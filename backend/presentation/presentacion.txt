@@ -1,0 +1,1 @@
+El frontend le pega a esta capa antes de pasar por el backend.
