@@ -9,3 +9,6 @@ class Operario:
     def __init__(self):
         pass
     
+    def pruebaPC():
+        pass
+    
