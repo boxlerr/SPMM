@@ -1,2 +1,0 @@
-Capa de aplicacion, interactua con el dominio y tiene los services. 
-Casos de uso

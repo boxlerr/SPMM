@@ -1,1 +1,0 @@
-En esta carpeta hay que poner las reglas de negocio, dominio puro sin frameworks
