@@ -23,3 +23,5 @@ class OrdenTrabajo(Base):
     fecha = Column(DateTime, default=datetime.now)
     id_operario = Column(Integer, nullable=False)
     id_maquinaria = Column(Integer, nullable=False)
+    
+    ##no iria una func??
