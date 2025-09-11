@@ -9,7 +9,7 @@ from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 
 from backend.application.validators.OrderValidator import orderValidator #importo la funcion, deberia tener una clase?
-from backend.commons.exceptions import BusinessException,InfrastructureException
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
 
 class OrdenTrabajoService: ##sacar el Crear
     def __init__(self):

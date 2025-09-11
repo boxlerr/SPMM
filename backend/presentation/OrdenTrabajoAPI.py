@@ -3,8 +3,8 @@ from backend.application.OrdenTrabajoService import OrdenTrabajoService
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 
 from backend.commons import ResponseDTO
-from backend.commons.exceptions import ApplicationException,BusinessException,DomainException,InfrastructureException
-
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.BusinessException import BusinessException
 
 #El request de afuera entra aca.
 app = FastAPI()

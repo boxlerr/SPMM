@@ -1,7 +1,7 @@
 # backend/infrastructure/OrdenTrabajoRepository.py
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.infrastructure.db import SessionLocal
-from backend.commons.exceptions import InfrastructureException
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
 class OrdenTrabajoRepository:
     def __init__(self):
         self.db = SessionLocal()
