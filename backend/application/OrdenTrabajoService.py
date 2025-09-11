@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from datetime import datetime
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 
@@ -8,6 +9,7 @@ from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 
 from backend.application.validators.OrderValidator import orderValidator #importo la funcion, deberia tener una clase?
+from backend.commons.exceptions import BusinessException,InfrastructureException
 
 class OrdenTrabajoService: ##sacar el Crear
     def __init__(self):
@@ -16,11 +18,13 @@ class OrdenTrabajoService: ##sacar el Crear
 
     def crearOrden(self, orden_dto: OrdenTrabajoRequestDTO):
     
-        errores = orderValidator(orden_dto)
-        if errores:
-            return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
-    
+        
         try:
+    
+            errores = orderValidator(orden_dto)
+            if errores:
+                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
+        
             orden = OrdenTrabajo(
             id_ot=orden_dto.id_ot,
             descripcion=orden_dto.descripcion,
@@ -40,10 +44,5 @@ class OrdenTrabajoService: ##sacar el Crear
             
             return response
         except Exception as e:
-            response = ResponseDTO(
-                status=False,
-                data={},
-                errorDescription=str(e)
-            )
-            return response
+            raise InfrastructureException("Error al guardar la OT.") from e
 
