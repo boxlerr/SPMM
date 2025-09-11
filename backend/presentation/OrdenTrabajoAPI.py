@@ -1,37 +1,32 @@
-from fastapi import FastAPI, APIRouter
-from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
-from backend.application.CrearOrdenTrabajoService import CrearOrdenTrabajoService
-from backend.domain.OrdenTrabajo import OrdenTrabajo
-from backend.dto.OrdenTrabajoDTO import OrdenTrabajoDTO
+from fastapi import FastAPI, APIRouter,HTTPException
+from backend.application.OrdenTrabajoService import OrdenTrabajoService
+from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 
+from backend.commons.ResponseDTO import ResponseDTO
+
+
+#El request de afuera entra aca.
 app = FastAPI()
 router = APIRouter()
 
 @router.post("/ordenes-trabajo")
-def crear_orden(orden_dto: OrdenTrabajoDTO):
+def crear_orden(orden_dto: OrdenTrabajoRequestDTO):
     # Creamos la entidad
-    orden = OrdenTrabajo(
-        id_ot=orden_dto.id_ot,
-        descripcion=orden_dto.descripcion,
-        id_operario=orden_dto.id_operario,
-        id_maquinaria=orden_dto.id_maquinaria
-    )
-
-    # Creamos el servicio con su repositorio
-    repository = OrdenTrabajoRepository()
-    service = CrearOrdenTrabajoService(repository)
-
-    # Ejecutamos la lógica de negocio
-    resultado = service.ejecutar(orden)
-
-    return {
-        "id_ot": resultado.id_ot,
-        "descripcion": resultado.descripcion,
-        "fecha": resultado.fecha,
-        "id_operario": resultado.id_operario,
-        "id_maquinaria": resultado.id_maquinaria
-    }
-
+    
+    try:
+        
+        service = OrdenTrabajoService() ##llamo al servicio
+        order = service.crearOrden(orden_dto)
+        
+        return order
+    except Exception as e : 
+       response = ResponseDTO(
+                            status=False,
+                            data={},
+                            errorDescription= str(e))
+          ##HTTPException recibe parametros, no el objeto dto completo.
+    raise HTTPException(status_code=400,detail = response.model_dump())
 app.include_router(router)
+
 
 

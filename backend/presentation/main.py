@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+""" from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 
@@ -54,7 +54,14 @@ def delete_operario(operario_id: int):
         if o.id == operario_id:
             operarios.pop(index)
             return {"message": f"Operario {operario_id} eliminado"}
-    raise HTTPException(status_code=404, detail="Operario no encontrado")
+    raise HTTPException(status_code=404, detail="Operario no encontrado") """
+
+from fastapi import FastAPI
+from backend.presentation.OrdenTrabajoAPI import router as orden_trabajo_router
+
+app = FastAPI()
+
+app.include_router(orden_trabajo_router)
 
 
 

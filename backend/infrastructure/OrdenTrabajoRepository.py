@@ -7,6 +7,8 @@ class OrdenTrabajoRepository:
         self.db = SessionLocal()
 
     def save(self, orden: OrdenTrabajo):
+        
+        ##try catch        
         self.db.add(orden)
         self.db.commit()
         self.db.refresh(orden)
