@@ -26,12 +26,14 @@ class OrdenTrabajoService: ##sacar el Crear
                 return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
         
             orden = OrdenTrabajo(
-            id_ot=orden_dto.id_ot,
+            id_ot=orden_dto.id_ot, #no tomar
             descripcion=orden_dto.descripcion,
             id_operario=orden_dto.id_operario,
             id_maquinaria=orden_dto.id_maquinaria
             )
             orden.fecha = datetime.now()
+            
+            #llamariamos a la capa de dominio
             
             orden_repository = OrdenTrabajoRepository()
             
