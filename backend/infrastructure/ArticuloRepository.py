@@ -14,4 +14,5 @@ class ArticuloRepository:
             return articulo
         except Exception as e:
             self.db.rollback()
+            print("❌ Error en INSERT:", repr(e))  # 👈 Mostramos el error original
             raise InfrastructureException("Error al guardar un nuevo artículo.") from e

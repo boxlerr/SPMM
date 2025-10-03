@@ -18,7 +18,6 @@ class ArticuloService:
                 return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
 
             articulo = Articulo(
-                id = articulo_dto.id,
                 cod_articulo= articulo_dto.cod_articulo,
                 descripcion=articulo_dto.descripcion,
                 abreviatura = articulo_dto.abreviatura
@@ -33,4 +32,6 @@ class ArticuloService:
             return response
 
         except Exception as e:
+            print("❌ Error real:", str(e))  # 👈 Mostralo en consola
             raise InfrastructureException("Error al guardar el artículo.") from e
+
