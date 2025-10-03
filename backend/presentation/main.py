@@ -58,10 +58,12 @@ def delete_operario(operario_id: int):
 
 from fastapi import FastAPI
 from backend.presentation.OrdenTrabajoAPI import router as orden_trabajo_router
+from backend.presentation.SectorAPI import router as sector_router
 
 app = FastAPI()
 
 app.include_router(orden_trabajo_router)
+app.include_router(sector_router)
 
 
 
