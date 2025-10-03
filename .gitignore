@@ -1,6 +1,6 @@
 # Entorno virtual
 venv/
-.env/
+.venv/
 
 # Archivos compilados de Python
 __pycache__/
@@ -12,4 +12,19 @@ __pycache__/
 *.log
 
 # Configuración local
-*.env
+.env
+.env.*
+
+# Cobertura de tests
+.coverage
+htmlcov/
+
+# Builds/artefactos
+dist/
+build/
+
+# Editores y SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
