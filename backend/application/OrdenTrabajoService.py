@@ -17,34 +17,36 @@ class OrdenTrabajoService: ##sacar el Crear
     
 
     def crearOrden(self, orden_dto: OrdenTrabajoRequestDTO):
-    
-        
         try:
-    
             errores = orderValidator(orden_dto)
             if errores:
-                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
-        
+                return ResponseDTO(
+                    status=False,
+                    data={},
+                    errorDescription="; ".join(errores)
+                )
+
             orden = OrdenTrabajo(
-            id_ot=orden_dto.id_ot, #no tomar
-            descripcion=orden_dto.descripcion,
-            id_operario=orden_dto.id_operario,
-            id_maquinaria=orden_dto.id_maquinaria
+                id_otvieja=orden_dto.id_otvieja,
+                observaciones=orden_dto.observaciones,
+                id_prioridad=orden_dto.id_prioridad,
+                id_sector=orden_dto.id_sector,
+                id_articulo=orden_dto.id_articulo,
+                id_maquinaria=orden_dto.id_maquinaria,
+                fecha_orden=orden_dto.fecha_orden,
+                fecha_entrada=orden_dto.fecha_entrada,
+                fecha_prometida=orden_dto.fecha_prometida,
+                fecha_entrega=orden_dto.fecha_entrega,
             )
-            orden.fecha = datetime.now()
-            
-            #llamariamos a la capa de dominio
-            
+
             orden_repository = OrdenTrabajoRepository()
-            
             orden_creada = orden_repository.save(orden)
-            
-            response = ResponseDTO()
-            response.status = True
-            response.data = jsonable_encoder(orden_creada)
-            response.errorDescription = ''
-            
-            return response
+
+            return ResponseDTO(
+                status=True,
+                data=jsonable_encoder(orden_creada),
+                errorDescription=''
+            )
+
         except Exception as e:
             raise InfrastructureException("Error al guardar la OT.") from e
-
