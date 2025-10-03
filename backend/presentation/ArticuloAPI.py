@@ -1,8 +1,7 @@
-from fastapi import FastAPI, APIRouter,HTTPException
-from backend.application.OrdenTrabajoService import OrdenTrabajoService
-from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 
-from backend.commons import ResponseDTO
+from fastapi import FastAPI, APIRouter,HTTPException
+from backend.dto.ArticuloRequestDTO import ArticuloRequestDTO
+from backend.application.ArticuloService import ArticuloService
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.BusinessException import BusinessException
 
@@ -10,15 +9,13 @@ from backend.commons.exceptions.BusinessException import BusinessException
 app = FastAPI()
 router = APIRouter()
 
-@router.post("/ordenes-trabajo") 
-def crear_orden(orden_dto: OrdenTrabajoRequestDTO):
-    # Creamos la entidad
-
+@router.post("/articulos")
+def crear_articulo(articulo_dto: ArticuloRequestDTO):
     try:
-        service = OrdenTrabajoService()
+        service = ArticuloService()
         
-        order = service.crearOrden(orden_dto)
-        return order
+        articulo = service.crearArticulo(articulo_dto)
+        return articulo
 
     except BusinessException as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -30,7 +27,5 @@ def crear_orden(orden_dto: OrdenTrabajoRequestDTO):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
 app.include_router(router)
-
-
-
