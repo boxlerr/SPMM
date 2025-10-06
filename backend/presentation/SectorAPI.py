@@ -25,3 +25,15 @@ def crear_sector(sector_dto: SectorRequestDTO):
         raise HTTPException(status_code=500, detail=str(e))
 
 app.include_router(router)
+
+@router.delete("/sectores/{sector_id}")
+def eliminar_sector(sector_id: int):
+    try:
+        service = SectorService()
+        result = service.eliminarSector(sector_id)
+        return result
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

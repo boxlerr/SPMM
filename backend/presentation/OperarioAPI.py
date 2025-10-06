@@ -28,3 +28,14 @@ def crear_operario(operario_dto: OperarioRequestDTO):
 
 app.include_router(router)
 
+@router.delete("/operarios/{operario_id}")
+def eliminar_operario(operario_id: int):
+    try:
+        service = OperarioService()
+        result = service.eliminarOperario(operario_id)
+        return result
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

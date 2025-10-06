@@ -22,4 +22,16 @@ class SectorRepository:
             self.db.rollback()
             raise InfrastructureException("Error al guardar un Sector.") from e
 
+    def delete(self, sector_id: int) -> bool:
+        try:
+            sector = self.db.get(Sector, sector_id)
+            if not sector:
+                return False
+            self.db.delete(sector)
+            self.db.commit()
+            return True
+        except Exception as e:
+            self.db.rollback()
+            raise InfrastructureException("Error al eliminar un Sector.") from e
+
 

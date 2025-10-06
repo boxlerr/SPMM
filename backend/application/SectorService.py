@@ -33,4 +33,15 @@ class SectorService:
         except Exception as e:
             raise InfrastructureException("Error al guardar el Sector.") from e
 
+    def eliminarSector(self, sector_id: int):
+        try:
+            ok = self.repo.delete(sector_id)
+            response = ResponseDTO()
+            response.status = bool(ok)
+            response.data = {"deleted": bool(ok)}
+            response.errorDescription = "" if ok else "Sector no encontrado"
+            return response
+        except Exception as e:
+            raise InfrastructureException("Error al eliminar el Sector.") from e
+
 
