@@ -22,4 +22,16 @@ class OperarioRepository:
             self.db.rollback()
             raise InfrastructureException("Error al guardar un Operario.") from e
 
+    def delete(self, operario_id: int) -> bool:
+        try:
+            operario = self.db.get(Operario, operario_id)
+            if not operario:
+                return False
+            self.db.delete(operario)
+            self.db.commit()
+            return True
+        except Exception as e:
+            self.db.rollback()
+            raise InfrastructureException("Error al eliminar un Operario.") from e
+
 

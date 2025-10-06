@@ -49,4 +49,16 @@ class OperarioService:
         except Exception as e:
             raise InfrastructureException("Error al guardar el Operario.") from e
 
+    def eliminarOperario(self, operario_id: int):
+        try:
+            repo = OperarioRepository()
+            ok = repo.delete(operario_id)
+            response = ResponseDTO()
+            response.status = bool(ok)
+            response.data = {"deleted": bool(ok)}
+            response.errorDescription = "" if ok else "Operario no encontrado"
+            return response
+        except Exception as e:
+            raise InfrastructureException("Error al eliminar el Operario.") from e
+
 
