@@ -49,10 +49,9 @@ class OperarioService:
         except Exception as e:
             raise InfrastructureException("Error al guardar el Operario.") from e
 
-    def eliminarOperario(self, operario_id: int):
+    def eliminarOperario(self, id: int):
         try:
-            repo = OperarioRepository()
-            ok = repo.delete(operario_id)
+            ok = OperarioRepository().delete(id)
             response = ResponseDTO()
             response.status = bool(ok)
             response.data = {"deleted": bool(ok)}
@@ -60,5 +59,46 @@ class OperarioService:
             return response
         except Exception as e:
             raise InfrastructureException("Error al eliminar el Operario.") from e
+
+    def listarOperarios(self):
+        try:
+            data = [
+                {
+                    "id": o.id,
+                    "nombre": o.nombre,
+                    "apellido": o.apellido,
+                    "sector": o.sector,
+                    "categoria": o.categoria,
+                }
+                for o in OperarioRepository().find_all()
+            ]
+            return ResponseDTO(status=True, data=data, errorDescription="")
+        except Exception as e:
+            raise InfrastructureException("Error al listar Operarios.") from e
+
+    def obtenerOperarioPorId(self, id: int):
+        try:
+            o = OperarioRepository().find_by_id(id)
+            if not o:
+                return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
+            return ResponseDTO(status=True, data={
+                "id": o.id,
+                "nombre": o.nombre,
+                "apellido": o.apellido,
+                "sector": o.sector,
+                "categoria": o.categoria,
+            }, errorDescription="")
+        except Exception as e:
+            raise InfrastructureException("Error al obtener Operario.") from e
+
+    def modificarOperario(self, id: int, operario_dto: OperarioRequestDTO):
+        try:
+            nueva_data = operario_dto.dict(exclude_unset=True)
+            actualizado = OperarioRepository().update(id, nueva_data)
+            if not actualizado:
+                return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
+            return ResponseDTO(status=True, data={"id": actualizado.id}, errorDescription="")
+        except Exception as e:
+            raise InfrastructureException("Error al actualizar Operario.") from e
 
 
