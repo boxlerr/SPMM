@@ -20,20 +20,6 @@ class Operario(Base):
     sector = Column(String(100), nullable=False)  # texto simple por ahora
     categoria = Column(String(100), nullable=False)
     disponible = Column(Boolean, nullable=False, default=True)
-    cant_hs_trabajadas = Column(Integer, nullable=False, default=0)
-    dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
+    #cant_hs_trabajadas = Column(Integer, nullable=False, default=0)
+    #dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
 
-from dataclasses import dataclass
-
-@dataclass
-class Operario:
-    id:int
-    nombre: str
-    apellido : str
-
-    def __init__(self):
-        pass
-    
-    def pruebaPC():
-        pass
-    

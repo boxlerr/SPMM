@@ -26,8 +26,6 @@ def crear_operario(operario_dto: OperarioRequestDTO):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-app.include_router(router)
-
 @router.delete("/operarios/{operario_id}")
 def eliminar_operario(operario_id: int):
     try:
@@ -39,3 +37,4 @@ def eliminar_operario(operario_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+app.include_router(router)
