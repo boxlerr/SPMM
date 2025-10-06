@@ -64,9 +64,8 @@ export default function LoginPage() {
             <div className="space-y-2 text-center relative">
               {currentView === "forgot" && (
                 <Button
-                  variant="ghost"
                   onClick={() => setCurrentView("login")}
-                  className="absolute left-0 top-0 p-2 hover:bg-gray-100 cursor-pointer"
+                  className="absolute left-0 top-0 p-2 hover:bg-gray-100 cursor-pointer bg-transparent shadow-none border-none"
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
