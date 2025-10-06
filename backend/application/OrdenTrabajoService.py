@@ -50,3 +50,28 @@ class OrdenTrabajoService: ##sacar el Crear
 
         except Exception as e:
             raise InfrastructureException("Error al guardar la OT.") from e
+
+    def eliminarOrden(self, id: int):
+            try:
+                orden_repository = OrdenTrabajoRepository()
+
+                orden_existente = orden_repository.find_by_id(id)
+                if not orden_existente:
+                    return ResponseDTO(
+                        status=False,
+                        data={},
+                        errorDescription="No se encontró la orden de trabajo con ese ID."
+                    )
+
+                orden_repository.delete(id)
+
+                return ResponseDTO(
+                    status=True,
+                    data={"id_eliminado": id},
+                    errorDescription=""
+                )
+
+            except InfrastructureException as e:
+                raise e
+            except Exception as e:
+                raise InfrastructureException("Error al eliminar la OT.") from e

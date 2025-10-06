@@ -16,3 +16,5 @@ class OrdenTrabajoRequestDTO(BaseModel):
     fecha_entrada: datetime
     fecha_prometida: datetime
     fecha_entrega: Optional[datetime] = None
+
+
