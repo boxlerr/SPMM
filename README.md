@@ -19,3 +19,7 @@ pip install -r requirements.txt
 uvicorn backend.carpeta.archivo.py:app (direccion del archivo que vamos a correr)
 
 http://127.0.0.1:8000
+
+en caso que no te ande FastAPI y SQLAlchemy:
+pip install fastapi uvicorn
+pip install sqlalchemy
