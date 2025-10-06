@@ -75,3 +75,7 @@ class OrdenTrabajoService: ##sacar el Crear
                 raise e
             except Exception as e:
                 raise InfrastructureException("Error al eliminar la OT.") from e
+            
+            
+            
+    

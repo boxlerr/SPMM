@@ -35,3 +35,28 @@ class ArticuloService:
             print("❌ Error real:", str(e))  # 👈 Mostralo en consola
             raise InfrastructureException("Error al guardar el artículo.") from e
 
+    def eliminarArticulo(self, id: int):
+        try:
+            repo = ArticuloRepository()
+            articulo = repo.find_by_id(id)
+
+            if not articulo:
+                return ResponseDTO(
+                    status=False,
+                    data={},
+                    errorDescription="No se encontró el artículo con ese ID."
+                )
+
+            repo.delete(id)
+
+            return ResponseDTO(
+                status=True,
+                data={"id_eliminado": id},
+                errorDescription=""
+            )
+
+        except InfrastructureException as e:
+            raise e
+        except Exception as e:
+            raise InfrastructureException("Error al eliminar el artículo.") from e
+

@@ -26,6 +26,22 @@ def crear_articulo(articulo_dto: ArticuloRequestDTO):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/articulos/{id}")
+def eliminar_articulo(id: int):
+    try:
+        service = ArticuloService()
+        response = service.eliminarArticulo(id)
+        return response
+
+    except BusinessException as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 app.include_router(router)
