@@ -23,3 +23,5 @@ http://127.0.0.1:8000
 en caso que no te ande FastAPI y SQLAlchemy:
 pip install fastapi uvicorn
 pip install sqlalchemy
+
+prueba desploy vercel
