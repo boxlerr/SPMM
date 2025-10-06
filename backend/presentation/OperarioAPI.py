@@ -8,12 +8,12 @@ from backend.commons.exceptions.BusinessException import BusinessException
 
 app = FastAPI()
 router = APIRouter()
+service = OperarioService()
 
 @router.post("/operarios")
 def crear_operario(operario_dto: OperarioRequestDTO):
     """Endpoint para crear un Operario (POST /operarios)."""
     try:
-        service = OperarioService()
         result = service.crearOperario(operario_dto)
         return result
 
@@ -26,15 +26,38 @@ def crear_operario(operario_dto: OperarioRequestDTO):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/operarios/{operario_id}")
-def eliminar_operario(operario_id: int):
+@router.delete("/operarios/{id}")
+def eliminar_operario(id: int):
     try:
-        service = OperarioService()
-        result = service.eliminarOperario(operario_id)
+        result = service.eliminarOperario(id)
         return result
     except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# GET all
+@router.get("/operarios")
+def listar_operarios():
+    try:
+        return service.listarOperarios()
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# GET by id
+@router.get("/operarios/{id}")
+def obtener_operario(id: int):
+    try:
+        return service.obtenerOperarioPorId(id)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# PUT
+@router.put("/operarios/{id}")
+def modificar_operario(id: int, operario_dto: OperarioRequestDTO):
+    try:
+        return service.modificarOperario(id, operario_dto)
+    except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 app.include_router(router)

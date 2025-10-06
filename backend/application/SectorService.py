@@ -33,31 +33,40 @@ class SectorService:
         except Exception as e:
             raise InfrastructureException("Error al guardar el Sector.") from e
 
-    def eliminarSector(self, id: int):
-        print(f"🔄 [Service] Eliminando sector ID: {id}")  # opcional para debug
-
+    def listarSectores(self):
         try:
-            repo = SectorRepository()
-            sector = repo.find_by_id(id)
-            print(f"🔍 [Service] Sector encontrado: {sector}")  # opcional
-
-            if not sector:
-                return ResponseDTO(
-                    status=False,
-                    data={},
-                    errorDescription="No se encontró el sector con ese ID."
-                )
-
-            repo.delete(id)
-
-            return ResponseDTO(
-                status=True,
-                data={"id_eliminado": id},
-                errorDescription=""
-            )
-
+            data = [{"id": s.id, "nombre": s.nombre} for s in self.repo.find_all()]
+            return ResponseDTO(status=True, data=data, errorDescription="")
         except Exception as e:
-            print(f"❌ [Service] Error al eliminar sector: {e}")  # opcional
+            raise InfrastructureException("Error al listar Sectores.") from e
+
+    def obtenerSectorPorId(self, id: int):
+        try:
+            sector = self.repo.find_by_id(id)
+            if not sector:
+                return ResponseDTO(status=False, data={}, errorDescription="Sector no encontrado")
+            return ResponseDTO(status=True, data={"id": sector.id, "nombre": sector.nombre}, errorDescription="")
+        except Exception as e:
+            raise InfrastructureException("Error al obtener Sector.") from e
+
+    def modificarSector(self, id: int, sector_dto: SectorRequestDTO):
+        try:
+            nueva_data = sector_dto.dict(exclude_unset=True)
+            actualizado = self.repo.update(id, nueva_data)
+            if not actualizado:
+                return ResponseDTO(status=False, data={}, errorDescription="Sector no encontrado")
+            return ResponseDTO(status=True, data={"id": actualizado.id}, errorDescription="")
+        except Exception as e:
+            raise InfrastructureException("Error al actualizar Sector.") from e
+
+    def eliminarSector(self, id: int):
+        try:
+            sector = self.repo.find_by_id(id)
+            if not sector:
+                return ResponseDTO(status=False, data={}, errorDescription="No se encontró el sector con ese ID.")
+            self.repo.delete(id)
+            return ResponseDTO(status=True, data={"id_eliminado": id}, errorDescription="")
+        except Exception as e:
             raise InfrastructureException("Error al eliminar el sector.") from e
 
 

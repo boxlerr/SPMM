@@ -13,7 +13,16 @@ class OperarioRepository:
         self.db = SessionLocal()
 
     def find_by_id(self, id: int):
-        return self.db.query(Operario).filter(Operario.id == id).first()
+        try:
+            return self.db.query(Operario).filter(Operario.id == id).first()
+        except Exception as e:
+            raise InfrastructureException("Error al buscar el Operario por ID.") from e
+
+    def find_all(self):
+        try:
+            return self.db.query(Operario).all()
+        except Exception as e:
+            raise InfrastructureException("Error al listar Operarios.") from e
 
     def save(self, operario: Operario):
         try:
@@ -25,26 +34,31 @@ class OperarioRepository:
             self.db.rollback()
             raise InfrastructureException("Error al guardar un Operario.") from e
 
-    def delete(self, id: int):
-        print(f"🛠️ [Repo] Ejecutando delete para ID: {id}")
-
+    def update(self, id: int, nueva_data: dict):
         try:
             operario = self.find_by_id(id)
-            print(f"📦 [Repo] Operario a eliminar: {operario}")
-
-            if operario:
-                self.db.delete(operario)
-                self.db.commit()
-                print("✅ [Repo] Operario eliminado")
-                return True
-
-            print("⚠️ [Repo] Operario no encontrado para eliminar")
-            return False
-
+            if not operario:
+                return None
+            for key, value in nueva_data.items():
+                setattr(operario, key, value)
+            self.db.commit()
+            self.db.refresh(operario)
+            return operario
         except Exception as e:
             self.db.rollback()
-            print(f"❌ [Repo] Error en delete: {e}")
-            raise InfrastructureException("Error al eliminar el operario.") from e
+            raise InfrastructureException("Error al actualizar el Operario.") from e
+
+    def delete(self, id: int):
+        try:
+            operario = self.find_by_id(id)
+            if not operario:
+                return False
+            self.db.delete(operario)
+            self.db.commit()
+            return True
+        except Exception as e:
+            self.db.rollback()
+            raise InfrastructureException("Error al eliminar el Operario.") from e
 
 
 
