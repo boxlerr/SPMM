@@ -60,3 +60,26 @@ class ArticuloService:
         except Exception as e:
             raise InfrastructureException("Error al eliminar el artículo.") from e
 
+    def listarArticulos(self):
+        repo = ArticuloRepository()
+        articulos = repo.find_all()
+        return ResponseDTO(status=True, data=jsonable_encoder(articulos))
+
+    def obtenerArticuloPorId(self, id: int):
+        repo = ArticuloRepository()
+        articulo = repo.find_by_id(id)
+        if not articulo:
+            return ResponseDTO(status=False, data={}, errorDescription="Artículo no encontrado")
+        return ResponseDTO(status=True, data=jsonable_encoder(articulo))
+
+    def modificarArticulo(self, id: int, dto: ArticuloRequestDTO):
+        try:
+            repo = ArticuloRepository()
+            nueva_data = dto.dict(exclude_unset=True)
+            actualizado = repo.update(id, nueva_data)
+            if not actualizado:
+                return ResponseDTO(status=False, data={}, errorDescription="Artículo no encontrado")
+            return ResponseDTO(status=True, data=jsonable_encoder(actualizado))
+        except Exception as e:
+            raise InfrastructureException("Error al actualizar el Artículo.") from e
+

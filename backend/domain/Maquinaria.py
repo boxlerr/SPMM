@@ -1,10 +1,9 @@
-from dataclasses import dataclass
+from sqlalchemy import Column, Integer, String
+from backend.infrastructure.db import Base
 
-@dataclass
-class Maquinaria:
-    id: int
-    nombre: str
-    tipo: str
+class Maquinaria(Base):
+    __tablename__ = "maquinaria"
 
-    def __init__(self):
-        pass
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nombre = Column(String(100), nullable=False)
+    tipo = Column(String(100), nullable=False)

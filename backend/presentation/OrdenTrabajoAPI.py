@@ -1,63 +1,65 @@
-from fastapi import FastAPI, APIRouter,HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException
 from backend.application.OrdenTrabajoService import OrdenTrabajoService
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
-
-from backend.commons import ResponseDTO
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.exceptions.BusinessException import BusinessException
-
-#El request de afuera entra aca.
-router = APIRouter()
-
-@router.post("/ordenes-trabajo") 
-def crear_orden(orden_dto: OrdenTrabajoRequestDTO):
-    # Creamos la entidad
-
-    try:
-        service = OrdenTrabajoService()
-        
-        order = service.crearOrden(orden_dto)
-        return order
-
-    except BusinessException as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/ordenes-trabajo/{id}")
-def eliminar_orden(id: int):
-    print(f"✅ [API] Recibida solicitud DELETE para ID: {id}")  # 👈
-
-    try:
-        service = OrdenTrabajoService()
-        response = service.eliminarOrden(id)
-        print(f"✅ [API] Respuesta enviada: {response}")  # 👈
-        return response
-
-    except BusinessException as e:
-        print(f"❌ [API] BusinessException: {e}")  # 👈
-        raise HTTPException(status_code=422, detail=str(e))
-
-    except InfrastructureException as e:
-        print(f"❌ [API] InfrastructureException: {e}")  # 👈
-        raise HTTPException(status_code=500, detail=str(e))
-
-    except Exception as e:
-        print(f"❌ [API] Excepción inesperada: {e}")  # 👈
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-
-
-
+from backend.commons.ResponseDTO import ResponseDTO
+from datetime import datetime
 
 app = FastAPI()
+router = APIRouter()
+service = OrdenTrabajoService()
+
+@router.post("/ordenes")
+def crear_orden(dto: OrdenTrabajoRequestDTO):
+    try:
+        return service.crearOrdenTrabajo(dto)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/ordenes")
+def listar_ordenes():
+    try:
+        return service.listarOrdenes()
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/ordenes/por-fechas")
+def listar_por_fechas(desde: datetime, hasta: datetime):
+
+    try:
+        return service.listarPorFechas(desde, hasta)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/ordenes/{id}")
+def obtener_orden(id: int):
+    try:
+        return service.obtenerOrdenPorId(id)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/ordenes/{id}")
+def modificar_orden(id: int, dto: OrdenTrabajoRequestDTO):
+    try:
+        return service.modificarOrden(id, dto)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/ordenes/{id}")
+def eliminar_orden(id: int):
+    try:
+        return service.eliminarOrden(id)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/ordenes/por-prioridad/{id_prioridad}")
+def listar_por_prioridad(id_prioridad: int):
+    try:
+        return service.listarPorPrioridad(id_prioridad)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 app.include_router(router)
+
+
 
