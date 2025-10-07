@@ -6,7 +6,7 @@ from backend.commons import ResponseDTO
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.BusinessException import BusinessException
 
-app = FastAPI()
+app = FastAPI() 
 router = APIRouter()
 service = ProcesoService()
 

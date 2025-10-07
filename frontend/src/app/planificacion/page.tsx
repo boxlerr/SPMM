@@ -30,7 +30,9 @@ export default function PlanificacionPage() {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const response = await fetch(`${apiUrl}/procesos`);
+      const cleanUrl = apiUrl.replace(/\/$/, "");
+
+      const response = await fetch(`${cleanUrl}/procesos`);
 
       if (!response.ok) {
         throw new Error(`Error: ${response.status} ${response.statusText}`);
