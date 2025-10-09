@@ -11,8 +11,7 @@ from backend.commons.exceptions.BusinessException import BusinessException
 
 class OperarioService:
     """
-    Capa de aplicación de Operario: validación mínima, delega en repo y
-    devuelve `ResponseDTO`.
+    Capa de aplicación de Operario.
     """
 
     def __init__(self):
@@ -20,9 +19,13 @@ class OperarioService:
 
     def crearOperario(self, operario_dto: OperarioRequestDTO):
         try:
-            # Validación mínima (igual criterio que en otros servicios)
+            # Validación mínima
             if not operario_dto.nombre or not operario_dto.apellido:
                 raise BusinessException("Nombre y Apellido son obligatorios.")
+            
+            # Esta validación ya no es necesaria si el DTO es correcto, pero la dejo por seguridad
+            if not operario_dto.fecha_nacimiento or not operario_dto.fecha_ingreso:
+                raise BusinessException("Fecha de nacimiento y fecha de ingreso son obligatorias.")
 
             operario = Operario(
                 nombre=operario_dto.nombre,
@@ -32,8 +35,9 @@ class OperarioService:
                 sector=operario_dto.sector,
                 categoria=operario_dto.categoria,
                 disponible=operario_dto.disponible if operario_dto.disponible is not None else True,
-                cant_hs_trabajadas=operario_dto.cant_hs_trabajadas if operario_dto.cant_hs_trabajadas is not None else 0,
-                dias_trabajo=operario_dto.dias_trabajo,
+                telefono=operario_dto.telefono,
+                celular=operario_dto.celular,
+                dni=operario_dto.dni,
             )
 
             repo = OperarioRepository()
@@ -46,6 +50,8 @@ class OperarioService:
 
             return response
 
+        except BusinessException as e:
+            raise e
         except Exception as e:
             raise InfrastructureException("Error al guardar el Operario.") from e
 
@@ -69,6 +75,12 @@ class OperarioService:
                     "apellido": o.apellido,
                     "sector": o.sector,
                     "categoria": o.categoria,
+                    "disponible": o.disponible,
+                    "fecha_nacimiento": o.fecha_nacimiento.isoformat() if o.fecha_nacimiento else None,
+                    "fecha_ingreso": o.fecha_ingreso.isoformat() if o.fecha_ingreso else None,
+                    "telefono": o.telefono,
+                    "celular": o.celular,
+                    "dni": o.dni,
                 }
                 for o in OperarioRepository().find_all()
             ]
@@ -87,6 +99,12 @@ class OperarioService:
                 "apellido": o.apellido,
                 "sector": o.sector,
                 "categoria": o.categoria,
+                "disponible": o.disponible,
+                "fecha_nacimiento": o.fecha_nacimiento.isoformat() if o.fecha_nacimiento else None,
+                "fecha_ingreso": o.fecha_ingreso.isoformat() if o.fecha_ingreso else None,
+                "telefono": o.telefono,
+                "celular": o.celular,
+                "dni": o.dni,
             }, errorDescription="")
         except Exception as e:
             raise InfrastructureException("Error al obtener Operario.") from e
@@ -94,11 +112,10 @@ class OperarioService:
     def modificarOperario(self, id: int, operario_dto: OperarioRequestDTO):
         try:
             nueva_data = operario_dto.dict(exclude_unset=True)
+            
             actualizado = OperarioRepository().update(id, nueva_data)
             if not actualizado:
                 return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
             return ResponseDTO(status=True, data={"id": actualizado.id}, errorDescription="")
         except Exception as e:
             raise InfrastructureException("Error al actualizar Operario.") from e
-
-
