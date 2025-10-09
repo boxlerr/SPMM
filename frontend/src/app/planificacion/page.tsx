@@ -38,8 +38,14 @@ export default function PlanificacionPage() {
         throw new Error(`Error: ${response.status} ${response.statusText}`);
       }
 
-      const data = await response.json();
-      setProcesos(data);
+      const responseData = await response.json();
+
+      // 🔥 Extraer el array del objeto ResponseDTO
+      if (responseData.status && responseData.data) {
+        setProcesos(Array.isArray(responseData.data) ? responseData.data : []);
+      } else {
+        setError(responseData.errorDescription || "Error al cargar procesos");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar procesos");
       console.error("Error fetching procesos:", err);
