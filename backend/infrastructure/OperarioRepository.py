@@ -1,64 +1,85 @@
+from sqlalchemy import select
 from backend.domain.Operario import Operario
-from backend.infrastructure.db import SessionLocal
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.loggers.logger import logger
 
 
 class OperarioRepository:
     """
-    Repositorio de `Operario` con el método `save` para insertar registros.
-    Maneja la transacción y traduce errores a `InfrastructureException`.
+    Repositorio asincrónico de `Operario`.
+    Maneja transacciones usando AsyncSession y errores con InfrastructureException.
     """
 
-    def __init__(self):
-        self.db = SessionLocal()
+    def __init__(self, db):
+        self.db = db
 
-    def find_by_id(self, id: int):
+    async def find_by_id(self, id: int):
         try:
-            return self.db.query(Operario).filter(Operario.id == id).first()
+            result = await self.db.execute(select(Operario).where(Operario.id == id))
+            return result.scalar_one_or_none()
         except Exception as e:
+            logger.error(f"Repository - Error al buscar Operario {id}: {e}")
             raise InfrastructureException("Error al buscar el Operario por ID.") from e
 
-    def find_all(self):
+    async def find_all(self):
         try:
-            return self.db.query(Operario).all()
+            logger.info("Repository - Obtener todos los operarios desde la base de datos.")
+            result = await self.db.execute(select(Operario))
+            data = result.scalars().all()
+            logger.info(f"Repository - Resultado OK ({len(data)} registros)")
+            return data
         except Exception as e:
+            logger.error(f"Repository - Error al listar Operarios: {e}")
             raise InfrastructureException("Error al listar Operarios.") from e
 
-    def save(self, operario: Operario):
+    async def save(self, operario: Operario):
         try:
             self.db.add(operario)
-            self.db.commit()
-            self.db.refresh(operario)
+            await self.db.commit()
+            await self.db.refresh(operario)
             return operario
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
+            logger.error(f"Repository - Error al guardar Operario: {e}")
             raise InfrastructureException("Error al guardar un Operario.") from e
 
-    def update(self, id: int, nueva_data: dict):
+    async def update(self, id: int, nueva_data: dict):
         try:
-            operario = self.find_by_id(id)
+            result = await self.db.execute(select(Operario).where(Operario.id == id))
+            operario = result.scalar_one_or_none()
             if not operario:
+                logger.info(f"Repository - Operario {id} no encontrado para actualizar.")
                 return None
+
             for key, value in nueva_data.items():
                 setattr(operario, key, value)
-            self.db.commit()
-            self.db.refresh(operario)
+
+            await self.db.commit()
+            await self.db.refresh(operario)
+            logger.info(f"Repository - Operario {id} actualizado correctamente.")
             return operario
+
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
+            logger.error(f"Repository - Error al actualizar Operario {id}: {e}")
             raise InfrastructureException("Error al actualizar el Operario.") from e
 
-    def delete(self, id: int):
+    async def delete(self, id: int):
         try:
-            operario = self.find_by_id(id)
+            logger.info(f"Repository - Inicio DELETE operario id={id}")
+            result = await self.db.execute(select(Operario).where(Operario.id == id))
+            operario = result.scalar_one_or_none()
+
             if not operario:
+                logger.info("Repository - Operario no encontrado.")
                 return False
-            self.db.delete(operario)
-            self.db.commit()
+
+            await self.db.delete(operario)
+            await self.db.commit()
+            logger.info(f"Repository - Operario {id} eliminado correctamente.")
             return True
+
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
+            logger.error(f"Repository - Error al eliminar Operario {id}: {e}")
             raise InfrastructureException("Error al eliminar el Operario.") from e
-
-
-
