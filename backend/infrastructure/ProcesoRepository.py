@@ -96,6 +96,8 @@ class ProcesoRepository:
 from sqlalchemy import select, delete
 from backend.domain.Proceso import Proceso
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+
 from backend.commons.loggers.logger import logger
 
 class ProcesoRepository:
@@ -103,14 +105,19 @@ class ProcesoRepository:
         self.db = db
 
     async def save(self, proceso: Proceso):
+        
         try:
+            logger.info("Repository - Crear Proceso.")
             self.db.add(proceso)
             await self.db.commit()
             await self.db.refresh(proceso)
+            logger.info(f"Repository - Crear operario OK.)")
             return proceso
         except Exception as e:
+            logger.error(f"Error real en save: {e}")
             await self.db.rollback()
             raise InfrastructureException("Error al guardar un Proceso.") from e
+
 
     async def find_all(self):
         try:

@@ -103,12 +103,10 @@ async def get_db():
 # 🔹 Crear proceso
 @router.post("/procesos")
 async def crear_proceso(proceso_dto: ProcesoRequestDTO, db=Depends(get_db)):
-    try:
-        service = ProcesoService(db)
-        result = await service.crearProceso(proceso_dto)
-        return result
-    except (BusinessException, InfrastructureException) as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("API Crear proceso- Inicio POST /procesos")
+    service = ProcesoService(db)
+    result = await service.crearProceso(proceso_dto)
+    return result
 
 # 🔹 Listar todos los procesos
 @router.get("/procesos")

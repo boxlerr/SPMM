@@ -119,7 +119,7 @@ class OperarioService:
                     "dni": o.dni,
                 },
                 errorDescription=""
-            )
+            )   
         except Exception as e:
             logger.error(f"Service - Error al obtener Operario: {e}")
             raise InfrastructureException("Error al obtener Operario.") from e
