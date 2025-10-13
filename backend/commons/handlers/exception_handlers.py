@@ -2,11 +2,13 @@
 from fastapi import Request,HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-#from commons.exceptions import ApplicationException, DomainException , InfrastructureException, NotFoundException
-#from backend.commons.exceptions.InfrastructureException import ApplicationException, DomainException , InfrastructureException
+
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.DomainException import DomainException
+from backend.commons.exceptions.BusinessException import BusinessException
+
 
 from backend.commons.loggers.logger import logger
 from backend.commons.ResponseDTO import ResponseDTO
@@ -88,13 +90,21 @@ async def not_found_handler(request: Request, exc: NotFoundException):
         ).model_dump()
     )
 
+async def business_handler(request: Request, exc: BusinessException):
+    return JSONResponse(
+        status_code=422,  # o 400 si preferís
+        content=ResponseDTO(
+            status=False,
+            data=None,
+            errors=[ErrorItemDTO(message=exc.message, campo="global")]
+        ).model_dump()
+    )
 
-"""
 async def domain_handler(request: Request, exc: DomainException):
     return JSONResponse(
         status_code=400,
-        content=GeneralResponseDTO(
-            result=False,
+        content=ResponseDTO(
+            status=False,
             data=None,
             errors=[ErrorItemDTO(message=exc.message, campo="global")]
         ).model_dump()
@@ -105,9 +115,9 @@ async def generic_handler(request: Request, exc: Exception):
     logger.exception(f"Error inesperado: {exc}")
     return JSONResponse(
         status_code=500,
-        content=GeneralResponseDTO(
-            result=False,
+        content=ResponseDTO(
+            status=False,
             data=None,
             errors=[ErrorItemDTO(message="Error inesperado", campo="global")]
         ).model_dump()
-    )"""
+    )

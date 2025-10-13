@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 # Routers de presentación
@@ -11,6 +11,8 @@ import logging
 #from backend.commons.exceptions import ApplicationException,BusinessException,DomainException,InfrastructureException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.DomainException import DomainException
 
 """from backend.commons.handlers.exception_handlers import (
     application_handler,
@@ -23,8 +25,13 @@ from backend.commons.exceptions.NotFoundException import NotFoundException
 )"""
 
 from backend.commons.handlers.exception_handlers import (
+    application_handler,
     infrastructure_handler,
     validation_exception_handler,
+    http_exception_handler,
+    not_found_handler,
+    domain_handler,
+    generic_handler,
     not_found_handler
 )
 
@@ -56,11 +63,11 @@ app.include_router(sector_router, tags=["sectores"])
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)
-#app.add_exception_handler(ApplicationException, application_handler)
-#app.add_exception_handler(DomainException, domain_handler)
-#app.add_exception_handler(Exception, generic_handler)
+app.add_exception_handler(ApplicationException, application_handler)
+app.add_exception_handler(DomainException, domain_handler)
+app.add_exception_handler(Exception, generic_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
-#app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(NotFoundException, not_found_handler)
 
 
