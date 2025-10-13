@@ -1,7 +1,6 @@
 from backend.domain.Proceso import Proceso
 from backend.dto.ProcesoRequestDTO import ProcesoRequestDTO
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
-from fastapi import HTTPException
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 from backend.application.validators.ProcesoValidator import procesoValidator

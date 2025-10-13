@@ -2,14 +2,11 @@
 from fastapi import Request,HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.DomainException import DomainException
 from backend.commons.exceptions.BusinessException import BusinessException
-
-
 from backend.commons.loggers.logger import logger
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.dto.ErrorItemDTO import ErrorItemDTO
