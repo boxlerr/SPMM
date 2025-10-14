@@ -6,6 +6,8 @@ from backend.presentation.ProcesoAPI import router as proceso_router
 from backend.presentation.OperarioAPI import router as operario_router
 from backend.presentation.OrdenTrabajoAPI import router as orden_trabajo_router
 from backend.presentation.SectorAPI import router as sector_router
+from backend.presentation.ArticuloAPI import router as articulo_router
+
 import logging
 
 #from backend.commons.exceptions import ApplicationException,BusinessException,DomainException,InfrastructureException
@@ -55,6 +57,7 @@ app.add_middleware(
 )
 
 # 🔹 Registrar todos los routers
+app.include_router(articulo_router, tags=["articulos"])
 app.include_router(proceso_router, tags=["procesos"])
 app.include_router(operario_router, tags=["operarios"])
 app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"])

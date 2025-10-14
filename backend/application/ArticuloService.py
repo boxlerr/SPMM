@@ -5,81 +5,94 @@ from backend.application.validators.ArticuloValitor import articuloValidator
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 
+# Excepciones personalizadas
+from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+
+from backend.commons.loggers.logger import logger
 
 class ArticuloService:
-    def __init__(self):
-        self.repository = ArticuloRepository()
+    def __init__(self, db_session):
+        self.repository = ArticuloRepository(db_session)
 
-    def crearArticulo(self, articulo_dto: ArticuloRequestDTO):
+    async def crearArticulo(self, articulo_dto: ArticuloRequestDTO):
         try:
+            logger.info("Service - Crear artículo.")
+
+            # Validación de negocio
             errores = articuloValidator(articulo_dto)
             if errores:
-                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
+                raise BusinessException("; ".join(errores))
 
             articulo = Articulo(
-                cod_articulo= articulo_dto.cod_articulo,
+                cod_articulo=articulo_dto.cod_articulo,
                 descripcion=articulo_dto.descripcion,
-                abreviatura = articulo_dto.abreviatura
+                abreviatura=articulo_dto.abreviatura,
             )
 
-            articulo_guardado = self.repository.save(articulo)
+            articulo_guardado = await self.repository.save(articulo)
 
-            response = ResponseDTO()
-            response.status = True
-            response.data = jsonable_encoder(articulo_guardado)
-            response.errorDescription = ''
-            return response
+            return ResponseDTO(status=True, data=jsonable_encoder(articulo_guardado))
 
+        except InfrastructureException:
+            raise  # viene del repo
+        except BusinessException:
+            raise
         except Exception as e:
-            print("❌ Error real:", str(e))  # 👈 Mostralo en consola
-            raise InfrastructureException("Error al guardar el artículo.") from e
+            raise ApplicationException("Error inesperado al crear el artículo.") from e
 
-    def eliminarArticulo(self, id: int):
-        try:
-            repo = ArticuloRepository()
-            articulo = repo.find_by_id(id)
+    async def eliminarArticulo(self, id: int):
+        logger.info(f"Service - Eliminar artículo ID: {id}")
+        eliminado = await self.repository.delete(id)
 
-            if not articulo:
-                return ResponseDTO(
-                    status=False,
-                    data={},
-                    errorDescription="No se encontró el artículo con ese ID."
-                )
+        # Posibles errores:
+        # - Artículo inexistente → NotFoundException
+        # - Error SQL / constraint → InfrastructureException (repo)
+        if not eliminado:
+            raise NotFoundException(f"No se encontró el artículo con ID {id}")
 
-            repo.delete(id)
+        return ResponseDTO(status=True, data={"deleted": id})
 
-            return ResponseDTO(
-                status=True,
-                data={"id_eliminado": id},
-                errorDescription=""
-            )
+    async def listarArticulos(self):
+        logger.info("Service - Listar artículos.")
+        articulos = await self.repository.find_all()
 
-        except InfrastructureException as e:
-            raise e
-        except Exception as e:
-            raise InfrastructureException("Error al eliminar el artículo.") from e
-
-    def listarArticulos(self):
-        repo = ArticuloRepository()
-        articulos = repo.find_all()
+        # Posibles errores:
+        # - Error de conexión o consulta SQL → InfrastructureException (repo)
+        # - Ninguno si la lista está vacía
         return ResponseDTO(status=True, data=jsonable_encoder(articulos))
+    
+    async def obtenerArticuloPorId(self, id: int):
+        logger.info(f"Service - Obtener artículo ID: {id}")
+        articulo = await self.repository.find_by_id(id)
 
-    def obtenerArticuloPorId(self, id: int):
-        repo = ArticuloRepository()
-        articulo = repo.find_by_id(id)
+        # Posibles errores:
+        # - Artículo no existe → NotFoundException
+        # - Error SQL → InfrastructureException (repo)
         if not articulo:
-            return ResponseDTO(status=False, data={}, errorDescription="Artículo no encontrado")
+            raise NotFoundException(f"No se encontró el artículo con ID {id}")
+
         return ResponseDTO(status=True, data=jsonable_encoder(articulo))
 
-    def modificarArticulo(self, id: int, dto: ArticuloRequestDTO):
-        try:
-            repo = ArticuloRepository()
-            nueva_data = dto.dict(exclude_unset=True)
-            actualizado = repo.update(id, nueva_data)
-            if not actualizado:
-                return ResponseDTO(status=False, data={}, errorDescription="Artículo no encontrado")
-            return ResponseDTO(status=True, data=jsonable_encoder(actualizado))
-        except Exception as e:
-            raise InfrastructureException("Error al actualizar el Artículo.") from e
+    async def modificarArticulo(self, id: int, dto: ArticuloRequestDTO):
+        logger.info(f"Service - Modificar artículo ID: {id}")
+
+        # Posibles errores:
+        # - Validaciones de negocio → BusinessException
+        # - Artículo inexistente → NotFoundException
+        # - Error SQL → InfrastructureException (repo)
+
+        errores = articuloValidator(dto)
+        if errores:
+            raise BusinessException("; ".join(errores))
+
+        nueva_data = dto.dict(exclude_unset=True)
+        actualizado = await self.repository.update(id, nueva_data)
+
+        if not actualizado:
+            raise NotFoundException(f"No se encontró el artículo con ID {id}")
+
+        return ResponseDTO(status=True, data=jsonable_encoder(actualizado))
 

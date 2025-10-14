@@ -1,5 +1,5 @@
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from backend.domain.Proceso import Proceso
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 

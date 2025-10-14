@@ -53,6 +53,11 @@ class ProcesoService:
         #   Posibles errores:
         # - Error de conexión / consulta SQL → InfrastructureException (repo)
         # - Ninguno si la lista está vacía (devuelve lista vacía)
+        
+        if not procesos:
+            logger.info("Service - No hay procesos registrados.")
+
+        
         return ResponseDTO(status=True, data=jsonable_encoder(procesos))
 
     async def obtenerProcesoPorId(self, id: int):
