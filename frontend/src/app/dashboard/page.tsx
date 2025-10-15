@@ -1,14 +1,14 @@
 export default function DashboardPage() {
   return (
-    <div className="p-6">
-      <div className="mb-6">
+    <div className="space-y-6">
+      <div>
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
         <p className="text-gray-600 mt-2">
           Panel principal del sistema SPMM
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Estadísticas rápidas */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center">
@@ -97,7 +97,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Información del backend */}
-      <div className="mt-6 bg-blue-50 rounded-lg p-6">
+      <div className="bg-blue-50 rounded-lg p-6">
         <h3 className="text-lg font-semibold text-blue-900 mb-2">Información del Backend</h3>
         <div className="text-sm text-blue-800 space-y-1">
           <p><strong>URL:</strong> http://127.0.0.1:8000</p>

@@ -1,253 +1,191 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { 
-  Users, 
-  Settings,
-  FileText, 
-  Calendar, 
-  Package, 
-  Target,
-  Home,
   BarChart3,
-  Search,
-  LogOut,
-  Menu,
-  MoreVertical
+  ArrowLeftRight,
+  Users,
+  Settings,
+  X,
+  Menu
 } from "lucide-react";
 
 interface SidebarItem {
   name: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
-  status: "active" | "inactive" | "coming-soon";
 }
 
 const sidebarItems: SidebarItem[] = [
   {
-    name: "Home",
-    href: "/dashboard",
-    icon: Home,
-    status: "coming-soon"
-  },
-  {
     name: "Dashboard",
     href: "/dashboard",
-    icon: BarChart3,
-    status: "coming-soon"
+    icon: BarChart3
   },
   {
-    name: "Planificación",
-    href: "/planificacion",
-    icon: Calendar,
-    status: "active"
+    name: "Operaciones",
+    href: "/operaciones",
+    icon: ArrowLeftRight
   },
   {
     name: "Recursos",
     href: "/recursos",
-    icon: Users,
-    status: "active"
+    icon: Users
   },
   {
-    name: "Operarios",
-    href: "/operarios",
-    icon: Users,
-    status: "active"
-  },
-  {
-    name: "Procesos",
-    href: "/procesos",
-    icon: Settings,
-    status: "active"
-  },
-  {
-    name: "Artículos",
-    href: "/articulos",
-    icon: Package,
-    status: "active"
-  },
-  {
-    name: "Sectores",
-    href: "/sectores",
-    icon: Target,
-    status: "inactive"
-  },
-  {
-    name: "Órdenes",
-    href: "/ordenes",
-    icon: FileText,
-    status: "inactive"
-  },
-  {
-    name: "Prioridades",
-    href: "/prioridades",
-    icon: BarChart3,
-    status: "inactive"
+    name: "Configuración",
+    href: "/configuracion",
+    icon: Settings
   }
 ];
 
 export default function Sidebar() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
 
-  const handleLogout = () => {
-    // Simular logout - limpiar sesión y redirigir al login
-    console.log('Cerrando sesión...');
-    router.push('/login');
+  // Detectar si es móvil
+  useEffect(() => {
+    const checkMobile = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      // En desktop, empezar cerrada para que funcione con hover
+      // En móvil, mantener cerrada
+      setIsOpen(false);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Manejar hover para desktop
+  const handleMouseEnter = () => {
+    if (!isMobile) {
+      setIsHovered(true);
+      setIsOpen(true);
+    }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "active":
-        return "bg-green-500";
-      case "inactive":
-        return "bg-yellow-500";
-      case "coming-soon":
-        return "bg-gray-400";
-      default:
-        return "bg-gray-500";
+  const handleMouseLeave = () => {
+    if (!isMobile) {
+      setIsHovered(false);
+      setIsOpen(false);
+    }
+  };
+
+  const toggleSidebar = () => {
+    setIsOpen(!isOpen);
+  };
+
+  const closeSidebar = () => {
+    if (isMobile) {
+      setIsOpen(false);
     }
   };
 
   return (
-    <div className={`bg-gray-900 transition-all duration-300 h-screen flex flex-col ${
-      isCollapsed ? "w-16" : "w-64"
-    }`}>
-      {/* Header */}
-      <div className="p-4 border-b border-gray-700">
-        <div className="flex items-center justify-between">
-          {!isCollapsed && (
+    <>
+      {/* Overlay para móvil */}
+      {isMobile && isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={closeSidebar}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div 
+        className={`
+          fixed lg:relative top-0 left-0 h-full bg-white border-r border-gray-200 
+          transition-all duration-300 ease-in-out z-50 lg:z-auto
+          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${isOpen ? 'w-64' : 'w-0 lg:w-16'}
+          overflow-hidden lg:overflow-visible
+        `}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* Header */}
+        <div className={`flex items-center border-b border-gray-200 ${isOpen ? 'justify-between p-6' : 'justify-center p-4'}`}>
+          {isOpen && (
             <div className="flex items-center">
-              <div className="w-8 h-8 bg-[#3F3FF3] rounded-lg flex items-center justify-center mr-3">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3">
                 <div className="w-4 h-4 bg-white rounded-sm"></div>
               </div>
-              <h1 className="text-xl font-semibold text-white">SPMM</h1>
+              <h1 className="text-xl font-semibold text-gray-900">SPMM</h1>
             </div>
           )}
-          <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
-          >
-            <Menu className="h-5 w-5 text-white" />
-          </button>
-        </div>
-      </div>
-
-      {/* Search Bar */}
-      <div className="p-4">
-        {!isCollapsed ? (
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search"
-              className="w-full bg-gray-800 text-white placeholder-gray-400 rounded-lg pl-10 pr-4 py-2 border border-gray-700 focus:outline-none focus:border-[#3F3FF3]"
-            />
-          </div>
-        ) : (
-          <div className="flex justify-center">
-            <button className="p-2 hover:bg-gray-800 rounded-lg transition-colors">
-              <Search className="h-5 w-5 text-white" />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 px-4 space-y-1">
-        {sidebarItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname === item.href;
-          const isHovered = hoveredItem === item.name;
           
-          return (
-            <div key={item.name} className="relative">
-              <Link
-                href={item.href}
-                className={`flex items-center p-3 rounded-lg transition-colors group relative ${
-                  isActive
-                    ? "bg-gray-800 text-white"
-                    : "text-gray-300 hover:bg-gray-800 hover:text-white"
-                } ${item.status === "coming-soon" ? "opacity-50 cursor-not-allowed" : ""}`}
-                onMouseEnter={() => setHoveredItem(item.name)}
-                onMouseLeave={() => setHoveredItem(null)}
-              >
-                <Icon className={`h-5 w-5 ${isCollapsed ? "" : "mr-3"}`} />
-                {!isCollapsed && (
-                  <span className="font-medium">{item.name}</span>
-                )}
-                
-                {/* Status indicator */}
-                <div className={`absolute right-2 w-2 h-2 rounded-full ${getStatusColor(item.status)}`}></div>
-              </Link>
-
-              {/* Tooltip for collapsed state */}
-              {isCollapsed && isHovered && (
-                <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 bg-gray-800 text-white px-3 py-2 rounded-lg shadow-lg z-50 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <span className="text-sm font-medium">{item.name}</span>
-                    <div className={`ml-2 w-2 h-2 rounded-full ${getStatusColor(item.status)}`}></div>
-                  </div>
-                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1 w-2 h-2 bg-gray-800 rotate-45"></div>
-                </div>
+          {/* Botón toggle - solo visible en móvil */}
+          {isMobile && (
+            <button
+              onClick={toggleSidebar}
+              className="flex items-center justify-center w-10 h-10 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              {isOpen ? (
+                <X className="h-5 w-5 text-gray-600" />
+              ) : (
+                <Menu className="h-5 w-5 text-gray-600" />
               )}
-            </div>
-          );
-        })}
-      </nav>
-
-      {/* Divider */}
-      <div className="px-4">
-        <div className="border-t border-gray-700"></div>
-      </div>
-
-      {/* Utility Navigation */}
-      <div className="px-4 py-2 space-y-1">
-        {!isCollapsed ? (
-          <div 
-            className="flex items-center p-3 rounded-lg hover:bg-red-600 transition-colors cursor-pointer"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-5 w-5 text-white mr-3" />
-            <span className="text-white font-medium">Logout</span>
-          </div>
-        ) : (
-          <button 
-            className="p-3 rounded-lg hover:bg-red-600 transition-colors"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-5 w-5 text-white" />
-          </button>
-        )}
-      </div>
-
-      {/* User Profile */}
-      <div className="p-4 border-t border-gray-700">
-        <div className={`flex items-center ${isCollapsed ? "justify-center" : ""}`}>
-          {!isCollapsed ? (
-            <>
-              <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center mr-3">
-                <div className="w-6 h-6 bg-[#3F3FF3] rounded-full"></div>
-              </div>
-              <div className="flex-1">
-                <div className="text-white font-medium text-sm">Admin User</div>
-                <div className="text-gray-400 text-xs">admin@spmm.com</div>
-              </div>
-              <button className="p-1 hover:bg-gray-800 rounded-lg transition-colors">
-                <MoreVertical className="h-4 w-4 text-gray-400" />
-              </button>
-            </>
-          ) : (
-            <div className="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center">
-              <div className="w-6 h-6 bg-[#3F3FF3] rounded-full"></div>
+            </button>
+          )}
+          
+          {/* Indicador de hover para desktop cuando está cerrada */}
+          {!isMobile && !isOpen && (
+            <div className="flex items-center justify-center w-8 h-8 bg-gray-100 rounded-lg">
+              <div className="w-3 h-3 bg-gray-400 rounded-sm"></div>
             </div>
           )}
         </div>
+
+        {/* Navigation */}
+        <nav className={`flex-1 space-y-2 ${isOpen ? 'p-4' : 'p-2'}`}>
+          {sidebarItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = pathname === item.href;
+            
+            return (
+              <Link
+                key={item.name}
+                href={item.href}
+                onClick={closeSidebar}
+                className={`
+                  flex items-center rounded-xl transition-all duration-200 group
+                  ${isActive 
+                    ? 'bg-blue-50 text-blue-600 shadow-sm' 
+                    : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }
+                  ${isOpen ? 'px-4 py-3' : 'justify-center p-3'}
+                `}
+              >
+                <Icon className={`
+                  h-5 w-5 transition-colors
+                  ${isActive ? 'text-blue-600' : 'text-gray-500 group-hover:text-gray-700'}
+                  ${isOpen ? 'mr-3' : ''}
+                `} />
+                
+                {isOpen && (
+                  <span className="font-medium text-sm">{item.name}</span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
       </div>
-    </div>
+
+      {/* Botón flotante para móvil cuando sidebar está cerrada */}
+      {isMobile && !isOpen && (
+        <button
+          onClick={toggleSidebar}
+          className="fixed top-4 left-4 z-50 flex items-center justify-center w-12 h-12 bg-white border border-gray-200 rounded-lg shadow-lg hover:bg-gray-50 transition-colors"
+        >
+          <Menu className="h-5 w-5 text-gray-600" />
+        </button>
+      )}
+    </>
   );
 }
