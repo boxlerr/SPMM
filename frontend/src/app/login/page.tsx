@@ -31,9 +31,9 @@ export default function LoginPage() {
     //   return;
     // }
     
-    // Simular login exitoso - redirigir a la página principal
+    // Simular login exitoso - redirigir al Dashboard
     console.log('Login exitoso - sin validaciones');
-    router.push('/planificacion'); // Redirigir a la página de planificación
+    router.push('/dashboard'); // Redirigir al Dashboard
   };
 
   return (
