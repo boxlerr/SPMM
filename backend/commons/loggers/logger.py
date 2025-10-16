@@ -2,7 +2,7 @@
 import logging
 
 logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.ERROR)
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s")
 
