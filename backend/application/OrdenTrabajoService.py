@@ -4,13 +4,19 @@ from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.loggers.logger import logger
 from datetime import datetime
-class OrdenTrabajoService:
-    def __init__(self):
-        pass
 
-    def crearOrdenTrabajo(self, dto: OrdenTrabajoRequestDTO):
+class OrdenTrabajoService:
+    def __init__(self, db_session):
+        self.repository = OrdenTrabajoRepository(db_session)
+
+    async def crearOrdenTrabajo(self, dto: OrdenTrabajoRequestDTO):
         try:
+            logger.info("Service - Crear orden de trabajo.")
+
             orden = OrdenTrabajo(
                 id_otvieja=dto.id_otvieja,
                 observaciones=dto.observaciones,
@@ -24,57 +30,67 @@ class OrdenTrabajoService:
                 fecha_entrega=dto.fecha_entrega
             )
 
-            repo = OrdenTrabajoRepository()
-            creada = repo.save(orden)
+            orden_creada = await self.repository.save(orden)
 
-            return ResponseDTO(status=True, data=jsonable_encoder(creada))
+            return ResponseDTO(status=True, data=jsonable_encoder(orden_creada))
+        except InfrastructureException:
+            raise  
         except Exception as e:
-            raise InfrastructureException("Error al guardar la Orden de Trabajo.") from e
+            raise ApplicationException("Error inesperado al crear la Orden de Trabajo.") from e
 
-    def listarOrdenes(self):
-        repo = OrdenTrabajoRepository()
-        ordenes = repo.find_all()
+    async def listarOrdenes(self):
+        logger.info("Service - Listar órdenes de trabajo.")
+        ordenes = await self.repository.find_all()
+        
+        if not ordenes:
+            logger.info("Service - No hay órdenes de trabajo registradas.")
+        
         return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
 
-    def obtenerOrdenPorId(self, id: int):
-        repo = OrdenTrabajoRepository()
-        orden = repo.find_by_id(id)
+    async def obtenerOrdenPorId(self, id: int):
+        logger.info(f"Service - Obtener orden de trabajo ID: {id}")
+        orden = await self.repository.find_by_id(id)
+
         if not orden:
-            return ResponseDTO(status=False, data={}, errorDescription="Orden de Trabajo no encontrada")
+            raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
+
         return ResponseDTO(status=True, data=jsonable_encoder(orden))
 
-    def modificarOrden(self, id: int, dto: OrdenTrabajoRequestDTO):
-        try:    
-            repo = OrdenTrabajoRepository()
-            nueva_data = dto.model_dump(exclude_unset=True)
-            actualizado = repo.update(id, nueva_data)
-
-            if not actualizado:
-                return ResponseDTO(status=False, data={}, errorDescription="Orden de Trabajo no encontrada")
-
-            return ResponseDTO(status=True, data=jsonable_encoder(actualizado))  # 👈 IMPORTANTE
-
-        except Exception as e:
-            raise InfrastructureException("Error al actualizar la Orden de Trabajo.") from e
-
-
-    def eliminarOrden(self, id: int):
-        try:
-            repo = OrdenTrabajoRepository()
-            ok = repo.delete(id)
-            if not ok:
-                return ResponseDTO(status=False, data={}, errorDescription="Orden de Trabajo no encontrada")
-            return ResponseDTO(status=True, data={"deleted": id})
-        except Exception as e:
-            raise InfrastructureException("Error al eliminar la Orden de Trabajo.") from e
+    async def modificarOrden(self, id: int, dto: OrdenTrabajoRequestDTO):
+        logger.info(f"Service - Modificar orden de trabajo ID: {id}")
         
-    def listarPorFechas(self, desde: datetime, hasta: datetime):
-        repo = OrdenTrabajoRepository()
-        ordenes = repo.find_by_fecha_orden_entre(desde, hasta)
+        nueva_data = dto.model_dump(exclude_unset=True)
+        orden_actualizada = await self.repository.update(id, nueva_data)
+
+        if not orden_actualizada:
+            raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
+
+        return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
+
+    async def eliminarOrden(self, id: int):
+        logger.info(f"Service - Eliminar orden de trabajo ID: {id}")
+        ok = await self.repository.delete(id)
+
+        if not ok:
+            raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
+
+        return ResponseDTO(status=True, data={"deleted": id})
+        
+    async def listarPorFechas(self, desde: datetime, hasta: datetime):
+        logger.info(f"Service - Listar órdenes por fechas: {desde} a {hasta}")
+        ordenes = await self.repository.find_by_fecha_orden_entre(desde, hasta)
+        
+        if not ordenes:
+            logger.info("Service - No hay órdenes en el rango de fechas especificado.")
+        
         return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
 
-    def listarPorPrioridad(self, id_prioridad: int):
-        repo = OrdenTrabajoRepository()
-        ordenes = repo.find_by_prioridad(id_prioridad)
+    async def listarPorPrioridad(self, id_prioridad: int):
+        logger.info(f"Service - Listar órdenes por prioridad: {id_prioridad}")
+        ordenes = await self.repository.find_by_prioridad(id_prioridad)
+        
+        if not ordenes:
+            logger.info(f"Service - No hay órdenes con prioridad {id_prioridad}.")
+        
         return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
 

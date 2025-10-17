@@ -1,53 +1,49 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, Depends
 from backend.application.PrioridadService import PrioridadService
 from backend.dto.PrioridadRequestDTO import PrioridadRequestDTO
-
-from backend.commons import ResponseDTO
-from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.exceptions.BusinessException import BusinessException
+from backend.infrastructure.db import SessionLocal
+from backend.commons.loggers.logger import logger
 
 app = FastAPI()
 router = APIRouter()
-service = PrioridadService()
 
+# 🔹 Dependencia para obtener sesión async
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
+# 🔹 Crear prioridad
 @router.post("/prioridades")
-def crear_prioridad(prioridad_dto: PrioridadRequestDTO):
-    try:
-        result = service.crearPrioridad(prioridad_dto)
-        return result
-    except (BusinessException, InfrastructureException) as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def crear_prioridad(prioridad_dto: PrioridadRequestDTO, db=Depends(get_db)):
+    logger.info("API - Inicio POST /prioridades")
+    service = PrioridadService(db)
+    result = await service.crearPrioridad(prioridad_dto)
+    return result
 
-# 🔹 Nuevo: Listar todas las prioridades
+# 🔹 Listar todas las prioridades
 @router.get("/prioridades")
-def listar_prioridades():
-    try:
-        return service.listarPrioridades()
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def listar_prioridades(db=Depends(get_db)):
+    logger.info("API - Inicio GET /prioridades")
+    service = PrioridadService(db)
+    return await service.listarPrioridades()
 
-# 🔹 Nuevo: Obtener una prioridad por ID
+# 🔹 Obtener prioridad por ID
 @router.get("/prioridades/{id}")
-def obtener_prioridad(id: int):
-    try:
-        return service.obtenerPrioridadPorId(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def obtener_prioridad(id: int, db=Depends(get_db)):
+    service = PrioridadService(db)
+    return await service.obtenerPrioridadPorId(id)
 
-# 🔹 Nuevo: Modificar una prioridad
+# 🔹 Modificar prioridad
 @router.put("/prioridades/{id}")
-def modificar_prioridad(id: int, prioridad_dto: PrioridadRequestDTO):
-    try:
-        return service.modificarPrioridad(id, prioridad_dto)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def modificar_prioridad(id: int, prioridad_dto: PrioridadRequestDTO, db=Depends(get_db)):
+    service = PrioridadService(db)
+    return await service.modificarPrioridad(id, prioridad_dto)
 
-# 🔹 Nuevo: Eliminar una prioridad
+# 🔹 Eliminar prioridad
 @router.delete("/prioridades/{id}")
-def eliminar_prioridad(id: int):
-    try:
-        return service.eliminarPrioridad(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def eliminar_prioridad(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio DELETE /prioridades/{id}")
+    service = PrioridadService(db)
+    return await service.eliminarPrioridad(id)
 
 app.include_router(router)
