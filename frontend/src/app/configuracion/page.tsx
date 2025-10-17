@@ -155,19 +155,19 @@ export default function ConfiguracionPage() {
 
       {/* Tabs Navigation */}
       <div className="bg-gray-100 rounded-lg p-1">
-        <div className="grid grid-cols-6 gap-1">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center justify-center space-x-2 px-4 py-3 rounded-md transition-all duration-200 ${
+              className={`flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-3 rounded-md transition-all duration-200 ${
                 activeTab === tab.id
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
               }`}
             >
-              <span className="text-lg">{tab.icon}</span>
-              <span className="font-medium">{tab.label}</span>
+              <span className="text-sm sm:text-lg">{tab.icon}</span>
+              <span className="font-medium text-xs sm:text-sm truncate">{tab.label}</span>
             </button>
           ))}
         </div>
