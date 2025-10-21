@@ -7,6 +7,7 @@ from backend.presentation.OperarioAPI import router as operario_router
 from backend.presentation.OrdenTrabajoAPI import router as orden_trabajo_router
 from backend.presentation.SectorAPI import router as sector_router
 from backend.presentation.ArticuloAPI import router as articulo_router
+from backend.presentation.PlanificacionAPI import router as plan_router
 
 import logging
 
@@ -62,7 +63,7 @@ app.include_router(proceso_router, tags=["procesos"])
 app.include_router(operario_router, tags=["operarios"])
 app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"])
 app.include_router(sector_router, tags=["sectores"])
-
+app.include_router(plan_router,tags=["planificación"])
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)
