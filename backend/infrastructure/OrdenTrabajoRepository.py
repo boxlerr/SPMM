@@ -1,86 +1,111 @@
+from sqlalchemy import select
 from backend.domain.OrdenTrabajo import OrdenTrabajo
-from backend.infrastructure.db import SessionLocal
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
-
-from backend.domain.Sector import Sector
-from backend.domain.Prioridad import Prioridad
-from backend.domain.Maquinaria import Maquinaria
-from backend.domain.Articulo import Articulo
+from backend.commons.loggers.logger import logger
 from datetime import datetime
 
-
-
 class OrdenTrabajoRepository:
-    def __init__(self):
-        self.db = SessionLocal()
+    def __init__(self, db):
+        self.db = db
 
-    def save(self, orden: OrdenTrabajo):
+    async def save(self, orden: OrdenTrabajo):
         try:
+            logger.info("Repository - Crear Orden de Trabajo.")
             self.db.add(orden)
-            self.db.commit()
-            self.db.refresh(orden)
+            await self.db.commit()
+            await self.db.refresh(orden)
+            logger.info("Repository - Crear Orden de Trabajo OK.")
             return orden
         except Exception as e:
-            self.db.rollback()
+            logger.error(f"Repository - Error real en save: {e}")
+            await self.db.rollback()
             raise InfrastructureException("Error al guardar la Orden de Trabajo.") from e
 
-    def find_all(self):
+    async def find_all(self):
         try:
-            return self.db.query(OrdenTrabajo).all()
+            logger.info("Repository - Obtener todas las órdenes de trabajo.")
+            result = await self.db.execute(select(OrdenTrabajo))
+            data = result.scalars().all()
+            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
+            return data
         except Exception as e:
-            raise InfrastructureException("Error al listar Órdenes de Trabajo.") from e
+            logger.error(f"Repository - Error real en find_all: {e}")
+            raise InfrastructureException("Error al listar las Órdenes de Trabajo.") from e
 
-    def find_by_id(self, id: int):
+    async def find_by_id(self, id: int):
         try:
-            return self.db.query(OrdenTrabajo).filter(OrdenTrabajo.id == id).first()
+            logger.info(f"Repository - Buscar orden de trabajo por ID {id}.")
+            result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id))
+            return result.scalar_one_or_none()
         except Exception as e:
+            logger.error(f"Repository - Error real en find_by_id: {e}")
             raise InfrastructureException("Error al buscar la Orden de Trabajo por ID.") from e
 
-    def update(self, id: int, nueva_data: dict):
+    async def update(self, id: int, nueva_data: dict):
         try:
-            orden = self.find_by_id(id)
+            logger.info(f"Repository - Actualizar orden de trabajo ID {id}.")
+            result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id))
+            orden = result.scalar_one_or_none()
             if not orden:
+                logger.info(f"Repository - Orden de trabajo {id} no encontrada para actualizar.")
                 return None
+
             for key, value in nueva_data.items():
                 setattr(orden, key, value)
 
-            print("Objeto antes de commit:", orden.__dict__)
-            self.db.commit()
-
+            await self.db.commit()
+            await self.db.refresh(orden)
+            logger.info(f"Repository - Orden de trabajo {id} actualizada correctamente.")
             return orden
         except Exception as e:
-            self.db.rollback()
-            print("❌ Error real en UPDATE:", repr(e))  # 👈 Agregado
+            await self.db.rollback()
+            logger.error(f"Repository - Error real en update: {e}")
             raise InfrastructureException("Error al actualizar la Orden de Trabajo.") from e
 
-
-    def delete(self, id: int):
+    async def delete(self, id: int):
         try:
-            orden = self.find_by_id(id)
+            logger.info(f"Repository - Eliminar orden de trabajo ID {id}.")
+            result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id))
+            orden = result.scalar_one_or_none()
+
             if not orden:
+                logger.info(f"Repository - Orden de trabajo {id} no encontrada para eliminar.")
                 return False
-            self.db.delete(orden)
-            self.db.commit()
+
+            await self.db.delete(orden)
+            await self.db.commit()
+            logger.info(f"Repository - Orden de trabajo {id} eliminada correctamente.")
             return True
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
+            logger.error(f"Repository - Error real en delete: {e}")
             raise InfrastructureException("Error al eliminar la Orden de Trabajo.") from e
             
-    def find_by_fecha_orden_entre(self, desde: datetime, hasta: datetime):
+    async def find_by_fecha_orden_entre(self, desde: datetime, hasta: datetime):
         try:
-            return self.db.query(OrdenTrabajo).filter(
+            logger.info(f"Repository - Buscar órdenes entre {desde} y {hasta}.")
+            result = await self.db.execute(select(OrdenTrabajo).where(
                 OrdenTrabajo.fecha_orden >= desde,
                 OrdenTrabajo.fecha_orden <= hasta
-            ).all()
+            ))
+            data = result.scalars().all()
+            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
+            return data
         except Exception as e:
+            logger.error(f"Repository - Error real en find_by_fecha_orden_entre: {e}")
             raise InfrastructureException("Error al filtrar por fechas.") from e
 
-    def find_by_prioridad(self, id_prioridad: int):
+    async def find_by_prioridad(self, id_prioridad: int):
         try:
-            return self.db.query(OrdenTrabajo).filter(
+            logger.info(f"Repository - Buscar órdenes por prioridad {id_prioridad}.")
+            result = await self.db.execute(select(OrdenTrabajo).where(
                 OrdenTrabajo.id_prioridad == id_prioridad
-            ).all()
+            ))
+            data = result.scalars().all()
+            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
+            return data
         except Exception as e:
+            logger.error(f"Repository - Error real en find_by_prioridad: {e}")
             raise InfrastructureException("Error al filtrar por prioridad.") from e
 
 

@@ -1,81 +1,82 @@
 from backend.domain.Prioridad import Prioridad
 from backend.dto.PrioridadRequestDTO import PrioridadRequestDTO
 from backend.infrastructure.PrioridadRepository import PrioridadRepository
-
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
-
 from backend.application.validators.PrioridadValidator import prioridadValidator
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.loggers.logger import logger
 
 class PrioridadService:
-    def __init__(self):
-        pass
+    def __init__(self, db_session):
+        self.repository = PrioridadRepository(db_session)
 
-    def crearPrioridad(self, prioridad_dto: PrioridadRequestDTO):
+    async def crearPrioridad(self, prioridad_dto: PrioridadRequestDTO):
         try:
+            logger.info("Service - Crear prioridad.")
+
+            # Validación de negocio
             errores = prioridadValidator(prioridad_dto)
             if errores:
-                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
+                raise BusinessException("; ".join(errores))
 
             prioridad = Prioridad(
                 descripcion=prioridad_dto.descripcion,
                 detalle=prioridad_dto.detalle
             )
 
-            repo = PrioridadRepository()
-            prioridad_creada = repo.save(prioridad)
+            prioridad_creada = await self.repository.save(prioridad)
 
-            response = ResponseDTO()
-            response.status = True
-            response.data = jsonable_encoder(prioridad_creada)
-            response.errorDescription = ""
-
-            return response
-
+            return ResponseDTO(status=True, data=jsonable_encoder(prioridad_creada))
+        except InfrastructureException:
+            raise  
+        except BusinessException:
+            raise
         except Exception as e:
-            raise InfrastructureException("Error al guardar la Prioridad.") from e
+            raise ApplicationException("Error inesperado al crear la Prioridad.") from e
 
-    # 🔹 Nuevo: Listar todas las prioridades
-    def listarPrioridades(self):
-        repo = PrioridadRepository()
-        prioridades = repo.find_all()
-        response = ResponseDTO(status=True, data=jsonable_encoder(prioridades))
-        return response
+    async def listarPrioridades(self):
+        logger.info("Service - Listar prioridades.")
+        prioridades = await self.repository.find_all()
+        
+        if not prioridades:
+            logger.info("Service - No hay prioridades registradas.")
+        
+        return ResponseDTO(status=True, data=jsonable_encoder(prioridades))
 
-    # 🔹 Nuevo: Traer una prioridad por ID
-    def obtenerPrioridadPorId(self, id: int):
-        repo = PrioridadRepository()
-        prioridad = repo.find_by_id(id)
+    async def obtenerPrioridadPorId(self, id: int):
+        logger.info(f"Service - Obtener prioridad ID: {id}")
+        prioridad = await self.repository.find_by_id(id)
+
         if not prioridad:
-            return ResponseDTO(status=False, data={}, errorDescription="Prioridad no encontrada")
+            raise NotFoundException(f"No se encontró la prioridad con ID {id}")
+
         return ResponseDTO(status=True, data=jsonable_encoder(prioridad))
 
-    # 🔹 Nuevo: Modificar una prioridad
-    def modificarPrioridad(self, id: int, prioridad_dto: PrioridadRequestDTO):
-        try:
-            errores = prioridadValidator(prioridad_dto)
-            if errores:
-                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
+    async def modificarPrioridad(self, id: int, prioridad_dto: PrioridadRequestDTO):
+        logger.info(f"Service - Modificar prioridad ID: {id}")
 
-            repo = PrioridadRepository()
-            nueva_data = prioridad_dto.dict(exclude_unset=True)
-            prioridad_actualizada = repo.update(id, nueva_data)
+        # Validación de negocio
+        errores = prioridadValidator(prioridad_dto)
+        if errores:
+            raise BusinessException("; ".join(errores))
 
-            if not prioridad_actualizada:
-                return ResponseDTO(status=False, data={}, errorDescription="Prioridad no encontrada")
+        nueva_data = prioridad_dto.dict(exclude_unset=True)
+        prioridad_actualizada = await self.repository.update(id, nueva_data)
 
-            return ResponseDTO(status=True, data=jsonable_encoder(prioridad_actualizada))
-        except Exception as e:
-            raise InfrastructureException("Error al actualizar la Prioridad.") from e
+        if not prioridad_actualizada:
+            raise NotFoundException(f"No se encontró la prioridad con ID {id}")
 
-    # 🔹 Nuevo: Eliminar una prioridad
-    def eliminarPrioridad(self, id: int):
-        try:
-            repo = PrioridadRepository()
-            ok = repo.delete(id)
-            if not ok:
-                return ResponseDTO(status=False, data={}, errorDescription="Prioridad no encontrada")
-            return ResponseDTO(status=True, data={"deleted": id})
-        except Exception as e:
-            raise InfrastructureException("Error al eliminar la Prioridad.") from e
+        return ResponseDTO(status=True, data=jsonable_encoder(prioridad_actualizada))
+
+    async def eliminarPrioridad(self, id: int):
+        logger.info(f"Service - Eliminar prioridad ID: {id}")
+        ok = await self.repository.delete(id)
+
+        if not ok:
+            raise NotFoundException(f"No se encontró la prioridad con ID {id}")
+
+        return ResponseDTO(status=True, data={"deleted": id})

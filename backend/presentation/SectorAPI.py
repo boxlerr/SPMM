@@ -1,62 +1,49 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, Depends
 from backend.application.SectorService import SectorService
 from backend.dto.SectorRequestDTO import SectorRequestDTO
-from backend.commons import ResponseDTO
-from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.exceptions.BusinessException import BusinessException
+from backend.infrastructure.db import SessionLocal
+from backend.commons.loggers.logger import logger
 
 app = FastAPI()
 router = APIRouter()
-service = SectorService()
 
+# 🔹 Dependencia para obtener sesión async
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
+# 🔹 Crear sector
 @router.post("/sectores")
-def crear_sector(sector_dto: SectorRequestDTO):
-    try:
-        result = service.crearSector(sector_dto)
-        return result
+async def crear_sector(sector_dto: SectorRequestDTO, db=Depends(get_db)):
+    logger.info("API - Inicio POST /sectores")
+    service = SectorService(db)
+    result = await service.crearSector(sector_dto)
+    return result
 
-    except BusinessException as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# GET all
+# 🔹 Listar todos los sectores
 @router.get("/sectores")
-def listar_sectores():
-    try:
-        return service.listarSectores()
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def listar_sectores(db=Depends(get_db)):
+    logger.info("API - Inicio GET /sectores")
+    service = SectorService(db)
+    return await service.listarSectores()
 
-# GET by id
+# 🔹 Obtener sector por ID
 @router.get("/sectores/{id}")
-def obtener_sector(id: int):
-    try:
-        return service.obtenerSectorPorId(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def obtener_sector(id: int, db=Depends(get_db)):
+    service = SectorService(db)
+    return await service.obtenerSectorPorId(id)
 
-# PUT
+# 🔹 Modificar sector
 @router.put("/sectores/{id}")
-def modificar_sector(id: int, sector_dto: SectorRequestDTO):
-    try:
-        return service.modificarSector(id, sector_dto)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def modificar_sector(id: int, sector_dto: SectorRequestDTO, db=Depends(get_db)):
+    service = SectorService(db)
+    return await service.modificarSector(id, sector_dto)
 
+# 🔹 Eliminar sector
 @router.delete("/sectores/{id}")
-def eliminar_sector(id: int):
-    try:
-        result = service.eliminarSector(id)
-        return result
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def eliminar_sector(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio DELETE /sectores/{id}")
+    service = SectorService(db)
+    return await service.eliminarSector(id)
 
 app.include_router(router)

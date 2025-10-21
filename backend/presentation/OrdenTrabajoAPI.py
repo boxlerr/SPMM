@@ -1,63 +1,64 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, Depends
 from backend.application.OrdenTrabajoService import OrdenTrabajoService
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
-from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.ResponseDTO import ResponseDTO
+from backend.infrastructure.db import SessionLocal
+from backend.commons.loggers.logger import logger
 from datetime import datetime
 
 app = FastAPI()
 router = APIRouter()
-service = OrdenTrabajoService()
 
+# 🔹 Dependencia para obtener sesión async
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
+# 🔹 Crear orden de trabajo
 @router.post("/ordenes")
-def crear_orden(dto: OrdenTrabajoRequestDTO):
-    try:
-        return service.crearOrdenTrabajo(dto)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def crear_orden(dto: OrdenTrabajoRequestDTO, db=Depends(get_db)):
+    logger.info("API - Inicio POST /ordenes")
+    service = OrdenTrabajoService(db)
+    return await service.crearOrdenTrabajo(dto)
 
+# 🔹 Listar todas las órdenes
 @router.get("/ordenes")
-def listar_ordenes():
-    try:
-        return service.listarOrdenes()
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+async def listar_ordenes(db=Depends(get_db)):
+    logger.info("API - Inicio GET /ordenes")
+    service = OrdenTrabajoService(db)
+    return await service.listarOrdenes()
+
+# 🔹 Listar órdenes por fechas
 @router.get("/ordenes/por-fechas")
-def listar_por_fechas(desde: datetime, hasta: datetime):
+async def listar_por_fechas(desde: datetime, hasta: datetime, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /ordenes/por-fechas desde={desde} hasta={hasta}")
+    service = OrdenTrabajoService(db)
+    return await service.listarPorFechas(desde, hasta)
 
-    try:
-        return service.listarPorFechas(desde, hasta)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# 🔹 Obtener orden por ID
 @router.get("/ordenes/{id}")
-def obtener_orden(id: int):
-    try:
-        return service.obtenerOrdenPorId(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def obtener_orden(id: int, db=Depends(get_db)):
+    service = OrdenTrabajoService(db)
+    return await service.obtenerOrdenPorId(id)
 
+# 🔹 Modificar orden
 @router.put("/ordenes/{id}")
-def modificar_orden(id: int, dto: OrdenTrabajoRequestDTO):
-    try:
-        return service.modificarOrden(id, dto)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def modificar_orden(id: int, dto: OrdenTrabajoRequestDTO, db=Depends(get_db)):
+    service = OrdenTrabajoService(db)
+    return await service.modificarOrden(id, dto)
 
+# 🔹 Eliminar orden
 @router.delete("/ordenes/{id}")
-def eliminar_orden(id: int):
-    try:
-        return service.eliminarOrden(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def eliminar_orden(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio DELETE /ordenes/{id}")
+    service = OrdenTrabajoService(db)
+    return await service.eliminarOrden(id)
 
+# 🔹 Listar órdenes por prioridad
 @router.get("/ordenes/por-prioridad/{id_prioridad}")
-def listar_por_prioridad(id_prioridad: int):
-    try:
-        return service.listarPorPrioridad(id_prioridad)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+async def listar_por_prioridad(id_prioridad: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /ordenes/por-prioridad/{id_prioridad}")
+    service = OrdenTrabajoService(db)
+    return await service.listarPorPrioridad(id_prioridad)
 
 app.include_router(router)
 

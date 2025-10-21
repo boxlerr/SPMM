@@ -8,8 +8,6 @@ class ArticuloRepository:
         self.db = db
 
 
-    def find_by_id(self, id: int):
-        return self.db.query(Articulo).filter(Articulo.id == id).first()
 
     async def save(self, articulo: Articulo):
         try:
