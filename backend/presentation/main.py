@@ -9,24 +9,15 @@ from backend.presentation.SectorAPI import router as sector_router
 from backend.presentation.ArticuloAPI import router as articulo_router
 from backend.presentation.PlanificacionAPI import router as plan_router
 from backend.presentation.PrioridadAPI import router as prioridad_router
+from backend.presentation.MaquinariaAPI import router as maquinaria_router
 
 import logging
 
-#from backend.commons.exceptions import ApplicationException,BusinessException,DomainException,InfrastructureException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.DomainException import DomainException
 
-"""from backend.commons.handlers.exception_handlers import (
-    application_handler,
-    validation_exception_handler,
-    http_exception_handler,
-    infrastructure_handler,
-    domain_handler,
-    generic_handler,
-    not_found_handler
-)"""
 
 from backend.commons.handlers.exception_handlers import (
     application_handler,
@@ -38,9 +29,6 @@ from backend.commons.handlers.exception_handlers import (
     generic_handler,
     not_found_handler
 )
-
-
-
 
 app = FastAPI(title="SPMM Backend", version="1.0")
 
@@ -66,7 +54,7 @@ app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"])
 app.include_router(sector_router, tags=["sectores"])
 app.include_router(plan_router,tags=["planificacion"])
 app.include_router(prioridad_router,tags=["prioridades"])
-
+app.include_router(maquinaria_router,tags=["maquinarias"])
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)
@@ -85,4 +73,4 @@ logger = logging.getLogger("uvicorn")
 # 🔹 Endpoint raíz
 @app.get("/")
 def root():
-    return {"message": "Backend funcionando correctamente 🚀"}
+    return {"message": "Backend funcionando correctamente"}
