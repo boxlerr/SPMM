@@ -1,8 +1,12 @@
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
 from datetime import datetime
+
+from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+from backend.domain.Proceso import Proceso
 
 class OrdenTrabajoRepository:
     def __init__(self, db):
@@ -108,7 +112,22 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error real en find_by_prioridad: {e}")
             raise InfrastructureException("Error al filtrar por prioridad.") from e
 
-
-
-
+    async def find_with_procesos(self):
+        try:
+            logger.info("Repository - Obtener órdenes con sus procesos.")
+    
+            result = await self.db.execute(
+                select(OrdenTrabajo)
+                .options(
+                    joinedload(OrdenTrabajo.procesos)
+                    .joinedload(OrdenTrabajoProceso.proceso),
+                    joinedload(OrdenTrabajo.prioridad)   # 👈 agregalo
+                )
+            )
+            logger.info(f"Repository - Resultado OK órdenes encontradas).")
+            return result.scalars().unique().all()
+        
+        except Exception as e:
+            logger.error(f"Repository - Error en find_with_procesos: {e}")
+            raise InfrastructureException("Error al obtener órdenes con procesos asociados.") from e
 

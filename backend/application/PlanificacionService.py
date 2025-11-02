@@ -1,117 +1,118 @@
 # backend/application/PlanificacionService.py
 import asyncio
 from ortools.sat.python import cp_model
-from datetime import datetime, timedelta
+from datetime import datetime, time
+
+from backend.infrastructure.ProcesoRepository import ProcesoRepository
+from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
+from backend.infrastructure.OperarioRepository import OperarioRepository
+from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 
 # 🔸 Función síncrona que corre OR-Tools
-def _resolver_planificacion():
-    procesos, maquinas, operarios, feriados = obtener_datos_simulados()
+from ortools.sat.python import cp_model
+from datetime import datetime
+
+from ortools.sat.python import cp_model
+
+def _resolver_planificacion(procesos):
+    """
+    Planificador que considera la descripción de la prioridad (Urgente, Normal, etc.)
+    y la fecha prometida.
+    """
+
     model = cp_model.CpModel()
+    posicion_vars = {}
 
-    tareas = {}
-    operario_vars = {}
-    maquina_vars = {}
-    horizon = sum([p[3] for p in procesos])
+    # 🔸 Asignamos valores numéricos según prioridad
+    prioridad_pesos = {
+        "urgente": 1,
+        "urgente 1": 1,
+        "urgente 2": 2,
+        "normal": 3,
+        "baja": 4,
+    }
 
-    # Variables por proceso
-    for (orden_id, proc_id, nombre, duracion, maquinas_permitidas, operarios_req, prioridad, deadline) in procesos:
-        start = model.NewIntVar(0, horizon, f"start_{proc_id}")
-        end = model.NewIntVar(0, horizon, f"end_{proc_id}")
-        interval = model.NewIntervalVar(start, duracion, end, f"interval_{proc_id}")
+    # Variables
+    for (orden_id, proc_id, secuencia, fecha_prometida, prioridad_desc) in procesos:
+        posicion_vars[(orden_id, proc_id)] = model.NewIntVar(1, len(procesos), f"pos_{orden_id}_{proc_id}")
 
-        maquina_var = model.NewIntVarFromDomain(
-            cp_model.Domain.FromValues(maquinas_permitidas),
-            f"maquina_{proc_id}"
-        )
+    # Restricciones de secuencia (como antes)
+    for orden_id in set(p[0] for p in procesos):
+        procesos_orden = [p for p in procesos if p[0] == orden_id]
+        procesos_orden.sort(key=lambda x: x[2])
+        for i in range(len(procesos_orden) - 1):
+            actual = procesos_orden[i] #1
+            siguiente = procesos_orden[i + 1] 
+            model.Add(posicion_vars[(orden_id, siguiente[1])] > posicion_vars[(orden_id, actual[1])])
 
-        posibles_op = [op["id"] for op in operarios]
-        op_var = model.NewIntVarFromDomain(
-            cp_model.Domain.FromValues(posibles_op),
-            f"operario_{proc_id}"
-        )
+    # 🔸 Objetivo: dar prioridad según urgencia + fecha
+    total_penalizacion = []
+    for (orden_id, proc_id, secuencia, fecha_prometida, prioridad_desc) in procesos:
+        peso_prioridad = prioridad_pesos.get(prioridad_desc, 5)  # si no la encuentra, la toma como baja
+        if fecha_prometida:
+            # si es date, convertirlo a datetime (a las 00:00hs)
+            if isinstance(fecha_prometida, datetime):
+                fecha_ts = int(fecha_prometida.timestamp())
+            else:
+                fecha_ts = int(datetime.combine(fecha_prometida, time.min).timestamp())
+        else:
+            fecha_ts = 0
 
-        tareas[proc_id] = (start, end, interval, duracion, deadline)
-        maquina_vars[proc_id] = maquina_var
-        operario_vars[proc_id] = op_var
+        penalizacion = model.NewIntVar(0, 10**9, f"pen_{orden_id}_{proc_id}")
+        model.Add(penalizacion == fecha_ts // 100000 + (peso_prioridad * 100))
+        total_penalizacion.append(penalizacion + posicion_vars[(orden_id, proc_id)])
 
-    # Secuencia por orden
-    procesos_por_orden = {}
-    for p in procesos:
-        procesos_por_orden.setdefault(p[0], []).append(p[1])
-    for orden, procs in procesos_por_orden.items():
-        procs.sort()
-        for i in range(len(procs) - 1):
-            model.Add(tareas[procs[i + 1]][0] >= tareas[procs[i]][1])
-
-    # No solapar máquinas
-    for m in maquinas:
-        intervals = [tareas[p[1]][2] for p in procesos if m in p[4]]
-        if intervals:
-            model.AddNoOverlap(intervals)
-
-    # No solapar operarios
-    for op in [o["id"] for o in operarios]:
-        intervals = []
-        for (orden_id, proc_id, nombre, duracion, maquinas_permitidas, operarios_req, prioridad, deadline) in procesos:
-            intervals.append(tareas[proc_id][2])
-        if intervals:
-            model.AddNoOverlap(intervals)
-
-    # Deadlines con penalización
-    retrasos = []
-    for (orden_id, proc_id, nombre, duracion, maquinas_permitidas, operarios_req, prioridad, deadline) in procesos:
-        deadline_min = int((deadline - datetime(2025, 10, 17, 8, 0)).total_seconds() / 60)
-        retraso = model.NewIntVar(0, horizon, f"retraso_{proc_id}")
-        model.Add(retraso >= tareas[proc_id][1] - deadline_min)
-        retrasos.append(retraso)
-
-    makespan = model.NewIntVar(0, horizon, "makespan")
-    model.AddMaxEquality(makespan, [t[1] for t in tareas.values()])
-    model.Minimize(makespan + sum(retrasos))
+    model.Minimize(sum(total_penalizacion))
 
     # Resolver
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 10
+    solver.parameters.max_time_in_seconds = 5
     status = solver.Solve(model)
 
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        for proc_id, (start, end, interval, duracion, deadline) in tareas.items():
-            s = solver.Value(start)
-            e = solver.Value(end)
-            op = solver.Value(operario_vars[proc_id])
-            maq = solver.Value(maquina_vars[proc_id])
+        for (orden_id, proc_id, secuencia, fecha_prometida, prioridad_desc) in procesos:
+            posicion = solver.Value(posicion_vars[(orden_id, proc_id)])
             resultados.append({
+                "orden_id": orden_id,
                 "proceso_id": proc_id,
-                "inicio": s,
-                "fin": e,
-                "operario": op,
-                "maquina": maq
+                "posicion_planificada": posicion,
+                "prioridad": prioridad_desc,
+                "fecha_prometida": fecha_prometida.strftime("%Y-%m-%d") if fecha_prometida else None
             })
+    else:
+        print("No se encontró solución.")
+
     return resultados
 
 
+
+
+
 # 🔸 Función async que envuelve al solver
-async def planificar():
-    return await asyncio.to_thread(_resolver_planificacion)
+async def planificar(repo_orden: OrdenTrabajoRepository):
+    ordenes = await repo_orden.find_with_procesos()
+
+    procesos_para_solver = []
+    for orden in ordenes:
+        prioridad_desc = None
+        if orden.prioridad:
+            prioridad_desc = orden.prioridad.descripcion.strip().lower()
+            
+        for rel in orden.procesos:
+            procesos_para_solver.append((
+                orden.id,
+                rel.proceso.id,
+                rel.orden,                   # campo de la tabla asociativa
+                orden.fecha_prometida,       # 👈 deadline
+                prioridad_desc               # 👈 texto ("urgente", "normal", etc.)
+            ))
+
+    resultados = await asyncio.to_thread(_resolver_planificacion, procesos_para_solver)
+    
+    
+    
+    return resultados
 
 
-# Datos simulados
-def obtener_datos_simulados():
-    procesos = [
-        (1, 101, "Corte", 120, [1], 1, 1, datetime(2025, 10, 25, 17, 0)),
-        (1, 102, "Pulido", 60, [2], 1, 1, datetime(2025, 10, 25, 17, 0)),
-        (2, 201, "Corte", 90, [1, 2], 2, 2, datetime(2025, 10, 26, 17, 0)),
-        (2, 202, "Pintura", 180, [3], 1, 2, datetime(2025, 10, 26, 17, 0)),
-    ]
-    maquinas = [1, 2, 3]
-    operarios = [
-        {"id": 1, "habilidades_principales": [1], "habilidades_secundarias": [2]},
-        {"id": 2, "habilidades_principales": [1, 2], "habilidades_secundarias": [3]},
-        {"id": 3, "habilidades_principales": [3], "habilidades_secundarias": []},
-    ]
-    feriados = [
-        datetime(2025, 10, 20).date(),
-        datetime(2025, 12, 25).date()
-    ]
-    return procesos, maquinas, operarios, feriados
+

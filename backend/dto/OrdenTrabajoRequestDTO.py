@@ -1,4 +1,3 @@
-# app/dto/orden_trabajo_dto.py
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
@@ -10,7 +9,7 @@ class OrdenTrabajoRequestDTO(BaseModel):
     id_prioridad: int
     id_sector: int
     id_articulo: int
-    id_maquinaria: int
+    # 🔻 Eliminado: id_maquinaria
 
     fecha_orden: datetime
     fecha_entrada: datetime

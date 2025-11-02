@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.infrastructure.db import Base
 
@@ -12,9 +13,13 @@ class OrdenTrabajo(Base):
     id_prioridad = Column(Integer, ForeignKey("prioridad.id"), nullable=False)
     id_sector = Column(Integer, ForeignKey("sector.id"), nullable=False)
     id_articulo = Column(Integer, ForeignKey("articulo.id"), nullable=False)
-    id_maquinaria = Column(Integer, ForeignKey("maquinaria.id"), nullable=False)
+    # 🔻 Eliminado: id_maquinaria (se quitó la FK a maquinaria)
 
     fecha_orden = Column(DateTime, nullable=False)
     fecha_entrada = Column(DateTime, nullable=False)
     fecha_prometida = Column(DateTime, nullable=False)
     fecha_entrega = Column(DateTime, nullable=True)
+
+    # Relaciones
+    procesos = relationship("OrdenTrabajoProceso", back_populates="orden_trabajo")
+    prioridad = relationship("Prioridad")

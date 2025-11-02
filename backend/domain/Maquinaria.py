@@ -13,7 +13,7 @@ class Maquinaria(Base):
       - limitacion (nvarchar(255), null)
       - capacidad (nvarchar(255), null)
       - especialidad (nvarchar(255), null)
-    """
+    """ 
     __tablename__ = "maquinaria"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)

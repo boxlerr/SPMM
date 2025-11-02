@@ -23,7 +23,7 @@ class OrdenTrabajoService:
                 id_prioridad=dto.id_prioridad,
                 id_sector=dto.id_sector,
                 id_articulo=dto.id_articulo,
-                id_maquinaria=dto.id_maquinaria,
+                # 🔻 Eliminado: id_maquinaria
                 fecha_orden=dto.fecha_orden,
                 fecha_entrada=dto.fecha_entrada,
                 fecha_prometida=dto.fecha_prometida,
@@ -31,8 +31,8 @@ class OrdenTrabajoService:
             )
 
             orden_creada = await self.repository.save(orden)
-
             return ResponseDTO(status=True, data=jsonable_encoder(orden_creada))
+
         except InfrastructureException:
             raise  
         except Exception as e:
