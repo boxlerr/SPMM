@@ -57,7 +57,7 @@ export default function DetalleOperario({ operario, onClose, onCambiarEstado }: 
             {operario.dni && (
               <div>
                 <p className="font-medium mb-1">DNI:</p>
-                <span>{operario.dni}</span>
+                <span>{(operario.dni || "").replace(/\./g, "")}</span>
               </div>
             )}
 
@@ -66,7 +66,7 @@ export default function DetalleOperario({ operario, onClose, onCambiarEstado }: 
                 <p className="font-medium mb-1">Contacto:</p>
                 <div className="flex items-center gap-2">
                   <Phone className="h-4 w-4 text-muted-foreground" />
-                  <span>{operario.celular || operario.telefono}</span>
+                  <span>{(operario.celular || operario.telefono || "").replace(/\D/g, "")}</span>
                 </div>
               </div>
             )}

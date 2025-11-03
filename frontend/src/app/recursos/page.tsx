@@ -121,6 +121,11 @@ export default function RecursosPage() {
       : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
   };
 
+  const formatPhone = (value?: string) => {
+    if (!value) return "";
+    return value.replace(/\D/g, "");
+  };
+
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -195,8 +200,9 @@ export default function RecursosPage() {
                 <thead className="border-b bg-muted/50">
                   <tr>
                     <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Especialidades</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">DNI</th>
+                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Rango</th>
+                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Sector</th>
+                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Teléfono</th>
                     <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Estado</th>
                     <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                   </tr>
@@ -208,12 +214,12 @@ export default function RecursosPage() {
                         {operario.nombre} {operario.apellido}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
-                          <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
-                        </div>
+                        <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
                       </td>
-                      <td className="px-6 py-4 text-sm text-muted-foreground">{operario.dni || "-"}</td>
+                      <td className="px-6 py-4">
+                        <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
+                      </td>
+                      <td className="px-6 py-4 text-sm">{formatPhone(operario.celular) || formatPhone(operario.telefono) || "-"}</td>
                       <td className="px-6 py-4">
                         <Badge className={getEstadoColor(operario.disponible)}>
                           {operario.disponible ? "Activo" : "Ausente"}
