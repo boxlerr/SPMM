@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
@@ -40,33 +42,32 @@ export default function LoginPage() {
     <div className="min-h-screen flex font-sans">
       <div
         className="hidden lg:flex lg:w-1/2 relative overflow-hidden"
-        style={{ backgroundColor: "#3F3FF3" }}
+        style={{ backgroundColor: "#DC143C" }}
       >
         <div className="relative z-10 flex flex-col justify-between w-full px-12 py-12">
           <div className="flex items-center">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center mr-3">
-              <div
-                className="w-4 h-4 rounded-sm"
-                style={{ backgroundColor: "#3F3FF3" }}
-              ></div>
+            <div className="bg-white rounded-lg p-2 mr-3 flex items-center justify-center border-4 border-white shadow-lg">
+              <Image 
+                src="/logo.png" 
+                alt="Metalúrgica Longchamps" 
+                width={48} 
+                height={48}
+              />
             </div>
-            <h1 className="text-xl font-semibold text-white">Frello</h1>
+            <h1 className="text-xl font-semibold text-white">Metalúrgica Longchamps</h1>
           </div>
 
           <div className="flex-1 flex flex-col justify-center">
             <h2 className="text-4xl text-white mb-6 leading-tight">
-              Effortlessly manage your team and operations.
+              Gestiona tus operaciones de manera eficiente.
             </h2>
             <p className="text-white/90 text-lg leading-relaxed">
-              Log in to access your SPMM dashboard and manage your team.
+              Inicia sesión para acceder a tu panel SPMM y gestionar tu equipo.
             </p>
           </div>
 
           <div className="flex justify-between items-center text-white/70 text-sm">
             <span>Copyright © 2025 Vaxler.</span>
-            <span className="cursor-pointer hover:text-white/90">
-              Privacy Policy
-            </span>
           </div>
         </div>
       </div>
@@ -74,13 +75,13 @@ export default function LoginPage() {
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
         <div className="w-full max-w-md space-y-8">
           <div className="lg:hidden text-center mb-8">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-3"
-              style={{ backgroundColor: "#3F3FF3" }}
-            >
-              <div className="w-4 h-4 bg-white rounded-sm"></div>
-            </div>
-            <h1 className="text-xl font-semibold text-foreground">Frello</h1>
+            <Image 
+              src="/longchamps_logo.png" 
+              alt="Metalúrgica Longchamps" 
+              width={300} 
+              height={120}
+              className="mx-auto mb-3"
+            />
           </div>
 
           <div className="space-y-6">
@@ -94,17 +95,17 @@ export default function LoginPage() {
                 </Button>
               )}
               <h2 className="text-3xl text-foreground">
-                {currentView === "login" && "Welcome Back"}
-                {currentView === "register" && "Create Account"}
-                {currentView === "forgot" && "Reset Password"}
+                {currentView === "login" && "Bienvenido de Vuelta"}
+                {currentView === "register" && "Crear Cuenta"}
+                {currentView === "forgot" && "Restablecer Contraseña"}
               </h2>
               <p className="text-muted-foreground">
                 {currentView === "login" &&
-                  "Enter your email and password to access your account."}
+                  "Ingresa tu email y contraseña para acceder a tu cuenta."}
                 {currentView === "register" &&
-                  "Create a new account to get started with Frello."}
+                  "Crea una nueva cuenta para comenzar con Metalúrgica Longchamps."}
                 {currentView === "forgot" &&
-                  "Enter your email address and we'll send you a reset link."}
+                  "Ingresa tu dirección de email y te enviaremos un enlace de restablecimiento."}
               </p>
             </div>
 
@@ -115,13 +116,13 @@ export default function LoginPage() {
                     htmlFor="name"
                     className="text-sm font-medium text-foreground"
                   >
-                    Full Name
+                    Nombre Completo
                   </Label>
                   <Input
                     id="name"
                     type="text"
-                    placeholder="John Doe"
-                    className="h-12 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#3F3FF3]"
+                    placeholder="Juan Pérez"
+                    className="h-12 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#DC143C]"
                   />
                 </div>
               )}
@@ -136,8 +137,8 @@ export default function LoginPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="user@company.com"
-                  className="h-12 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#3F3FF3]"
+                  placeholder="usuario@empresa.com"
+                  className="h-12 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#DC143C]"
                 />
               </div>
 
@@ -147,14 +148,14 @@ export default function LoginPage() {
                     htmlFor="password"
                     className="text-sm font-medium text-foreground"
                   >
-                    Password
+                    Contraseña
                   </Label>
                   <div className="relative">
                     <Input
                       id="password"
                       type={showPassword ? "text" : "password"}
-                      placeholder="Enter password"
-                      className="h-12 pr-10 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#3F3FF3]"
+                      placeholder="Ingresa tu contraseña"
+                      className="h-12 pr-10 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#DC143C]"
                     />
                     <button
                       type="button"
@@ -177,14 +178,14 @@ export default function LoginPage() {
                     htmlFor="confirmPassword"
                     className="text-sm font-medium text-foreground"
                   >
-                    Confirm Password
+                    Confirmar Contraseña
                   </Label>
                   <div className="relative">
                     <Input
                       id="confirmPassword"
                       type={showConfirmPassword ? "text" : "password"}
-                      placeholder="Confirm password"
-                      className="h-12 pr-10 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#3F3FF3]"
+                      placeholder="Confirma tu contraseña"
+                      className="h-12 pr-10 border-gray-200 focus:ring-0 shadow-none rounded-lg bg-white focus:border-[#DC143C]"
                     />
                     <button
                       type="button"
@@ -215,14 +216,14 @@ export default function LoginPage() {
                       htmlFor="remember"
                       className="text-sm text-muted-foreground cursor-pointer"
                     >
-                      Remember Me
+                      Recordarme
                     </Label>
                   </div>
                   <button
                     onClick={() => setCurrentView("forgot")}
-                    className="text-sm font-medium text-[#3F3FF3] hover:opacity-80 cursor-pointer"
+                    className="text-sm font-medium text-[#DC143C] hover:opacity-80 cursor-pointer"
                   >
-                    Forgot Your Password?
+                    ¿Olvidaste tu Contraseña?
                   </button>
                 </div>
               )}
@@ -230,45 +231,45 @@ export default function LoginPage() {
 
             <Button
               className="w-full h-12 text-sm font-medium text-white hover:opacity-90 rounded-lg shadow-none cursor-pointer"
-              style={{ backgroundColor: "#3F3FF3" }}
+              style={{ backgroundColor: "#DC143C" }}
               onClick={currentView === "login" ? handleLogin : undefined}
             >
-              {currentView === "login" && "Log In"}
-              {currentView === "register" && "Create Account"}
-              {currentView === "forgot" && "Send Reset Link"}
+              {currentView === "login" && "Iniciar Sesión"}
+              {currentView === "register" && "Crear Cuenta"}
+              {currentView === "forgot" && "Enviar Enlace de Restablecimiento"}
             </Button>
 
             <div className="text-center text-sm text-muted-foreground">
               {currentView === "login" && (
                 <>
-                  Don't Have An Account?{" "}
+                  ¿No tienes una cuenta?{" "}
                   <button
                     onClick={() => setCurrentView("register")}
-                    className="text-[#3F3FF3] font-medium hover:opacity-80"
+                    className="text-[#DC143C] font-medium hover:opacity-80"
                   >
-                    Register Now.
+                    Regístrate ahora.
                   </button>
                 </>
               )}
               {currentView === "register" && (
                 <>
-                  Already Have An Account?{" "}
+                  ¿Ya tienes una cuenta?{" "}
                   <button
                     onClick={() => setCurrentView("login")}
-                    className="text-[#3F3FF3] font-medium hover:opacity-80"
+                    className="text-[#DC143C] font-medium hover:opacity-80"
                   >
-                    Sign In.
+                    Inicia Sesión.
                   </button>
                 </>
               )}
               {currentView === "forgot" && (
                 <>
-                  Remember Your Password?{" "}
+                  ¿Recuerdas tu contraseña?{" "}
                   <button
                     onClick={() => setCurrentView("login")}
-                    className="text-[#3F3FF3] font-medium hover:opacity-80"
+                    className="text-[#DC143C] font-medium hover:opacity-80"
                   >
-                    Back to Login.
+                    Volver al Inicio de Sesión.
                   </button>
                 </>
               )}

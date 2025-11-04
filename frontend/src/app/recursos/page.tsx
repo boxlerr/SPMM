@@ -135,19 +135,22 @@ export default function RecursosPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-foreground">Administración de Recursos</h1>
-        <div className="flex gap-2">
-            <Button onClick={handleAbrirCrear} size="sm">
-              <Plus className="h-4 w-4 mr-2" />
+    <div className="min-h-screen bg-background p-4 md:p-6">
+      <div className="mb-4 md:mb-6">
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4">
+          Administración de Recursos
+        </h1>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto">
+            <Plus className="h-4 w-4 mr-2" />
             {tabActiva === "operarios" ? "Nuevo Operario" : "Nueva Maquinaria"}
-            </Button>
+          </Button>
           <Button
             onClick={tabActiva === "operarios" ? fetchOperarios : fetchMaquinas}
             disabled={api.loading}
             variant="outline"
             size="sm"
+            className="w-full sm:w-auto"
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${api.loading ? "animate-spin" : ""}`} />
             Actualizar
@@ -156,32 +159,34 @@ export default function RecursosPage() {
       </div>
 
       {api.error && (
-        <Alert variant="destructive" className="mb-6">
+        <Alert variant="destructive" className="mb-4 md:mb-6">
           <AlertDescription>{api.error}</AlertDescription>
         </Alert>
       )}
 
-      <div className="mb-6 flex gap-2">
+      <div className="mb-4 md:mb-6 flex gap-2">
         <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
           className="flex-1"
         >
-          Operarios
+          <User className="h-4 w-4 sm:mr-2" />
+          <span className="hidden xs:inline">Operarios</span>
         </Button>
         <Button
           variant={tabActiva === "maquinas" ? "default" : "outline"}
           onClick={() => setTabActiva("maquinas")}
           className="flex-1"
         >
-          Máquinas
+          <Activity className="h-4 w-4 sm:mr-2" />
+          <span className="hidden xs:inline">Máquinas</span>
         </Button>
       </div>
 
       {/* TABLA DE OPERARIOS */}
       {tabActiva === "operarios" && (
         <div className="rounded-lg border bg-card">
-          <div className="p-6 border-b">
+          <div className="p-4 md:p-6 border-b">
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Operarios</h2>
@@ -203,62 +208,126 @@ export default function RecursosPage() {
           )}
 
           {!api.loading && operarios.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b bg-muted/50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Rango</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Sector</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Teléfono</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Estado</th>
-                    <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {operarios.map((operario) => (
-                    <tr key={operario.id} className="hover:bg-muted/50 transition-colors">
-                      <td className="px-6 py-4 text-sm font-medium">
-                        {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
-                      </td>
-                      <td className="px-6 py-4">
-                        <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
-                      </td>
-                      <td className="px-6 py-4 text-sm">{formatPhone(operario.celular) || formatPhone(operario.telefono) || "-"}</td>
-                      <td className="px-6 py-4">
-                        <Badge className={getEstadoColor(operario.disponible)}>
-                          {operario.disponible ? "Activo" : "Ausente"}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleVerOperario(operario)} className="h-8 w-8">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleEditar("operario", operario)} className="h-8 w-8">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}` });
-                              setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                            }}
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
+            <>
+              {/* Vista Desktop - Tabla */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                  <thead className="border-b bg-muted/50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Rango</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Sector</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Teléfono</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Estado</th>
+                      <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y">
+                    {operarios.map((operario) => (
+                      <tr key={operario.id} className="hover:bg-muted/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-medium">
+                          {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
+                        </td>
+                        <td className="px-6 py-4">
+                          <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
+                        </td>
+                        <td className="px-6 py-4 text-sm">{formatPhone(operario.celular) || formatPhone(operario.telefono) || "-"}</td>
+                        <td className="px-6 py-4">
+                          <Badge className={getEstadoColor(operario.disponible)}>
+                            {operario.disponible ? "Activo" : "Ausente"}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => handleVerOperario(operario)} className="h-8 w-8">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleEditar("operario", operario)} className="h-8 w-8">
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}` });
+                                setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                              }}
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Vista Mobile - Tarjetas */}
+              <div className="md:hidden divide-y">
+                {operarios.map((operario) => (
+                  <div key={operario.id} className="p-4 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-base mb-1">
+                          {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
+                        </h3>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
+                          <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
+                        </div>
+                      </div>
+                      <Badge className={`${getEstadoColor(operario.disponible)} ml-2`}>
+                        {operario.disponible ? "Activo" : "Ausente"}
+                      </Badge>
+                    </div>
+                    
+                    {(operario.celular || operario.telefono) && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
+                        <Phone className="h-4 w-4" />
+                        <span>{formatPhone(operario.celular) || formatPhone(operario.telefono)}</span>
+                      </div>
+                    )}
+                    
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleVerOperario(operario)}
+                        className="flex-1"
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        Ver
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleEditar("operario", operario)}
+                        className="flex-1"
+                      >
+                        <Pencil className="h-4 w-4 mr-1" />
+                        Editar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}` });
+                          setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                        }}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -266,12 +335,9 @@ export default function RecursosPage() {
       {/* TABLA DE MAQUINAS */}
       {tabActiva === "maquinas" && (
         <div className="rounded-lg border bg-card">
-          <div className="p-6 border-b">
+          <div className="p-4 md:p-6 border-b">
             <div className="flex items-center gap-2">
-              <svg className="h-5 w-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+              <Activity className="h-5 w-5 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Máquinas y Equipos</h2>
             </div>
             <p className="text-sm text-muted-foreground mt-1">Gestión de maquinaria industrial</p>
@@ -291,50 +357,112 @@ export default function RecursosPage() {
           )}
 
           {!api.loading && maquinas.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b bg-muted/50">
-                <tr>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Código</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Especialidad</th>
-                    <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Capacidad</th>
-                    <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
+            <>
+              {/* Vista Desktop - Tabla */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                  <thead className="border-b bg-muted/50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Código</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Especialidad</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Capacidad</th>
+                      <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {maquinas.map((maquina) => (
+                      <tr key={maquina.id} className="hover:bg-muted/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-medium">{maquina.nombre}</td>
+                        <td className="px-6 py-4 text-sm">{maquina.cod_maquina || "-"}</td>
+                        <td className="px-6 py-4 text-sm">{maquina.especialidad || "-"}</td>
+                        <td className="px-6 py-4 text-sm">{maquina.capacidad || "-"}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => handleVerMaquina(maquina)} className="h-8 w-8">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
+                                setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                              }}
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Vista Mobile - Tarjetas */}
+              <div className="md:hidden divide-y">
                 {maquinas.map((maquina) => (
-                    <tr key={maquina.id} className="hover:bg-muted/50 transition-colors">
-                      <td className="px-6 py-4 text-sm font-medium">{maquina.nombre}</td>
-                      <td className="px-6 py-4 text-sm">{maquina.cod_maquina || "-"}</td>
-                      <td className="px-6 py-4 text-sm">{maquina.especialidad || "-"}</td>
-                      <td className="px-6 py-4 text-sm">{maquina.capacidad || "-"}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleVerMaquina(maquina)} className="h-8 w-8">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                            onClick={() => {
-                              setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
-                              setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                            }}
-                          className="h-8 w-8 text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                  <div key={maquina.id} className="p-4 hover:bg-muted/50 transition-colors">
+                    <div className="mb-3">
+                      <h3 className="font-semibold text-base mb-2">{maquina.nombre}</h3>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Código:</span>
+                          <span className="ml-2 font-medium">{maquina.cod_maquina || "-"}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Capacidad:</span>
+                          <span className="ml-2 font-medium">{maquina.capacidad || "-"}</span>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
+                      {maquina.especialidad && (
+                        <div className="mt-2 text-sm">
+                          <span className="text-muted-foreground">Especialidad:</span>
+                          <span className="ml-2 font-medium">{maquina.especialidad}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleVerMaquina(maquina)}
+                        className="flex-1"
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        Ver
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => handleEditar("maquina", maquina)}
+                        className="flex-1"
+                      >
+                        <Pencil className="h-4 w-4 mr-1" />
+                        Editar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
+                          setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                        }}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </>
           )}
         </div>
       )}

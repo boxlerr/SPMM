@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import Image from "next/image";
 import { 
   BarChart3,
   ArrowLeftRight,
@@ -143,11 +144,11 @@ export default function Sidebar() {
           ) : (
             isCollapsed ? 'w-16' : 'w-64'
           )}
-          overflow-hidden
         `}
+        style={{ overflow: isCollapsed && !isMobile ? 'visible' : 'hidden' }}
       >
         {/* Header */}
-        <div className={`flex items-center border-b border-gray-200 ${
+        <div className={`flex items-center border-b border-gray-200 transition-all duration-300 ${
           isMobile ? (
             isMobileOpen ? 'justify-between p-6' : 'justify-center p-4'
           ) : (
@@ -155,36 +156,44 @@ export default function Sidebar() {
           )
         }`}>
           {(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? (
-            <div className="flex items-center">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3">
-                <div className="w-4 h-4 bg-white rounded-sm"></div>
-              </div>
-              <h1 className="text-xl font-semibold text-gray-900">SPMM</h1>
+            <div className="flex items-center overflow-hidden">
+              <Image 
+                src="/longchamps_logo.png" 
+                alt="Metalúrgica Longchamps" 
+                width={180} 
+                height={60}
+                className="object-contain"
+              />
             </div>
-          ) : null}
+          ) : (
+            <button
+              onClick={toggleSidebar}
+              className="bg-white rounded-lg p-1.5 flex items-center justify-center border-2 border-[#DC143C] shadow-sm hover:shadow-md hover:border-[#B8112E] transition-all duration-200 cursor-pointer"
+              title="Abrir menú"
+            >
+              <Image 
+                src="/logo.png" 
+                alt="Metalúrgica Longchamps" 
+                width={28} 
+                height={28}
+                className="object-contain"
+              />
+            </button>
+          )}
           
-          {/* Botón toggle */}
-          <button
-            onClick={toggleSidebar}
-            className={`
-              flex items-center justify-center w-8 h-8 hover:bg-gray-100 rounded-lg transition-colors
-              ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'mx-auto' : ''}
-            `}
-          >
-            {isMobile ? (
-              isMobileOpen ? (
+          {/* Botón toggle - solo visible cuando el sidebar está abierto */}
+          {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
+            <button
+              onClick={toggleSidebar}
+              className="flex items-center justify-center w-8 h-8 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              {isMobile ? (
                 <X className="h-5 w-5 text-gray-600" />
               ) : (
-                <Menu className="h-5 w-5 text-gray-600" />
-              )
-            ) : (
-              isCollapsed ? (
-                <ChevronRight className="h-5 w-5 text-gray-600" />
-              ) : (
                 <ChevronLeft className="h-5 w-5 text-gray-600" />
-              )
-            )}
-          </button>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Navigation */}
@@ -201,7 +210,7 @@ export default function Sidebar() {
                 href={item.href}
                 onClick={closeMobileSidebar}
                 className={`
-                  flex items-center rounded-xl transition-all duration-200 group
+                  flex items-center rounded-xl transition-all duration-200 group relative
                   ${isActive 
                     ? 'bg-blue-50 text-blue-600 shadow-sm' 
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
@@ -211,13 +220,15 @@ export default function Sidebar() {
                 title={(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? item.name : undefined}
               >
                 <Icon className={`
-                  h-5 w-5 transition-colors
+                  h-5 w-5 transition-colors flex-shrink-0
                   ${isActive ? 'text-blue-600' : 'text-gray-500 group-hover:text-gray-700'}
                   ${(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? 'mr-3' : ''}
                 `} />
                 
                 {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
-                  <span className="font-medium text-sm">{item.name}</span>
+                  <span className="font-medium text-sm whitespace-nowrap transition-opacity duration-200">
+                    {item.name}
+                  </span>
                 )}
               </Link>
             );
@@ -238,13 +249,15 @@ export default function Sidebar() {
             title={(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? "Cerrar Sesión" : undefined}
           >
             <LogOut className={`
-              h-5 w-5 transition-colors
+              h-5 w-5 transition-colors flex-shrink-0
               text-gray-500 group-hover:text-red-600
               ${(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? 'mr-3' : ''}
             `} />
             
             {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
-              <span className="font-medium text-sm">Cerrar Sesión</span>
+              <span className="font-medium text-sm whitespace-nowrap transition-opacity duration-200">
+                Cerrar Sesión
+              </span>
             )}
           </button>
         </div>
@@ -254,9 +267,16 @@ export default function Sidebar() {
       {isMobile && !isMobileOpen && (
         <button
           onClick={toggleSidebar}
-          className="fixed bottom-4 left-4 z-[60] flex items-center justify-center w-12 h-12 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
+          className="fixed bottom-4 left-4 z-[60] flex items-center justify-center w-14 h-14 bg-white border-2 border-[#DC143C] rounded-full shadow-lg hover:shadow-xl hover:border-[#B8112E] transition-all duration-200"
+          title="Abrir menú"
         >
-          <Menu className="h-6 w-6" />
+          <Image 
+            src="/logo.png" 
+            alt="Metalúrgica Longchamps" 
+            width={32} 
+            height={32}
+            className="object-contain"
+          />
         </button>
       )}
     </>
