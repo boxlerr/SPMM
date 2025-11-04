@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Operario } from "../_types";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 interface CambiarEstadoProps {
   operario: Operario | null;
@@ -17,6 +18,7 @@ interface CambiarEstadoProps {
 }
 
 export default function CambiarEstado({ operario, open, onClose, onSuccess, cleanUrl }: CambiarEstadoProps) {
+  const { addNotification } = useNotifications();
   const [nuevoEstado, setNuevoEstado] = useState("");
   const [motivoCambio, setMotivoCambio] = useState("");
 
@@ -30,8 +32,12 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
   const handleSubmit = async () => {
     if (!operario) return;
 
+    const estadoAnterior = operario.disponible ? "Activo" : "Ausente";
+    const nuevoEstadoBoolean = nuevoEstado === "Activo";
+    const estadoCambio = estadoAnterior !== nuevoEstado;
+
     try {
-      await fetch(`${cleanUrl}/operarios/${operario.id}`, {
+      const response = await fetch(`${cleanUrl}/operarios/${operario.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -41,12 +47,20 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
           categoria: operario.categoria,
           fecha_nacimiento: operario.fecha_nacimiento,
           fecha_ingreso: operario.fecha_ingreso,
-          disponible: nuevoEstado === "Activo",
+          disponible: nuevoEstadoBoolean,
           telefono: operario.telefono || null,
           celular: operario.celular || null,
           dni: operario.dni || null,
         }),
       });
+
+      if (response.ok && estadoCambio) {
+        addNotification(
+          `Operario ${operario.nombre} ${operario.apellido} cambió de estado: ${estadoAnterior} → ${nuevoEstado}`,
+          "operario_updated",
+          motivoCambio.trim() || undefined
+        );
+      }
 
       onSuccess();
     } catch (err) {

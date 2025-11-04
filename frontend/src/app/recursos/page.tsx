@@ -14,8 +14,10 @@ import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
 import CambiarEstado from "./_components/CambiarEstado";
 import { Operario, Maquina } from "./_types";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 export default function RecursosPage() {
+  const { addNotification } = useNotifications();
   const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
@@ -96,6 +98,10 @@ export default function RecursosPage() {
     const success = await api.executeOperation(url, "DELETE");
     if (success) {
       if (itemAEliminar.tipo === "operario") {
+        addNotification(
+          `Operario ${itemAEliminar.nombre} ha sido eliminado`,
+          "operario_deleted"
+        );
         await fetchOperarios();
       } else {
         await fetchMaquinas();

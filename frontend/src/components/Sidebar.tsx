@@ -181,6 +181,8 @@ export default function Sidebar() {
             </button>
           )}
           
+          
+          
           {/* Botón toggle - solo visible cuando el sidebar está abierto */}
           {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
             <button

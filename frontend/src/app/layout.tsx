@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LayoutWrapper from "../components/LayoutWrapper";
 import CleanupBrowserExtensions from "../components/CleanupBrowserExtensions";
+import { NotificationProvider } from "../contexts/NotificationContext";
 
 
 const geistSans = Geist({
@@ -35,9 +36,11 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <CleanupBrowserExtensions />
-        <LayoutWrapper>
-          {children}
-        </LayoutWrapper>
+        <NotificationProvider>
+          <LayoutWrapper>
+            {children}
+          </LayoutWrapper>
+        </NotificationProvider>
       </body>
     </html>
   );

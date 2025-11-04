@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Operario } from "../_types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 interface OperarioFormProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface OperarioFormProps {
 }
 
 export default function OperarioForm({ open, editing, data, onClose, onSuccess, cleanUrl }: OperarioFormProps) {
+  const { addNotification } = useNotifications();
   const [formData, setFormData] = useState({
     nombre: "",
     apellido: "",
@@ -137,8 +139,26 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     } as any;
     // No enviar email al backend hasta que el DTO lo soporte
     delete payload.email;
+    
     if (editing && data) {
-      await fetch(`${cleanUrl}/operarios/${data.id}`, {
+      // Normalizar datos originales para comparación (teléfonos y DNI solo dígitos)
+      const originalTelefono = data.telefono ? onlyDigits(data.telefono) : null;
+      const originalCelular = data.celular ? onlyDigits(data.celular) : null;
+      const originalDni = data.dni ? onlyDigits(data.dni) : null;
+      
+      // Comparar datos originales con los nuevos para detectar cambios
+      const hasChanges = 
+        (data.nombre || "") !== (payload.nombre || "") ||
+        (data.apellido || "") !== (payload.apellido || "") ||
+        (data.sector || "") !== (payload.sector || "") ||
+        (data.categoria || "") !== (payload.categoria || "") ||
+        (data.fecha_nacimiento || "") !== (payload.fecha_nacimiento || "") ||
+        (data.fecha_ingreso || "") !== (payload.fecha_ingreso || "") ||
+        (originalTelefono || "") !== (payload.telefono || "") ||
+        (originalCelular || "") !== (payload.celular || "") ||
+        (originalDni || "") !== (payload.dni || "");
+
+      const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -146,8 +166,15 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           disponible: data.disponible ?? true,
         }),
       });
+      
+      if (response.ok && hasChanges) {
+        addNotification(
+          `Operario ${payload.nombre} ${payload.apellido} ha sido modificado`,
+          "operario_updated"
+        );
+      }
     } else {
-      await fetch(`${cleanUrl}/operarios`, {
+      const response = await fetch(`${cleanUrl}/operarios`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -155,6 +182,12 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           disponible: true,
         }),
       });
+      if (response.ok) {
+        addNotification(
+          `Operario ${payload.nombre} ${payload.apellido} ha sido creado`,
+          "operario_created"
+        );
+      }
     }
     onSuccess();
   };
