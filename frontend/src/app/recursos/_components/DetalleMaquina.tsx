@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Maquina } from "../_types";
 
 interface DetalleMaquinaProps {
@@ -17,6 +17,7 @@ export default function DetalleMaquina({ maquina, onClose }: DetalleMaquinaProps
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Detalles de la Máquina</DialogTitle>
+          <DialogDescription>Información detallada de la maquinaria</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center justify-between">

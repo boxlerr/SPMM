@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { User, Phone, Activity } from "lucide-react";
 import { Operario } from "../_types";
 
@@ -15,6 +15,14 @@ interface DetalleOperarioProps {
 export default function DetalleOperario({ operario, onClose, onCambiarEstado }: DetalleOperarioProps) {
   if (!operario) return null;
 
+  const capitalizeName = (text?: string) => {
+    if (!text) return "";
+    return text
+      .split(/\s+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
+  };
+
   const getEstadoColor = (disponible?: boolean) => {
     return disponible
       ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
@@ -26,6 +34,7 @@ export default function DetalleOperario({ operario, onClose, onCambiarEstado }: 
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Perfil del Operario</DialogTitle>
+          <DialogDescription>Información detallada del operario</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center gap-4">
@@ -34,7 +43,7 @@ export default function DetalleOperario({ operario, onClose, onCambiarEstado }: 
             </div>
             <div className="flex-1">
               <h3 className="text-xl font-semibold">
-                {operario.nombre} {operario.apellido}
+                {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
               </h3>
               <p className="text-muted-foreground">ID: {operario.id}</p>
             </div>

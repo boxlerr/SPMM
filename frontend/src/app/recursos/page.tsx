@@ -126,6 +126,14 @@ export default function RecursosPage() {
     return value.replace(/\D/g, "");
   };
 
+  const capitalizeName = (text?: string) => {
+    if (!text) return "";
+    return text
+      .split(/\s+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(" ");
+  };
+
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -211,7 +219,7 @@ export default function RecursosPage() {
                   {operarios.map((operario) => (
                     <tr key={operario.id} className="hover:bg-muted/50 transition-colors">
                       <td className="px-6 py-4 text-sm font-medium">
-                        {operario.nombre} {operario.apellido}
+                        {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
                       </td>
                       <td className="px-6 py-4">
                         <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
@@ -237,7 +245,7 @@ export default function RecursosPage() {
                             variant="ghost"
                             size="icon"
                             onClick={() => {
-                              setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${operario.nombre} ${operario.apellido}` });
+                              setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}` });
                               setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
                             }}
                             className="h-8 w-8 text-destructive hover:text-destructive"
