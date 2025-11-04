@@ -1,56 +1,197 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { 
+  CheckCircle2, 
+  Clock, 
+  AlertCircle, 
+  PlayCircle, 
+  TrendingUp,
+  RefreshCw 
+} from "lucide-react";
+
+interface EstadisticasOrdenes {
+  completadas: number;
+  en_proceso: number;
+  pendientes: number;
+  retrasadas: number;
+  total: number;
+}
+
 export default function DashboardPage() {
+  const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  const fetchEstadisticas = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch(`${apiUrl}/ordenes-estadisticas/estados`);
+      
+      if (!response.ok) {
+        throw new Error('Error al obtener estadísticas');
+      }
+      
+      const data = await response.json();
+      setEstadisticas(data.data);
+    } catch (err) {
+      console.error('Error fetching stats:', err);
+      setError('Error al cargar estadísticas');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEstadisticas();
+  }, []);
+
+  const calcularPorcentaje = (valor: number, total: number) => {
+    if (total === 0) return 0;
+    return Math.round((valor / total) * 100);
+  };
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-2">
-          Panel principal del sistema SPMM
-        </p>
+    <div className="space-y-6 p-4 md:p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-gray-600 mt-2">
+            Panel principal del sistema SPMM
+          </p>
+        </div>
+        <button
+          onClick={fetchEstadisticas}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 bg-[#DC143C] text-white rounded-lg hover:bg-[#B8112E] transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Actualizar</span>
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Estadísticas rápidas */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <h3 className="text-lg font-semibold text-gray-900">Operarios</h3>
-              <p className="text-sm text-gray-600">Gestionar personal</p>
-            </div>
+      {/* Widget de Estadísticas de Órdenes */}
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Estado de Órdenes</h2>
+            <p className="text-sm text-gray-600 mt-1">Resumen general de órdenes de trabajo</p>
           </div>
+          {estadisticas && (
+            <div className="text-right">
+              <div className="text-3xl font-bold text-[#DC143C]">{estadisticas.total}</div>
+              <div className="text-sm text-gray-600">Total</div>
+            </div>
+          )}
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <h3 className="text-lg font-semibold text-gray-900">Procesos</h3>
-              <p className="text-sm text-gray-600">Configurar procesos</p>
-            </div>
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#DC143C]"></div>
           </div>
-        </div>
+        )}
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center text-red-800">
+            {error}
+          </div>
+        )}
+
+        {!loading && !error && estadisticas && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Completadas */}
+            <div className="bg-white rounded-lg border border-green-200 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-start justify-between">
+                <div className="p-3 bg-green-100 rounded-lg">
+                  <CheckCircle2 className="h-6 w-6 text-green-600" />
+                </div>
+                <span className="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded-full">
+                  {calcularPorcentaje(estadisticas.completadas, estadisticas.total)}%
+                </span>
+              </div>
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-600">Completadas</h3>
+                <p className="text-3xl font-bold text-green-600 mt-1">{estadisticas.completadas}</p>
+                <div className="mt-3 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-green-500 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${calcularPorcentaje(estadisticas.completadas, estadisticas.total)}%` }}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="ml-4">
-              <h3 className="text-lg font-semibold text-gray-900">Artículos</h3>
-              <p className="text-sm text-gray-600">Inventario de productos</p>
+
+            {/* En Proceso */}
+            <div className="bg-white rounded-lg border border-blue-200 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-start justify-between">
+                <div className="p-3 bg-blue-100 rounded-lg">
+                  <PlayCircle className="h-6 w-6 text-blue-600" />
+                </div>
+                <span className="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
+                  {calcularPorcentaje(estadisticas.en_proceso, estadisticas.total)}%
+                </span>
+              </div>
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-600">En Proceso</h3>
+                <p className="text-3xl font-bold text-blue-600 mt-1">{estadisticas.en_proceso}</p>
+                <div className="mt-3 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${calcularPorcentaje(estadisticas.en_proceso, estadisticas.total)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Pendientes */}
+            <div className="bg-white rounded-lg border border-yellow-200 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-start justify-between">
+                <div className="p-3 bg-yellow-100 rounded-lg">
+                  <Clock className="h-6 w-6 text-yellow-600" />
+                </div>
+                <span className="text-xs font-semibold text-yellow-600 bg-yellow-100 px-2 py-1 rounded-full">
+                  {calcularPorcentaje(estadisticas.pendientes, estadisticas.total)}%
+                </span>
+              </div>
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-600">Pendientes</h3>
+                <p className="text-3xl font-bold text-yellow-600 mt-1">{estadisticas.pendientes}</p>
+                <div className="mt-3 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-yellow-500 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${calcularPorcentaje(estadisticas.pendientes, estadisticas.total)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Retrasadas */}
+            <div className="bg-white rounded-lg border border-red-200 p-5 hover:shadow-md transition-shadow">
+              <div className="flex items-start justify-between">
+                <div className="p-3 bg-red-100 rounded-lg">
+                  <AlertCircle className="h-6 w-6 text-red-600" />
+                </div>
+                <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-1 rounded-full">
+                  {calcularPorcentaje(estadisticas.retrasadas, estadisticas.total)}%
+                </span>
+              </div>
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-600">Retrasadas</h3>
+                <p className="text-3xl font-bold text-red-600 mt-1">{estadisticas.retrasadas}</p>
+                <div className="mt-3 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-red-500 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${calcularPorcentaje(estadisticas.retrasadas, estadisticas.total)}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Estado del sistema */}
@@ -97,12 +238,18 @@ export default function DashboardPage() {
       </div>
 
       {/* Información del backend */}
-      <div className="bg-blue-50 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">Información del Backend</h3>
+      <div className="bg-blue-50 rounded-lg p-6 border border-blue-200">
+        <h3 className="text-lg font-semibold text-blue-900 mb-2 flex items-center gap-2">
+          <TrendingUp className="h-5 w-5" />
+          Información del Backend
+        </h3>
         <div className="text-sm text-blue-800 space-y-1">
-          <p><strong>URL:</strong> http://127.0.0.1:8000</p>
-          <p><strong>Documentación API:</strong> http://127.0.0.1:8000/docs</p>
-          <p><strong>Estado:</strong> Activo</p>
+          <p><strong>URL:</strong> {apiUrl}</p>
+          <p><strong>Documentación API:</strong> {apiUrl}/docs</p>
+          <p><strong>Estado:</strong> <span className="inline-flex items-center">
+            <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+            Activo
+          </span></p>
         </div>
       </div>
     </div>

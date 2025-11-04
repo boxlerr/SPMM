@@ -94,3 +94,17 @@ class OrdenTrabajoService:
         
         return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
 
+    async def obtenerEstadisticasEstados(self):
+        """
+        Obtiene estadísticas de órdenes agrupadas por estado
+        """
+        try:
+            logger.info("Service - Obtener estadísticas de estados.")
+            estadisticas = await self.repository.get_estadisticas_estados()
+            logger.info(f"Service - Estadísticas obtenidas: {estadisticas}")
+            return ResponseDTO(status=True, data=estadisticas)
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener estadísticas de estados.") from e
+

@@ -60,6 +60,13 @@ async def listar_por_prioridad(id_prioridad: int, db=Depends(get_db)):
     service = OrdenTrabajoService(db)
     return await service.listarPorPrioridad(id_prioridad)
 
+# 🔹 Obtener estadísticas de estados de órdenes
+@router.get("/ordenes-estadisticas/estados")
+async def obtener_estadisticas_estados(db=Depends(get_db)):
+    logger.info("API - Inicio GET /ordenes-estadisticas/estados")
+    service = OrdenTrabajoService(db)
+    return await service.obtenerEstadisticasEstados()
+
 app.include_router(router)
 
 

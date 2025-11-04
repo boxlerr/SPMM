@@ -1,9 +1,10 @@
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
+from sqlalchemy import func, case
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
-from datetime import datetime
+from datetime import datetime, date
 
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Proceso import Proceso
@@ -130,4 +131,55 @@ class OrdenTrabajoRepository:
         except Exception as e:
             logger.error(f"Repository - Error en find_with_procesos: {e}")
             raise InfrastructureException("Error al obtener órdenes con procesos asociados.") from e
+
+    async def get_estadisticas_estados(self):
+        """
+        Obtiene el conteo de órdenes por estado:
+        - completadas: fecha_entrega <= HOY
+        - en_proceso: fecha_entrada <= HOY y fecha_entrega IS NULL
+        - pendientes: fecha_entrada > HOY y fecha_entrega IS NULL
+        - retrasadas: fecha_prometida < HOY y fecha_entrega IS NULL
+        """
+        try:
+            logger.info("Repository - Obtener estadísticas de estados de órdenes.")
+            
+            hoy = date.today()
+            
+            # Query para contar estados
+            query = select(
+                func.count(case(
+                    (OrdenTrabajo.fecha_entrega != None, 1)
+                )).label('completadas'),
+                func.count(case(
+                    ((OrdenTrabajo.fecha_entrada <= hoy) & 
+                     (OrdenTrabajo.fecha_entrega == None), 1)
+                )).label('en_proceso'),
+                func.count(case(
+                    ((OrdenTrabajo.fecha_entrada > hoy) & 
+                     (OrdenTrabajo.fecha_entrega == None), 1)
+                )).label('pendientes'),
+                func.count(case(
+                    ((OrdenTrabajo.fecha_prometida < hoy) & 
+                     (OrdenTrabajo.fecha_entrega == None), 1)
+                )).label('retrasadas')
+            )
+            
+            result = await self.db.execute(query)
+            row = result.fetchone()
+            
+            estadisticas = {
+                'completadas': row.completadas or 0,
+                'en_proceso': row.en_proceso or 0,
+                'pendientes': row.pendientes or 0,
+                'retrasadas': row.retrasadas or 0,
+                'total': (row.completadas or 0) + (row.en_proceso or 0) + 
+                        (row.pendientes or 0) + (row.retrasadas or 0)
+            }
+            
+            logger.info(f"Repository - Estadísticas OK: {estadisticas}")
+            return estadisticas
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en get_estadisticas_estados: {e}")
+            raise InfrastructureException("Error al obtener estadísticas de estados.") from e
 
