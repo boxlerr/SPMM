@@ -66,7 +66,6 @@ app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(NotFoundException, not_found_handler)
 
 
-
 # 🔹 Logger básico
 logger = logging.getLogger("uvicorn")
 
