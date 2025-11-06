@@ -4,7 +4,7 @@ Maneja todas las operaciones de base de datos para usuarios usando SQLAlchemy
 """
 from typing import Optional, List
 from datetime import datetime
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from backend.domain.Usuario import Usuario
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -153,15 +153,14 @@ class UsuarioRepository:
             raise InfrastructureException("Error al guardar token de reset") from e
     
     async def eliminar(self, id_usuario: int) -> bool:
-        """Elimina un usuario (soft delete - marca como inactivo)"""
+        """Elimina un usuario permanentemente de la base de datos"""
         try:
             await self.db.execute(
-                update(Usuario)
+                delete(Usuario)
                 .where(Usuario.id_usuario == id_usuario)
-                .values(activo=False)
             )
             await self.db.commit()
-            logger.info(f"Usuario eliminado (soft delete) ID: {id_usuario}")
+            logger.info(f"Usuario eliminado permanentemente ID: {id_usuario}")
             return True
         except Exception as e:
             await self.db.rollback()
