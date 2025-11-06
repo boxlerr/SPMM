@@ -10,6 +10,7 @@ from backend.presentation.ArticuloAPI import router as articulo_router
 from backend.presentation.PlanificacionAPI import router as plan_router
 from backend.presentation.PrioridadAPI import router as prioridad_router
 from backend.presentation.MaquinariaAPI import router as maquinaria_router
+from backend.presentation.AuthAPI import router as auth_router
 
 import logging
 
@@ -47,6 +48,7 @@ app.add_middleware(
 )
 
 # 🔹 Registrar todos los routers
+app.include_router(auth_router)  # Autenticación
 app.include_router(articulo_router, tags=["articulos"])
 app.include_router(proceso_router, tags=["procesos"])
 app.include_router(operario_router, tags=["operarios"])

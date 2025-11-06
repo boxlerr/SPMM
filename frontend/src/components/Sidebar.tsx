@@ -16,6 +16,7 @@ import {
   ChevronRight
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useAuth } from "../contexts/AuthContext";
 
 interface SidebarItem {
   name: string;
@@ -52,6 +53,7 @@ export default function Sidebar() {
   const { isMobile, isMounted } = useIsMobile();
   const pathname = usePathname();
   const router = useRouter();
+  const { logout, user } = useAuth();
 
   const toggleSidebar = () => {
     if (isMobile) {
@@ -68,12 +70,7 @@ export default function Sidebar() {
   };
 
   const handleLogout = () => {
-    // Limpiar cualquier dato de sesión almacenado
-    localStorage.removeItem('user');
-    sessionStorage.clear();
-    
-    // Redirigir al login
-    router.push('/login');
+    logout();
   };
 
   // No renderizar nada hasta que el componente esté montado
@@ -236,6 +233,30 @@ export default function Sidebar() {
             );
           })}
         </nav>
+
+        {/* User Info */}
+        {user && (
+          <div className={`border-t border-gray-200 ${
+            (!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
+          }`}>
+            {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) ? (
+              <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-sm font-semibold text-gray-900 truncate">
+                  {user.nombre} {user.apellido}
+                </p>
+                <p className="text-xs text-gray-500 truncate mt-0.5">
+                  {user.username}
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center p-2">
+                <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white font-semibold flex items-center justify-center text-sm">
+                  {user.nombre.charAt(0)}{user.apellido.charAt(0)}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Logout Button */}
         <div className={`border-t border-gray-200 ${

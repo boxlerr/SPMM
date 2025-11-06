@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import UsuariosTable from '@/components/usuarios/UsuariosTable';
 
 export default function ConfiguracionPage() {
   const searchParams = useSearchParams();
@@ -76,14 +77,14 @@ export default function ConfiguracionPage() {
         );
       case 'usuarios':
         return (
-          <div className="p-8 text-center">
-            <div className="text-gray-400 mb-4">
-              <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
+          <div className="p-6">
+            <div className="mb-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-1">Gestión de Usuarios</h3>
+              <p className="text-sm text-gray-500">
+                Administra los usuarios del sistema, crea nuevos usuarios y gestiona permisos
+              </p>
             </div>
-            <h3 className="text-xl font-semibold text-gray-700 mb-2">Gestión de Usuarios</h3>
-            <p className="text-gray-500">Administra los usuarios del sistema</p>
+            <UsuariosTable />
           </div>
         );
       case 'notificaciones':

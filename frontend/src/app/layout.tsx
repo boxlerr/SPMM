@@ -4,6 +4,7 @@ import "./globals.css";
 import LayoutWrapper from "../components/LayoutWrapper";
 import CleanupBrowserExtensions from "../components/CleanupBrowserExtensions";
 import { NotificationProvider } from "../contexts/NotificationContext";
+import { AuthProvider } from "../contexts/AuthContext";
 
 
 const geistSans = Geist({
@@ -36,11 +37,13 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <CleanupBrowserExtensions />
-        <NotificationProvider>
-          <LayoutWrapper>
-            {children}
-          </LayoutWrapper>
-        </NotificationProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            <LayoutWrapper>
+              {children}
+            </LayoutWrapper>
+          </NotificationProvider>
+        </AuthProvider>
       </body>
     </html>
   );
