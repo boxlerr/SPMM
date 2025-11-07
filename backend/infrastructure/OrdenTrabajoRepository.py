@@ -135,32 +135,39 @@ class OrdenTrabajoRepository:
     async def get_estadisticas_estados(self):
         """
         Obtiene el conteo de órdenes por estado:
-        - completadas: fecha_entrega <= HOY
-        - en_proceso: fecha_entrada <= HOY y fecha_entrega IS NULL
-        - pendientes: fecha_entrada > HOY y fecha_entrega IS NULL
-        - retrasadas: fecha_prometida < HOY y fecha_entrega IS NULL
+        - completadas: fecha_entrega > 1950-01-01
+        - en_proceso: fecha_entrada > 1950-01-01 y fecha_entrega = 1950-01-01 y fecha_prometida >= HOY y >= 2020
+        - pendientes: fecha_entrada = 1950-01-01 y fecha_entrega = 1950-01-01
+        - retrasadas: fecha_prometida < HOY y >= 2020 y fecha_entrega = 1950-01-01
+        
+        Nota: Fechas prometidas < 2020 se consideran inválidas y se ignoran
         """
         try:
             logger.info("Repository - Obtener estadísticas de estados de órdenes.")
             
             hoy = date.today()
+            fecha_nula = date(1950, 1, 1)  # Valor usado como NULL en la BD
+            fecha_minima_valida = date(2020, 1, 1)  # Fechas prometidas válidas deben ser >= 2020
             
             # Query para contar estados
             query = select(
                 func.count(case(
-                    (OrdenTrabajo.fecha_entrega != None, 1)
+                    (OrdenTrabajo.fecha_entrega > fecha_nula, 1)
                 )).label('completadas'),
                 func.count(case(
-                    ((OrdenTrabajo.fecha_entrada <= hoy) & 
-                     (OrdenTrabajo.fecha_entrega == None), 1)
+                    ((OrdenTrabajo.fecha_entrada > fecha_nula) & 
+                     (OrdenTrabajo.fecha_entrega == fecha_nula) &
+                     (OrdenTrabajo.fecha_prometida >= hoy) &
+                     (OrdenTrabajo.fecha_prometida >= fecha_minima_valida), 1)
                 )).label('en_proceso'),
                 func.count(case(
-                    ((OrdenTrabajo.fecha_entrada > hoy) & 
-                     (OrdenTrabajo.fecha_entrega == None), 1)
+                    ((OrdenTrabajo.fecha_entrada == fecha_nula) & 
+                     (OrdenTrabajo.fecha_entrega == fecha_nula), 1)
                 )).label('pendientes'),
                 func.count(case(
                     ((OrdenTrabajo.fecha_prometida < hoy) & 
-                     (OrdenTrabajo.fecha_entrega == None), 1)
+                     (OrdenTrabajo.fecha_entrega == fecha_nula) &
+                     (OrdenTrabajo.fecha_prometida >= fecha_minima_valida), 1)
                 )).label('retrasadas')
             )
             
@@ -187,9 +194,12 @@ class OrdenTrabajoRepository:
         """
         Obtiene las órdenes críticas próximas a vencer.
         Retorna órdenes donde:
-        - fecha_entrega IS NULL (no completadas)
+        - fecha_entrega = 1950-01-01 (no completadas)
         - fecha_prometida está entre HOY y HOY + dias
+        - fecha_prometida >= 2020-01-01 (fechas válidas solamente)
         Ordena por fecha_prometida ASC (las más urgentes primero)
+        
+        Nota: Fechas prometidas < 2020 se consideran inválidas y se ignoran
         """
         try:
             from datetime import timedelta
@@ -197,12 +207,15 @@ class OrdenTrabajoRepository:
             
             hoy = date.today()
             fecha_limite = hoy + timedelta(days=dias)
+            fecha_nula = date(1950, 1, 1)  # Valor usado como NULL en la BD
+            fecha_minima_valida = date(2020, 1, 1)  # Solo fechas prometidas >= 2020 son válidas
             
             # Query con joins para obtener información completa
             query = select(OrdenTrabajo).where(
-                OrdenTrabajo.fecha_entrega == None,
-                OrdenTrabajo.fecha_prometida >= hoy,
-                OrdenTrabajo.fecha_prometida <= fecha_limite
+                OrdenTrabajo.fecha_entrega == fecha_nula,  # No completadas
+                OrdenTrabajo.fecha_prometida >= hoy,  # Fecha prometida futura
+                OrdenTrabajo.fecha_prometida <= fecha_limite,  # Dentro del rango
+                OrdenTrabajo.fecha_prometida >= fecha_minima_valida  # Filtrar fechas antiguas/inválidas
             ).options(
                 joinedload(OrdenTrabajo.articulo),
                 joinedload(OrdenTrabajo.sector)
