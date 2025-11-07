@@ -5,6 +5,7 @@ import LayoutWrapper from "../components/LayoutWrapper";
 import CleanupBrowserExtensions from "../components/CleanupBrowserExtensions";
 import { NotificationProvider } from "../contexts/NotificationContext";
 import { AuthProvider } from "../contexts/AuthContext";
+import { ToastProvider } from "../components/ui/toast";
 
 
 const geistSans = Geist({
@@ -39,9 +40,11 @@ export default function RootLayout({
         <CleanupBrowserExtensions />
         <AuthProvider>
           <NotificationProvider>
-            <LayoutWrapper>
-              {children}
-            </LayoutWrapper>
+            <ToastProvider>
+              <LayoutWrapper>
+                {children}
+              </LayoutWrapper>
+            </ToastProvider>
           </NotificationProvider>
         </AuthProvider>
       </body>

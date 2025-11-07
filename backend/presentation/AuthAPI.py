@@ -370,6 +370,21 @@ async def crear_usuario(
         
         usuario_creado = await usuario_repository.crear(nuevo_usuario)
         
+        # Crear notificación
+        try:
+            from backend.application.NotificacionService import NotificacionService
+            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
+            notificacion_service = NotificacionService(db)
+            await notificacion_service.crearNotificacion(
+                NotificacionCreateDTO(
+                    mensaje=f"Usuario '{usuario_creado.username}' ({usuario_creado.nombre} {usuario_creado.apellido}) fue creado exitosamente",
+                    tipo="usuario_created",
+                    id_usuario_creador=current_user['id_usuario']
+                )
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo crear notificación para usuario creado: {str(e)}")
+        
         usuario_data = {
             "id_usuario": usuario_creado.id_usuario,
             "username": usuario_creado.username,
@@ -450,6 +465,21 @@ async def actualizar_usuario(
         
         usuario_actualizado = await usuario_repository.actualizar(usuario)
         
+        # Crear notificación
+        try:
+            from backend.application.NotificacionService import NotificacionService
+            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
+            notificacion_service = NotificacionService(db)
+            await notificacion_service.crearNotificacion(
+                NotificacionCreateDTO(
+                    mensaje=f"Usuario '{usuario_actualizado.username}' ({usuario_actualizado.nombre} {usuario_actualizado.apellido}) fue modificado",
+                    tipo="usuario_updated",
+                    id_usuario_creador=current_user['id_usuario']
+                )
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo crear notificación para usuario actualizado: {str(e)}")
+        
         usuario_data = {
             "id_usuario": usuario_actualizado.id_usuario,
             "username": usuario_actualizado.username,
@@ -509,12 +539,31 @@ async def eliminar_usuario(
         if not usuario:
             raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
         
+        # Guardar información antes de eliminar para la notificación
+        username_eliminado = usuario.username
+        nombre_eliminado = f"{usuario.nombre} {usuario.apellido}"
+        
         # Eliminar
         await usuario_repository.eliminar(id_usuario)
         
+        # Crear notificación
+        try:
+            from backend.application.NotificacionService import NotificacionService
+            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
+            notificacion_service = NotificacionService(db)
+            await notificacion_service.crearNotificacion(
+                NotificacionCreateDTO(
+                    mensaje=f"Usuario '{username_eliminado}' ({nombre_eliminado}) fue eliminado",
+                    tipo="usuario_deleted",
+                    id_usuario_creador=current_user['id_usuario']
+                )
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo crear notificación para usuario eliminado: {str(e)}")
+        
         return ResponseDTO(
             status=True,
-            message=f"Usuario '{usuario.username}' eliminado exitosamente",
+            message=f"Usuario '{username_eliminado}' eliminado exitosamente",
             data={"id_usuario": id_usuario}
         )
         
