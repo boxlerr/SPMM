@@ -183,3 +183,38 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en get_estadisticas_estados: {e}")
             raise InfrastructureException("Error al obtener estadísticas de estados.") from e
 
+    async def get_ordenes_criticas(self, dias: int = 7):
+        """
+        Obtiene las órdenes críticas próximas a vencer.
+        Retorna órdenes donde:
+        - fecha_entrega IS NULL (no completadas)
+        - fecha_prometida está entre HOY y HOY + dias
+        Ordena por fecha_prometida ASC (las más urgentes primero)
+        """
+        try:
+            from datetime import timedelta
+            logger.info(f"Repository - Obtener órdenes críticas (próximas {dias} días).")
+            
+            hoy = date.today()
+            fecha_limite = hoy + timedelta(days=dias)
+            
+            # Query con joins para obtener información completa
+            query = select(OrdenTrabajo).where(
+                OrdenTrabajo.fecha_entrega == None,
+                OrdenTrabajo.fecha_prometida >= hoy,
+                OrdenTrabajo.fecha_prometida <= fecha_limite
+            ).options(
+                joinedload(OrdenTrabajo.articulo),
+                joinedload(OrdenTrabajo.sector)
+            ).order_by(OrdenTrabajo.fecha_prometida.asc())
+            
+            result = await self.db.execute(query)
+            ordenes = result.scalars().unique().all()
+            
+            logger.info(f"Repository - Órdenes críticas encontradas: {len(ordenes)}")
+            return ordenes
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en get_ordenes_criticas: {e}")
+            raise InfrastructureException("Error al obtener órdenes críticas.") from e
+

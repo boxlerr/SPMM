@@ -67,6 +67,13 @@ async def obtener_estadisticas_estados(db=Depends(get_db)):
     service = OrdenTrabajoService(db)
     return await service.obtenerEstadisticasEstados()
 
+# 🔹 Obtener órdenes críticas (próximas a vencer)
+@router.get("/ordenes-estadisticas/criticas")
+async def obtener_ordenes_criticas(dias: int = 7, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /ordenes-estadisticas/criticas?dias={dias}")
+    service = OrdenTrabajoService(db)
+    return await service.obtenerOrdenesCriticas(dias)
+
 app.include_router(router)
 
 

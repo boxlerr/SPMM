@@ -23,3 +23,5 @@ class OrdenTrabajo(Base):
     # Relaciones
     procesos = relationship("OrdenTrabajoProceso", back_populates="orden_trabajo")
     prioridad = relationship("Prioridad")
+    sector = relationship("Sector")
+    articulo = relationship("Articulo")

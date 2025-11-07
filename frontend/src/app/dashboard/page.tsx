@@ -7,7 +7,13 @@ import {
   AlertCircle, 
   PlayCircle, 
   TrendingUp,
-  RefreshCw 
+  RefreshCw,
+  Package,
+  Users,
+  Plus,
+  Calendar,
+  ChevronRight,
+  Factory
 } from "lucide-react";
 
 interface EstadisticasOrdenes {
@@ -18,9 +24,19 @@ interface EstadisticasOrdenes {
   total: number;
 }
 
+interface OrdenCritica {
+  id: number;
+  articulo: string;
+  sector: string;
+  fecha_prometida: string;
+  dias_restantes: number;
+}
+
 export default function DashboardPage() {
   const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null);
+  const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingCriticas, setLoadingCriticas] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -45,8 +61,27 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchOrdenesCriticas = async () => {
+    try {
+      setLoadingCriticas(true);
+      const response = await fetch(`${apiUrl}/ordenes-estadisticas/criticas?dias=7`);
+      
+      if (!response.ok) {
+        throw new Error('Error al obtener órdenes críticas');
+      }
+      
+      const data = await response.json();
+      setOrdenesCriticas(data.data);
+    } catch (err) {
+      console.error('Error fetching critical orders:', err);
+    } finally {
+      setLoadingCriticas(false);
+    }
+  };
+
   useEffect(() => {
     fetchEstadisticas();
+    fetchOrdenesCriticas();
   }, []);
 
   const calcularPorcentaje = (valor: number, total: number) => {
@@ -65,11 +100,14 @@ export default function DashboardPage() {
           </p>
         </div>
         <button
-          onClick={fetchEstadisticas}
-          disabled={loading}
+          onClick={() => {
+            fetchEstadisticas();
+            fetchOrdenesCriticas();
+          }}
+          disabled={loading || loadingCriticas}
           className="flex items-center gap-2 px-4 py-2 bg-[#DC143C] text-white rounded-lg hover:bg-[#B8112E] transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${(loading || loadingCriticas) ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Actualizar</span>
         </button>
       </div>
@@ -190,6 +228,94 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Widget de Alertas de Órdenes Críticas */}
+      <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl shadow-lg border border-orange-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <AlertCircle className="h-6 w-6 text-orange-600" />
+              Alertas de Órdenes Críticas
+            </h2>
+            <p className="text-sm text-gray-600 mt-1">Órdenes próximas a vencer (7 días)</p>
+          </div>
+          {ordenesCriticas.length > 0 && (
+            <div className="text-right">
+              <div className="text-3xl font-bold text-orange-600">{ordenesCriticas.length}</div>
+              <div className="text-sm text-gray-600">Alertas</div>
+            </div>
+          )}
+        </div>
+
+        {loadingCriticas && (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
+          </div>
+        )}
+
+        {!loadingCriticas && ordenesCriticas.length === 0 && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-8 text-center">
+            <CheckCircle2 className="h-12 w-12 text-green-600 mx-auto mb-3" />
+            <p className="text-green-800 font-medium">No hay órdenes críticas</p>
+            <p className="text-sm text-green-600 mt-1">Todas las órdenes están bajo control</p>
+          </div>
+        )}
+
+        {!loadingCriticas && ordenesCriticas.length > 0 && (
+          <div className="space-y-3">
+            {ordenesCriticas.slice(0, 5).map((orden) => (
+              <div
+                key={orden.id}
+                className="bg-white rounded-lg border-l-4 border-orange-500 p-4 hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-semibold text-gray-900">#{orden.id}</span>
+                      <span className="text-sm text-gray-600">- {orden.articulo}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                      <div className="flex items-center gap-1">
+                        <span className="font-medium">Sector:</span>
+                        <span>{orden.sector}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Clock className="h-4 w-4" />
+                        <span className="font-medium">Vence en:</span>
+                        <span className={`font-semibold ${
+                          orden.dias_restantes <= 2 
+                            ? 'text-red-600' 
+                            : orden.dias_restantes <= 5 
+                            ? 'text-orange-600' 
+                            : 'text-yellow-600'
+                        }`}>
+                          {orden.dias_restantes} {orden.dias_restantes === 1 ? 'día' : 'días'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    orden.dias_restantes <= 2 
+                      ? 'bg-red-100 text-red-800' 
+                      : orden.dias_restantes <= 5 
+                      ? 'bg-orange-100 text-orange-800' 
+                      : 'bg-yellow-100 text-yellow-800'
+                  }`}>
+                    {orden.dias_restantes <= 2 ? '⚠️ Urgente' : '⏰ Próxima'}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {ordenesCriticas.length > 5 && (
+              <div className="text-center pt-2">
+                <button className="text-sm text-orange-600 hover:text-orange-800 font-medium">
+                  Ver todas las alertas ({ordenesCriticas.length})
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
