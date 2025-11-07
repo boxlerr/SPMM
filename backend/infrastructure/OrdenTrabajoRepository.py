@@ -135,32 +135,39 @@ class OrdenTrabajoRepository:
     async def get_estadisticas_estados(self):
         """
         Obtiene el conteo de órdenes por estado:
-        - completadas: fecha_entrega <= HOY
-        - en_proceso: fecha_entrada <= HOY y fecha_entrega IS NULL
-        - pendientes: fecha_entrada > HOY y fecha_entrega IS NULL
-        - retrasadas: fecha_prometida < HOY y fecha_entrega IS NULL
+        - completadas: fecha_entrega > 1950-01-01
+        - en_proceso: fecha_entrada > 1950-01-01 y fecha_entrega = 1950-01-01 y fecha_prometida >= HOY y >= 2020
+        - pendientes: fecha_entrada = 1950-01-01 y fecha_entrega = 1950-01-01
+        - retrasadas: fecha_prometida < HOY y >= 2020 y fecha_entrega = 1950-01-01
+        
+        Nota: Fechas prometidas < 2020 se consideran inválidas y se ignoran
         """
         try:
             logger.info("Repository - Obtener estadísticas de estados de órdenes.")
             
             hoy = date.today()
+            fecha_nula = date(1950, 1, 1)  # Valor usado como NULL en la BD
+            fecha_minima_valida = date(2020, 1, 1)  # Fechas prometidas válidas deben ser >= 2020
             
             # Query para contar estados
             query = select(
                 func.count(case(
-                    (OrdenTrabajo.fecha_entrega != None, 1)
+                    (OrdenTrabajo.fecha_entrega > fecha_nula, 1)
                 )).label('completadas'),
                 func.count(case(
-                    ((OrdenTrabajo.fecha_entrada <= hoy) & 
-                     (OrdenTrabajo.fecha_entrega == None), 1)
+                    ((OrdenTrabajo.fecha_entrada > fecha_nula) & 
+                     (OrdenTrabajo.fecha_entrega == fecha_nula) &
+                     (OrdenTrabajo.fecha_prometida >= hoy) &
+                     (OrdenTrabajo.fecha_prometida >= fecha_minima_valida), 1)
                 )).label('en_proceso'),
                 func.count(case(
-                    ((OrdenTrabajo.fecha_entrada > hoy) & 
-                     (OrdenTrabajo.fecha_entrega == None), 1)
+                    ((OrdenTrabajo.fecha_entrada == fecha_nula) & 
+                     (OrdenTrabajo.fecha_entrega == fecha_nula), 1)
                 )).label('pendientes'),
                 func.count(case(
                     ((OrdenTrabajo.fecha_prometida < hoy) & 
-                     (OrdenTrabajo.fecha_entrega == None), 1)
+                     (OrdenTrabajo.fecha_entrega == fecha_nula) &
+                     (OrdenTrabajo.fecha_prometida >= fecha_minima_valida), 1)
                 )).label('retrasadas')
             )
             
@@ -187,9 +194,12 @@ class OrdenTrabajoRepository:
         """
         Obtiene las órdenes críticas próximas a vencer.
         Retorna órdenes donde:
-        - fecha_entrega IS NULL (no completadas)
+        - fecha_entrega = 1950-01-01 (no completadas)
         - fecha_prometida está entre HOY y HOY + dias
+        - fecha_prometida >= 2020-01-01 (fechas válidas solamente)
         Ordena por fecha_prometida ASC (las más urgentes primero)
+        
+        Nota: Fechas prometidas < 2020 se consideran inválidas y se ignoran
         """
         try:
             from datetime import timedelta
@@ -197,12 +207,15 @@ class OrdenTrabajoRepository:
             
             hoy = date.today()
             fecha_limite = hoy + timedelta(days=dias)
+            fecha_nula = date(1950, 1, 1)  # Valor usado como NULL en la BD
+            fecha_minima_valida = date(2020, 1, 1)  # Solo fechas prometidas >= 2020 son válidas
             
             # Query con joins para obtener información completa
             query = select(OrdenTrabajo).where(
-                OrdenTrabajo.fecha_entrega == None,
-                OrdenTrabajo.fecha_prometida >= hoy,
-                OrdenTrabajo.fecha_prometida <= fecha_limite
+                OrdenTrabajo.fecha_entrega == fecha_nula,  # No completadas
+                OrdenTrabajo.fecha_prometida >= hoy,  # Fecha prometida futura
+                OrdenTrabajo.fecha_prometida <= fecha_limite,  # Dentro del rango
+                OrdenTrabajo.fecha_prometida >= fecha_minima_valida  # Filtrar fechas antiguas/inválidas
             ).options(
                 joinedload(OrdenTrabajo.articulo),
                 joinedload(OrdenTrabajo.sector)
@@ -217,4 +230,127 @@ class OrdenTrabajoRepository:
         except Exception as e:
             logger.error(f"Repository - Error en get_ordenes_criticas: {e}")
             raise InfrastructureException("Error al obtener órdenes críticas.") from e
+
+    async def get_ocupacion_por_sector(self):
+        """
+        Obtiene la carga de trabajo (ocupación) por sector.
+        Calcula el número de órdenes activas (no completadas) en cada sector.
+        """
+        try:
+            from backend.domain.Sector import Sector
+            logger.info("Repository - Obtener ocupación por sector.")
+            
+            hoy = date.today()
+            fecha_nula = date(1950, 1, 1)
+            fecha_minima_valida = date(2020, 1, 1)
+            
+            # Query para contar órdenes activas por sector
+            query = select(
+                Sector.nombre.label('sector'),
+                func.count(OrdenTrabajo.id).label('ordenes_activas')
+            ).select_from(Sector).outerjoin(
+                OrdenTrabajo,
+                (Sector.id_sector == OrdenTrabajo.id_sector) &
+                (OrdenTrabajo.fecha_entrega == fecha_nula) &  # NO completadas
+                (OrdenTrabajo.fecha_prometida > fecha_minima_valida)  # Fechas válidas
+            ).group_by(Sector.nombre).order_by(
+                func.count(OrdenTrabajo.id).desc()
+            )
+            
+            result = await self.db.execute(query)
+            sectores = result.all()
+            
+            # Calcular el total de órdenes activas para porcentajes
+            total_ordenes = sum(s.ordenes_activas for s in sectores)
+            
+            # Formatear resultado con porcentajes
+            ocupacion = []
+            for sector in sectores:
+                # Calcular porcentaje basado en el total
+                # Si hay 0 órdenes, todos están en 0%
+                porcentaje = round((sector.ordenes_activas / total_ordenes * 100), 1) if total_ordenes > 0 else 0
+                
+                ocupacion.append({
+                    'sector': sector.sector,
+                    'ordenes_activas': sector.ordenes_activas,
+                    'porcentaje': porcentaje
+                })
+            
+            logger.info(f"Repository - Ocupación por sector: {len(ocupacion)} sectores")
+            return ocupacion
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en get_ocupacion_por_sector: {e}")
+            raise InfrastructureException("Error al obtener ocupación por sector.") from e
+
+    async def get_proximas_entregas_timeline(self, dias: int = 7):
+        """
+        Obtiene las órdenes con entregas en los próximos N días, agrupadas por fecha.
+        Útil para visualización en timeline.
+        
+        Args:
+            dias: Número de días hacia adelante (default: 7)
+            
+        Returns:
+            Lista de diccionarios con {fecha, cantidad_ordenes, ordenes[...]}
+        """
+        try:
+            from datetime import timedelta
+            logger.info(f"Repository - Obtener timeline de próximas entregas ({dias} días)")
+            
+            hoy = date.today()
+            fecha_limite = hoy + timedelta(days=dias)
+            fecha_nula = date(1950, 1, 1)
+            fecha_minima_valida = date(2020, 1, 1)
+            
+            # Obtener todas las órdenes con entrega en el rango
+            query = select(OrdenTrabajo).where(
+                OrdenTrabajo.fecha_entrega == fecha_nula,  # NO completadas
+                OrdenTrabajo.fecha_prometida >= hoy,  # Desde hoy
+                OrdenTrabajo.fecha_prometida <= fecha_limite,  # Hasta hoy + dias
+                OrdenTrabajo.fecha_prometida >= fecha_minima_valida  # Fechas válidas
+            ).options(
+                joinedload(OrdenTrabajo.articulo),
+                joinedload(OrdenTrabajo.sector)
+            ).order_by(OrdenTrabajo.fecha_prometida.asc())
+            
+            result = await self.db.execute(query)
+            ordenes = result.scalars().unique().all()
+            
+            # Agrupar por fecha
+            entregas_por_fecha = {}
+            for orden in ordenes:
+                fecha_str = orden.fecha_prometida.strftime('%Y-%m-%d')
+                if fecha_str not in entregas_por_fecha:
+                    entregas_por_fecha[fecha_str] = []
+                
+                entregas_por_fecha[fecha_str].append({
+                    'id': orden.id,
+                    'articulo': orden.articulo.descripcion if orden.articulo else 'Sin artículo',
+                    'sector': orden.sector.nombre if orden.sector else 'Sin sector',
+                })
+            
+            # Formatear para timeline (incluir todos los días del rango, incluso sin órdenes)
+            timeline = []
+            fecha_actual = hoy
+            while fecha_actual <= fecha_limite:
+                fecha_str = fecha_actual.strftime('%Y-%m-%d')
+                ordenes_del_dia = entregas_por_fecha.get(fecha_str, [])
+                
+                timeline.append({
+                    'fecha': fecha_str,
+                    'fecha_formato': fecha_actual.strftime('%d/%m'),
+                    'dia_semana': ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'][fecha_actual.weekday()],
+                    'cantidad_ordenes': len(ordenes_del_dia),
+                    'ordenes': ordenes_del_dia[:5]  # Limitar a 5 para preview
+                })
+                
+                fecha_actual += timedelta(days=1)
+            
+            logger.info(f"Repository - Timeline generado: {len(timeline)} días, {len(ordenes)} órdenes")
+            return timeline
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en get_proximas_entregas_timeline: {e}")
+            raise InfrastructureException("Error al obtener timeline de próximas entregas.") from e
 
