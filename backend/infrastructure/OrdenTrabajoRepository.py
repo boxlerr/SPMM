@@ -231,3 +231,126 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en get_ordenes_criticas: {e}")
             raise InfrastructureException("Error al obtener órdenes críticas.") from e
 
+    async def get_ocupacion_por_sector(self):
+        """
+        Obtiene la carga de trabajo (ocupación) por sector.
+        Calcula el número de órdenes activas (no completadas) en cada sector.
+        """
+        try:
+            from backend.domain.Sector import Sector
+            logger.info("Repository - Obtener ocupación por sector.")
+            
+            hoy = date.today()
+            fecha_nula = date(1950, 1, 1)
+            fecha_minima_valida = date(2020, 1, 1)
+            
+            # Query para contar órdenes activas por sector
+            query = select(
+                Sector.nombre.label('sector'),
+                func.count(OrdenTrabajo.id).label('ordenes_activas')
+            ).select_from(Sector).outerjoin(
+                OrdenTrabajo,
+                (Sector.id_sector == OrdenTrabajo.id_sector) &
+                (OrdenTrabajo.fecha_entrega == fecha_nula) &  # NO completadas
+                (OrdenTrabajo.fecha_prometida > fecha_minima_valida)  # Fechas válidas
+            ).group_by(Sector.nombre).order_by(
+                func.count(OrdenTrabajo.id).desc()
+            )
+            
+            result = await self.db.execute(query)
+            sectores = result.all()
+            
+            # Calcular el total de órdenes activas para porcentajes
+            total_ordenes = sum(s.ordenes_activas for s in sectores)
+            
+            # Formatear resultado con porcentajes
+            ocupacion = []
+            for sector in sectores:
+                # Calcular porcentaje basado en el total
+                # Si hay 0 órdenes, todos están en 0%
+                porcentaje = round((sector.ordenes_activas / total_ordenes * 100), 1) if total_ordenes > 0 else 0
+                
+                ocupacion.append({
+                    'sector': sector.sector,
+                    'ordenes_activas': sector.ordenes_activas,
+                    'porcentaje': porcentaje
+                })
+            
+            logger.info(f"Repository - Ocupación por sector: {len(ocupacion)} sectores")
+            return ocupacion
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en get_ocupacion_por_sector: {e}")
+            raise InfrastructureException("Error al obtener ocupación por sector.") from e
+
+    async def get_proximas_entregas_timeline(self, dias: int = 7):
+        """
+        Obtiene las órdenes con entregas en los próximos N días, agrupadas por fecha.
+        Útil para visualización en timeline.
+        
+        Args:
+            dias: Número de días hacia adelante (default: 7)
+            
+        Returns:
+            Lista de diccionarios con {fecha, cantidad_ordenes, ordenes[...]}
+        """
+        try:
+            from datetime import timedelta
+            logger.info(f"Repository - Obtener timeline de próximas entregas ({dias} días)")
+            
+            hoy = date.today()
+            fecha_limite = hoy + timedelta(days=dias)
+            fecha_nula = date(1950, 1, 1)
+            fecha_minima_valida = date(2020, 1, 1)
+            
+            # Obtener todas las órdenes con entrega en el rango
+            query = select(OrdenTrabajo).where(
+                OrdenTrabajo.fecha_entrega == fecha_nula,  # NO completadas
+                OrdenTrabajo.fecha_prometida >= hoy,  # Desde hoy
+                OrdenTrabajo.fecha_prometida <= fecha_limite,  # Hasta hoy + dias
+                OrdenTrabajo.fecha_prometida >= fecha_minima_valida  # Fechas válidas
+            ).options(
+                joinedload(OrdenTrabajo.articulo),
+                joinedload(OrdenTrabajo.sector)
+            ).order_by(OrdenTrabajo.fecha_prometida.asc())
+            
+            result = await self.db.execute(query)
+            ordenes = result.scalars().unique().all()
+            
+            # Agrupar por fecha
+            entregas_por_fecha = {}
+            for orden in ordenes:
+                fecha_str = orden.fecha_prometida.strftime('%Y-%m-%d')
+                if fecha_str not in entregas_por_fecha:
+                    entregas_por_fecha[fecha_str] = []
+                
+                entregas_por_fecha[fecha_str].append({
+                    'id': orden.id,
+                    'articulo': orden.articulo.descripcion if orden.articulo else 'Sin artículo',
+                    'sector': orden.sector.nombre if orden.sector else 'Sin sector',
+                })
+            
+            # Formatear para timeline (incluir todos los días del rango, incluso sin órdenes)
+            timeline = []
+            fecha_actual = hoy
+            while fecha_actual <= fecha_limite:
+                fecha_str = fecha_actual.strftime('%Y-%m-%d')
+                ordenes_del_dia = entregas_por_fecha.get(fecha_str, [])
+                
+                timeline.append({
+                    'fecha': fecha_str,
+                    'fecha_formato': fecha_actual.strftime('%d/%m'),
+                    'dia_semana': ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'][fecha_actual.weekday()],
+                    'cantidad_ordenes': len(ordenes_del_dia),
+                    'ordenes': ordenes_del_dia[:5]  # Limitar a 5 para preview
+                })
+                
+                fecha_actual += timedelta(days=1)
+            
+            logger.info(f"Repository - Timeline generado: {len(timeline)} días, {len(ordenes)} órdenes")
+            return timeline
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en get_proximas_entregas_timeline: {e}")
+            raise InfrastructureException("Error al obtener timeline de próximas entregas.") from e
+

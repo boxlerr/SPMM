@@ -32,11 +32,33 @@ interface OrdenCritica {
   dias_restantes: number;
 }
 
+interface OcupacionSector {
+  sector: string;
+  ordenes_activas: number;
+  porcentaje: number;
+}
+
+interface TimelineEntrega {
+  fecha: string;
+  fecha_formato: string;
+  dia_semana: string;
+  cantidad_ordenes: number;
+  ordenes: Array<{
+    id: number;
+    articulo: string;
+    sector: string;
+  }>;
+}
+
 export default function DashboardPage() {
   const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null);
   const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([]);
+  const [ocupacionSectores, setOcupacionSectores] = useState<OcupacionSector[]>([]);
+  const [timelineEntregas, setTimelineEntregas] = useState<TimelineEntrega[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingCriticas, setLoadingCriticas] = useState(true);
+  const [loadingOcupacion, setLoadingOcupacion] = useState(true);
+  const [loadingTimeline, setLoadingTimeline] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -79,9 +101,47 @@ export default function DashboardPage() {
     }
   };
 
+  const fetchOcupacionSectores = async () => {
+    try {
+      setLoadingOcupacion(true);
+      const response = await fetch(`${apiUrl}/ordenes-estadisticas/ocupacion-sector`);
+      
+      if (!response.ok) {
+        throw new Error('Error al obtener ocupación por sector');
+      }
+      
+      const data = await response.json();
+      setOcupacionSectores(data.data);
+    } catch (err) {
+      console.error('Error fetching sector occupation:', err);
+    } finally {
+      setLoadingOcupacion(false);
+    }
+  };
+
+  const fetchTimelineEntregas = async () => {
+    try {
+      setLoadingTimeline(true);
+      const response = await fetch(`${apiUrl}/ordenes-estadisticas/proximas-entregas?dias=7`);
+      
+      if (!response.ok) {
+        throw new Error('Error al obtener timeline de entregas');
+      }
+      
+      const data = await response.json();
+      setTimelineEntregas(data.data);
+    } catch (err) {
+      console.error('Error fetching timeline:', err);
+    } finally {
+      setLoadingTimeline(false);
+    }
+  };
+
   useEffect(() => {
     fetchEstadisticas();
     fetchOrdenesCriticas();
+    fetchOcupacionSectores();
+    fetchTimelineEntregas();
   }, []);
 
   const calcularPorcentaje = (valor: number, total: number) => {
@@ -103,11 +163,13 @@ export default function DashboardPage() {
           onClick={() => {
             fetchEstadisticas();
             fetchOrdenesCriticas();
+            fetchOcupacionSectores();
+            fetchTimelineEntregas();
           }}
-          disabled={loading || loadingCriticas}
+          disabled={loading || loadingCriticas || loadingOcupacion || loadingTimeline}
           className="flex items-center gap-2 px-4 py-2 bg-[#DC143C] text-white rounded-lg hover:bg-[#B8112E] transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`h-4 w-4 ${(loading || loadingCriticas) ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${(loading || loadingCriticas || loadingOcupacion || loadingTimeline) ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Actualizar</span>
         </button>
       </div>
@@ -318,6 +380,221 @@ export default function DashboardPage() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Widget de Ocupación por Sector */}
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Users className="h-6 w-6 text-purple-600" />
+              Ocupación por Sector
+            </h2>
+            <p className="text-sm text-gray-600 mt-1">Carga de trabajo por sector</p>
+          </div>
+        </div>
+
+        {loadingOcupacion && (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+          </div>
+        )}
+
+        {!loadingOcupacion && ocupacionSectores.length === 0 && (
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+            <Users className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-600 font-medium">No hay sectores registrados</p>
+          </div>
+        )}
+
+        {!loadingOcupacion && ocupacionSectores.length > 0 && (
+          <div className="space-y-4">
+            {ocupacionSectores.map((sector, index) => (
+              <div key={index} className="bg-white rounded-lg border border-purple-100 p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Factory className="h-5 w-5 text-purple-600" />
+                    <span className="font-semibold text-gray-800">{sector.sector}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-bold text-purple-600">{sector.porcentaje}%</span>
+                    <p className="text-xs text-gray-500">{sector.ordenes_activas} órdenes</p>
+                  </div>
+                </div>
+                <div className="relative w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                  <div 
+                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-purple-500 to-purple-600 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${sector.porcentaje}%` }}
+                  >
+                    <div className="absolute inset-0 bg-white opacity-20 animate-pulse"></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 📅 Timeline de Próximas Entregas (7 días) */}
+      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+        <div className="bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Calendar className="w-6 h-6 text-white" />
+              <div>
+                <h2 className="text-xl font-bold text-white">Entregas Próxima Semana</h2>
+                <p className="text-cyan-50 text-sm">Timeline de entregas en los próximos 7 días</p>
+              </div>
+            </div>
+            {timelineEntregas.length > 0 && (
+              <div className="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg">
+                <span className="text-white font-bold text-lg">
+                  {timelineEntregas.reduce((sum, day) => sum + day.cantidad_ordenes, 0)} órdenes
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="p-6">
+          {loadingTimeline ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div>
+            </div>
+          ) : timelineEntregas.length === 0 ? (
+            <div className="text-center py-12">
+              <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <p className="text-gray-600 font-medium">Sin entregas programadas</p>
+              <p className="text-sm text-gray-500 mt-1">No hay órdenes próximas a vencer en 7 días</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Timeline horizontal */}
+              <div className="grid grid-cols-7 gap-2">
+                {timelineEntregas.map((dia, index) => {
+                  const maxOrdenes = Math.max(...timelineEntregas.map(d => d.cantidad_ordenes));
+                  const altura = maxOrdenes > 0 ? (dia.cantidad_ordenes / maxOrdenes) * 100 : 0;
+                  
+                  return (
+                    <div key={index} className="group relative">
+                      {/* Barra vertical */}
+                      <div className="flex flex-col items-center">
+                        <div className="w-full h-32 flex flex-col justify-end mb-2">
+                          {dia.cantidad_ordenes > 0 ? (
+                            <div 
+                              className={`w-full rounded-t-lg transition-all duration-300 group-hover:opacity-80 cursor-pointer ${
+                                dia.cantidad_ordenes >= 5 ? 'bg-gradient-to-t from-red-500 to-red-400' :
+                                dia.cantidad_ordenes >= 3 ? 'bg-gradient-to-t from-orange-500 to-orange-400' :
+                                'bg-gradient-to-t from-cyan-500 to-cyan-400'
+                              }`}
+                              style={{ height: `${Math.max(altura, 20)}%` }}
+                            >
+                              <div className="flex items-center justify-center h-full">
+                                <span className="text-white font-bold text-lg">
+                                  {dia.cantidad_ordenes}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-full h-2 rounded-t-lg bg-gray-200"></div>
+                          )}
+                        </div>
+                        
+                        {/* Info del día */}
+                        <div className="text-center">
+                          <div className={`text-xs font-semibold mb-1 ${
+                            dia.cantidad_ordenes > 0 ? 'text-cyan-700' : 'text-gray-500'
+                          }`}>
+                            {dia.dia_semana}
+                          </div>
+                          <div className={`text-xs ${
+                            dia.cantidad_ordenes > 0 ? 'text-gray-700 font-medium' : 'text-gray-400'
+                          }`}>
+                            {dia.fecha_formato}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tooltip con detalles (hover) */}
+                      {dia.cantidad_ordenes > 0 && (
+                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                          <div className="bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3 min-w-[200px]">
+                            <div className="font-semibold mb-2 border-b border-gray-700 pb-2">
+                              {dia.dia_semana} {dia.fecha_formato}
+                            </div>
+                            <div className="space-y-1">
+                              {dia.ordenes.slice(0, 3).map((orden) => (
+                                <div key={orden.id} className="text-xs">
+                                  <span className="font-medium">#{orden.id}</span> - {orden.articulo.substring(0, 30)}...
+                                </div>
+                              ))}
+                              {dia.cantidad_ordenes > 3 && (
+                                <div className="text-xs text-gray-400 pt-1">
+                                  +{dia.cantidad_ordenes - 3} más...
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Leyenda */}
+              <div className="flex items-center justify-center gap-6 pt-4 border-t border-gray-200">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-gradient-to-t from-cyan-500 to-cyan-400 rounded"></div>
+                  <span className="text-xs text-gray-600">1-2 órdenes</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-gradient-to-t from-orange-500 to-orange-400 rounded"></div>
+                  <span className="text-xs text-gray-600">3-4 órdenes</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-gradient-to-t from-red-500 to-red-400 rounded"></div>
+                  <span className="text-xs text-gray-600">5+ órdenes</span>
+                </div>
+              </div>
+
+              {/* Detalle de órdenes por día */}
+              <div className="mt-6 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  Detalle de Entregas
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {timelineEntregas.filter(d => d.cantidad_ordenes > 0).map((dia) => (
+                    <div key={dia.fecha} className="bg-gradient-to-br from-cyan-50 to-blue-50 rounded-lg border border-cyan-200 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="font-semibold text-cyan-900 text-sm">
+                          {dia.dia_semana} {dia.fecha_formato}
+                        </div>
+                        <span className="bg-cyan-600 text-white text-xs font-bold px-2 py-1 rounded-full">
+                          {dia.cantidad_ordenes}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {dia.ordenes.map((orden) => (
+                          <div key={orden.id} className="text-xs text-gray-700 flex items-start gap-1">
+                            <span className="text-cyan-600 font-medium">#{orden.id}</span>
+                            <span className="truncate">{orden.articulo}</span>
+                          </div>
+                        ))}
+                        {dia.cantidad_ordenes > dia.ordenes.length && (
+                          <div className="text-xs text-cyan-600 font-medium">
+                            +{dia.cantidad_ordenes - dia.ordenes.length} más...
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Estado del sistema */}

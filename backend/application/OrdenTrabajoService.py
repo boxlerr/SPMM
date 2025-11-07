@@ -139,3 +139,37 @@ class OrdenTrabajoService:
         except Exception as e:
             raise ApplicationException("Error al obtener órdenes críticas.") from e
 
+    async def obtenerOcupacionPorSector(self):
+        """
+        Obtiene la ocupación (carga de trabajo) por sector
+        """
+        try:
+            logger.info("Service - Obtener ocupación por sector.")
+            ocupacion = await self.repository.get_ocupacion_por_sector()
+            logger.info(f"Service - Ocupación obtenida: {len(ocupacion)} sectores")
+            return ResponseDTO(status=True, data=ocupacion)
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener ocupación por sector.") from e
+
+    async def obtenerProximasEntregasTimeline(self, dias: int = 7):
+        """
+        Obtiene timeline de próximas entregas agrupadas por fecha
+        
+        Args:
+            dias: Número de días hacia adelante (default: 7)
+            
+        Returns:
+            ResponseDTO con timeline de entregas
+        """
+        try:
+            logger.info(f"Service - Obtener timeline de próximas entregas ({dias} días).")
+            timeline = await self.repository.get_proximas_entregas_timeline(dias)
+            logger.info(f"Service - Timeline obtenido: {len(timeline)} días")
+            return ResponseDTO(status=True, data=timeline)
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener timeline de próximas entregas.") from e
+
