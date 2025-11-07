@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2 } from "lucide-react";
 import { useNotifications } from "../contexts/NotificationContext";
 import { useRouter } from "next/navigation";
+import { formatNotificationMessage } from "@/lib/utils";
 
 export default function Topbar() {
   const { notifications, unreadCount, markAsRead } = useNotifications();
@@ -45,10 +46,13 @@ export default function Topbar() {
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case "operario_created":
+      case "usuario_created":
         return <UserPlus className="h-4 w-4 text-green-600" />;
       case "operario_updated":
+      case "usuario_updated":
         return <Pencil className="h-4 w-4 text-blue-600" />;
       case "operario_deleted":
+      case "usuario_deleted":
         return <UserMinus className="h-4 w-4 text-red-600" />;
       default:
         return <Bell className="h-4 w-4 text-gray-600" />;
@@ -58,10 +62,13 @@ export default function Topbar() {
   const getNotificationBadge = (type: string) => {
     switch (type) {
       case "operario_created":
+      case "usuario_created":
         return <span className="text-xs text-green-600 font-medium">Creado</span>;
       case "operario_updated":
+      case "usuario_updated":
         return <span className="text-xs text-blue-600 font-medium">Modificado</span>;
       case "operario_deleted":
+      case "usuario_deleted":
         return <span className="text-xs text-red-600 font-medium">Eliminado</span>;
       default:
         return null;
@@ -155,7 +162,7 @@ export default function Topbar() {
                               notification.read ? "text-gray-600" : "text-gray-900 font-medium"
                             } line-clamp-2`}
                           >
-                            {notification.message}
+                            {formatNotificationMessage(notification.message)}
                           </p>
                           <p className="text-xs text-gray-400 mt-1">
                             {formatDate(notification.timestamp)}

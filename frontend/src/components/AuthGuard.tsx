@@ -18,6 +18,10 @@ export default function AuthGuard({ children }: AuthGuardProps) {
     if (!loading && !isAuthenticated && pathname !== '/login') {
       router.push('/login');
     }
+    // Si está en login y ya está autenticado, redirigir al dashboard
+    if (!loading && isAuthenticated && pathname === '/login') {
+      router.push('/dashboard');
+    }
   }, [isAuthenticated, loading, pathname, router]);
 
   // Mostrar loading mientras se verifica la autenticación
@@ -38,9 +42,9 @@ export default function AuthGuard({ children }: AuthGuardProps) {
     return null;
   }
 
-  // Si está en login y ya está autenticado, redirigir al dashboard
+  // Si está en login y ya está autenticado, no mostrar nada
+  // (se redirigirá en el useEffect)
   if (isAuthenticated && pathname === '/login') {
-    router.push('/dashboard');
     return null;
   }
 

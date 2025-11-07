@@ -11,6 +11,7 @@ from backend.presentation.PlanificacionAPI import router as plan_router
 from backend.presentation.PrioridadAPI import router as prioridad_router
 from backend.presentation.MaquinariaAPI import router as maquinaria_router
 from backend.presentation.AuthAPI import router as auth_router
+from backend.presentation.NotificacionAPI import router as notificacion_router
 
 import logging
 
@@ -57,6 +58,7 @@ app.include_router(sector_router, tags=["sectores"])
 app.include_router(plan_router,tags=["planificacion"])
 app.include_router(prioridad_router,tags=["prioridades"])
 app.include_router(maquinaria_router,tags=["maquinarias"])
+app.include_router(notificacion_router, tags=["notificaciones"])
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)

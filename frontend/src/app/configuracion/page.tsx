@@ -3,34 +3,49 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
-import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, Server, Database, Clock, User, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UsuariosTable from '@/components/usuarios/UsuariosTable';
+import { formatNotificationMessage } from '@/lib/utils';
 
 export default function ConfiguracionPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('empresa');
+  const [activeTab, setActiveTab] = useState('usuarios');
+  const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const { notifications, markAsRead, markAllAsRead, clearNotifications, unreadCount } = useNotifications();
+  const { user } = useAuth();
+
+  // Actualizar fecha y hora cada segundo para tiempo real
+  useEffect(() => {
+    // Actualizar inmediatamente al montar
+    setCurrentDateTime(new Date());
+    
+    // Luego actualizar cada segundo
+    const interval = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000); // Actualizar cada 1 segundo (tiempo real)
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Leer el parámetro 'tab' de la URL al cargar
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl && ['empresa', 'usuarios', 'notificaciones', 'sistema'].includes(tabFromUrl)) {
+    if (tabFromUrl && ['usuarios', 'notificaciones', 'sistema'].includes(tabFromUrl)) {
       setActiveTab(tabFromUrl);
     }
   }, [searchParams]);
 
+  // Marcar notificaciones como leídas automáticamente cuando se entra a la pestaña de notificaciones
+  useEffect(() => {
+    if (activeTab === 'notificaciones' && unreadCount > 0) {
+      markAllAsRead();
+    }
+  }, [activeTab]); // Solo cuando cambia la pestaña activa
+
   const tabs = [
-    {
-      id: 'empresa',
-      label: 'Empresa',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-        </svg>
-      )
-    },
     {
       id: 'usuarios',
       label: 'Usuario',
@@ -44,9 +59,7 @@ export default function ConfiguracionPage() {
       id: 'notificaciones',
       label: 'Notificación',
       icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5M4 3h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1z" />
-        </svg>
+        <Bell className="w-5 h-5" />
       )
     },
     {
@@ -63,18 +76,6 @@ export default function ConfiguracionPage() {
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'empresa':
-        return (
-          <div className="p-8 text-center">
-            <div className="text-gray-400 mb-4">
-              <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-700 mb-2">Configuración de Empresa</h3>
-            <p className="text-gray-500">Aquí podrás configurar los datos de la empresa</p>
-          </div>
-        );
       case 'usuarios':
         return (
           <div className="p-6">
@@ -91,10 +92,13 @@ export default function ConfiguracionPage() {
         const getNotificationIcon = (type: string) => {
           switch (type) {
             case 'operario_created':
+            case 'usuario_created':
               return <UserPlus className="h-5 w-5 text-green-600" />;
             case 'operario_updated':
+            case 'usuario_updated':
               return <Pencil className="h-5 w-5 text-blue-600" />;
             case 'operario_deleted':
+            case 'usuario_deleted':
               return <UserMinus className="h-5 w-5 text-red-600" />;
             default:
               return <Bell className="h-5 w-5 text-gray-600" />;
@@ -104,10 +108,13 @@ export default function ConfiguracionPage() {
         const getNotificationBadge = (type: string) => {
           switch (type) {
             case 'operario_created':
+            case 'usuario_created':
               return <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Creado</span>;
             case 'operario_updated':
+            case 'usuario_updated':
               return <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">Modificado</span>;
             case 'operario_deleted':
+            case 'usuario_deleted':
               return <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">Eliminado</span>;
             default:
               return null;
@@ -203,7 +210,7 @@ export default function ConfiguracionPage() {
                             )}
                           </div>
                           <p className={`text-sm ${notification.read ? 'text-gray-600' : 'text-gray-900 font-medium'}`}>
-                            {notification.message}
+                            {formatNotificationMessage(notification.message)}
                           </p>
                           {notification.motivo && (
                             <div className="mt-2 p-2 bg-gray-100 rounded-md border-l-2 border-blue-500">
@@ -234,16 +241,160 @@ export default function ConfiguracionPage() {
           </div>
         );
       case 'sistema':
+        const systemInfo = {
+          version: '1.0.0',
+          nombre: 'SPMM - Sistema de Planificación y Mantenimiento de Maquinaria',
+          backendUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+          frontendUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
+          fechaActual: currentDateTime.toLocaleString('es-ES', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          }),
+          navegador: typeof window !== 'undefined' ? navigator.userAgent : 'N/A',
+          idioma: typeof window !== 'undefined' ? navigator.language : 'es-ES',
+        };
+
         return (
-          <div className="p-8 text-center">
-            <div className="text-gray-400 mb-4">
-              <svg className="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+          <div className="p-6">
+            <div className="mb-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-1">Información del Sistema</h3>
+              <p className="text-sm text-gray-500">
+                Detalles técnicos y configuración del sistema SPMM
+              </p>
             </div>
-            <h3 className="text-xl font-semibold text-gray-700 mb-2">Configuración del Sistema</h3>
-            <p className="text-gray-500">Ajustes avanzados del sistema</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              {/* Información General */}
+              <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <Info className="h-5 w-5 text-blue-600" />
+                  <h4 className="text-lg font-semibold text-gray-900">Información General</h4>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Nombre del Sistema</p>
+                    <p className="text-sm font-medium text-gray-900">{systemInfo.nombre}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Versión</p>
+                    <p className="text-sm font-medium text-gray-900">{systemInfo.version}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Fecha y Hora Actual</p>
+                    <p className="text-sm font-medium text-gray-900">{systemInfo.fechaActual}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Información del Usuario */}
+              <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <User className="h-5 w-5 text-green-600" />
+                  <h4 className="text-lg font-semibold text-gray-900">Sesión Actual</h4>
+                </div>
+                <div className="space-y-3">
+                  {user ? (
+                    <>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Usuario</p>
+                        <p className="text-sm font-medium text-gray-900">{user.username}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Nombre Completo</p>
+                        <p className="text-sm font-medium text-gray-900">{user.nombre} {user.apellido}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Email</p>
+                        <p className="text-sm font-medium text-gray-900">{user.email}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Rol</p>
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          <Shield className="h-3 w-3 mr-1" />
+                          {user.rol}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-500">No hay sesión activa</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Configuración del Servidor */}
+              <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <Server className="h-5 w-5 text-purple-600" />
+                  <h4 className="text-lg font-semibold text-gray-900">Servidor Backend</h4>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">URL del API</p>
+                    <p className="text-sm font-medium text-gray-900 break-all">{systemInfo.backendUrl}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">URL del Frontend</p>
+                    <p className="text-sm font-medium text-gray-900 break-all">{systemInfo.frontendUrl}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Información del Cliente */}
+              <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <Database className="h-5 w-5 text-orange-600" />
+                  <h4 className="text-lg font-semibold text-gray-900">Información del Cliente</h4>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Idioma</p>
+                    <p className="text-sm font-medium text-gray-900">{systemInfo.idioma}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Zona Horaria</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Resolución de Pantalla</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {typeof window !== 'undefined' 
+                        ? `${window.screen.width}x${window.screen.height}` 
+                        : 'N/A'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Estadísticas Rápidas */}
+            <div className="bg-blue-50 rounded-lg p-5 border border-blue-200">
+              <div className="flex items-center gap-3 mb-4">
+                <Clock className="h-5 w-5 text-blue-600" />
+                <h4 className="text-lg font-semibold text-gray-900">Estadísticas del Sistema</h4>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-blue-600">{notifications.length}</p>
+                  <p className="text-xs text-gray-600 mt-1">Total de Notificaciones</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-green-600">{unreadCount}</p>
+                  <p className="text-xs text-gray-600 mt-1">Notificaciones No Leídas</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-purple-600">
+                    {typeof window !== 'undefined' ? 'Online' : 'N/A'}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">Estado de Conexión</p>
+                </div>
+              </div>
+            </div>
           </div>
         );
       default:
@@ -260,27 +411,30 @@ export default function ConfiguracionPage() {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="bg-gray-100 rounded-lg p-1">
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id);
-                // Actualizar la URL sin recargar la página
-                router.replace(`/configuracion?tab=${tab.id}`, { scroll: false });
-              }}
-              className={`flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-4 py-3 rounded-md transition-all duration-200 ${
-                activeTab === tab.id
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              <span className="text-sm sm:text-lg">{tab.icon}</span>
-              <span className="font-medium text-xs sm:text-sm truncate">{tab.label}</span>
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => {
+              setActiveTab(tab.id);
+              // Actualizar la URL sin recargar la página
+              router.replace(`/configuracion?tab=${tab.id}`, { scroll: false });
+            }}
+            className={`relative flex items-center justify-center space-x-2 px-4 py-3 rounded-lg transition-all duration-200 border w-full ${
+              activeTab === tab.id
+                ? 'bg-[#DC143C] text-white border-[#DC143C] shadow-md hover:bg-[#B01030]'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+            }`}
+          >
+            <span className="text-sm sm:text-lg">{tab.icon}</span>
+            <span className="font-medium text-sm truncate">{tab.label}</span>
+            {tab.id === 'notificaciones' && unreadCount > 0 && (
+              <span className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-[10px] leading-5 text-center shadow-md border-2 border-white">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {/* Tab Content */}

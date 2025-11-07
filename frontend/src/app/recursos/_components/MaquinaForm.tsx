@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Maquina } from "../_types";
+import { useToast } from "@/components/ui/toast";
 
 interface MaquinaFormProps {
   open: boolean;
@@ -17,6 +18,7 @@ interface MaquinaFormProps {
 }
 
 export default function MaquinaForm({ open, editing, data, onClose, onSuccess, cleanUrl }: MaquinaFormProps) {
+  const { showToast } = useToast();
   const [formData, setFormData] = useState({
     nombre: "",
     cod_maquina: "",
@@ -55,17 +57,23 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
     };
 
     if (editing && data) {
-      await fetch(`${cleanUrl}/maquinarias/${data.id}`, {
+      const response = await fetch(`${cleanUrl}/maquinarias/${data.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (response.ok) {
+        showToast(`Máquina '${payload.nombre}' modificada correctamente`, 'success');
+      }
     } else {
-      await fetch(`${cleanUrl}/maquinarias`, {
+      const response = await fetch(`${cleanUrl}/maquinarias`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (response.ok) {
+        showToast(`Máquina '${payload.nombre}' creada correctamente`, 'success');
+      }
     }
     onSuccess();
   };

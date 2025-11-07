@@ -15,9 +15,11 @@ import DetalleMaquina from "./_components/DetalleMaquina";
 import CambiarEstado from "./_components/CambiarEstado";
 import { Operario, Maquina } from "./_types";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { useToast } from "@/components/ui/toast";
 
 export default function RecursosPage() {
   const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
@@ -102,8 +104,10 @@ export default function RecursosPage() {
           `Operario ${itemAEliminar.nombre} ha sido eliminado`,
           "operario_deleted"
         );
+        showToast(`Operario ${itemAEliminar.nombre} eliminado correctamente`, 'success');
         await fetchOperarios();
       } else {
+        showToast(`Máquina ${itemAEliminar.nombre} eliminada correctamente`, 'success');
         await fetchMaquinas();
       }
     }
@@ -147,7 +151,7 @@ export default function RecursosPage() {
           Administración de Recursos
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
-          <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto">
+          <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
             <Plus className="h-4 w-4 mr-2" />
             {tabActiva === "operarios" ? "Nuevo Operario" : "Nueva Maquinaria"}
           </Button>
@@ -174,7 +178,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
-          className="flex-1"
+          className={`flex-1 ${tabActiva === "operarios" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <User className="h-4 w-4 sm:mr-2" />
           <span className="hidden xs:inline">Operarios</span>
@@ -182,7 +186,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "maquinas" ? "default" : "outline"}
           onClick={() => setTabActiva("maquinas")}
-          className="flex-1"
+          className={`flex-1 ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Activity className="h-4 w-4 sm:mr-2" />
           <span className="hidden xs:inline">Máquinas</span>

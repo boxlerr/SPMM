@@ -74,6 +74,20 @@ async def obtener_ordenes_criticas(dias: int = 7, db=Depends(get_db)):
     service = OrdenTrabajoService(db)
     return await service.obtenerOrdenesCriticas(dias)
 
+# 🔹 Obtener ocupación por sector
+@router.get("/ordenes-estadisticas/ocupacion-sector")
+async def obtener_ocupacion_sector(db=Depends(get_db)):
+    logger.info("API - Inicio GET /ordenes-estadisticas/ocupacion-sector")
+    service = OrdenTrabajoService(db)
+    return await service.obtenerOcupacionPorSector()
+
+# 🔹 Obtener timeline de próximas entregas (7 días)
+@router.get("/ordenes-estadisticas/proximas-entregas")
+async def obtener_proximas_entregas(dias: int = 7, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /ordenes-estadisticas/proximas-entregas?dias={dias}")
+    service = OrdenTrabajoService(db)
+    return await service.obtenerProximasEntregasTimeline(dias)
+
 app.include_router(router)
 
 

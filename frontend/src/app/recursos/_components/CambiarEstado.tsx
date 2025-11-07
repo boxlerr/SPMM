@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Operario } from "../_types";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { useToast } from "@/components/ui/toast";
+import { capitalizeName } from "@/lib/utils";
 
 interface CambiarEstadoProps {
   operario: Operario | null;
@@ -19,6 +21,7 @@ interface CambiarEstadoProps {
 
 export default function CambiarEstado({ operario, open, onClose, onSuccess, cleanUrl }: CambiarEstadoProps) {
   const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const [nuevoEstado, setNuevoEstado] = useState("");
   const [motivoCambio, setMotivoCambio] = useState("");
 
@@ -60,6 +63,7 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
           "operario_updated",
           motivoCambio.trim() || undefined
         );
+        showToast(`Estado del operario ${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)} cambiado a ${nuevoEstado} correctamente`, 'success');
       }
 
       onSuccess();
