@@ -1,53 +1,51 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+
+from fastapi import FastAPI, APIRouter,Depends
+
 from backend.application.ProcesoService import ProcesoService
 from backend.dto.ProcesoRequestDTO import ProcesoRequestDTO
-
-from backend.commons import ResponseDTO
-from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.exceptions.BusinessException import BusinessException
+from backend.infrastructure.db import SessionLocal
+from backend.commons.loggers.logger import logger
 
 app = FastAPI()
 router = APIRouter()
-service = ProcesoService()
 
+# 🔹 Dependencia para obtener sesión async
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+    
+# 🔹 Crear proceso
 @router.post("/procesos")
-def crear_proceso(proceso_dto: ProcesoRequestDTO):
-    try:
-        result = service.crearProceso(proceso_dto)
-        return result
-    except (BusinessException, InfrastructureException) as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def crear_proceso(proceso_dto: ProcesoRequestDTO, db=Depends(get_db)):
+    logger.info("API Crear proceso- Inicio POST /procesos")
+    service = ProcesoService(db)
+    result = await service.crearProceso(proceso_dto)
+    return result
 
-# 🔹 Nuevo: Listar todos los procesos
+# 🔹 Listar todos los procesos
 @router.get("/procesos")
-def listar_procesos():
-    try:
-        return service.listarProcesos()
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def listar_procesos(db=Depends(get_db)):
+    logger.info("API - Inicio GET /procesos")
+    service = ProcesoService(db)
+    return await service.listarProcesos()
 
-# 🔹 Nuevo: Obtener un proceso por ID
+# 🔹 Obtener proceso por ID
 @router.get("/procesos/{id}")
-def obtener_proceso(id: int):
-    try:
-        return service.obtenerProcesoPorId(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def obtener_proceso(id: int, db=Depends(get_db)):
+    service = ProcesoService(db)
+    return await service.obtenerProcesoPorId(id)
 
-# 🔹 Nuevo: Modificar un proceso
+# 🔹 Modificar proceso
 @router.put("/procesos/{id}")
-def modificar_proceso(id: int, proceso_dto: ProcesoRequestDTO):
-    try:
-        return service.modificarProceso(id, proceso_dto)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def modificar_proceso(id: int, proceso_dto: ProcesoRequestDTO, db=Depends(get_db)):
+    service = ProcesoService(db)
+    return await service.modificarProceso(id, proceso_dto)
 
-# 🔹 Nuevo: Eliminar un proceso
+# 🔹 Eliminar proceso
 @router.delete("/procesos/{id}")
-def eliminar_proceso(id: int):
-    try:
-        return service.eliminarProceso(id)
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def eliminar_proceso(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio DELETE /procesos/{id}")
+    service = ProcesoService(db)
+    return await service.eliminarProceso(id)
 
 app.include_router(router)

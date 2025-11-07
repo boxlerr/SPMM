@@ -1,71 +1,77 @@
-""" from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List
-
-app = FastAPI()
-
-# Modelo de request/response
-class Operario(BaseModel):
-    id: int
-    nombre: str
-    especialidad: str
-
-# "Base de datos" en memoria --------
-operarios: List[Operario] = []
-
-@app.get("/")
-def read_root():
-    return {"message": "Hola, FastAPI funcionando 🚀"}
-
-# Nuevo recurso: lista de operarios
-# Listar todos
-@app.get("/operarios", response_model=List[Operario])
-def list_operarios():
-    return operarios
-
-
-
-@app.get("/operarios/{operario_id}", response_model=Operario)
-def get_operario(operario_id: int):
-    for o in operarios:
-        if o.id == operario_id:
-            return o
-    raise HTTPException(status_code=404, detail="Operario no encontrado")
-
-# Crear un nuevo operario (POST)
-@app.post("/operarios", response_model=Operario)
-def create_operario(operario: Operario):
-    operarios.append(operario)
-    return operario
-
-# Actualizar (PUT)
-@app.put("/operarios/{operario_id}", response_model=Operario)
-def update_operario(operario_id: int, datos: Operario):
-    for index, o in enumerate(operarios):
-        if o.id == operario_id:
-            operarios[index] = datos
-            return datos
-    raise HTTPException(status_code=404, detail="Operario no encontrado")
-
-# Eliminar (DELETE)
-@app.delete("/operarios/{operario_id}")
-def delete_operario(operario_id: int):
-    for index, o in enumerate(operarios):
-        if o.id == operario_id:
-            operarios.pop(index)
-            return {"message": f"Operario {operario_id} eliminado"}
-    raise HTTPException(status_code=404, detail="Operario no encontrado") """
-
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+# Routers de presentación
+from backend.presentation.ProcesoAPI import router as proceso_router
+from backend.presentation.OperarioAPI import router as operario_router
 from backend.presentation.OrdenTrabajoAPI import router as orden_trabajo_router
 from backend.presentation.SectorAPI import router as sector_router
-from backend.presentation.OperarioAPI import router as operario_router
+from backend.presentation.ArticuloAPI import router as articulo_router
+from backend.presentation.PlanificacionAPI import router as plan_router
+from backend.presentation.PrioridadAPI import router as prioridad_router
+from backend.presentation.MaquinariaAPI import router as maquinaria_router
+from backend.presentation.AuthAPI import router as auth_router
 
-app = FastAPI()
+import logging
 
-app.include_router(orden_trabajo_router)
-app.include_router(sector_router)
-app.include_router(operario_router)
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.DomainException import DomainException
 
 
+from backend.commons.handlers.exception_handlers import (
+    application_handler,
+    infrastructure_handler,
+    validation_exception_handler,
+    http_exception_handler,
+    not_found_handler,
+    domain_handler,
+    generic_handler,
+    not_found_handler
+)
 
+app = FastAPI(title="SPMM Backend", version="1.0")
+
+# Configuración CORS
+origins = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # o usa 'origins' si querés restringir
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 🔹 Registrar todos los routers
+app.include_router(auth_router)  # Autenticación
+app.include_router(articulo_router, tags=["articulos"])
+app.include_router(proceso_router, tags=["procesos"])
+app.include_router(operario_router, tags=["operarios"])
+app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"])
+app.include_router(sector_router, tags=["sectores"])
+app.include_router(plan_router,tags=["planificacion"])
+app.include_router(prioridad_router,tags=["prioridades"])
+app.include_router(maquinaria_router,tags=["maquinarias"])
+
+# Agrega los handler de exepciones globales al contexto de la aplicacion
+app.add_exception_handler(InfrastructureException, infrastructure_handler)
+app.add_exception_handler(ApplicationException, application_handler)
+app.add_exception_handler(DomainException, domain_handler)
+app.add_exception_handler(Exception, generic_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(NotFoundException, not_found_handler)
+
+
+# 🔹 Logger básico
+logger = logging.getLogger("uvicorn")
+
+# 🔹 Endpoint raíz
+@app.get("/")
+def root():
+    return {"message": "Backend funcionando correctamente"}

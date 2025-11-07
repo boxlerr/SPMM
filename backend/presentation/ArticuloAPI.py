@@ -1,47 +1,55 @@
-
-from fastapi import FastAPI, APIRouter,HTTPException
+from fastapi import FastAPI, APIRouter, Depends
+from backend.infrastructure.db import SessionLocal
 from backend.dto.ArticuloRequestDTO import ArticuloRequestDTO
 from backend.application.ArticuloService import ArticuloService
-from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.loggers.logger import logger
 
 #El request de afuera entra aca.
 app = FastAPI()
 router = APIRouter()
 
+# 🔹 Dependencia para obtener la sesión async
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
+
+# 🔹 Crear artículo
 @router.post("/articulos")
-def crear_articulo(articulo_dto: ArticuloRequestDTO):
-    try:
-        service = ArticuloService()
-        
-        articulo = service.crearArticulo(articulo_dto)
-        return articulo
+async def crear_articulo(articulo_dto: ArticuloRequestDTO, db=Depends(get_db)):
+    logger.info("API - Inicio POST /articulos")
+    service = ArticuloService(db)
+    result = await service.crearArticulo(articulo_dto)
+    return result
 
-    except BusinessException as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/articulos/{id}")
-def eliminar_articulo(id: int):
-    try:
-        service = ArticuloService()
-        response = service.eliminarArticulo(id)
-        return response
+async def eliminar_articulo(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio DELETE /articulos/{id}")
+    service = ArticuloService(db)
+    result = await service.eliminarArticulo(id)
+    return result
 
-    except BusinessException as e:
-        raise HTTPException(status_code=422, detail=str(e))
 
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/articulos")
+async def listar_articulos(db=Depends(get_db)):
+    logger.info("API - Inicio GET /articulos")
+    service = ArticuloService(db)
+    return await service.listarArticulos()
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/articulos/{id}")
+async def obtener_articulo(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /articulos/{id}")
+    service = ArticuloService(db)
+    return await service.obtenerArticuloPorId(id)
+
+
+@router.put("/articulos/{id}")
+async def modificar_articulo(id: int, dto: ArticuloRequestDTO, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /articulos/{id}")
+    service = ArticuloService(db)
+    return await service.modificarArticulo(id, dto)
 
 
 app.include_router(router)

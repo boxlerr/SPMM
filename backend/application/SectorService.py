@@ -6,59 +6,77 @@ from backend.infrastructure.SectorRepository import SectorRepository
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
-
+from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+from fastapi.encoders import jsonable_encoder
+from backend.commons.loggers.logger import logger
 
 class SectorService:
-    """
-    validación mínima y delega en repositorio `save`.
-    """
+    def __init__(self, db_session):
+        self.repository = SectorRepository(db_session)
 
-    def __init__(self):
-        self.repo = SectorRepository()
-
-    def crearSector(self, payload: SectorRequestDTO):
+    async def crearSector(self, sector_dto: SectorRequestDTO):
         try:
-            nombre = (payload.nombre or "").strip()
+            logger.info("Service - Crear sector.")
+
+            # Validación de negocio
+            nombre = (sector_dto.nombre or "").strip()
             if not nombre:
                 raise BusinessException("El nombre de Sector es obligatorio.")
 
             sector = Sector(nombre=nombre)
-            creado = self.repo.save(sector)
+            sector_creado = await self.repository.save(sector)
 
-            response = ResponseDTO()
-            response.status = True
-            response.data = {"id": creado.id, "nombre": creado.nombre}
-            response.errorDescription = ""
-            return response
+            return ResponseDTO(status=True, data=jsonable_encoder(sector_creado))
+        except InfrastructureException:
+            raise  
+        except BusinessException:
+            raise
         except Exception as e:
-            raise InfrastructureException("Error al guardar el Sector.") from e
+            raise ApplicationException("Error inesperado al crear el Sector.") from e
 
-    def eliminarSector(self, id: int):
-        print(f"🔄 [Service] Eliminando sector ID: {id}")  # opcional para debug
+    async def listarSectores(self):
+        logger.info("Service - Listar sectores.")
+        sectores = await self.repository.find_all()
+        
+        if not sectores:
+            logger.info("Service - No hay sectores registrados.")
+        
+        return ResponseDTO(status=True, data=jsonable_encoder(sectores))
 
-        try:
-            repo = SectorRepository()
-            sector = repo.find_by_id(id)
-            print(f"🔍 [Service] Sector encontrado: {sector}")  # opcional
+    async def obtenerSectorPorId(self, id: int):
+        logger.info(f"Service - Obtener sector ID: {id}")
+        sector = await self.repository.find_by_id(id)
 
-            if not sector:
-                return ResponseDTO(
-                    status=False,
-                    data={},
-                    errorDescription="No se encontró el sector con ese ID."
-                )
+        if not sector:
+            raise NotFoundException(f"No se encontró el sector con ID {id}")
 
-            repo.delete(id)
+        return ResponseDTO(status=True, data=jsonable_encoder(sector))
 
-            return ResponseDTO(
-                status=True,
-                data={"id_eliminado": id},
-                errorDescription=""
-            )
+    async def modificarSector(self, id: int, sector_dto: SectorRequestDTO):
+        logger.info(f"Service - Modificar sector ID: {id}")
 
-        except Exception as e:
-            print(f"❌ [Service] Error al eliminar sector: {e}")  # opcional
-            raise InfrastructureException("Error al eliminar el sector.") from e
+        # Validación de negocio
+        nombre = (sector_dto.nombre or "").strip()
+        if not nombre:
+            raise BusinessException("El nombre de Sector es obligatorio.")
+
+        nueva_data = sector_dto.dict(exclude_unset=True)
+        sector_actualizado = await self.repository.update(id, nueva_data)
+
+        if not sector_actualizado:
+            raise NotFoundException(f"No se encontró el sector con ID {id}")
+
+        return ResponseDTO(status=True, data=jsonable_encoder(sector_actualizado))
+
+    async def eliminarSector(self, id: int):
+        logger.info(f"Service - Eliminar sector ID: {id}")
+        ok = await self.repository.delete(id)
+
+        if not ok:
+            raise NotFoundException(f"No se encontró el sector con ID {id}")
+
+        return ResponseDTO(status=True, data={"deleted": id})
 
 
 

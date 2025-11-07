@@ -1,0 +1,16 @@
+{
+  "name": "spmm",
+  "version": "1.0.0",
+  "description": "Sistema de Planificación y Mantenimiento de Maquinaria",
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "cd backend && python -m uvicorn presentation.main:app --reload",
+    "build": "npm run build --prefix frontend",
+    "start": "npm run start --prefix frontend"
+  },
+  "dependencies": {
+    "badge": "^1.0.3",
+    "ui": "^0.2.4"
+  }
+}

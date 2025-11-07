@@ -1,80 +1,105 @@
 from backend.domain.Proceso import Proceso
 from backend.dto.ProcesoRequestDTO import ProcesoRequestDTO
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
-
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
-
 from backend.application.validators.ProcesoValidator import procesoValidator
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.ApplicationException import ApplicationException
+from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.NotFoundException import NotFoundException
+
+
+
+from backend.commons.loggers.logger import logger
 
 class ProcesoService:
-    def __init__(self):
-        pass
+    def __init__(self, db_session):
+        self.repository = ProcesoRepository(db_session)
 
-    def crearProceso(self, proceso_dto: ProcesoRequestDTO):
+    async def crearProceso(self, proceso_dto: ProcesoRequestDTO):
         try:
+            logger.info("Service - Crear proceso.")
+
+            # Validación de negocio
             errores = procesoValidator(proceso_dto)
             if errores:
-                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
+                raise BusinessException("; ".join(errores))
 
             proceso = Proceso(
                 nombre=proceso_dto.nombre,
                 descripcion=proceso_dto.descripcion
             )
 
-            repo = ProcesoRepository()
-            proceso_creado = repo.save(proceso)
+            proceso_creado = await self.repository.save(proceso)
 
-            response = ResponseDTO()
-            response.status = True
-            response.data = jsonable_encoder(proceso_creado)
-            response.errorDescription = ""
-
-            return response
-
+            return ResponseDTO(status=True, data=jsonable_encoder(proceso_creado))
+        #Las maneja el exception_hanlder pero acá se le da el formato
+        #Error al guardar (viene del repo) → InfrastructureException
+        #Error de validación (ej. nombre vacío) → BusinessException
+        #Otro error inesperado → ApplicationException
+        except InfrastructureException:
+            raise  
+        except BusinessException:
+            raise
         except Exception as e:
-            raise InfrastructureException("Error al guardar el Proceso.") from e
+            raise ApplicationException("Error inesperado al crear el Proceso.") from e
 
-    # 🔹 Nuevo: Listar todos los procesos
-    def listarProcesos(self):
-        repo = ProcesoRepository()
-        procesos = repo.find_all()
+
+    async def listarProcesos(self):
+        logger.info("Service - Listar procesos.")
+        procesos = await self.repository.find_all()
+
+        #   Posibles errores:
+        # - Error de conexión / consulta SQL → InfrastructureException (repo)
+        # - Ninguno si la lista está vacía (devuelve lista vacía)
+        
+        if not procesos:
+            logger.info("Service - No hay procesos registrados.")
+
+        
         return ResponseDTO(status=True, data=jsonable_encoder(procesos))
 
-    # 🔹 Nuevo: Obtener proceso por ID
-    def obtenerProcesoPorId(self, id: int):
-        repo = ProcesoRepository()
-        proceso = repo.find_by_id(id)
+    async def obtenerProcesoPorId(self, id: int):
+        logger.info(f"Service - Obtener proceso ID: {id}")
+        proceso = await self.repository.find_by_id(id)
+
+        #  Posibles errores:
+        # - Proceso no existe → NotFoundException (lanzarla acá)
+        # - Error de base de datos → InfrastructureException (repo)
         if not proceso:
-            return ResponseDTO(status=False, data={}, errorDescription="Proceso no encontrado")
+            raise NotFoundException(f"No se encontró el proceso con ID {id}")
+
         return ResponseDTO(status=True, data=jsonable_encoder(proceso))
 
-    # 🔹 Nuevo: Modificar un proceso
-    def modificarProceso(self, id: int, proceso_dto: ProcesoRequestDTO):
-        try:
-            errores = procesoValidator(proceso_dto)
-            if errores:
-                return ResponseDTO(status=False, data={}, errorDescription="; ".join(errores))
+    async def modificarProceso(self, id: int, proceso_dto: ProcesoRequestDTO):
+        logger.info(f"Service - Modificar proceso ID: {id}")
 
-            repo = ProcesoRepository()
-            nueva_data = proceso_dto.dict(exclude_unset=True)
-            proceso_actualizado = repo.update(id, nueva_data)
+        #   Posibles errores:
+        # - Validaciones de negocio → BusinessException
+        # - Proceso inexistente → NotFoundException
+        # - Error SQL → InfrastructureException (repo)
 
-            if not proceso_actualizado:
-                return ResponseDTO(status=False, data={}, errorDescription="Proceso no encontrado")
+        errores = procesoValidator(proceso_dto)
+        if errores:
+            raise BusinessException("; ".join(errores))
 
-            return ResponseDTO(status=True, data=jsonable_encoder(proceso_actualizado))
-        except Exception as e:
-            raise InfrastructureException("Error al actualizar el Proceso.") from e
+        nueva_data = proceso_dto.dict(exclude_unset=True)
+        proceso_actualizado = await self.repository.update(id, nueva_data)
 
-    # 🔹 Nuevo: Eliminar un proceso
-    def eliminarProceso(self, id: int):
-        try:
-            repo = ProcesoRepository()
-            ok = repo.delete(id)
-            if not ok:
-                return ResponseDTO(status=False, data={}, errorDescription="Proceso no encontrado")
-            return ResponseDTO(status=True, data={"deleted": id})
-        except Exception as e:
-            raise InfrastructureException("Error al eliminar el Proceso.") from e
+        if not proceso_actualizado:
+            raise NotFoundException(f"No se encontró el proceso con ID {id}")
+
+        return ResponseDTO(status=True, data=jsonable_encoder(proceso_actualizado))
+
+    async def eliminarProceso(self, id: int):
+        logger.info(f"Service - Eliminar proceso ID: {id}")
+        ok = await self.repository.delete(id)
+
+        #   Posibles errores:
+        # - Proceso inexistente → NotFoundException
+        # - Error SQL / constraint → InfrastructureException (repo)
+        if not ok:
+            raise NotFoundException(f"No se encontró el proceso con ID {id}")
+
+        return ResponseDTO(status=True, data={"deleted": id})

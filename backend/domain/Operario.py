@@ -20,6 +20,9 @@ class Operario(Base):
     sector = Column(String(100), nullable=False)  # texto simple por ahora
     categoria = Column(String(100), nullable=False)
     disponible = Column(Boolean, nullable=False, default=True)
+    telefono = Column(String(50), nullable=True)
+    celular = Column(String(50), nullable=True)
+    dni = Column(String(20), nullable=True)
     #cant_hs_trabajadas = Column(Integer, nullable=False, default=0)
     #dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
 

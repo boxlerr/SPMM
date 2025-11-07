@@ -1,59 +1,83 @@
+
+from sqlalchemy import select
 from backend.domain.Proceso import Proceso
-from backend.infrastructure.db import SessionLocal
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 
-class ProcesoRepository:
-    def __init__(self):
-        self.db = SessionLocal()
+from backend.commons.loggers.logger import logger
 
-    def save(self, proceso: Proceso):
+class ProcesoRepository:
+    def __init__(self, db):
+        self.db = db
+
+    async def save(self, proceso: Proceso):
         try:
+            logger.info("Repository - Crear Proceso.")
             self.db.add(proceso)
-            self.db.commit()
-            self.db.refresh(proceso)
+            await self.db.commit()
+            await self.db.refresh(proceso)
+            logger.info("Repository - Crear Proceso OK.")
             return proceso
         except Exception as e:
-            self.db.rollback()
-            raise InfrastructureException("Error al guardar un Proceso.") from e
+            logger.error(f"Repository - Error real en save: {e}")
+            await self.db.rollback()
+            raise InfrastructureException("Error al guardar el Proceso.") from e
 
-    # 🔹 Nuevo: Obtener todos los procesos
-    def find_all(self):
+    async def find_all(self):
         try:
-            return self.db.query(Proceso).all()
+            logger.info("Repository - Obtener todos los procesos.")
+            result = await self.db.execute(select(Proceso))
+            data = result.scalars().all()
+            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
+            return data
         except Exception as e:
-            raise InfrastructureException("Error al listar Procesos.") from e
+            logger.error(f"Repository - Error real en find_all: {e}")
+            raise InfrastructureException("Error al listar los Procesos.") from e
 
-    # 🔹 Nuevo: Buscar un proceso por ID
-    def find_by_id(self, id: int):
+    async def find_by_id(self, id: int):
         try:
-            return self.db.query(Proceso).filter(Proceso.id == id).first()
+            logger.info(f"Repository - Buscar proceso por ID {id}.")
+            result = await self.db.execute(select(Proceso).where(Proceso.id == id))
+            return result.scalar_one_or_none()
         except Exception as e:
+            logger.error(f"Repository - Error real en find_by_id: {e}")
             raise InfrastructureException("Error al buscar el Proceso por ID.") from e
 
-    # 🔹 Nuevo: Actualizar un proceso existente
-    def update(self, id: int, nueva_data: dict):
+    async def update(self, id: int, nueva_data: dict):
         try:
-            proceso = self.find_by_id(id)
+            logger.info(f"Repository - Actualizar proceso ID {id}.")
+            result = await self.db.execute(select(Proceso).where(Proceso.id == id))
+            proceso = result.scalar_one_or_none()
             if not proceso:
+                logger.info(f"Repository - Proceso {id} no encontrado para actualizar.")
                 return None
+
             for key, value in nueva_data.items():
                 setattr(proceso, key, value)
-            self.db.commit()
-            self.db.refresh(proceso)
+
+            await self.db.commit()
+            await self.db.refresh(proceso)
+            logger.info(f"Repository - Proceso {id} actualizado correctamente.")
             return proceso
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
+            logger.error(f"Repository - Error real en update: {e}")
             raise InfrastructureException("Error al actualizar el Proceso.") from e
 
-    # 🔹 Nuevo: Eliminar un proceso por ID
-    def delete(self, id: int):
+    async def delete(self, id: int):
         try:
-            proceso = self.find_by_id(id)
+            logger.info(f"Repository - Eliminar proceso ID {id}.")
+            result = await self.db.execute(select(Proceso).where(Proceso.id == id))
+            proceso = result.scalar_one_or_none()
+
             if not proceso:
+                logger.info(f"Repository - Proceso {id} no encontrado para eliminar.")
                 return False
-            self.db.delete(proceso)
-            self.db.commit()
+
+            await self.db.delete(proceso)
+            await self.db.commit()
+            logger.info(f"Repository - Proceso {id} eliminado correctamente.")
             return True
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
+            logger.error(f"Repository - Error real en delete: {e}")
             raise InfrastructureException("Error al eliminar el Proceso.") from e
