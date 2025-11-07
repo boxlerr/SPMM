@@ -13,7 +13,7 @@ class OrdenTrabajo(Base):
     id_prioridad = Column(Integer, ForeignKey("prioridad.id"), nullable=False)
     id_sector = Column(Integer, ForeignKey("sector.id"), nullable=False)
     id_articulo = Column(Integer, ForeignKey("articulo.id"), nullable=False)
-    # 🔻 Eliminado: id_maquinaria (se quitó la FK a maquinaria)
+
 
     fecha_orden = Column(DateTime, nullable=False)
     fecha_entrada = Column(DateTime, nullable=False)
@@ -21,7 +21,7 @@ class OrdenTrabajo(Base):
     fecha_entrega = Column(DateTime, nullable=True)
 
     # Relaciones
-    procesos = relationship("OrdenTrabajoProceso", back_populates="orden_trabajo")
-    prioridad = relationship("Prioridad")
+    prioridad = relationship("Prioridad", back_populates="ordenes_trabajo")
+    procesos = relationship("OrdenTrabajoProceso", back_populates="orden_trabajo", lazy="joined")
     sector = relationship("Sector")
     articulo = relationship("Articulo")

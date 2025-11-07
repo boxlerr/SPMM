@@ -1,8 +1,11 @@
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+
 from backend.domain.Operario import Operario
+from backend.domain.OperarioRango import OperarioRango
+
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
-
 
 class OperarioRepository:
     """
@@ -83,3 +86,18 @@ class OperarioRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error al eliminar Operario {id}: {e}")
             raise InfrastructureException("Error al eliminar el Operario.") from e
+
+    async def find_with_rangos(self):
+        """
+        Devuelve una lista de tuplas (id_operario, id_rango)
+        """
+        try:
+            result = await self.db.execute(
+                select(OperarioRango).options(joinedload(OperarioRango.operario))
+            )
+            relaciones = result.scalars().all()
+            return [(r.id_operario, r.id_rango) for r in relaciones]
+
+        except Exception as e:
+            print(f"Error en find_with_rangos: {e}")
+            raise
