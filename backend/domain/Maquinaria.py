@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String
 from backend.infrastructure.db import Base
+from sqlalchemy.orm import relationship
 
 
 class Maquinaria(Base):
@@ -23,6 +24,15 @@ class Maquinaria(Base):
     capacidad = Column(String(255), nullable=True)
     especialidad = Column(String(255), nullable=True)
 
+    rango_maquinarias = relationship(
+        "RangoMaquinaria",
+        back_populates="maquinaria",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     def __repr__(self) -> str:
         return f"<Maquinaria id={self.id} nombre={self.nombre!r}>"
+      
+      
+  
 
