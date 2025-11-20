@@ -1,4 +1,6 @@
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
+
 from backend.domain.Maquinaria import Maquinaria
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -86,3 +88,17 @@ class MaquinariaRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error al eliminar Maquinaria {id}: {e}")
             raise InfrastructureException("Error al eliminar la Maquinaria.") from e
+
+    async def find_with_rangos(self):
+        try:
+            logger.info("Repository - Obtener maquinarias con sus rangos asociados.")
+            result = await self.db.execute(
+                select(Maquinaria).options(joinedload(Maquinaria.rango_maquinarias))
+            )
+            data = result.unique().scalars().all()  # ✅ NO pierde rangos, solo agrupa bien
+
+            logger.info(f"Repository - Resultado OK ({len(data)} maquinarias con rangos)")
+            return data
+        except Exception as e:
+            logger.error(f"Repository - Error al listar Maquinarias con rangos: {e}")
+            raise InfrastructureException("Error al listar Maquinarias con rangos.") from e

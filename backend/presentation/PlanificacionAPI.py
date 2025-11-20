@@ -26,7 +26,9 @@ async def planificar_endpoint(db = Depends(get_db)):
     return resultados"""
     
     repo_orden = OrdenTrabajoRepository(db)
-    resultados = await planificar(repo_orden)
+    repo_operario = OperarioRepository(db)
+    repo_maquinaria = MaquinariaRepository(db)
+    resultados = await planificar(repo_orden,repo_operario,repo_maquinaria,db)
     return resultados
     
     

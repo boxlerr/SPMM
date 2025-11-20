@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { capitalizeName } from '@/lib/utils';
 import { 
   Search, 
   UserPlus, 
@@ -59,6 +61,7 @@ interface FormData {
 }
 
 export default function UsuariosTable() {
+  const { showToast } = useToast();
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [filteredUsuarios, setFilteredUsuarios] = useState<Usuario[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -208,7 +211,14 @@ export default function UsuariosTable() {
       if (data.status) {
         await fetchUsuarios();
         setIsCreateModalOpen(false);
-        // TODO: Mostrar notificación de éxito
+        showToast(`Usuario '${formData.username}' creado correctamente`, 'success');
+        // La notificación se crea automáticamente en el backend
+        // Recargar notificaciones inmediatamente después de un pequeño delay
+        setTimeout(() => {
+          if ((window as any).reloadNotifications) {
+            (window as any).reloadNotifications();
+          }
+        }, 500); // Esperar 500ms para que el backend procese la notificación
       } else {
         // Mostrar errores del servidor
         if (data.errors && data.errors.length > 0) {
@@ -258,7 +268,14 @@ export default function UsuariosTable() {
       if (data.status) {
         await fetchUsuarios();
         setIsEditModalOpen(false);
-        // TODO: Mostrar notificación de éxito
+        showToast(`Usuario '${formData.username}' modificado correctamente`, 'success');
+        // La notificación se crea automáticamente en el backend
+        // Recargar notificaciones inmediatamente después de un pequeño delay
+        setTimeout(() => {
+          if ((window as any).reloadNotifications) {
+            (window as any).reloadNotifications();
+          }
+        }, 500); // Esperar 500ms para que el backend procese la notificación
       } else {
         // Mostrar errores del servidor
         if (data.errors && data.errors.length > 0) {
@@ -290,9 +307,18 @@ export default function UsuariosTable() {
       const data = await response.json();
 
       if (data.status) {
+        // La notificación se crea automáticamente en el backend
+        if (selectedUsuario) {
+          showToast(`Usuario '${selectedUsuario.username}' eliminado correctamente`, 'success');
+        }
         await fetchUsuarios();
         setIsDeleteModalOpen(false);
-        // TODO: Mostrar notificación de éxito
+        // Recargar notificaciones inmediatamente después de un pequeño delay
+        setTimeout(() => {
+          if ((window as any).reloadNotifications) {
+            (window as any).reloadNotifications();
+          }
+        }, 500); // Esperar 500ms para que el backend procese la notificación
       }
     } catch (error) {
       console.error('Error al eliminar usuario:', error);
@@ -391,7 +417,7 @@ export default function UsuariosTable() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-gray-900">{usuario.nombre} {usuario.apellido}</div>
+                      <div className="text-gray-900">{capitalizeName(usuario.nombre)} {capitalizeName(usuario.apellido)}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded-full">
@@ -694,7 +720,7 @@ export default function UsuariosTable() {
                   <strong>Username:</strong> {selectedUsuario.username}
                 </p>
                 <p className="text-sm text-gray-900 mb-2">
-                  <strong>Nombre:</strong> {selectedUsuario.nombre} {selectedUsuario.apellido}
+                  <strong>Nombre:</strong> {capitalizeName(selectedUsuario.nombre)} {capitalizeName(selectedUsuario.apellido)}
                 </p>
                 <p className="text-sm text-gray-900">
                   <strong>Email:</strong> {selectedUsuario.email}

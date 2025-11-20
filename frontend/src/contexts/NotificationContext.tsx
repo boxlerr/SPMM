@@ -1,34 +1,28 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { useAuth } from "./AuthContext";
 
 export interface Notification {
-  id: string;
+  id: string; // Mantenemos string para compatibilidad con el frontend
+  id_notificacion?: number; // ID de la base de datos
   message: string;
-  type: "operario_created" | "operario_updated" | "operario_deleted";
+  type: "operario_created" | "operario_updated" | "operario_deleted" | "usuario_created" | "usuario_updated" | "usuario_deleted";
   timestamp: Date;
   read: boolean;
   motivo?: string; // Motivo o detalles adicionales (solo para cambio de estado)
 }
 
-interface NotificationStorage {
-  id: string;
-  message: string;
-  type: "operario_created" | "operario_updated" | "operario_deleted";
-  timestamp: string;
-  read: boolean;
-  motivo?: string;
-}
-
-const STORAGE_KEY = "spmm_notifications";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface NotificationContextType {
   notifications: Notification[];
   unreadCount: number;
-  addNotification: (message: string, type: Notification["type"], motivo?: string) => void;
-  markAsRead: (id: string) => void;
-  markAllAsRead: () => void;
-  clearNotifications: () => void;
+  loading: boolean;
+  addNotification: (message: string, type: Notification["type"], motivo?: string) => Promise<void>;
+  markAsRead: (id: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  clearNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -36,70 +30,223 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { token } = useAuth();
 
-  // Cargar notificaciones desde localStorage al montar
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed: NotificationStorage[] = JSON.parse(stored);
-        const loadedNotifications: Notification[] = parsed.map((n) => ({
-          ...n,
-          timestamp: new Date(n.timestamp),
-        }));
-        setNotifications(loadedNotifications);
-      }
-    } catch (error) {
-      console.error("Error al cargar notificaciones desde localStorage:", error);
-    } finally {
-      setIsLoaded(true);
-    }
-  }, []);
-
-  // Guardar notificaciones en localStorage cada vez que cambien
-  useEffect(() => {
-    if (isLoaded) {
-      try {
-        const toStore: NotificationStorage[] = notifications.map((n) => ({
-          id: n.id,
-          message: n.message,
-          type: n.type,
-          timestamp: n.timestamp.toISOString(),
-          read: n.read,
-          motivo: n.motivo,
-        }));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
-      } catch (error) {
-        console.error("Error al guardar notificaciones en localStorage:", error);
-      }
-    }
-  }, [notifications, isLoaded]);
-
-  const addNotification = (message: string, type: Notification["type"], motivo?: string) => {
-    const newNotification: Notification = {
-      id: `${Date.now()}-${Math.random()}`,
-      message,
-      type,
-      timestamp: new Date(),
-      read: false,
-      motivo: motivo?.trim() || undefined,
+  // Función auxiliar para obtener headers con autenticación
+  const getHeaders = () => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
     };
-    setNotifications((prev) => [newNotification, ...prev]);
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
   };
 
-  const markAsRead = (id: string) => {
+  // Cargar notificaciones desde el backend al montar
+  useEffect(() => {
+    const loadNotifications = async () => {
+      if (!token) {
+        setIsLoaded(true);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const response = await fetch(`${API_URL}/notificaciones`, {
+          method: "GET",
+          headers: getHeaders(),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.status && result.data) {
+            const loadedNotifications: Notification[] = result.data.map((n: any) => ({
+              id: n.id_notificacion?.toString() || `${Date.now()}-${Math.random()}`,
+              id_notificacion: n.id_notificacion,
+              message: n.mensaje,
+              type: n.tipo,
+              timestamp: new Date(n.fecha_creacion),
+              read: n.leida,
+              motivo: n.motivo,
+            }));
+            setNotifications(loadedNotifications);
+          }
+        }
+      } catch (error) {
+        console.error("Error al cargar notificaciones desde el backend:", error);
+      } finally {
+        setLoading(false);
+        setIsLoaded(true);
+      }
+    };
+
+    loadNotifications();
+  }, [token]);
+
+  // Función para recargar notificaciones manualmente
+  const reloadNotifications = async () => {
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${API_URL}/notificaciones`, {
+        method: "GET",
+        headers: getHeaders(),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.status && result.data) {
+          const loadedNotifications: Notification[] = result.data.map((n: any) => ({
+            id: n.id_notificacion?.toString() || `${Date.now()}-${Math.random()}`,
+            id_notificacion: n.id_notificacion,
+            message: n.mensaje,
+            type: n.tipo,
+            timestamp: new Date(n.fecha_creacion),
+            read: n.leida,
+            motivo: n.motivo,
+          }));
+          setNotifications(loadedNotifications);
+        }
+      }
+    } catch (error) {
+      console.error("Error al recargar notificaciones:", error);
+    }
+  };
+
+  // Recargar notificaciones periódicamente (cada 10 segundos para respuesta más rápida)
+  useEffect(() => {
+    if (!token || !isLoaded) return;
+
+    const interval = setInterval(() => {
+      reloadNotifications();
+    }, 10000); // 10 segundos
+
+    return () => clearInterval(interval);
+  }, [token, isLoaded]);
+
+  // Exponer la función para recargar manualmente
+  useEffect(() => {
+    // Agregar función al contexto global para que otros componentes puedan usarla
+    (window as any).reloadNotifications = reloadNotifications;
+  }, [token]);
+
+  const addNotification = async (
+    message: string,
+    type: Notification["type"],
+    motivo?: string
+  ) => {
+    if (!token) {
+      // Si no hay token, crear notificación local temporal
+      const newNotification: Notification = {
+        id: `${Date.now()}-${Math.random()}`,
+        message,
+        type,
+        timestamp: new Date(),
+        read: false,
+        motivo: motivo?.trim() || undefined,
+      };
+      setNotifications((prev) => [newNotification, ...prev]);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/notificaciones`, {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify({
+          mensaje: message,
+          tipo: type,
+          motivo: motivo?.trim() || null,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.status && result.data) {
+          const newNotification: Notification = {
+            id: result.data.id_notificacion?.toString() || `${Date.now()}-${Math.random()}`,
+            id_notificacion: result.data.id_notificacion,
+            message: result.data.mensaje,
+            type: result.data.tipo,
+            timestamp: new Date(result.data.fecha_creacion),
+            read: result.data.leida,
+            motivo: result.data.motivo,
+          };
+          setNotifications((prev) => [newNotification, ...prev]);
+        }
+      }
+    } catch (error) {
+      console.error("Error al crear notificación en el backend:", error);
+      // Fallback: crear notificación local
+      const newNotification: Notification = {
+        id: `${Date.now()}-${Math.random()}`,
+        message,
+        type,
+        timestamp: new Date(),
+        read: false,
+        motivo: motivo?.trim() || undefined,
+      };
+      setNotifications((prev) => [newNotification, ...prev]);
+    }
+  };
+
+  const markAsRead = async (id: string) => {
+    // Buscar el id_notificacion antes de actualizar
+    const notification = notifications.find((n) => n.id === id);
+    const idNotificacion = notification?.id_notificacion;
+
+    // Actualizar localmente primero para respuesta inmediata
     setNotifications((prev) =>
       prev.map((notif) => (notif.id === id ? { ...notif, read: true } : notif))
     );
+
+    // Actualizar en el backend si existe id_notificacion
+    if (idNotificacion && token) {
+      try {
+        await fetch(`${API_URL}/notificaciones/${idNotificacion}/leida`, {
+          method: "PUT",
+          headers: getHeaders(),
+        });
+      } catch (error) {
+        console.error("Error al marcar notificación como leída:", error);
+        // Revertir cambio local si falla
+        setNotifications((prev) =>
+          prev.map((notif) => (notif.id === id ? { ...notif, read: false } : notif))
+        );
+      }
+    }
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
+    // Actualizar localmente primero
     setNotifications((prev) => prev.map((notif) => ({ ...notif, read: true })));
+
+    if (token) {
+      try {
+        await fetch(`${API_URL}/notificaciones/leer-todas`, {
+          method: "PUT",
+          headers: getHeaders(),
+        });
+      } catch (error) {
+        console.error("Error al marcar todas como leídas:", error);
+      }
+    }
   };
 
-  const clearNotifications = () => {
+  const clearNotifications = async () => {
+    if (token) {
+      try {
+        await fetch(`${API_URL}/notificaciones`, {
+          method: "DELETE",
+          headers: getHeaders(),
+        });
+      } catch (error) {
+        console.error("Error al eliminar todas las notificaciones:", error);
+      }
+    }
     setNotifications([]);
-    localStorage.removeItem(STORAGE_KEY);
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -109,6 +256,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       value={{
         notifications,
         unreadCount,
+        loading,
         addNotification,
         markAsRead,
         markAllAsRead,

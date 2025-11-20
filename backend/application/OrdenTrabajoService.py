@@ -108,3 +108,68 @@ class OrdenTrabajoService:
         except Exception as e:
             raise ApplicationException("Error al obtener estadísticas de estados.") from e
 
+    async def obtenerOrdenesCriticas(self, dias: int = 7):
+        """
+        Obtiene las órdenes críticas próximas a vencer
+        """
+        try:
+            logger.info(f"Service - Obtener órdenes críticas (próximas {dias} días).")
+            ordenes = await self.repository.get_ordenes_criticas(dias)
+            
+            # Formatear la respuesta con información relevante
+            ordenes_formateadas = []
+            for orden in ordenes:
+                from datetime import date
+                hoy = date.today()
+                dias_restantes = (orden.fecha_prometida - hoy).days
+                
+                orden_data = {
+                    "id": orden.id,
+                    "articulo": orden.articulo.descripcion if orden.articulo else "Sin artículo",
+                    "sector": orden.sector.nombre if orden.sector else "Sin sector",
+                    "fecha_prometida": orden.fecha_prometida.isoformat(),
+                    "dias_restantes": dias_restantes
+                }
+                ordenes_formateadas.append(orden_data)
+            
+            logger.info(f"Service - Órdenes críticas obtenidas: {len(ordenes_formateadas)}")
+            return ResponseDTO(status=True, data=ordenes_formateadas)
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener órdenes críticas.") from e
+
+    async def obtenerOcupacionPorSector(self):
+        """
+        Obtiene la ocupación (carga de trabajo) por sector
+        """
+        try:
+            logger.info("Service - Obtener ocupación por sector.")
+            ocupacion = await self.repository.get_ocupacion_por_sector()
+            logger.info(f"Service - Ocupación obtenida: {len(ocupacion)} sectores")
+            return ResponseDTO(status=True, data=ocupacion)
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener ocupación por sector.") from e
+
+    async def obtenerProximasEntregasTimeline(self, dias: int = 7):
+        """
+        Obtiene timeline de próximas entregas agrupadas por fecha
+        
+        Args:
+            dias: Número de días hacia adelante (default: 7)
+            
+        Returns:
+            ResponseDTO con timeline de entregas
+        """
+        try:
+            logger.info(f"Service - Obtener timeline de próximas entregas ({dias} días).")
+            timeline = await self.repository.get_proximas_entregas_timeline(dias)
+            logger.info(f"Service - Timeline obtenido: {len(timeline)} días")
+            return ResponseDTO(status=True, data=timeline)
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener timeline de próximas entregas.") from e
+

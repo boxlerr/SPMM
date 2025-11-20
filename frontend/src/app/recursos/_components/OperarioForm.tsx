@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Operario } from "../_types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { useToast } from "@/components/ui/toast";
+import { capitalizeName } from "@/lib/utils";
 
 interface OperarioFormProps {
   open: boolean;
@@ -20,6 +22,7 @@ interface OperarioFormProps {
 
 export default function OperarioForm({ open, editing, data, onClose, onSuccess, cleanUrl }: OperarioFormProps) {
   const { addNotification } = useNotifications();
+  const { showToast } = useToast();
   const [formData, setFormData] = useState({
     nombre: "",
     apellido: "",
@@ -172,6 +175,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           `Operario ${payload.nombre} ${payload.apellido} ha sido modificado`,
           "operario_updated"
         );
+        showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} modificado correctamente`, 'success');
       }
     } else {
       const response = await fetch(`${cleanUrl}/operarios`, {
@@ -187,6 +191,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           `Operario ${payload.nombre} ${payload.apellido} ha sido creado`,
           "operario_created"
         );
+        showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} creado correctamente`, 'success');
       }
     }
     onSuccess();

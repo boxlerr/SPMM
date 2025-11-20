@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Date, Boolean
 from backend.infrastructure.db import Base
+from sqlalchemy.orm import relationship
 
 
 class Operario(Base):
@@ -26,3 +27,4 @@ class Operario(Base):
     #cant_hs_trabajadas = Column(Integer, nullable=False, default=0)
     #dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
 
+    rangos = relationship("OperarioRango", back_populates="operario")
