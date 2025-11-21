@@ -12,4 +12,11 @@ class Rango(Base):
     # 🔹 Relación inversa
     procesos = relationship("RangoProceso", back_populates="rango")
     operarios_rango = relationship("OperarioRango", back_populates="rango")
-
+    
+    rango_maquinarias = relationship(
+        "RangoMaquinaria",
+        back_populates="rango",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+from backend.domain.RangoMaquinaria import RangoMaquinaria
