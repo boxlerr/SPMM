@@ -19,6 +19,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 interface PlanificacionItem {
     id: number;
@@ -35,6 +42,12 @@ interface PlanificacionItem {
     apellido_operario?: string;
     fecha_prometida?: string;
     prioridad_peso?: number;
+}
+
+interface Operario {
+    id: number;
+    nombre: string;
+    apellido: string;
 }
 
 // Paleta de colores para procesos
@@ -70,7 +83,7 @@ const CustomTooltip: React.FC<{
     // Como la librería no permite pasar data arbitraria fácilmente en 'Task', 
     // parseamos el nombre o usamos el estado global si fuera necesario.
     // Aquí usaremos el nombre y fechas que ya tiene la tarea.
-    
+
     return (
         <div style={{
             backgroundColor: 'white',
@@ -90,10 +103,10 @@ const CustomTooltip: React.FC<{
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
                 <span className="font-semibold">Inicio:</span>
                 <span>{task.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                
+
                 <span className="font-semibold">Fin:</span>
                 <span>{task.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                
+
                 <span className="font-semibold">Duración:</span>
                 <span>{Math.round((task.end.getTime() - task.start.getTime()) / 60000)} min</span>
             </div>
@@ -103,7 +116,7 @@ const CustomTooltip: React.FC<{
 
 const TaskListHeader: React.FC<{ headerHeight: number; isSidebarOpen?: boolean }> = ({ headerHeight, isSidebarOpen }) => {
     if (isSidebarOpen === false) return null;
-    
+
     return (
         <div
             style={{
@@ -124,15 +137,15 @@ const TaskListHeader: React.FC<{ headerHeight: number; isSidebarOpen?: boolean }
     );
 };
 
-const TaskListTable: React.FC<{ 
-    rowHeight: number; 
-    tasks: Task[]; 
+const TaskListTable: React.FC<{
+    rowHeight: number;
+    tasks: Task[];
     onExpanderClick: (task: Task) => void;
     planificacionItems: PlanificacionItem[];
     cargasMap: Record<string, { totalMinutos: number; porcentaje: number }>;
     isSidebarOpen?: boolean;
 }> = ({ rowHeight, tasks, onExpanderClick, planificacionItems, cargasMap, isSidebarOpen }) => {
-    
+
     if (isSidebarOpen === false) return null;
 
     return (
@@ -141,14 +154,14 @@ const TaskListTable: React.FC<{
                 const isProject = t.type === 'project';
                 let mainText = t.name;
                 let subText = '';
-                
+
                 if (isProject) {
                     // Recuperar nombre si está vacío (para ocultarlo en el gráfico)
                     if (!mainText || mainText === 'Rango Inicio' || mainText === 'Rango Fin') {
                         if (t.id === 'range-start' || t.id === 'range-end') {
                             return <div key={t.id} style={{ height: rowHeight }} />;
                         }
-                        
+
                         if (t.id === 'op-none') {
                             mainText = 'Sin Operario Asignado';
                         } else if (t.id.startsWith('op-')) {
@@ -163,9 +176,9 @@ const TaskListTable: React.FC<{
                             }
                         }
                     }
-                    
+
                     const carga = cargasMap[t.id] || { totalMinutos: 0, porcentaje: 0 };
-                    
+
                     return (
                         <div
                             key={t.id}
@@ -183,8 +196,8 @@ const TaskListTable: React.FC<{
                             }}
                             onClick={() => onExpanderClick(t)}
                         >
-                            <div 
-                                style={{ 
+                            <div
+                                style={{
                                     paddingLeft: 0,
                                     display: 'flex',
                                     flexDirection: 'row',
@@ -199,10 +212,10 @@ const TaskListTable: React.FC<{
                                     <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>
                                         {t.hideChildren ? '▶' : '▼'}
                                     </span>
-                                    
+
                                     <div className="truncate w-full">
-                                        <span style={{ 
-                                            fontWeight: 700, 
+                                        <span style={{
+                                            fontWeight: 700,
                                             color: '#111827',
                                             fontSize: '0.875rem'
                                         }}>
@@ -211,8 +224,8 @@ const TaskListTable: React.FC<{
                                     </div>
                                 </div>
 
-                                <div style={{ 
-                                    fontSize: '0.65rem', 
+                                <div style={{
+                                    fontSize: '0.65rem',
                                     color: carga.porcentaje > 90 ? '#dc2626' : carga.porcentaje > 75 ? '#f59e0b' : '#10b981',
                                     fontWeight: 600,
                                     flexShrink: 0,
@@ -222,7 +235,7 @@ const TaskListTable: React.FC<{
                                 </div>
                             </div>
 
-                            <div style={{ 
+                            <div style={{
                                 marginTop: 4,
                                 height: 3,
                                 backgroundColor: '#e5e7eb',
@@ -244,14 +257,14 @@ const TaskListTable: React.FC<{
                     mainText = parts[0];
                     // Capitalizar primera letra
                     mainText = mainText.charAt(0).toUpperCase() + mainText.slice(1);
-                    
+
                     if (parts.length > 1) {
                         subText = `OT: ${parts[1].replace(')', '')}`;
                     }
-                    
+
                     // Formatear fecha: "nov. 18"
                     const dateText = t.start.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' });
-                    
+
                     return (
                         <div
                             key={t.id}
@@ -267,8 +280,8 @@ const TaskListTable: React.FC<{
                                 cursor: 'default',
                             }}
                         >
-                            <div 
-                                style={{ 
+                            <div
+                                style={{
                                     paddingLeft: 24,
                                     display: 'flex',
                                     flexDirection: 'row',
@@ -279,17 +292,17 @@ const TaskListTable: React.FC<{
                                 }}
                             >
                                 <div className="truncate" style={{ flex: 1, marginRight: 8 }}>
-                                    <span style={{ 
-                                        fontWeight: 500, 
+                                    <span style={{
+                                        fontWeight: 500,
                                         color: '#374151',
                                         fontSize: '0.8125rem'
                                     }}>
                                         {mainText}
                                     </span>
                                     {subText && (
-                                        <span style={{ 
-                                            display: 'block', 
-                                            fontSize: '0.75rem', 
+                                        <span style={{
+                                            display: 'block',
+                                            fontSize: '0.75rem',
                                             color: '#6b7280',
                                             marginTop: '-2px'
                                         }}>
@@ -297,9 +310,9 @@ const TaskListTable: React.FC<{
                                         </span>
                                     )}
                                 </div>
-                                <div style={{ 
-                                    fontSize: '0.75rem', 
-                                    color: '#6b7280', 
+                                <div style={{
+                                    fontSize: '0.75rem',
+                                    color: '#6b7280',
                                     flexShrink: 0,
                                     textAlign: 'right'
                                 }}>
@@ -324,6 +337,7 @@ const PlanificacionGantt = () => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isViewDropdownOpen, setIsViewDropdownOpen] = useState(false);
     const [ganttStartDate, setGanttStartDate] = useState<Date | null>(null);
+    const [operarios, setOperarios] = useState<Operario[]>([]);
     const nowLineRef = useRef<HTMLDivElement>(null);
 
     const ganttContainerRef = useRef<HTMLDivElement>(null);
@@ -371,7 +385,7 @@ const PlanificacionGantt = () => {
             const style = window.getComputedStyle(div);
             const hasHorizontalScroll = (style.overflowX === 'auto' || style.overflowX === 'scroll') && div.scrollWidth > div.clientWidth;
             const hasVerticalScroll = (style.overflowY === 'auto' || style.overflowY === 'scroll') && div.scrollHeight > div.clientHeight;
-            
+
             if (hasHorizontalScroll || hasVerticalScroll) {
                 return div;
             }
@@ -387,16 +401,16 @@ const PlanificacionGantt = () => {
             // Encontrar la fecha de inicio del gráfico (la tarea más antigua o range-start)
             // Como quitamos range-start, usamos ganttStartDate o la primera tarea
             const startDate = ganttStartDate || tasks[0].start;
-            
+
             const now = new Date();
-            
+
             const diffTime = now.getTime() - startDate.getTime();
             const diffHours = diffTime / (1000 * 60 * 60);
-            
+
             const columnWidth = getColumnWidth();
             let pixels = 0;
-            
-            switch(viewMode) {
+
+            switch (viewMode) {
                 case ViewMode.Hour:
                     pixels = diffHours * columnWidth;
                     break;
@@ -431,11 +445,11 @@ const PlanificacionGantt = () => {
             const now = new Date();
             const diffTime = now.getTime() - ganttStartDate.getTime();
             const diffHours = diffTime / (1000 * 60 * 60);
-            
+
             const columnWidth = getColumnWidth();
             let pixels = 0;
-            
-            switch(viewMode) {
+
+            switch (viewMode) {
                 case ViewMode.Hour:
                     pixels = diffHours * columnWidth;
                     break;
@@ -452,17 +466,17 @@ const PlanificacionGantt = () => {
                     pixels = (diffHours / (24 * 365)) * columnWidth;
                     break;
             }
-            
+
             const sidebarWidth = isSidebarOpen ? 300 : 0;
             const position = sidebarWidth + pixels;
-            
+
             setCurrentTimePosition(position);
         };
 
         calculateTimePosition();
         // Actualizar cada minuto
         const interval = setInterval(calculateTimePosition, 60000);
-        
+
         return () => clearInterval(interval);
     }, [viewMode, isSidebarOpen, ganttStartDate]);
 
@@ -475,7 +489,7 @@ const PlanificacionGantt = () => {
         // La librería suele tener una estructura donde un div interno maneja el scroll
         let scrollContainer: HTMLElement | null = null;
         const divs = wrapper.querySelectorAll('div');
-        
+
         for (let i = 0; i < divs.length; i++) {
             const div = divs[i];
             const style = window.getComputedStyle(div);
@@ -491,7 +505,7 @@ const PlanificacionGantt = () => {
 
         const handleScroll = () => {
             if (!scrollContainer) return;
-            
+
             // Actualizar línea "Ahora"
             if (nowLineRef.current && currentTimePosition > 0) {
                 const visibleLeft = currentTimePosition - scrollContainer.scrollLeft;
@@ -524,7 +538,7 @@ const PlanificacionGantt = () => {
         scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
         // Agregamos el listener al wrapper principal con capture: true
         wrapper.addEventListener('wheel', handleWheelCapture, { passive: false, capture: true });
-        
+
         return () => {
             if (scrollContainer) {
                 scrollContainer.removeEventListener('scroll', handleScroll);
@@ -542,7 +556,7 @@ const PlanificacionGantt = () => {
                 }
                 const data: PlanificacionItem[] = await response.json();
                 setPlanificacionItems(data);
-                
+
                 if (data.length === 0) {
                     setTasks([]);
                     return;
@@ -554,14 +568,14 @@ const PlanificacionGantt = () => {
 
                 // 1. Identificar todos los operarios únicos (y "Sin Operario")
                 const operariosMap = new Map<string, { id: string, name: string }>();
-                
+
                 data.forEach(item => {
                     const opId = item.id_operario ? `op-${item.id_operario}` : 'op-none';
                     let opName = 'Sin Operario Asignado';
                     if (item.nombre_operario) {
                         opName = `${item.nombre_operario} ${item.apellido_operario || ''}`.trim();
                     }
-                    
+
                     if (!operariosMap.has(opId)) {
                         operariosMap.set(opId, { id: opId, name: opName });
                     }
@@ -577,7 +591,7 @@ const PlanificacionGantt = () => {
                 const ganttTasks: Task[] = [];
 
                 // 2. Crear tareas de tipo "project" para cada operario
-                
+
                 operarios.forEach(op => {
                     // Tarea padre (Operario)
                     ganttTasks.push({
@@ -589,11 +603,11 @@ const PlanificacionGantt = () => {
                         progress: 0,
                         isDisabled: true,
                         hideChildren: true,
-                        styles: { 
-                            backgroundColor: '#f3f4f6', 
-                            backgroundSelectedColor: '#e5e7eb', 
-                            progressColor: '#f3f4f6', 
-                            progressSelectedColor: '#e5e7eb' 
+                        styles: {
+                            backgroundColor: '#f3f4f6',
+                            backgroundSelectedColor: '#e5e7eb',
+                            progressColor: '#f3f4f6',
+                            progressSelectedColor: '#e5e7eb'
                         }
                     });
 
@@ -605,12 +619,12 @@ const PlanificacionGantt = () => {
 
                     tareasOperario.forEach((item, index) => {
                         const originalStart = new Date(baseDate.getTime() + item.inicio_min * 60000);
-                        
+
                         // Forzar visualización de día completo para que ocupe todo el ancho de la columna
                         // Ajustamos al inicio del día (00:00) y final del día (23:59:59)
                         const start = new Date(originalStart);
                         start.setHours(0, 0, 0, 0);
-                        
+
                         const end = new Date(start);
                         end.setTime(start.getTime() + (24 * 60 * 60 * 1000) - 1000); // 23:59:59
 
@@ -620,13 +634,13 @@ const PlanificacionGantt = () => {
                             start: start,
                             end: end,
                             name: `${item.nombre_proceso || 'Proceso'} (OT: ${item.orden_id})`,
-                            id: `task-${item.orden_id}-${item.proceso_id}-${index}`,
+                            id: `task-${item.orden_id}-${item.proceso_id}-${index}-${item.id}`,
                             type: 'task',
                             project: op.id,
                             progress: 0,
                             isDisabled: false,
-                            styles: { 
-                                progressColor: color, 
+                            styles: {
+                                progressColor: color,
                                 progressSelectedColor: color,
                                 backgroundColor: color,
                                 backgroundSelectedColor: color
@@ -643,7 +657,7 @@ const PlanificacionGantt = () => {
                     // Si no hay tareas, usar hoy a las 9
                     minDate = baseDate;
                 }
-                
+
                 setTasks(ganttTasks);
                 setGanttStartDate(minDate);
 
@@ -655,6 +669,31 @@ const PlanificacionGantt = () => {
         fetchData();
     }, []);
 
+    // Fetch operators list
+    useEffect(() => {
+        const fetchOperarios = async () => {
+            try {
+                const response = await fetch('http://localhost:8000/operarios');
+                if (response.ok) {
+                    const data = await response.json();
+                    // Handle ResponseDTO structure
+                    if (data.data && Array.isArray(data.data)) {
+                        setOperarios(data.data);
+                    } else if (Array.isArray(data)) {
+                        setOperarios(data);
+                    } else {
+                        console.error("Operarios data is not an array:", data);
+                        setOperarios([]);
+                    }
+                }
+            } catch (error) {
+                console.error("Error fetching operarios:", error);
+                setOperarios([]);
+            }
+        };
+        fetchOperarios();
+    }, []);
+
     const handleTaskSelect = (task: Task, isSelected: boolean) => {
         if (task.type === 'project') return;
 
@@ -663,7 +702,7 @@ const PlanificacionGantt = () => {
             const ordenId = parseInt(parts[1]);
             const procesoId = parseInt(parts[2]);
             const item = planificacionItems.find(p => p.orden_id === ordenId && p.proceso_id === procesoId);
-            
+
             if (item) {
                 setSelectedItem(item);
                 setIsDialogOpen(true);
@@ -671,18 +710,99 @@ const PlanificacionGantt = () => {
         }
     };
 
+    const handleTaskChange = async (task: Task) => {
+        console.log('handleTaskChange called with task:', task);
+        const parts = task.id.split('-');
+        // task-{orden_id}-{proceso_id}-{index}-{db_id}
+        if (parts.length < 5) return;
+
+        const dbId = parseInt(parts[4]);
+        const item = planificacionItems.find(p => p.id === dbId);
+        if (!item) return;
+
+        const oldTask = tasks.find(t => t.id === task.id);
+        if (!oldTask) return;
+
+        const diffMillis = task.start.getTime() - oldTask.start.getTime();
+        const diffMinutes = Math.round(diffMillis / 60000);
+
+        if (diffMinutes === 0) return;
+
+        const newInicio = item.inicio_min + diffMinutes;
+        const newFin = item.fin_min + diffMinutes;
+
+        try {
+            const response = await fetch(`http://localhost:8000/planificacion/${dbId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    inicio_min: newInicio,
+                    fin_min: newFin
+                })
+            });
+
+            if (response.ok) {
+                setPlanificacionItems(prev => prev.map(p =>
+                    p.id === dbId
+                        ? { ...p, inicio_min: newInicio, fin_min: newFin }
+                        : p
+                ));
+
+                setTasks(prev => prev.map(t =>
+                    t.id === task.id
+                        ? { ...t, start: task.start, end: task.end }
+                        : t
+                ));
+            }
+        } catch (error) {
+            console.error("Error updating task:", error);
+        }
+    };
+
     const handleExpanderClick = (task: Task) => {
-        setTasks(prevTasks => 
-            prevTasks.map(t => 
-                t.id === task.id 
+        setTasks(prevTasks =>
+            prevTasks.map(t =>
+                t.id === task.id
                     ? { ...t, hideChildren: !t.hideChildren }
                     : t
             )
         );
     };
 
+    const handleOperatorChange = async (newOpId: string) => {
+        if (!selectedItem) return;
+
+        const opId = parseInt(newOpId);
+
+        try {
+            const response = await fetch(`http://localhost:8000/planificacion/${selectedItem.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id_operario: opId
+                })
+            });
+
+            if (response.ok) {
+                // Actualizar el item local
+                const newOp = operarios.find(o => o.id === opId);
+                setPlanificacionItems(prev => prev.map(p =>
+                    p.id === selectedItem.id
+                        ? { ...p, id_operario: opId, nombre_operario: newOp?.nombre, apellido_operario: newOp?.apellido }
+                        : p
+                ));
+
+                // Cerrar diálogo y recargar para reflejar el cambio de fila
+                setIsDialogOpen(false);
+                window.location.reload();
+            }
+        } catch (error) {
+            console.error("Error updating operator:", error);
+        }
+    };
+
     const getColumnWidth = () => {
-        switch(viewMode) {
+        switch (viewMode) {
             case ViewMode.Year: return 500;
             case ViewMode.Month: return 400;
             case ViewMode.Week: return 350;
@@ -693,7 +813,7 @@ const PlanificacionGantt = () => {
     };
 
     const getViewLabel = (mode: ViewMode) => {
-        switch(mode) {
+        switch (mode) {
             case ViewMode.Hour: return 'Horas';
             case ViewMode.Day: return 'Días';
             case ViewMode.Week: return 'Semanas';
@@ -719,7 +839,7 @@ const PlanificacionGantt = () => {
                             </svg>
                         </button>
                     </div>
-                    
+
                     <div className="h-6 w-px bg-gray-300 mx-2"></div>
                 </div>
 
@@ -748,46 +868,46 @@ const PlanificacionGantt = () => {
                     </button>
 
                     <div className="relative">
-                        <button 
+                        <button
                             onClick={() => setIsViewDropdownOpen(!isViewDropdownOpen)}
                             className="flex items-center gap-2 px-3 py-1.5 bg-white border rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm"
                         >
                             {getViewLabel(viewMode)}
                             <ChevronDown size={14} />
                         </button>
-                        
+
                         {isViewDropdownOpen && (
                             <>
-                                <div 
-                                    className="fixed inset-0 z-10" 
+                                <div
+                                    className="fixed inset-0 z-10"
                                     onClick={() => setIsViewDropdownOpen(false)}
                                 ></div>
                                 <div className="absolute right-0 mt-1 w-36 bg-white border rounded-md shadow-lg z-20 py-1">
-                                    <button 
+                                    <button
                                         onClick={() => { setViewMode(ViewMode.Hour); setIsViewDropdownOpen(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${viewMode === ViewMode.Hour ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}`}
                                     >
                                         Horas
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={() => { setViewMode(ViewMode.Day); setIsViewDropdownOpen(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${viewMode === ViewMode.Day ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}`}
                                     >
                                         Días
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={() => { setViewMode(ViewMode.Week); setIsViewDropdownOpen(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${viewMode === ViewMode.Week ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}`}
                                     >
                                         Semanas
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={() => { setViewMode(ViewMode.Month); setIsViewDropdownOpen(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${viewMode === ViewMode.Month ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}`}
                                     >
                                         Meses
                                     </button>
-                                    <button 
+                                    <button
                                         onClick={() => { setViewMode(ViewMode.Year); setIsViewDropdownOpen(false); }}
                                         className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${viewMode === ViewMode.Year ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}`}
                                     >
@@ -797,7 +917,7 @@ const PlanificacionGantt = () => {
                             </>
                         )}
                     </div>
-                    
+
                     <div className="flex items-center border rounded-md overflow-hidden">
                         <button className="p-1.5 hover:bg-gray-100 text-gray-600 border-r">
                             <span className="text-xs font-medium">-</span>
@@ -808,12 +928,12 @@ const PlanificacionGantt = () => {
                     </div>
                 </div>
             </div>
-            
-            <div 
+
+            <div
                 ref={ganttContainerRef}
-                className="border rounded-lg relative" 
-                style={{ 
-                    height: '500px', 
+                className="border rounded-lg relative"
+                style={{
+                    height: '500px',
                     width: '100%',
                     position: 'relative',
                     overflow: 'hidden',
@@ -823,11 +943,10 @@ const PlanificacionGantt = () => {
                 {/* Botón para colapsar/expandir sidebar */}
                 <button
                     onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                    className={`absolute z-30 flex items-center justify-center w-6 h-6 rounded-full shadow-md transition-all duration-300 border ${
-                        isSidebarOpen 
-                            ? 'bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200' 
-                            : 'bg-red-600 border-red-600 text-white hover:bg-red-700'
-                    }`}
+                    className={`absolute z-30 flex items-center justify-center w-6 h-6 rounded-full shadow-md transition-all duration-300 border ${isSidebarOpen
+                        ? 'bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200'
+                        : 'bg-red-600 border-red-600 text-white hover:bg-red-700'
+                        }`}
                     style={{
                         top: '12px',
                         left: isSidebarOpen ? '270px' : '16px',
@@ -839,16 +958,16 @@ const PlanificacionGantt = () => {
 
                 {/* Línea vertical "Ahora" - Hora actual exacta */}
                 {viewMode === ViewMode.Hour && currentTimePosition > (isSidebarOpen ? 300 : 0) && (
-                    <div 
+                    <div
                         ref={nowLineRef}
                         className="absolute top-0 bottom-0 pointer-events-none z-20"
-                        style={{ 
+                        style={{
                             width: '2px',
                             backgroundColor: '#ef4444',
                             boxShadow: '0 0 4px rgba(239, 68, 68, 0.6)'
                         }}
                     >
-                        <div 
+                        <div
                             className="absolute -top-6 -left-8 bg-red-500 text-white text-xs px-2 py-0.5 rounded"
                             style={{ fontSize: '10px' }}
                         >
@@ -857,7 +976,7 @@ const PlanificacionGantt = () => {
                     </div>
                 )}
 
-                <div style={{ 
+                <div style={{
                     height: '100%',
                     width: '100%',
                     position: 'relative'
@@ -881,6 +1000,7 @@ const PlanificacionGantt = () => {
                         onSelect={handleTaskSelect}
                         onDoubleClick={(task) => handleTaskSelect(task, true)}
                         onExpanderClick={handleExpanderClick}
+                        onDateChange={handleTaskChange}
                         todayColor="rgba(252, 165, 165, 0.1)"
                     />
                 </div>
@@ -899,8 +1019,8 @@ const PlanificacionGantt = () => {
                             <div className="grid grid-cols-4 items-center gap-4">
                                 <span className="font-bold text-right">Proceso:</span>
                                 <span className="col-span-3 flex items-center gap-2">
-                                    <div 
-                                        className="w-3 h-3 rounded-full" 
+                                    <div
+                                        className="w-3 h-3 rounded-full"
                                         style={{ backgroundColor: getProcessColor(selectedItem.nombre_proceso || 'default') }}
                                     />
                                     {selectedItem.nombre_proceso}
@@ -912,11 +1032,23 @@ const PlanificacionGantt = () => {
                             </div>
                             <div className="grid grid-cols-4 items-center gap-4">
                                 <span className="font-bold text-right">Operario:</span>
-                                <span className="col-span-3">
-                                    {selectedItem.nombre_operario 
-                                        ? `${selectedItem.nombre_operario} ${selectedItem.apellido_operario || ''}` 
-                                        : 'Sin asignar'}
-                                </span>
+                                <div className="col-span-3">
+                                    <Select
+                                        value={selectedItem.id_operario?.toString() || ""}
+                                        onValueChange={handleOperatorChange}
+                                    >
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Seleccionar operario" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Array.isArray(operarios) && operarios.map(op => (
+                                                <SelectItem key={op.id} value={op.id.toString()}>
+                                                    {op.nombre} {op.apellido}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
                             <div className="grid grid-cols-4 items-center gap-4">
                                 <span className="font-bold text-right">Maquinaria:</span>
