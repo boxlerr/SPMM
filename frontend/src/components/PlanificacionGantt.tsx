@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Gantt, Task, ViewMode } from 'gantt-task-react';
 import "gantt-task-react/dist/index.css";
+import "./PlanificacionGantt.module.css";
 import { ChevronLeft, ChevronRight, Calendar, List, Maximize2, ChevronDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import {
     Dialog,
@@ -241,9 +242,15 @@ const TaskListTable: React.FC<{
                 } else {
                     const parts = t.name.split(' (OT:');
                     mainText = parts[0];
+                    // Capitalizar primera letra
+                    mainText = mainText.charAt(0).toUpperCase() + mainText.slice(1);
+                    
                     if (parts.length > 1) {
                         subText = `OT: ${parts[1].replace(')', '')}`;
                     }
+                    
+                    // Formatear fecha: "nov. 18"
+                    const dateText = t.start.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' });
                     
                     return (
                         <div
@@ -264,14 +271,14 @@ const TaskListTable: React.FC<{
                                 style={{ 
                                     paddingLeft: 24,
                                     display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'flex-start',
-                                    justifyContent: 'center',
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
                                     width: '100%',
                                     overflow: 'hidden'
                                 }}
                             >
-                                <div className="truncate w-full">
+                                <div className="truncate" style={{ flex: 1, marginRight: 8 }}>
                                     <span style={{ 
                                         fontWeight: 500, 
                                         color: '#374151',
@@ -289,6 +296,14 @@ const TaskListTable: React.FC<{
                                             {subText}
                                         </span>
                                     )}
+                                </div>
+                                <div style={{ 
+                                    fontSize: '0.75rem', 
+                                    color: '#6b7280', 
+                                    flexShrink: 0,
+                                    textAlign: 'right'
+                                }}>
+                                    {dateText}
                                 </div>
                             </div>
                         </div>
@@ -312,11 +327,8 @@ const PlanificacionGantt = () => {
     const nowLineRef = useRef<HTMLDivElement>(null);
 
     const ganttContainerRef = useRef<HTMLDivElement>(null);
-    const [isDragging, setIsDragging] = useState(false);
-    const startX = useRef(0);
-    const scrollLeft = useRef(0);
-    const isDragGesture = useRef(false);
-    const animationFrameId = useRef<number | null>(null);
+    const scrollContainerRef = useRef<HTMLElement | null>(null);
+    const lastScrollLeft = useRef<number>(0);
 
     // Optimización: Calcular cargas de trabajo una sola vez cuando cambian los items
     const cargasMap = useMemo(() => {
@@ -353,96 +365,21 @@ const PlanificacionGantt = () => {
 
     const getScrollContainer = () => {
         if (!ganttContainerRef.current) return null;
-        // Buscamos el contenedor específico que tiene el scroll horizontal
-        // En gantt-task-react suele ser un div con overflow-x: auto o scroll
         const divs = ganttContainerRef.current.querySelectorAll('div');
         for (let i = 0; i < divs.length; i++) {
             const div = divs[i];
-            // Verificamos explícitamente el estilo o la propiedad
             const style = window.getComputedStyle(div);
-            if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
+            const hasHorizontalScroll = (style.overflowX === 'auto' || style.overflowX === 'scroll') && div.scrollWidth > div.clientWidth;
+            const hasVerticalScroll = (style.overflowY === 'auto' || style.overflowY === 'scroll') && div.scrollHeight > div.clientHeight;
+            
+            if (hasHorizontalScroll || hasVerticalScroll) {
                 return div;
             }
         }
         return null;
     };
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-        const scrollContainer = getScrollContainer();
-        if (scrollContainer) {
-            const rect = ganttContainerRef.current?.getBoundingClientRect();
-            if (!rect) return;
-            
-            const xInComponent = e.clientX - rect.left;
-            const sidebarWidth = isSidebarOpen ? 300 : 0;
-            
-            // Si el click es en la sidebar, no iniciamos drag
-            if (xInComponent < sidebarWidth) {
-                return;
-            }
 
-            // IMPORTANTE: Ignorar si el click es en la barra de scroll vertical
-            const scrollRect = scrollContainer.getBoundingClientRect();
-            const scrollbarWidth = scrollContainer.offsetWidth - scrollContainer.clientWidth;
-            
-            // Margen de seguridad de 20px para la barra de scroll
-            if (e.clientX >= scrollRect.right - Math.max(scrollbarWidth, 20)) {
-                return;
-            }
-
-            // Si el click está en la zona del scrollbar horizontal (abajo)
-            const scrollbarHeight = scrollContainer.offsetHeight - scrollContainer.clientHeight;
-            if (e.clientY >= scrollRect.bottom - Math.max(scrollbarHeight, 20)) {
-                return;
-            }
-
-            isDragGesture.current = false;
-            startX.current = e.pageX - scrollContainer.offsetLeft;
-            scrollLeft.current = scrollContainer.scrollLeft;
-            setIsDragging(true);
-        }
-    };
-
-    const handleMouseLeave = () => {
-        if (isDragging) {
-            setIsDragging(false);
-            isDragGesture.current = false;
-        }
-    };
-
-    const handleMouseUp = () => {
-        if (isDragging) {
-            setIsDragging(false);
-            // Pequeño timeout para evitar que el click se propague si fue un drag
-            setTimeout(() => {
-                isDragGesture.current = false;
-            }, 100);
-        }
-    };
-
-    const handleMouseMove = (e: React.MouseEvent) => {
-        if (!isDragging) return;
-        
-        e.preventDefault();
-        
-        if (animationFrameId.current) return;
-
-        animationFrameId.current = requestAnimationFrame(() => {
-            const scrollContainer = getScrollContainer();
-            if (scrollContainer) {
-                const x = e.pageX - scrollContainer.offsetLeft;
-                const walk = (x - startX.current) * 1.5; // Velocidad de scroll
-                
-                // Si se mueve más de 5px, lo consideramos un gesto de drag
-                if (Math.abs(walk) > 5) {
-                    isDragGesture.current = true;
-                }
-                
-                scrollContainer.scrollLeft = scrollLeft.current - walk;
-            }
-            animationFrameId.current = null;
-        });
-    };
 
     const handleAutoAdjust = () => {
         const scrollContainer = getScrollContainer();
@@ -529,27 +466,72 @@ const PlanificacionGantt = () => {
         return () => clearInterval(interval);
     }, [viewMode, isSidebarOpen, ganttStartDate]);
 
-    // Sincronizar la línea roja con el scroll
+    // Sincronizar la línea roja con el scroll y controlar el comportamiento del scroll
     useEffect(() => {
-        const container = getScrollContainer();
-        if (!container) return;
+        const wrapper = ganttContainerRef.current;
+        if (!wrapper) return;
+
+        // Buscar el contenedor que tiene el scroll vertical activo
+        // La librería suele tener una estructura donde un div interno maneja el scroll
+        let scrollContainer: HTMLElement | null = null;
+        const divs = wrapper.querySelectorAll('div');
+        
+        for (let i = 0; i < divs.length; i++) {
+            const div = divs[i];
+            const style = window.getComputedStyle(div);
+            // Buscamos explícitamente el contenedor vertical
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && div.scrollHeight > div.clientHeight) {
+                scrollContainer = div;
+                break;
+            }
+        }
+
+        if (!scrollContainer) return;
+        scrollContainerRef.current = scrollContainer;
 
         const handleScroll = () => {
+            if (!scrollContainer) return;
+            
+            // Actualizar línea "Ahora"
             if (nowLineRef.current && currentTimePosition > 0) {
-                // currentTimePosition es absoluto desde el inicio del gráfico + sidebar
-                // visibleLeft = currentTimePosition - scrollLeft
-                // Nota: currentTimePosition ya incluye sidebarWidth
-                const visibleLeft = currentTimePosition - container.scrollLeft;
+                const visibleLeft = currentTimePosition - scrollContainer.scrollLeft;
                 nowLineRef.current.style.left = `${visibleLeft}px`;
             }
         };
 
-        container.addEventListener('scroll', handleScroll);
-        // Actualización inicial
-        handleScroll();
+        // Interceptamos el evento wheel en la fase de captura (antes que llegue a la librería)
+        const handleWheelCapture = (e: WheelEvent) => {
+            if (!scrollContainer) return;
 
-        return () => container.removeEventListener('scroll', handleScroll);
-    }, [currentTimePosition, isSidebarOpen]);
+            const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+            const deltaY = e.deltaY;
+
+            // Solo nos interesa el movimiento vertical
+            if (deltaY === 0) return;
+
+            const isAtTop = scrollTop <= 0;
+            // Margen de tolerancia de 2px
+            const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) <= 2;
+
+            // Si estamos en los límites y tratamos de forzar más allá
+            if ((isAtTop && deltaY < 0) || (isAtBottom && deltaY > 0)) {
+                // Detenemos la propagación INMEDIATAMENTE para que la librería no se entere
+                e.stopPropagation();
+                e.preventDefault();
+            }
+        };
+
+        scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+        // Agregamos el listener al wrapper principal con capture: true
+        wrapper.addEventListener('wheel', handleWheelCapture, { passive: false, capture: true });
+        
+        return () => {
+            if (scrollContainer) {
+                scrollContainer.removeEventListener('scroll', handleScroll);
+            }
+            wrapper.removeEventListener('wheel', handleWheelCapture, { capture: true } as any);
+        };
+    }, [currentTimePosition, isSidebarOpen, tasks]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -622,13 +604,15 @@ const PlanificacionGantt = () => {
                     });
 
                     tareasOperario.forEach((item, index) => {
-                        const start = new Date(baseDate.getTime() + item.inicio_min * 60000);
-                        const end = new Date(baseDate.getTime() + item.fin_min * 60000);
+                        const originalStart = new Date(baseDate.getTime() + item.inicio_min * 60000);
                         
-                        // Asegurar duración mínima visual
-                        if (end.getTime() <= start.getTime()) {
-                            end.setTime(start.getTime() + 60000);
-                        }
+                        // Forzar visualización de día completo para que ocupe todo el ancho de la columna
+                        // Ajustamos al inicio del día (00:00) y final del día (23:59:59)
+                        const start = new Date(originalStart);
+                        start.setHours(0, 0, 0, 0);
+                        
+                        const end = new Date(start);
+                        end.setTime(start.getTime() + (24 * 60 * 60 * 1000) - 1000); // 23:59:59
 
                         const color = getProcessColor(item.nombre_proceso || 'default');
 
@@ -699,12 +683,12 @@ const PlanificacionGantt = () => {
 
     const getColumnWidth = () => {
         switch(viewMode) {
-            case ViewMode.Year: return 350;
-            case ViewMode.Month: return 300;
-            case ViewMode.Week: return 250;
-            case ViewMode.Day: return 65;
-            case ViewMode.Hour: return 50;
-            default: return 65;
+            case ViewMode.Year: return 500;
+            case ViewMode.Month: return 400;
+            case ViewMode.Week: return 350;
+            case ViewMode.Day: return 300; // Aumentado significativamente para dar espacio
+            case ViewMode.Hour: return 120;
+            default: return 120;
         }
     };
 
@@ -827,25 +811,18 @@ const PlanificacionGantt = () => {
             
             <div 
                 ref={ganttContainerRef}
-                className="border rounded-lg relative select-none" 
+                className="border rounded-lg relative" 
                 style={{ 
                     height: '500px', 
-                    width: '100%', 
-                    cursor: isDragging ? 'grabbing' : 'default',
-                    // overflow: 'hidden' eliminado para evitar conflictos con el scroll vertical nativo
+                    width: '100%',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    overscrollBehavior: 'none'
                 }}
-                onMouseDown={handleMouseDown}
-                onMouseLeave={handleMouseLeave}
-                onMouseUp={handleMouseUp}
-                onMouseMove={handleMouseMove}
             >
                 {/* Botón para colapsar/expandir sidebar */}
                 <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        setIsSidebarOpen(!isSidebarOpen);
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                     className={`absolute z-30 flex items-center justify-center w-6 h-6 rounded-full shadow-md transition-all duration-300 border ${
                         isSidebarOpen 
                             ? 'bg-white border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200' 
@@ -880,32 +857,29 @@ const PlanificacionGantt = () => {
                     </div>
                 )}
 
-                <div style={{ pointerEvents: isDragging ? 'none' : 'auto', height: '100%' }}>
+                <div style={{ 
+                    height: '100%',
+                    width: '100%',
+                    position: 'relative'
+                }}>
                     <Gantt
-                        key={isSidebarOpen ? 'sidebar-open' : 'sidebar-closed'}
                         tasks={tasks}
                         viewMode={viewMode}
                         locale="es"
                         columnWidth={getColumnWidth()}
                         listCellWidth={isSidebarOpen ? "300px" : "0px"}
-                        barFill={80}
+                        barFill={90}
                         ganttHeight={500}
                         rowHeight={50}
                         barCornerRadius={4}
-                        fontFamily="inherit"
+                        headerHeight={90}
+                        fontFamily="Inter, system-ui, sans-serif"
+                        fontSize="14px"
                         TaskListHeader={MemoizedTaskListHeader}
                         TaskListTable={MemoizedTaskListTable}
                         TooltipContent={CustomTooltip}
-                        onSelect={(task, isSelected) => {
-                            if (!isDragGesture.current) {
-                                handleTaskSelect(task, isSelected);
-                            }
-                        }}
-                        onDoubleClick={(task) => {
-                            if (!isDragGesture.current) {
-                                handleTaskSelect(task, true);
-                            }
-                        }}
+                        onSelect={handleTaskSelect}
+                        onDoubleClick={(task) => handleTaskSelect(task, true)}
                         onExpanderClick={handleExpanderClick}
                         todayColor="rgba(252, 165, 165, 0.1)"
                     />
