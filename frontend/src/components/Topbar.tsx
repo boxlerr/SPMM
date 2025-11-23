@@ -4,11 +4,13 @@ import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2 } from "lucide-react";
 import { useNotifications } from "../contexts/NotificationContext";
+import { usePanelContext } from "../contexts/PanelContext";
 import { useRouter } from "next/navigation";
 import { formatNotificationMessage } from "@/lib/utils";
 
 export default function Topbar() {
   const { notifications, unreadCount, markAsRead } = useNotifications();
+  const { isDetailsPanelOpen } = usePanelContext();
   const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -95,9 +97,12 @@ export default function Topbar() {
 
   const recentNotifications = notifications.slice(0, 5);
 
+  // Ajustar la posición derecha basado en si el panel está abierto
+  const rightPosition = isDetailsPanelOpen ? 336 : 16; // 320px (panel) + 16px (margen)
+
   return createPortal(
     (
-      <div className="fixed z-[2147483647]" style={{ top: 16, right: 16 }}>
+      <div className="fixed z-[2147483647] transition-all duration-300" style={{ top: 16, right: rightPosition }}>
         <button
           ref={buttonRef}
           type="button"
@@ -142,9 +147,8 @@ export default function Topbar() {
                     <button
                       key={notification.id}
                       onClick={() => handleNotificationClick(notification.id)}
-                      className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
-                        !notification.read ? "bg-blue-50/50" : ""
-                      }`}
+                      className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors ${!notification.read ? "bg-blue-50/50" : ""
+                        }`}
                     >
                       <div className="flex items-start gap-3">
                         <div className="mt-0.5 flex-shrink-0">
@@ -158,9 +162,8 @@ export default function Topbar() {
                             )}
                           </div>
                           <p
-                            className={`text-sm ${
-                              notification.read ? "text-gray-600" : "text-gray-900 font-medium"
-                            } line-clamp-2`}
+                            className={`text-sm ${notification.read ? "text-gray-600" : "text-gray-900 font-medium"
+                              } line-clamp-2`}
                           >
                             {formatNotificationMessage(notification.message)}
                           </p>

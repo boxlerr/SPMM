@@ -69,6 +69,7 @@
   height: 32px !important;
   rx: 8px !important;
   ry: 8px !important;
+  cursor: pointer !important;
 }
 
 :global(.gantt-task-react .bar:hover) {
@@ -77,12 +78,24 @@
   cursor: pointer !important;
 }
 
-/* Texto en las barras - más grande y negrita */
+/* Prevenir cursor de drag cuando no se está arrastrando */
+:global(.gantt-task-react .bar-wrapper:not(.gantt-task-react-dragging) .bar) {
+  cursor: pointer !important;
+}
+
+/* Cursor de drag solo cuando realmente se está arrastrando */
+:global(.gantt-task-react .bar-wrapper.gantt-task-react-dragging .bar) {
+  cursor: move !important;
+}
+
+/* Texto en las barras - más grande, mayúsculas y muy legible */
 :global(.gantt-task-react .bar-label) {
-  font-size: 14px !important;
-  font-weight: 600 !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
   fill: #ffffff !important;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
 }
 
 /* Asegurar que las barras tengan altura consistente */
