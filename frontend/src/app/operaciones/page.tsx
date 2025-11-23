@@ -3,11 +3,14 @@
 import { useState } from "react";
 import PlanificacionGantt from "@/components/PlanificacionGantt";
 import TablaTareas from "@/components/TablaTareas";
-import { Activity, LayoutList, GanttChartSquare } from "lucide-react";
+import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react";
 import { usePanelContext } from "@/contexts/PanelContext";
+import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
+import { Button } from "@/components/ui/button";
 
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<'gantt' | 'tabla'>('gantt');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const { isDetailsPanelOpen } = usePanelContext();
 
   return (
@@ -33,6 +36,13 @@ export default function OperacionesPage() {
                 Gestiona las operaciones del sistema
               </p>
             </div>
+            <Button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg"
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Nueva Orden
+            </Button>
           </div>
 
           {/* Tabs Navigation */}
@@ -74,6 +84,16 @@ export default function OperacionesPage() {
           )}
         </div>
       </div>
+
+      <CreateWorkOrderModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          // Aquí podríamos recargar los datos si fuera necesario
+          // Por ahora solo cerramos el modal
+          setIsCreateModalOpen(false);
+        }}
+      />
     </div>
   );
 }
