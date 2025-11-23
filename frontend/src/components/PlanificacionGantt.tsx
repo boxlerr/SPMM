@@ -453,6 +453,7 @@ const PlanificacionGantt = () => {
   const [ganttStartDate, setGanttStartDate] = useState<Date | null>(null);
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [columnWidth, setColumnWidth] = useState<number>(350);
   const nowLineRef = useRef<HTMLDivElement>(null);
   // Ref para acceder a tasks sin causar re-renders
   const tasksRef = useRef<Task[]>([]);
@@ -1579,6 +1580,11 @@ const PlanificacionGantt = () => {
     }
   };
 
+  // Resetear ancho de columna al cambiar de vista
+  useEffect(() => {
+    setColumnWidth(getColumnWidth());
+  }, [viewMode]);
+
   const getViewLabel = (mode: ViewMode) => {
     switch (mode) {
       case ViewMode.Hour:
@@ -1594,6 +1600,33 @@ const PlanificacionGantt = () => {
       default:
         return "Vista";
     }
+  };
+
+  const getZoomLimits = () => {
+    switch (viewMode) {
+      case ViewMode.Hour:
+        return { min: 60, max: 250 };
+      case ViewMode.Day:
+        return { min: 80, max: 500 };
+      case ViewMode.Week:
+        return { min: 150, max: 800 };
+      case ViewMode.Month:
+        return { min: 200, max: 1000 };
+      case ViewMode.Year:
+        return { min: 300, max: 1200 };
+      default:
+        return { min: 50, max: 500 };
+    }
+  };
+
+  const handleZoomIn = () => {
+    const { max } = getZoomLimits();
+    setColumnWidth((prev) => Math.min(prev + 20, max));
+  };
+
+  const handleZoomOut = () => {
+    const { min } = getZoomLimits();
+    setColumnWidth((prev) => Math.max(prev - 20, min));
   };
 
   if (tasks.length === 0) {
@@ -1750,15 +1783,23 @@ const PlanificacionGantt = () => {
           </div>
 
           <div className="flex items-center border rounded-md overflow-hidden">
-            <button className="p-1.5 hover:bg-gray-100 text-gray-600 border-r">
+            <button
+              onClick={handleZoomOut}
+              className="p-1.5 hover:bg-gray-100 text-gray-600 border-r"
+              title="Alejar (Zoom Out)"
+            >
               <span className="text-xs font-medium">-</span>
             </button>
-            <button className="p-1.5 hover:bg-gray-100 text-gray-600">
+            <button
+              onClick={handleZoomIn}
+              className="p-1.5 hover:bg-gray-100 text-gray-600"
+              title="Acercar (Zoom In)"
+            >
               <span className="text-xs font-medium">+</span>
             </button>
           </div>
         </div>
-      </div >
+      </div>
 
       <div
         ref={ganttContainerRef}
@@ -1825,7 +1866,7 @@ const PlanificacionGantt = () => {
             tasks={tasks}
             viewMode={viewMode}
             locale="es"
-            columnWidth={getColumnWidth()}
+            columnWidth={columnWidth}
             listCellWidth={isSidebarOpen ? "300px" : "0px"}
             barFill={90}
             ganttHeight={500}

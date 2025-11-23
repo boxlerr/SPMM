@@ -174,8 +174,10 @@
 }
 
 /* Estilos para días de fin de semana */
+/* Estilos para días de fin de semana */
 :global(.gantt-task-react .weekend) {
-  background-color: #f6f7fb !important;
+  background-color: #e5e7eb !important;
+  opacity: 0.5 !important;
 }
 
 /* Mejoras para la línea del "hoy" */
