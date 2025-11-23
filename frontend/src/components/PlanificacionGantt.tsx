@@ -653,42 +653,69 @@ const PlanificacionGantt = () => {
     return () => clearInterval(interval);
   }, [viewMode, isSidebarOpen, ganttStartDate]);
 
-  // Scroll y sincronización de línea roja
+  // Scroll mejorado: Sincronización de línea roja, Shift+Wheel y Drag-to-Pan
   useEffect(() => {
     const wrapper = ganttContainerRef.current;
     if (!wrapper) return;
 
+    // 1. Buscar el contenedor con scroll
     let scrollContainer: HTMLElement | null = null;
-    const divs = wrapper.querySelectorAll("div");
 
-    for (let i = 0; i < divs.length; i++) {
-      const div = divs[i];
-      const style = window.getComputedStyle(div);
-      if (
-        (style.overflowY === "auto" || style.overflowY === "scroll") &&
-        div.scrollHeight > div.clientHeight
-      ) {
-        scrollContainer = div;
-        break;
+    // Intentar encontrar el contenedor específico de gantt-task-react
+    // Generalmente es el que tiene overflow-x auto
+    const findScrollContainer = () => {
+      const divs = wrapper.querySelectorAll("div");
+      for (let i = 0; i < divs.length; i++) {
+        const div = divs[i];
+        const style = window.getComputedStyle(div);
+        if (style.overflowX === "auto" || style.overflowX === "scroll") {
+          return div;
+        }
       }
-    }
+      // Fallback
+      for (let i = 0; i < divs.length; i++) {
+        const div = divs[i];
+        const style = window.getComputedStyle(div);
+        if ((style.overflowY === "auto" || style.overflowY === "scroll") && div.scrollHeight > div.clientHeight) {
+          return div;
+        }
+      }
+      return null;
+    };
+
+    scrollContainer = findScrollContainer();
 
     if (!scrollContainer) return;
     scrollContainerRef.current = scrollContainer;
 
+    // --- A. Lógica de Línea Roja (Ahora) ---
     const handleScroll = () => {
       if (!scrollContainer) return;
-
       if (nowLineRef.current && currentTimePosition > 0) {
         const visibleLeft = currentTimePosition - scrollContainer.scrollLeft;
         nowLineRef.current.style.left = `${visibleLeft}px`;
       }
     };
 
+    // --- B. Shift + Wheel (Scroll Horizontal) ---
     const handleWheelCapture = (e: WheelEvent) => {
       if (!scrollContainer) return;
 
+      // Si presiona Shift, scrolleamos horizontalmente
+      if (e.shiftKey) {
+        e.preventDefault();
+        scrollContainer.scrollLeft += e.deltaY;
+        return;
+      }
+
+      // FIX: Solo aplicar lógica de bloqueo vertical si el contenedor tiene scroll vertical
       const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+
+      // Si el contenido entra perfectamente (o sobra espacio), no bloquear el scroll vertical
+      // para que el evento burbujee a contenedores padres o al body
+      if (scrollHeight <= clientHeight) return;
+
+      // Lógica original de prevención de rebote vertical
       const deltaY = e.deltaY;
 
       if (deltaY === 0) return;
@@ -702,11 +729,93 @@ const PlanificacionGantt = () => {
       }
     };
 
+    // --- C. Drag-to-Pan (Estilo Figma/Miro) ---
+    // Variables mutables para el estado del drag
+    let isMouseDown = false;
+    let isDragging = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      // Solo botón izquierdo
+      if (e.button !== 0) return;
+
+      const target = e.target as HTMLElement;
+      const tagName = target.tagName.toLowerCase();
+
+      // FILTRO ESTRICTO:
+      // Si el usuario hace click en algo que parece interactuable, NO iniciamos la lógica de drag
+      // Esto permite que el evento siga su curso natural hacia la librería
+      if (tagName === 'rect' || tagName === 'text' || tagName === 'tspan' || tagName === 'circle' || tagName === 'path') {
+        // Excepción: Si es el fondo SVG (a veces el click cae en el svg root o un g vacío)
+        // Pero gantt-task-react llena todo con rects.
+        // Si es una barra de tarea, definitivamente retornamos.
+        if (target.closest('.bar-wrapper') || target.getAttribute('class')?.includes('bar')) {
+          return;
+        }
+      }
+
+      // Aún así, permitimos intentar el drag si es en el espacio vacío
+      // Pero NO capturamos el puntero todavía. Esperamos a que se mueva.
+      isMouseDown = true;
+      isDragging = false;
+      startX = e.clientX;
+      startScrollLeft = scrollContainer!.scrollLeft;
+
+      // No llamamos a setPointerCapture aquí para no robar el click
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isMouseDown || !scrollContainer) return;
+
+      const x = e.clientX;
+      const walk = x - startX;
+
+      // Solo activamos el drag si se mueve más de 10px
+      if (!isDragging && Math.abs(walk) > 10) {
+        isDragging = true;
+        // AHORA sí capturamos el puntero, porque el usuario claramente quiere arrastrar
+        wrapper.setPointerCapture(e.pointerId);
+        wrapper.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+      }
+
+      if (isDragging) {
+        e.preventDefault(); // Evitar selección de texto nativa
+        scrollContainer.scrollLeft = startScrollLeft - walk;
+      }
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      if (isMouseDown) {
+        if (isDragging) {
+          // Si estuvimos arrastrando, liberamos todo
+          wrapper.releasePointerCapture(e.pointerId);
+          wrapper.style.cursor = 'default';
+          document.body.style.userSelect = '';
+        }
+
+        isMouseDown = false;
+        isDragging = false;
+      }
+    };
+
+    // Agregar listeners
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
     wrapper.addEventListener("wheel", handleWheelCapture, {
       passive: false,
       capture: true,
     });
+
+    // Usamos capture=true en pointerdown para evaluar antes que nadie, 
+    // pero somos cuidadosos de no bloquear si no es necesario.
+    // Sin embargo, para que funcione bien con elementos internos, a veces es mejor bubbling.
+    // Probemos bubbling (false) para pointerdown para que si un hijo hace stopPropagation, lo respete.
+    // Pero queremos "robar" el drag del fondo.
+    wrapper.addEventListener("pointerdown", handlePointerDown);
+    wrapper.addEventListener("pointermove", handlePointerMove);
+    wrapper.addEventListener("pointerup", handlePointerUp);
+    wrapper.addEventListener("pointerleave", handlePointerUp);
 
     return () => {
       if (scrollContainer) {
@@ -715,6 +824,10 @@ const PlanificacionGantt = () => {
       wrapper.removeEventListener("wheel", handleWheelCapture, {
         capture: true,
       } as any);
+      wrapper.removeEventListener("pointerdown", handlePointerDown);
+      wrapper.removeEventListener("pointermove", handlePointerMove);
+      wrapper.removeEventListener("pointerup", handlePointerUp);
+      wrapper.removeEventListener("pointerleave", handlePointerUp);
     };
   }, [currentTimePosition, isSidebarOpen, tasks]);
 
