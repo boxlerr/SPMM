@@ -1,9 +1,7 @@
 # backend/application/PlanificacionService.py
 import asyncio
 from ortools.sat.python import cp_model
-from datetime import datetime, time
-
-import uuid
+from datetime import datetime, time,date
 
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
@@ -11,13 +9,6 @@ from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 # 🔸 Función síncrona que corre OR-Tools
-from datetime import datetime
-
-from ortools.sat.python import cp_model
-from datetime import datetime, time, date
-
-from datetime import datetime, time, date, timedelta
-from ortools.sat.python import cp_model
 
 from sqlalchemy import text
 import time
@@ -177,29 +168,6 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         model.AddNoOverlap(pres_intervals)
 
     # ---- Consistencia Operario–Maquinaria (AllowedAssignments) 👈 NUEVO
-    """    for (orden_id, proc_id, _seq, _fp, _pp, _dur, rangos_proc, _nombre_proc) in procesos_norm:
-        #for (orden_id, proc_id, _seq, _fp, _pp, _dur, rangos_proc) in procesos_norm:
-            op_var = operario_vars[(orden_id, proc_id)]
-            maq_var = maq_vars[(orden_id, proc_id)]
-
-            # Pares (op, maq) permitidos: el rango del operario debe estar habilitado por esa máquina.
-            allowed_pairs = []
-            # Además, si el proceso tiene rangos, que la máquina tenga al menos uno de esos rangos.
-            needs = set(rangos_proc)
-
-            for op_id in REAL_OP_IDS:
-                rango_op = op_to_rango[op_id]
-                for m_id in REAL_MAQ_IDS:
-                    if rango_op in maq_to_rangos[m_id]:
-                        if not needs or (needs & maq_to_rangos[m_id]):
-                            allowed_pairs.append([op_id, m_id])
-
-            # Si no hay pares, permitimos dummy maquina (para no romper) y penalizamos fuerte.
-            if not allowed_pairs:
-                # Permitimos cualquier op con dummy maquina si el op_var lo permite
-                allowed_pairs = [[op_id, DUMMY_MAQ_ID] for op_id in REAL_OP_IDS]
-
-            model.AddAllowedAssignments([op_var, maq_var], allowed_pairs)"""
     for (orden_id, proc_id, _seq, _fp, _pp, _dur, rangos_proc, _nombre_proc) in procesos_norm:
         op_var = operario_vars[(orden_id, proc_id)]
         maq_var = maq_vars[(orden_id, proc_id)]
@@ -330,13 +298,9 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
             total_obj.append((is_over, PENAL_OVERQUAL))
 
     model.Minimize(sum(v * c for (v, c) in total_obj))
-    
-    fin = time.perf_counter()
-    print(f"✅✅✅✅✅✅✅✅Los FOR tardaron {fin - inicio:.4f} segundos.")
-    
+
     # ---- Resolver ----
     
-    inicio_solver = time.perf_counter()
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 360
     solver.parameters.num_search_workers = 12
@@ -346,9 +310,6 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
 
     status = solver.Solve(model)
 
-        
-    fin = time.perf_counter()
-    print(f"✅✅✅ El solver tardo {fin - inicio_solver:.4f} segundos.")
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         for (orden_id, proc_id, secuencia, fecha_prometida, peso_prioridad, dur, rangos_proc, nombre_proceso) in procesos_norm:
@@ -418,9 +379,6 @@ async def planificar(repo_orden: OrdenTrabajoRepository, repo_operario: Operario
                 rangos_validos,            # lista de rangos válidos (puede estar vacía)
                 nombre_proceso             # 👈 nuevo campo
             ))
-
-    fin = time.perf_counter()
-    print(f"El método tardó {fin - inicio:.4f} segundos.")
 
     resultados = await asyncio.to_thread(_resolver_planificacion, procesos_para_solver, operarios, maquinarias)
 
