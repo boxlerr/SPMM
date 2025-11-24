@@ -35,6 +35,53 @@ async def planificar_endpoint(db = Depends(get_db)):
     
     
 
+@router.get("/planificacion")
+async def obtener_planificacion(db = Depends(get_db)):
+    query = text("""
+        SELECT p.*, m.nombre as nombre_maquinaria, o.nombre as nombre_operario, o.apellido as apellido_operario
+        FROM planificacion p
+        LEFT JOIN maquinaria m ON p.id_maquinaria = m.id
+        LEFT JOIN operario o ON p.id_operario = o.id
+        ORDER BY p.inicio_min ASC
+    """)
+    result = await db.execute(query)
+    rows = result.fetchall()
+    return [dict(row._mapping) for row in rows]
+
+from backend.dto.PlanificacionUpdateDTO import PlanificacionUpdateDTO
+
+@router.put("/planificacion/{id}")
+async def actualizar_planificacion(id: int, dto: PlanificacionUpdateDTO, db = Depends(get_db)):
+    # Construir query dinámica
+    updates = []
+    params = {"id": id}
+    
+    if dto.inicio_min is not None:
+        updates.append("inicio_min = :inicio_min")
+        params["inicio_min"] = dto.inicio_min
+        
+    if dto.fin_min is not None:
+        updates.append("fin_min = :fin_min")
+        params["fin_min"] = dto.fin_min
+        
+    if dto.id_operario is not None:
+        updates.append("id_operario = :id_operario")
+        params["id_operario"] = dto.id_operario
+
+    if not updates:
+        return {"message": "No changes provided"}
+
+    query = text(f"""
+        UPDATE planificacion
+        SET {", ".join(updates)}
+        WHERE id = :id
+    """)
+    
+    await db.execute(query, params)
+    await db.commit()
+    
+    return {"message": "Planificación actualizada correctamente"}
+
 
 
 app.include_router(router)
