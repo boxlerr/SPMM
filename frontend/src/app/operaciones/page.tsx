@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import PlanificacionGantt from "@/components/PlanificacionGantt";
+import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper";
 import TablaTareas from "@/components/TablaTareas";
 import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react";
 import { usePanelContext } from "@/contexts/PanelContext";
@@ -78,7 +78,7 @@ export default function OperacionesPage() {
           </h2>
 
           {activeTab === 'gantt' ? (
-            <PlanificacionGantt />
+            <PlanificacionGanttWrapper />
           ) : (
             <TablaTareas />
           )}
