@@ -7,6 +7,8 @@ from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
+from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
+
 from sqlalchemy import text
 
 app = FastAPI()
@@ -29,7 +31,8 @@ async def planificar_endpoint(db = Depends(get_db)):
     repo_orden = OrdenTrabajoRepository(db)
     repo_operario = OperarioRepository(db)
     repo_maquinaria = MaquinariaRepository(db)
-    resultados = await planificar(repo_orden,repo_operario,repo_maquinaria,db)
+    repo_planificacion = PlanificacionRepository(db)
+    resultados = await planificar(repo_orden,repo_operario,repo_maquinaria,repo_planificacion,db)
     return resultados
     
     
