@@ -115,22 +115,25 @@ class OrdenTrabajoRepository:
 
     async def find_with_procesos(self):
         try:
-            logger.info("Repository - Obtener órdenes con sus procesos.")
-    
+            logger.info("Repository - Obtener órdenes con sus procesos, prioridades y rangos.")
+
             result = await self.db.execute(
                 select(OrdenTrabajo)
                 .options(
                     joinedload(OrdenTrabajo.procesos)
-                    .joinedload(OrdenTrabajoProceso.proceso),
-                    joinedload(OrdenTrabajo.prioridad)   # 👈 agregalo
+                    .joinedload(OrdenTrabajoProceso.proceso)
+                    .joinedload(Proceso.rangos),
+                    joinedload(OrdenTrabajo.prioridad) 
                 )
             )
-            logger.info(f"Repository - Resultado OK órdenes encontradas).")
+
+            logger.info("Repository - Resultado OK: órdenes encontradas.")
             return result.scalars().unique().all()
-        
+
         except Exception as e:
             logger.error(f"Repository - Error en find_with_procesos: {e}")
             raise InfrastructureException("Error al obtener órdenes con procesos asociados.") from e
+
 
     async def get_estadisticas_estados(self):
         """
