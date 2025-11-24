@@ -22,7 +22,7 @@ export default function OperacionesPage() {
       }}
     >
       {/* Header sticky mejorado */}
-      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
+      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div>

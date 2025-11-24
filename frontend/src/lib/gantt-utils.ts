@@ -175,3 +175,8 @@ export function convertPlanificacionToGanttTasks(
 function formatTimeFromDate(date: Date): string {
   return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 }
+
+export function toTitleCase(str: string): string {
+  if (!str) return ""
+  return str.toLowerCase().replace(/(?:^|\s)\S/g, function (a) { return a.toUpperCase(); });
+}
