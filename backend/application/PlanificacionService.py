@@ -9,7 +9,7 @@ from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
 from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
-#from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
+from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 # 🔸 Función síncrona que corre OR-Tools
 from datetime import datetime
 
@@ -20,6 +20,7 @@ from datetime import datetime, time, date, timedelta
 from ortools.sat.python import cp_model
 
 from sqlalchemy import text
+import time
 
 
 def _resolver_planificacion(procesos, operarios, maquinarias):
@@ -42,7 +43,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     PENAL_DUMMY = 1_000_000
     PENAL_DUMMY_MAQ = 1_000_000
 
-    # ---- Normalización ----
+    inicio = time.perf_counter()
+    # ---- Invocar a funcion de Normalización ----
     procesos_norm = []
     for (orden_id, proc_id, secuencia, fecha_prometida, prioridad_desc, dur_min, rangos_validos, nombre_proceso) in procesos:
         dur = int(dur_min) if dur_min is not None else 1
@@ -328,15 +330,25 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
             total_obj.append((is_over, PENAL_OVERQUAL))
 
     model.Minimize(sum(v * c for (v, c) in total_obj))
-
+    
+    fin = time.perf_counter()
+    print(f"✅✅✅✅✅✅✅✅Los FOR tardaron {fin - inicio:.4f} segundos.")
+    
     # ---- Resolver ----
+    
+    inicio_solver = time.perf_counter()
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 30
-    solver.parameters.num_search_workers = 8
-    solver.parameters.log_search_progress = True
+    solver.parameters.max_time_in_seconds = 360
+    solver.parameters.num_search_workers = 12
+    solver.parameters.log_search_progress = False
+
+
 
     status = solver.Solve(model)
 
+        
+    fin = time.perf_counter()
+    print(f"✅✅✅ El solver tardo {fin - inicio_solver:.4f} segundos.")
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         for (orden_id, proc_id, secuencia, fecha_prometida, peso_prioridad, dur, rangos_proc, nombre_proceso) in procesos_norm:
@@ -371,7 +383,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
 
 # 🔸 Función async que envuelve al solver
 
-async def planificar(repo_orden: OrdenTrabajoRepository, repo_operario: OperarioRepository, repo_maquinaria: MaquinariaRepository,db):
+async def planificar(repo_orden: OrdenTrabajoRepository, repo_operario: OperarioRepository, repo_maquinaria: MaquinariaRepository,repo_planificacion: PlanificacionRepository,db):
     ordenes = await repo_orden.find_with_procesos()
     operarios = await repo_operario.find_with_rangos()  # [(id_operario, id_rango), ...]
 
@@ -383,8 +395,8 @@ async def planificar(repo_orden: OrdenTrabajoRepository, repo_operario: Operario
         rangos_ok = {rm.id_rango for rm in (m.rango_maquinarias or [])}
         maquinarias.append((m.id, rangos_ok, m.nombre))
 
-
     procesos_para_solver = []
+    inicio = time.perf_counter()
     for orden in ordenes:
         prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
@@ -407,59 +419,10 @@ async def planificar(repo_orden: OrdenTrabajoRepository, repo_operario: Operario
                 nombre_proceso             # 👈 nuevo campo
             ))
 
+    fin = time.perf_counter()
+    print(f"El método tardó {fin - inicio:.4f} segundos.")
+
     resultados = await asyncio.to_thread(_resolver_planificacion, procesos_para_solver, operarios, maquinarias)
-    
-    # ✅ Generar ID único del lote y descripción
-    id_lote = str(uuid.uuid4())
-    descripcion_lote = f"Planificación {datetime.now():%B %Y}".capitalize()
 
-    # ✅ Insertar directamente a la BD sin repositorio
-    insert_query = """
-        INSERT INTO planificacion (
-            orden_id, proceso_id, id_operario, id_rango_operario, id_maquinaria,
-            sin_maquinaria, inicio_min, fin_min, duracion_min, prioridad_peso,
-            fecha_prometida, sin_asignar, nombre_proceso, rangos_permitidos,
-            id_planificacion_lote, descripcion_lote, creado_en
-        )
-        VALUES (
-            :orden_id, :proceso_id, :id_operario, :id_rango_operario, :id_maquinaria,
-            :sin_maquinaria, :inicio_min, :fin_min, :duracion_min, :prioridad_peso,
-            :fecha_prometida, :sin_asignar, :nombre_proceso, :rangos_permitidos,
-            :id_planificacion_lote, :descripcion_lote, :creado_en
-        )
-    """
-
-    for r in resultados:
-        params = {
-            "orden_id": r["orden_id"],
-            "proceso_id": r["proceso_id"],
-            "id_operario": r.get("id_operario"),
-            "id_rango_operario": r.get("id_rango_operario"),
-            "id_maquinaria": r.get("id_maquinaria"),
-            "sin_maquinaria": r.get("sin_maquinaria", False),
-            "inicio_min": r["inicio_min"],
-            "fin_min": r["fin_min"],
-            "duracion_min": r["duracion_min"],
-            "prioridad_peso": r["prioridad_peso"],
-            "fecha_prometida": r.get("fecha_prometida"),
-            "sin_asignar": r.get("sin_asignar", False),
-            "nombre_proceso": r.get("nombre_proceso"),
-            "rangos_permitidos": str(r.get("rangos_permitidos_proceso", [])),
-            "id_planificacion_lote": id_lote,
-            "descripcion_lote": descripcion_lote,
-            "creado_en": datetime.now(),
-        }
-        await db.execute(text(insert_query), params)
-
-    await db.commit()
-
-    return {
-        "mensaje": f"Planificación guardada ({len(resultados)} registros)",
-        "id_planificacion_lote": id_lote,
-        "descripcion_lote": descripcion_lote
-    }
-    
-    #return resultados
-
-
+    return await repo_planificacion.insertar_planificacion_lote(resultados)
 

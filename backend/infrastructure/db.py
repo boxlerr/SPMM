@@ -74,7 +74,7 @@ safe_log = DATABASE_URL.replace(DB_PASSWORD or "", "*****") if DB_PASSWORD else 
 logger.info(f"Resultado URL: {safe_log}")
 
 # 🔹 Crear el engine asincrónico
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 
 # 🔹 Crear la sesión asincrónica
 SessionLocal = sessionmaker(
