@@ -4,438 +4,33 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { Gantt, Task, ViewMode } from "gantt-task-react";
 import "gantt-task-react/dist/index.css";
 import "./PlanificacionGantt.module.css";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Calendar,
-  ChevronDown,
-  X,
-  Activity,
-} from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { usePanelContext } from "@/contexts/PanelContext";
 
-interface PlanificacionItem {
-  id: number;
-  orden_id: number;
-  proceso_id: number;
-  nombre_proceso: string;
-  inicio_min: number;
-  fin_min: number;
-  creado_en: string;
-  id_operario?: number;
-  id_maquinaria?: number;
-  nombre_maquinaria?: string;
-  nombre_operario?: string;
-  apellido_operario?: string;
-  fecha_prometida?: string;
-  prioridad_peso?: number;
-}
+// Components
+import TaskListHeader from "./gantt/TaskListHeader";
+import TaskListTable from "./gantt/TaskListTable";
+import CustomTooltip from "./gantt/CustomTooltip";
+import SidebarPanel from "./gantt/SidebarPanel";
 
-interface Operario {
-  id: number;
-  nombre: string;
-  apellido: string;
-}
-
-// Paleta de colores para procesos
-const PROCESS_COLORS = [
-  "#3b82f6", // blue-500
-  "#ef4444", // red-500
-  "#10b981", // emerald-500
-  "#f59e0b", // amber-500
-  "#8b5cf6", // violet-500
-  "#ec4899", // pink-500
-  "#06b6d4", // cyan-500
-  "#f97316", // orange-500
-];
-
-const getProcessColor = (processName: string) => {
-  let hash = 0;
-  for (let i = 0; i < processName.length; i++) {
-    hash = processName.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const index = Math.abs(hash) % PROCESS_COLORS.length;
-  return PROCESS_COLORS[index];
-};
-
-// Tooltip personalizado
-const CustomTooltip: React.FC<{
-  task: Task;
-  fontSize: string;
-  fontFamily: string;
-}> = ({ task, fontSize, fontFamily }) => {
-  if (task.type === "project") return null;
-
-  return (
-    <div
-      style={{
-        backgroundColor: "white",
-        padding: "12px",
-        borderRadius: "8px",
-        boxShadow:
-          "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-        border: "1px solid #e5e7eb",
-        fontSize: "12px",
-        fontFamily,
-        zIndex: 1000,
-        minWidth: "200px",
-      }}
-    >
-      <div className="font-bold text-gray-900 mb-1 text-sm">
-        {task.name.split(" (OT:")[0]}
-      </div>
-      <div className="text-gray-600 mb-2">
-        {task.name.match(/\(OT: \d+\)/)?.[0] || ""}
-      </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
-        <span className="font-semibold">Inicio:</span>
-        <span>
-          {task.start.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
-
-        <span className="font-semibold">Fin:</span>
-        <span>
-          {task.end.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
-
-        <span className="font-semibold">Duración:</span>
-        <span>
-          {Math.round((task.end.getTime() - task.start.getTime()) / 60000)} min
-        </span>
-      </div>
-    </div>
-  );
-};
-
-const TaskListHeader: React.FC<{
-  headerHeight: number;
-  isSidebarOpen?: boolean;
-}> = ({ headerHeight, isSidebarOpen }) => {
-  if (isSidebarOpen === false) return null;
-
-  return (
-    <div
-      style={{
-        height: headerHeight,
-        fontFamily: "inherit",
-        fontWeight: "bold",
-        paddingLeft: 16,
-        display: "flex",
-        alignItems: "center",
-        borderBottom: "1px solid #e5e7eb",
-        backgroundColor: "#f9fafb",
-        color: "#374151",
-        fontSize: "0.875rem",
-      }}
-    >
-      Operario / Tarea
-    </div>
-  );
-};
-
-const TaskListTable: React.FC<{
-  rowHeight: number;
-  tasks: Task[];
-  onExpanderClick: (task: Task) => void;
-  planificacionItems: PlanificacionItem[];
-  cargasMap: Record<string, { totalMinutos: number; porcentaje: number }>;
-  isSidebarOpen?: boolean;
-  onTaskClick?: (item: PlanificacionItem) => void;
-}> = ({
-  rowHeight,
-  tasks,
-  onExpanderClick,
-  planificacionItems,
-  cargasMap,
-  isSidebarOpen,
-  onTaskClick,
-}) => {
-    if (isSidebarOpen === false) return null;
-
-    return (
-      <div style={{ fontFamily: "inherit" }}>
-        {tasks.map((t) => {
-          const isProject = t.type === "project";
-          let mainText = t.name;
-          let subText = "";
-
-          if (isProject) {
-            if (
-              !mainText ||
-              mainText === "Rango Inicio" ||
-              mainText === "Rango Fin"
-            ) {
-              if (t.id === "range-start" || t.id === "range-end") {
-                return <div key={t.id} style={{ height: rowHeight }} />;
-              }
-
-              if (t.id === "op-none") {
-                mainText = "Sin Operario Asignado";
-              } else if (t.id.startsWith("op-")) {
-                const opId = parseInt(t.id.replace("op-", ""));
-                const item = planificacionItems.find(
-                  (p) => p.id_operario === opId
-                );
-                if (item) {
-                  mainText = `${item.nombre_operario || ""} ${item.apellido_operario || ""
-                    }`.trim();
-                } else {
-                  mainText = "Operario";
-                }
-              }
-            }
-
-            const carga = cargasMap[t.id] || { totalMinutos: 0, porcentaje: 0 };
-
-            return (
-              <div
-                key={t.id}
-                style={{
-                  height: rowHeight,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  paddingLeft: 16,
-                  paddingRight: 16,
-                  borderBottom: "1px solid #e5e7eb",
-                  backgroundColor: "#f3f4f6",
-                  cursor: "pointer",
-                  transition: "background-color 0.2s",
-                }}
-                onClick={() => onExpanderClick(t)}
-              >
-                <div
-                  style={{
-                    paddingLeft: 0,
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    width: "100%",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flex: 1,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <span
-                      style={{ fontSize: 10, color: "#6b7280", flexShrink: 0 }}
-                    >
-                      {t.hideChildren ? "▶" : "▼"}
-                    </span>
-
-                    <div className="truncate w-full">
-                      <span
-                        style={{
-                          fontWeight: 700,
-                          color: "#111827",
-                          fontSize: "0.875rem",
-                        }}
-                      >
-                        {mainText}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: "0.65rem",
-                      color:
-                        carga.porcentaje > 90
-                          ? "#dc2626"
-                          : carga.porcentaje > 75
-                            ? "#f59e0b"
-                            : "#10b981",
-                      fontWeight: 600,
-                      flexShrink: 0,
-                      paddingLeft: 8,
-                    }}
-                  >
-                    {Math.round(carga.totalMinutos / 60)}h/8h
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 4,
-                    height: 3,
-                    backgroundColor: "#e5e7eb",
-                    borderRadius: 2,
-                    overflow: "hidden",
-                    width: "100%",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${carga.porcentaje}%`,
-                      backgroundColor:
-                        carga.porcentaje > 90
-                          ? "#dc2626"
-                          : carga.porcentaje > 75
-                            ? "#f59e0b"
-                            : "#10b981",
-                      transition: "width 0.3s ease",
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          } else {
-            const parts = t.name.split(" (OT:");
-            mainText = parts[0];
-            mainText = mainText.charAt(0).toUpperCase() + mainText.slice(1);
-
-            if (parts.length > 1) {
-              subText = `OT: ${parts[1].replace(")", "")}`;
-            }
-
-            const dateText = t.start.toLocaleDateString("es-AR", {
-              month: "short",
-              day: "numeric",
-            });
-
-            // Extraer el ID de la planificación del task.id
-            const taskIdParts = t.id.split("-");
-            const dbIdStr = taskIdParts[4];
-            const planItem = dbIdStr
-              ? planificacionItems.find((p) => p.id === parseInt(dbIdStr))
-              : null;
-
-            const handleTaskClick = () => {
-              if (planItem && onTaskClick) {
-                onTaskClick(planItem);
-              }
-            };
-
-            return (
-              <div
-                key={t.id}
-                onClick={handleTaskClick}
-                style={{
-                  height: rowHeight,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  paddingLeft: 16,
-                  paddingRight: 16,
-                  borderBottom: "1px solid #e5e7eb",
-                  borderLeft: "3px solid transparent",
-                  backgroundColor: "#fff",
-                  cursor: planItem ? "pointer" : "default",
-                  transition: "all 0.2s ease",
-                }}
-                onMouseEnter={(e) => {
-                  if (planItem) {
-                    e.currentTarget.style.backgroundColor = "#f3f4f6";
-                    e.currentTarget.style.borderLeftColor = getProcessColor(
-                      planItem.nombre_proceso || "default"
-                    );
-                    e.currentTarget.style.boxShadow =
-                      "0 1px 3px 0 rgba(0, 0, 0, 0.1)";
-                    const chevron = e.currentTarget.querySelector(".task-chevron") as HTMLElement;
-                    if (chevron) {
-                      chevron.style.color = "#6b7280";
-                      chevron.style.transform = "translateX(2px)";
-                    }
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = "#fff";
-                  e.currentTarget.style.borderLeftColor = "transparent";
-                  e.currentTarget.style.boxShadow = "none";
-                  const chevron = e.currentTarget.querySelector(".task-chevron") as HTMLElement;
-                  if (chevron) {
-                    chevron.style.color = "#9ca3af";
-                    chevron.style.transform = "translateX(0)";
-                  }
-                }}
-              >
-                <div
-                  style={{
-                    paddingLeft: 24,
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    width: "100%",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div className="truncate" style={{ flex: 1, marginRight: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <span
-                        style={{
-                          fontWeight: 600,
-                          color: "#374151",
-                          fontSize: "0.8125rem",
-                        }}
-                      >
-                        {mainText}
-                      </span>
-                    </div>
-                    {subText && (
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: "0.75rem",
-                          color: "#6b7280",
-                          marginTop: "2px",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {subText}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    <div
-                      style={{
-                        fontSize: "0.75rem",
-                        color: "#6b7280",
-                        textAlign: "right",
-                      }}
-                    >
-                      {dateText}
-                    </div>
-                    <ChevronRight
-                      size={16}
-                      style={{
-                        color: planItem ? "#9ca3af" : "transparent",
-                        flexShrink: 0,
-                        transition: "transform 0.15s ease, color 0.15s ease",
-                      }}
-                      className="task-chevron"
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          }
-        })}
-      </div >
-    );
-  };
+// Libs
+import {
+  getProcessColor,
+  getColumnWidth,
+  getZoomLimits,
+  getViewLabel,
+} from "../lib/gantt-utils";
+import {
+  PlanificacionItem,
+  Operario,
+  calculateCargas,
+  transformToGanttTasks,
+} from "../lib/gantt-transform";
+import {
+  setupBarListeners,
+  handleWheelScroll,
+  setupDragToPan,
+} from "../lib/gantt-events";
 
 const PlanificacionGantt = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -455,6 +50,7 @@ const PlanificacionGantt = () => {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [columnWidth, setColumnWidth] = useState<number>(350);
   const nowLineRef = useRef<HTMLDivElement>(null);
+
   // Ref para acceder a tasks sin causar re-renders
   const tasksRef = useRef<Task[]>([]);
 
@@ -503,25 +99,7 @@ const PlanificacionGantt = () => {
 
   // Cargas por operario
   const cargasMap = useMemo(() => {
-    const map: Record<string, { totalMinutos: number; porcentaje: number }> =
-      {};
-    const horasTrabajo = 8 * 60;
-
-    const minutosPorOperario: Record<string, number> = {};
-
-    planificacionItems.forEach((item) => {
-      const opId = item.id_operario ? `op-${item.id_operario}` : "op-none";
-      const duracion = item.fin_min - item.inicio_min;
-      minutosPorOperario[opId] = (minutosPorOperario[opId] || 0) + duracion;
-    });
-
-    Object.keys(minutosPorOperario).forEach((opId) => {
-      const totalMinutos = minutosPorOperario[opId];
-      const porcentaje = Math.min((totalMinutos / horasTrabajo) * 100, 100);
-      map[opId] = { totalMinutos, porcentaje };
-    });
-
-    return map;
+    return calculateCargas(planificacionItems);
   }, [planificacionItems]);
 
   const MemoizedTaskListHeader = useMemo(() => {
@@ -548,6 +126,7 @@ const PlanificacionGantt = () => {
             setDetailsOpen(true);
           }
         }}
+        getProcessColor={getProcessColor}
       />
     );
   }, [planificacionItems, cargasMap, isSidebarOpen, selectedItem]);
@@ -582,7 +161,7 @@ const PlanificacionGantt = () => {
       const diffTime = now.getTime() - startDate.getTime();
       const diffHours = diffTime / (1000 * 60 * 60);
 
-      const columnWidth = getColumnWidth();
+      const columnWidth = getColumnWidth(viewMode);
       let pixels = 0;
 
       switch (viewMode) {
@@ -621,7 +200,7 @@ const PlanificacionGantt = () => {
       const diffTime = now.getTime() - ganttStartDate.getTime();
       const diffHours = diffTime / (1000 * 60 * 60);
 
-      const columnWidth = getColumnWidth();
+      const columnWidth = getColumnWidth(viewMode);
       let pixels = 0;
 
       switch (viewMode) {
@@ -662,8 +241,6 @@ const PlanificacionGantt = () => {
     // 1. Buscar el contenedor con scroll
     let scrollContainer: HTMLElement | null = null;
 
-    // Intentar encontrar el contenedor específico de gantt-task-react
-    // Generalmente es el que tiene overflow-x auto
     const findScrollContainer = () => {
       const divs = wrapper.querySelectorAll("div");
       for (let i = 0; i < divs.length; i++) {
@@ -677,7 +254,10 @@ const PlanificacionGantt = () => {
       for (let i = 0; i < divs.length; i++) {
         const div = divs[i];
         const style = window.getComputedStyle(div);
-        if ((style.overflowY === "auto" || style.overflowY === "scroll") && div.scrollHeight > div.clientHeight) {
+        if (
+          (style.overflowY === "auto" || style.overflowY === "scroll") &&
+          div.scrollHeight > div.clientHeight
+        ) {
           return div;
         }
       }
@@ -698,137 +278,27 @@ const PlanificacionGantt = () => {
       }
     };
 
-    // --- B. Shift + Wheel (Scroll Horizontal) ---
-    const handleWheelCapture = (e: WheelEvent) => {
-      if (!scrollContainer) return;
-
-      // Si presiona Shift, scrolleamos horizontalmente
-      if (e.shiftKey) {
-        e.preventDefault();
-        scrollContainer.scrollLeft += e.deltaY;
-        return;
-      }
-
-      // FIX: Solo aplicar lógica de bloqueo vertical si el contenedor tiene scroll vertical
-      const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-
-      // Si el contenido entra perfectamente (o sobra espacio), no bloquear el scroll vertical
-      // para que el evento burbujee a contenedores padres o al body
-      if (scrollHeight <= clientHeight) return;
-
-      // Lógica original de prevención de rebote vertical
-      const deltaY = e.deltaY;
-
-      if (deltaY === 0) return;
-
-      const isAtTop = scrollTop <= 0;
-      const isAtBottom = Math.abs(scrollHeight - clientHeight - scrollTop) <= 2;
-
-      if ((isAtTop && deltaY < 0) || (isAtBottom && deltaY > 0)) {
-        e.stopPropagation();
-        e.preventDefault();
-      }
-    };
-
-    // --- C. Drag-to-Pan (Estilo Figma/Miro) ---
-    // Variables mutables para el estado del drag
-    let isMouseDown = false;
-    let isDragging = false;
-    let startX = 0;
-    let startScrollLeft = 0;
-
-    const handlePointerDown = (e: PointerEvent) => {
-      // Solo botón izquierdo
-      if (e.button !== 0) return;
-
-      const target = e.target as HTMLElement;
-      const tagName = target.tagName.toLowerCase();
-
-      // FILTRO ESTRICTO:
-      // Si el usuario hace click en algo que parece interactuable, NO iniciamos la lógica de drag
-      // Esto permite que el evento siga su curso natural hacia la librería
-      if (tagName === 'rect' || tagName === 'text' || tagName === 'tspan' || tagName === 'circle' || tagName === 'path') {
-        // Excepción: Si es el fondo SVG (a veces el click cae en el svg root o un g vacío)
-        // Pero gantt-task-react llena todo con rects.
-        // Si es una barra de tarea, definitivamente retornamos.
-        if (target.closest('.bar-wrapper') || target.getAttribute('class')?.includes('bar')) {
-          return;
-        }
-      }
-
-      // Aún así, permitimos intentar el drag si es en el espacio vacío
-      // Pero NO capturamos el puntero todavía. Esperamos a que se mueva.
-      isMouseDown = true;
-      isDragging = false;
-      startX = e.clientX;
-      startScrollLeft = scrollContainer!.scrollLeft;
-
-      // No llamamos a setPointerCapture aquí para no robar el click
-    };
-
-    const handlePointerMove = (e: PointerEvent) => {
-      if (!isMouseDown || !scrollContainer) return;
-
-      const x = e.clientX;
-      const walk = x - startX;
-
-      // Solo activamos el drag si se mueve más de 10px
-      if (!isDragging && Math.abs(walk) > 10) {
-        isDragging = true;
-        // AHORA sí capturamos el puntero, porque el usuario claramente quiere arrastrar
-        wrapper.setPointerCapture(e.pointerId);
-        wrapper.style.cursor = 'grabbing';
-        document.body.style.userSelect = 'none';
-      }
-
-      if (isDragging) {
-        e.preventDefault(); // Evitar selección de texto nativa
-        scrollContainer.scrollLeft = startScrollLeft - walk;
-      }
-    };
-
-    const handlePointerUp = (e: PointerEvent) => {
-      if (isMouseDown) {
-        if (isDragging) {
-          // Si estuvimos arrastrando, liberamos todo
-          wrapper.releasePointerCapture(e.pointerId);
-          wrapper.style.cursor = 'default';
-          document.body.style.userSelect = '';
-        }
-
-        isMouseDown = false;
-        isDragging = false;
-      }
-    };
-
     // Agregar listeners
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-    wrapper.addEventListener("wheel", handleWheelCapture, {
+
+    // --- B. Shift + Wheel (Scroll Horizontal) ---
+    const wheelHandler = (e: WheelEvent) => handleWheelScroll(e, scrollContainer!);
+    wrapper.addEventListener("wheel", wheelHandler, {
       passive: false,
       capture: true,
     });
 
-    // Usamos capture=true en pointerdown para evaluar antes que nadie, 
-    // pero somos cuidadosos de no bloquear si no es necesario.
-    // Sin embargo, para que funcione bien con elementos internos, a veces es mejor bubbling.
-    // Probemos bubbling (false) para pointerdown para que si un hijo hace stopPropagation, lo respete.
-    // Pero queremos "robar" el drag del fondo.
-    wrapper.addEventListener("pointerdown", handlePointerDown);
-    wrapper.addEventListener("pointermove", handlePointerMove);
-    wrapper.addEventListener("pointerup", handlePointerUp);
-    wrapper.addEventListener("pointerleave", handlePointerUp);
+    // --- C. Drag-to-Pan (Estilo Figma/Miro) ---
+    const cleanupDrag = setupDragToPan(wrapper, scrollContainer);
 
     return () => {
       if (scrollContainer) {
         scrollContainer.removeEventListener("scroll", handleScroll);
       }
-      wrapper.removeEventListener("wheel", handleWheelCapture, {
+      wrapper.removeEventListener("wheel", wheelHandler, {
         capture: true,
       } as any);
-      wrapper.removeEventListener("pointerdown", handlePointerDown);
-      wrapper.removeEventListener("pointermove", handlePointerMove);
-      wrapper.removeEventListener("pointerup", handlePointerUp);
-      wrapper.removeEventListener("pointerleave", handlePointerUp);
+      cleanupDrag();
     };
   }, [currentTimePosition, isSidebarOpen, tasks]);
 
@@ -837,294 +307,38 @@ const PlanificacionGantt = () => {
     const container = ganttContainerRef.current;
     if (!container || tasks.length === 0) return;
 
-    // Función para inyectar listeners en las barras
-    const injectBarListeners = () => {
-      // Buscar todos los <rect> que son barras de tareas (no proyectos)
-      const svg = container.querySelector("svg");
-      if (!svg) {
-        console.log("No se encontró SVG en el contenedor");
-        return;
-      }
-
-      // Obtener todas las barras de tareas (task.type === 'task')
-      const taskBars = tasks.filter((t) => t.type === "task");
-      console.log("Tareas encontradas:", taskBars.length);
-
-      // Buscar todos los grupos de barras (gantt-task-react usa <g> para agrupar barras)
-      // Buscar todos los <rect> dentro del SVG que tienen altura (son barras, no líneas)
-      const allRects = svg.querySelectorAll("rect");
-      const barRects: Array<{ rect: SVGRectElement; y: number; x: number }> =
-        [];
-
-      allRects.forEach((rect) => {
-        const height = parseFloat(rect.getAttribute("height") || "0");
-        const y = parseFloat(rect.getAttribute("y") || "0");
-        const x = parseFloat(rect.getAttribute("x") || "0");
-        // Las barras tienen altura > 20px, las líneas tienen altura muy pequeña
-        if (height > 20 && x > 0) {
-          barRects.push({ rect, y, x });
-        }
-      });
-
-      // Ordenar por posición Y (de arriba hacia abajo) y luego por X (de izquierda a derecha)
-      barRects.sort((a, b) => {
-        if (Math.abs(a.y - b.y) < 5) {
-          return a.x - b.x; // Misma fila, ordenar por X
-        }
-        return a.y - b.y; // Diferente fila, ordenar por Y
-      });
-
-      // Emparejar cada rect con su task usando el texto cercano
-      barRects.forEach(({ rect }, index) => {
-        if (index >= taskBars.length) return;
-
-        const task = taskBars[index];
-        if (!task) return;
-
-        // Buscar el texto asociado a esta barra para identificar la tarea correcta
-        const textElements = svg.querySelectorAll("text");
-        let matchedTask = task;
-
-        const rectY = parseFloat(rect.getAttribute("y") || "0");
-        const rectHeight = parseFloat(rect.getAttribute("height") || "0");
-        const rectCenterY = rectY + rectHeight / 2;
-        const rectX = parseFloat(rect.getAttribute("x") || "0");
-        const rectWidth = parseFloat(rect.getAttribute("width") || "0");
-        const rectCenterX = rectX + rectWidth / 2;
-
-        // Buscar texto que esté dentro o cerca de esta barra
-        for (const textEl of textElements) {
-          const textY = parseFloat(textEl.getAttribute("y") || "0");
-          const textX = parseFloat(textEl.getAttribute("x") || "0");
-          const textContent = textEl.textContent || "";
-
-          // Si el texto está dentro del área de la barra
-          if (
-            Math.abs(textY - rectCenterY) < 25 &&
-            textX >= rectX - 10 &&
-            textX <= rectX + rectWidth + 10 &&
-            textContent.trim().length > 0
-          ) {
-            // Buscar la tarea que coincide con este texto
-            const taskNamePart = task.name.split(" (OT:")[0].toLowerCase();
-            if (textContent.toLowerCase().includes(taskNamePart)) {
-              matchedTask = task;
-              break;
-            }
-
-            // Intentar encontrar cualquier tarea que coincida con el texto
-            const matchingTask = taskBars.find((t) => {
-              const tNamePart = t.name.split(" (OT:")[0].toLowerCase();
-              return textContent.toLowerCase().includes(tNamePart);
-            });
-            if (matchingTask) {
-              matchedTask = matchingTask;
-              break;
-            }
-          }
-        }
-
-        // Agregar data-task-id si no existe
-        const taskIdToUse = matchedTask.id;
-        if (
-          !rect.getAttribute("data-task-id") ||
-          rect.getAttribute("data-task-id") !== taskIdToUse
-        ) {
-          rect.setAttribute("data-task-id", taskIdToUse);
-          rect.style.cursor = "pointer";
-        }
-
-        // Remover listeners previos si existen
-        const existingListeners = (rect as any).__ganttListeners;
-        if (existingListeners) {
-          rect.removeEventListener(
-            "pointerdown",
-            existingListeners.pointerdown
-          );
-          rect.removeEventListener(
-            "pointermove",
-            existingListeners.pointermove
-          );
-          rect.removeEventListener("pointerup", existingListeners.pointerup);
-        }
-
-        // Estado local para este rect
-        let pointerState = {
-          isDown: false,
-          startX: 0,
-          startY: 0,
-          hasMoved: false,
-          startTime: 0,
-          taskId: taskIdToUse,
-        };
-
-        const handlePointerDown = (e: PointerEvent) => {
-          console.log("pointerdown detectado en barra:", pointerState.taskId);
-          // NO usar stopPropagation aquí, solo prevenir el comportamiento por defecto si es necesario
-          // e.stopPropagation(); // Comentado para permitir que el Gantt también maneje el evento
-          e.preventDefault(); // Prevenir selección de texto
-          pointerState.isDown = true;
-          pointerState.startX = e.clientX;
-          pointerState.startY = e.clientY;
-          pointerState.hasMoved = false;
-          pointerState.startTime = Date.now();
-
-          // Cancelar cualquier timeout del modal
-          if (modalTimeoutRef.current) {
-            clearTimeout(modalTimeoutRef.current);
-            modalTimeoutRef.current = null;
-          }
-
-          // Cambiar cursor después de 200ms si se mantiene presionado
-          const holdTimeout = setTimeout(() => {
-            if (pointerState.isDown && !pointerState.hasMoved) {
-              rect.style.cursor = "move";
-            }
-          }, 200);
-
-          (rect as any).__holdTimeout = holdTimeout;
-        };
-
-        const handlePointerMove = (e: PointerEvent) => {
-          if (!pointerState.isDown) return;
-
-          const deltaX = Math.abs(e.clientX - pointerState.startX);
-          const deltaY = Math.abs(e.clientY - pointerState.startY);
-          const threshold = 3; // 3px de movimiento = drag
-
-          if (deltaX > threshold || deltaY > threshold) {
-            pointerState.hasMoved = true;
-            preventModalRef.current = true;
-
-            // Cambiar cursor a move
-            rect.style.cursor = "move";
-
-            // Cancelar timeout de hold
-            if ((rect as any).__holdTimeout) {
-              clearTimeout((rect as any).__holdTimeout);
-              (rect as any).__holdTimeout = null;
-            }
-
-            // Cancelar timeout del modal
-            if (modalTimeoutRef.current) {
-              clearTimeout(modalTimeoutRef.current);
-              modalTimeoutRef.current = null;
-            }
-          }
-        };
-
-        const handlePointerUp = (e: PointerEvent) => {
-          if (!pointerState.isDown) return;
-
-          console.log("pointerup detectado, hasMoved:", pointerState.hasMoved);
-
-          // Cancelar timeout de hold
-          if ((rect as any).__holdTimeout) {
-            clearTimeout((rect as any).__holdTimeout);
-            (rect as any).__holdTimeout = null;
-          }
-
-          const deltaX = Math.abs(e.clientX - pointerState.startX);
-          const deltaY = Math.abs(e.clientY - pointerState.startY);
-          const threshold = 3;
-
-          console.log("Delta:", deltaX, deltaY, "threshold:", threshold);
-
-          // Si NO hubo movimiento significativo, es un CLICK → abrir panel
-          if (
-            !pointerState.hasMoved &&
-            deltaX < threshold &&
-            deltaY < threshold
-          ) {
-            console.log("Es un CLICK, abriendo panel...");
-            // Cancelar cualquier timeout previo
-            if (modalTimeoutRef.current) {
-              clearTimeout(modalTimeoutRef.current);
-            }
-
-            // Abrir panel inmediatamente (sin delay para testing)
-            const parts = pointerState.taskId.split("-");
-            const dbIdStr = parts[4];
-            if (dbIdStr) {
-              const dbId = parseInt(dbIdStr);
-              if (!Number.isNaN(dbId)) {
-                const item = planificacionItems.find((p) => p.id === dbId);
-                if (item) {
-                  console.log("Abriendo panel para tarea:", item); // Debug
-
-                  // Toggle: si es la misma tarea, cerrar el panel
-                  if (selectedItem && selectedItem.id === item.id) {
-                    setDetailsOpen(false);
-                    setSelectedItem(null);
-                  } else {
-                    // Si es diferente, abrir con la nueva tarea
-                    setSelectedItem(item);
-                    setDetailsOpen(true);
-                  }
-
-                  setSelectedTaskId(pointerState.taskId);
-
-                  // Deseleccionar la tarea
-                  requestAnimationFrame(() => {
-                    setTasks((prevTasks) => {
-                      const updated = prevTasks.map((t) => ({
-                        ...t,
-                        isSelected: false,
-                      }));
-                      tasksRef.current = updated;
-                      return updated;
-                    });
-                    setSelectedTaskId(null);
-                  });
-                }
-              }
-            }
-          } else {
-            // Hubo movimiento = drag, no abrir modal
-            preventModalRef.current = true;
-            setTimeout(() => {
-              preventModalRef.current = false;
-            }, 500);
-          }
-
-          // Resetear estado
-          pointerState.isDown = false;
-          pointerState.hasMoved = false;
-          rect.style.cursor = "pointer";
-        };
-
-        // Agregar listeners
-        rect.addEventListener("pointerdown", handlePointerDown, {
-          passive: false,
-        });
-        rect.addEventListener("pointermove", handlePointerMove, {
-          passive: true,
-        });
-        rect.addEventListener("pointerup", handlePointerUp, { passive: true });
-
-        // Guardar referencias para poder removerlos después
-        (rect as any).__ganttListeners = {
-          pointerdown: handlePointerDown,
-          pointermove: handlePointerMove,
-          pointerup: handlePointerUp,
-        };
-
-        console.log(
-          `Listeners agregados a barra ${index} con taskId: ${taskIdToUse}`
-        );
-      });
-
-      console.log(`Total de barras con listeners: ${barRects.length}`);
-    };
-
     // Inyectar listeners después de que el Gantt se renderice
     const timeout = setTimeout(() => {
-      injectBarListeners();
+      setupBarListeners({
+        container,
+        tasks,
+        planificacionItems,
+        setSelectedItem,
+        setDetailsOpen,
+        setSelectedTaskId,
+        setTasks,
+        tasksRef,
+        preventModalRef,
+        modalTimeoutRef,
+        selectedItem,
+      });
     }, 100);
 
     // Re-inyectar cuando cambien las tareas
     const observer = new MutationObserver(() => {
-      injectBarListeners();
+      setupBarListeners({
+        container,
+        tasks,
+        planificacionItems,
+        setSelectedItem,
+        setDetailsOpen,
+        setSelectedTaskId,
+        setTasks,
+        tasksRef,
+        preventModalRef,
+        modalTimeoutRef,
+        selectedItem,
+      });
     });
 
     if (container) {
@@ -1158,7 +372,7 @@ const PlanificacionGantt = () => {
         modalTimeoutRef.current = null;
       }
     };
-  }, [tasks, planificacionItems]); // Re-ejecutar cuando cambien las tareas
+  }, [tasks, planificacionItems, selectedItem]); // Re-ejecutar cuando cambien las tareas o el item seleccionado
 
   // Fetch planificación
   useEffect(() => {
@@ -1171,108 +385,11 @@ const PlanificacionGantt = () => {
         const data: PlanificacionItem[] = await response.json();
         setPlanificacionItems(data);
 
-        if (data.length === 0) {
-          setTasks([]);
-          return;
-        }
-
-        const baseDate = new Date();
-        baseDate.setHours(9, 0, 0, 0);
-
-        const operariosMap = new Map<string, { id: string; name: string }>();
-
-        data.forEach((item) => {
-          const opId = item.id_operario ? `op-${item.id_operario}` : "op-none";
-          let opName = "Sin Operario Asignado";
-          if (item.nombre_operario) {
-            opName = `${item.nombre_operario} ${item.apellido_operario || ""
-              }`.trim();
-          }
-
-          if (!operariosMap.has(opId)) {
-            operariosMap.set(opId, { id: opId, name: opName });
-          }
-        });
-
-        const operarios = Array.from(operariosMap.values()).sort((a, b) => {
-          if (a.id === "op-none") return 1;
-          if (b.id === "op-none") return -1;
-          return a.name.localeCompare(b.name);
-        });
-
-        const ganttTasks: Task[] = [];
-
-        operarios.forEach((op) => {
-          ganttTasks.push({
-            start: baseDate,
-            end: baseDate,
-            name: "",
-            id: op.id,
-            type: "project",
-            progress: 0,
-            isDisabled: true,
-            hideChildren: true,
-            styles: {
-              backgroundColor: "#f3f4f6",
-              backgroundSelectedColor: "#e5e7eb",
-              progressColor: "#f3f4f6",
-              progressSelectedColor: "#e5e7eb",
-            },
-          });
-
-          const tareasOperario = data.filter((item) => {
-            const itemOpId = item.id_operario
-              ? `op-${item.id_operario}`
-              : "op-none";
-            return itemOpId === op.id;
-          });
-
-          tareasOperario.forEach((item, index) => {
-            const originalStart = new Date(
-              baseDate.getTime() + item.inicio_min * 60000
-            );
-
-            const start = new Date(originalStart);
-            start.setHours(0, 0, 0, 0);
-
-            const end = new Date(start);
-            end.setTime(start.getTime() + 24 * 60 * 60 * 1000 - 1000);
-
-            const color = getProcessColor(item.nombre_proceso || "default");
-
-            ganttTasks.push({
-              start: start,
-              end: end,
-              name: `${item.nombre_proceso || "Proceso"} (OT: ${item.orden_id
-                })`,
-              id: `task-${item.orden_id}-${item.proceso_id}-${index}-${item.id}`,
-              type: "task",
-              project: op.id,
-              progress: 0,
-              isDisabled: false,
-              styles: {
-                progressColor: color,
-                progressSelectedColor: color,
-                backgroundColor: color,
-                backgroundSelectedColor: color,
-              },
-            });
-          });
-        });
-
-        let minDate = new Date();
-        if (ganttTasks.length > 0) {
-          minDate = ganttTasks.reduce(
-            (min, t) => (t.start < min ? t.start : min),
-            ganttTasks[0].start
-          );
-        } else {
-          minDate = baseDate;
-        }
+        const { tasks: ganttTasks, startDate } = transformToGanttTasks(data);
 
         setTasks(ganttTasks);
         tasksRef.current = ganttTasks;
-        setGanttStartDate(minDate);
+        setGanttStartDate(startDate);
       } catch (error) {
         console.error("Error fetching planificacion:", error);
       }
@@ -1365,8 +482,6 @@ const PlanificacionGantt = () => {
           `HTTP error! status: ${response.status}, message: ${errorText}`
         );
       }
-
-      const updatedData = await response.json();
 
       setPlanificacionItems((prev) =>
         prev.map((p) =>
@@ -1563,69 +678,18 @@ const PlanificacionGantt = () => {
     }
   };
 
-  const getColumnWidth = () => {
-    switch (viewMode) {
-      case ViewMode.Year:
-        return 500;
-      case ViewMode.Month:
-        return 400;
-      case ViewMode.Week:
-        return 350;
-      case ViewMode.Day:
-        return 300;
-      case ViewMode.Hour:
-        return 120;
-      default:
-        return 120;
-    }
-  };
-
   // Resetear ancho de columna al cambiar de vista
   useEffect(() => {
-    setColumnWidth(getColumnWidth());
+    setColumnWidth(getColumnWidth(viewMode));
   }, [viewMode]);
 
-  const getViewLabel = (mode: ViewMode) => {
-    switch (mode) {
-      case ViewMode.Hour:
-        return "Horas";
-      case ViewMode.Day:
-        return "Días";
-      case ViewMode.Week:
-        return "Semanas";
-      case ViewMode.Month:
-        return "Meses";
-      case ViewMode.Year:
-        return "Años";
-      default:
-        return "Vista";
-    }
-  };
-
-  const getZoomLimits = () => {
-    switch (viewMode) {
-      case ViewMode.Hour:
-        return { min: 60, max: 250 };
-      case ViewMode.Day:
-        return { min: 80, max: 500 };
-      case ViewMode.Week:
-        return { min: 150, max: 800 };
-      case ViewMode.Month:
-        return { min: 200, max: 1000 };
-      case ViewMode.Year:
-        return { min: 300, max: 1200 };
-      default:
-        return { min: 50, max: 500 };
-    }
-  };
-
   const handleZoomIn = () => {
-    const { max } = getZoomLimits();
+    const { max } = getZoomLimits(viewMode);
     setColumnWidth((prev) => Math.min(prev + 20, max));
   };
 
   const handleZoomOut = () => {
-    const { min } = getZoomLimits();
+    const { min } = getZoomLimits(viewMode);
     setColumnWidth((prev) => Math.max(prev - 20, min));
   };
 
@@ -1886,130 +950,18 @@ const PlanificacionGantt = () => {
         </div>
       </div>
 
-      {/* Panel lateral fijo - estilo Jira/Asana/Notion */}
-      {
-        detailsOpen && selectedItem && (
-          <div className="fixed right-0 top-0 bottom-0 w-80 bg-white shadow-2xl z-50 border-l border-gray-200 flex flex-col transform transition-transform duration-300 ease-in-out">
-            {/* Header del panel con branding rojo */}
-            <div className="relative bg-gradient-to-r from-[#DC143C] to-[#B8112E] p-4 text-white">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                    <Activity className="h-5 w-5 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold">
-                      Detalle de Planificación
-                    </h2>
-                    <p className="text-xs text-white/80 mt-0.5">
-                      OT #{selectedItem.orden_id}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setDetailsOpen(false);
-                    setSelectedItem(null);
-                  }}
-                  className="text-white/80 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/20"
-                  title="Cerrar panel"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-
-            {/* Contenido del panel */}
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="space-y-4">
-                {/* Proceso */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                    Proceso
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-4 h-4 rounded-full flex-shrink-0"
-                      style={{
-                        backgroundColor: getProcessColor(
-                          selectedItem.nombre_proceso || "default"
-                        ),
-                      }}
-                    />
-                    <span className="text-base text-gray-900 font-medium">
-                      {selectedItem.nombre_proceso}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Orden de Trabajo */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                    Orden de Trabajo
-                  </label>
-                  <span className="text-base text-gray-900 font-medium">
-                    #{selectedItem.orden_id}
-                  </span>
-                </div>
-
-                {/* Operario */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                    Operario
-                  </label>
-                  <Select
-                    value={selectedItem.id_operario?.toString() || ""}
-                    onValueChange={handleOperatorChange}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccionar operario" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.isArray(operarios) &&
-                        operarios.map((op) => (
-                          <SelectItem key={op.id} value={op.id.toString()}>
-                            {op.nombre} {op.apellido}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Maquinaria */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                    Maquinaria
-                  </label>
-                  <span className="text-base text-gray-900">
-                    {selectedItem.nombre_maquinaria || "Sin asignar"}
-                  </span>
-                </div>
-
-                {/* Duración */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                    Duración
-                  </label>
-                  <span className="text-base text-gray-900">
-                    {selectedItem.fin_min - selectedItem.inicio_min} minutos
-                  </span>
-                </div>
-
-                {/* Fecha Prometida */}
-                <div>
-                  <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                    Fecha Prometida
-                  </label>
-                  <span className="text-base text-gray-900">
-                    {selectedItem.fecha_prometida || "N/A"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      }
-    </div >
+      <SidebarPanel
+        isOpen={detailsOpen}
+        selectedItem={selectedItem}
+        onClose={() => {
+          setDetailsOpen(false);
+          setSelectedItem(null);
+        }}
+        getProcessColor={getProcessColor}
+        operarios={operarios}
+        onOperatorChange={handleOperatorChange}
+      />
+    </div>
   );
 };
 
