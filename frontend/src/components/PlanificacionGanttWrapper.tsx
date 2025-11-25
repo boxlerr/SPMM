@@ -220,6 +220,7 @@ export default function PlanificacionGanttWrapper() {
                             resources={resources}
                             viewMode={viewMode}
                             onTaskClick={handleTaskClick}
+                            onTaskMove={handleTaskMove}
                         />
                     </TabsContent>
                 </Tabs>

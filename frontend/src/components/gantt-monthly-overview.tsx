@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, MouseEvent } from "react"
+import { useState, useRef, MouseEvent, useEffect, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -25,58 +25,171 @@ interface GanttMonthlyOverviewProps {
   resources: Resource[]
   viewMode: "operario" | "maquina"
   onTaskClick?: (task: GanttTask) => void
+  onTaskMove?: (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => void
 }
 
-export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }: GanttMonthlyOverviewProps) {
+
+
+export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, onTaskMove }: GanttMonthlyOverviewProps) {
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  // Drag & Momentum State
   const [isDragging, setIsDragging] = useState(false)
   const [startX, setStartX] = useState(0)
   const [scrollLeft, setScrollLeft] = useState(0)
 
+  // Physics refs
+  const velocityRef = useRef(0)
+  const lastXRef = useRef(0)
+  const lastTimeRef = useRef(0)
+  const requestRef = useRef<number>()
+
   const handleMouseDown = (e: MouseEvent) => {
     if (!scrollContainerRef.current) return
+
+    // Stop any current momentum
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current)
+    }
+
     setIsDragging(true)
     setStartX(e.pageX - scrollContainerRef.current.offsetLeft)
     setScrollLeft(scrollContainerRef.current.scrollLeft)
+
+    // Initialize physics tracking
+    lastXRef.current = e.pageX
+    lastTimeRef.current = performance.now()
+    velocityRef.current = 0
   }
 
   const handleMouseLeave = () => {
-    setIsDragging(false)
+    if (isDragging) {
+      setIsDragging(false)
+      startMomentum()
+    }
   }
 
   const handleMouseUp = () => {
     setIsDragging(false)
+    startMomentum()
   }
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!isDragging || !scrollContainerRef.current) return
     e.preventDefault()
+
     const x = e.pageX - scrollContainerRef.current.offsetLeft
     const walk = (x - startX) * 1.5 // Multiplier for faster scrolling
     scrollContainerRef.current.scrollLeft = scrollLeft - walk
+
+    // Calculate velocity
+    const now = performance.now()
+    const dt = now - lastTimeRef.current
+    const dx = e.pageX - lastXRef.current
+
+    if (dt > 0) {
+      velocityRef.current = dx / dt
+    }
+
+    lastXRef.current = e.pageX
+    lastTimeRef.current = now
   }
 
-  const monthDates = getMonthDates(currentMonthOffset * 4)
-  const filteredResources = resources.filter((r) => r.type === viewMode)
+  const startMomentum = () => {
+    if (!scrollContainerRef.current) return
+
+    let vel = velocityRef.current * 15 // Amplify velocity for better feel
+
+    const loop = () => {
+      if (!scrollContainerRef.current) return
+
+      // Apply friction
+      vel *= 0.95
+
+      if (Math.abs(vel) > 0.1) {
+        scrollContainerRef.current.scrollLeft -= vel
+        requestRef.current = requestAnimationFrame(loop)
+      } else {
+        velocityRef.current = 0
+      }
+    }
+
+    requestRef.current = requestAnimationFrame(loop)
+  }
+
+  // Drag & Drop Logic for Tasks
+  const handleTaskDragStart = (e: React.DragEvent<HTMLDivElement>, task: GanttTask) => {
+    e.stopPropagation() // Prevent triggering scroll drag
+    e.dataTransfer.setData("taskId", task.id)
+    e.dataTransfer.effectAllowed = "move"
+    // Create a ghost image if needed, or let browser handle it
+  }
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, resourceId: string, date: string) => {
+    e.preventDefault()
+    const taskId = e.dataTransfer.getData("taskId")
+    if (!taskId || !onTaskMove) return
+
+    const task = tasks.find(t => t.id === taskId)
+    if (task) {
+      // Keep original time, just change date and resource
+      onTaskMove(taskId, resourceId, date, task.startTime)
+    }
+  }
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current)
+      }
+    }
+  }, [])
+
+  // Memoized calculations
+  const monthDates = useMemo(() => getMonthDates(currentMonthOffset * 4), [currentMonthOffset])
+
+  const filteredResources = useMemo(() =>
+    resources.filter((r) => r.type === viewMode),
+    [resources, viewMode])
 
   const firstDate = monthDates[0]
   const lastDate = monthDates[monthDates.length - 1]
 
+  // Optimized Task Lookup Map
+  // Creates a map: "resourceId-dateString" -> GanttTask[]
+  const tasksMap = useMemo(() => {
+    const map = new Map<string, GanttTask[]>()
+    tasks.forEach(task => {
+      const key = `${task.resourceId}-${task.startDate}`
+      if (!map.has(key)) {
+        map.set(key, [])
+      }
+      map.get(key)!.push(task)
+    })
+    return map
+  }, [tasks])
+
   const getTasksForDay = (resourceId: string, date: string) => {
-    return tasks.filter((task) => task.resourceId === resourceId && task.startDate === date)
+    return tasksMap.get(`${resourceId}-${date}`) || []
   }
 
-  const stats = {
+  const stats = useMemo(() => ({
     total: tasks.length,
     inProgress: tasks.filter((t) => t.status === "en_proceso").length,
     urgent: tasks.filter((t) => t.priority === "urgente" || t.priority === "critica").length,
     delayed: tasks.filter((t) => t.isDelayed).length,
-  }
+  }), [tasks])
 
   // Configuración de dimensiones
   const SIDEBAR_WIDTH = 220
-  const DAY_WIDTH = 140 // Ancho fijo por día para evitar desalineación
+  const DAY_WIDTH = 140
   const TOTAL_WIDTH = SIDEBAR_WIDTH + (monthDates.length * DAY_WIDTH)
 
   return (
@@ -143,7 +256,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
       {/* Contenedor Scrollable */}
       <div
         ref={scrollContainerRef}
-        className={`overflow-x-auto overflow-y-hidden relative ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
+        className={`overflow-x-auto overflow-y-hidden relative select-none ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
         onMouseDown={handleMouseDown}
         onMouseLeave={handleMouseLeave}
         onMouseUp={handleMouseUp}
@@ -152,9 +265,9 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
         <div style={{ minWidth: TOTAL_WIDTH }} className="relative">
 
           {/* Header de Semanas */}
-          <div className="flex border-b bg-gray-50 sticky top-0 z-20">
+          <div className="flex sticky top-0 z-20 shadow-md">
             <div
-              className="sticky left-0 z-30 bg-gray-50 border-r font-semibold text-sm p-3 flex items-center justify-center text-muted-foreground shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]"
+              className="sticky left-0 z-30 bg-gray-900 text-white border-r border-gray-800 font-semibold text-sm p-3 flex items-center justify-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]"
               style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
             >
               {viewMode === "operario" ? "Operario" : "Máquina"}
@@ -162,7 +275,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
             {[0, 1, 2, 3].map((week) => (
               <div
                 key={week}
-                className="text-center border-r last:border-r-0 font-semibold text-sm py-2 bg-white text-gray-700"
+                className="text-center border-r border-gray-800 last:border-r-0 font-semibold text-sm py-2 bg-gray-900 text-white"
                 style={{ width: DAY_WIDTH * 5 }}
               >
                 Semana {week + 1}
@@ -171,19 +284,19 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
           </div>
 
           {/* Header de Días */}
-          <div className="flex border-b bg-white sticky top-[41px] z-20">
+          <div className="flex border-b bg-gray-50 sticky top-[41px] z-20 shadow-sm">
             <div
-              className="sticky left-0 z-30 bg-white border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]"
+              className="sticky left-0 z-30 bg-gray-100 border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]"
               style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
             />
             {monthDates.map((date, idx) => (
               <div
                 key={idx}
-                className="text-center border-r last:border-r-0 py-2 px-1 bg-gray-50/50"
+                className="text-center border-r last:border-r-0 py-2 px-1 bg-white hover:bg-gray-50 transition-colors"
                 style={{ width: DAY_WIDTH }}
               >
-                <div className="font-medium text-xs text-gray-900">{WORK_DAYS[idx % 5]}</div>
-                <div className="text-[10px] text-muted-foreground">
+                <div className="font-bold text-xs text-gray-900 uppercase tracking-wider">{WORK_DAYS[idx % 5]}</div>
+                <div className="text-[10px] text-muted-foreground font-medium">
                   {date.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}
                 </div>
               </div>
@@ -201,10 +314,10 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
               const utilizationPercent = (avgLoad / WORK_HOURS.total) * 100
 
               return (
-                <div key={resource.id} className="flex hover:bg-gray-50/50 transition-colors">
+                <div key={resource.id} className="flex hover:bg-gray-50/50 transition-colors group/row">
                   {/* Columna Sticky del Recurso */}
                   <div
-                    className="sticky left-0 z-10 bg-white border-r p-4 flex flex-col justify-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]"
+                    className="sticky left-0 z-10 bg-white border-r p-4 flex flex-col justify-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover/row:bg-gray-50/50 transition-colors"
                     style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
                   >
                     <div className="font-bold text-sm text-gray-900 mb-2">{resource.name}</div>
@@ -243,16 +356,20 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
                             <TooltipTrigger asChild>
                               <div
                                 className="h-full w-full cursor-pointer"
+                                onDragOver={handleDragOver}
+                                onDrop={(e) => handleDrop(e, resource.id, dateStr)}
                                 onClick={() => {
-                                  // Si hay una sola tarea, click directo. Si hay varias, el usuario quizás quiera expandir.
-                                  // Por ahora, si hace click en el día, no hacemos nada específico salvo que haga click en la tarea.
+                                  // Click en celda vacía
                                 }}
                               >
                                 {dayTasks.length > 0 ? (
-                                  <div className="space-y-1.5">
+                                  <div className="space-y-1.5 pointer-events-none">
                                     {dayTasks.slice(0, 3).map((task) => (
                                       <div
                                         key={task.id}
+                                        draggable
+                                        onDragStart={(e) => handleTaskDragStart(e, task)}
+                                        onMouseDown={(e) => e.stopPropagation()}
                                         onClick={(e) => {
                                           e.stopPropagation()
                                           onTaskClick?.(task)
@@ -263,7 +380,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
                                           rounded px-2 py-1.5 text-xs font-medium
                                           shadow-sm border border-white/10
                                           hover:brightness-110 hover:scale-[1.02] transition-all
-                                          relative overflow-hidden group
+                                          relative overflow-hidden group pointer-events-auto cursor-grab active:cursor-grabbing
                                         `}
                                       >
                                         <div className="flex items-center justify-between gap-1 relative z-10">
