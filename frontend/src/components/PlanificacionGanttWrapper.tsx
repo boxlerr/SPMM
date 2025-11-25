@@ -179,7 +179,7 @@ export default function PlanificacionGanttWrapper() {
 
     return (
         <div className="flex min-h-screen">
-            <div className={`flex-1 flex flex-col space-y-4 p-4 transition-all duration-300 ${isDetailsPanelOpen ? "mr-80" : ""}`}>
+            <div className={`flex-1 flex flex-col space-y-4 p-4 transition-all duration-300 ${isDetailsPanelOpen ? "mr-80" : ""} min-w-0`}>
                 <div className="flex justify-between items-center">
                     <h2 className="text-2xl font-bold">Planificación de Producción</h2>
                     <div className="flex gap-2">

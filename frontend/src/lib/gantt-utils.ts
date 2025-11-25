@@ -9,9 +9,9 @@ export const WORK_HOURS = {
 export const WORK_DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
 
 export const PRIORITY_COLORS: Record<Priority, string> = {
-  normal: "bg-primary",
-  urgente: "bg-warning",
-  critica: "bg-destructive",
+  normal: "bg-blue-600",
+  urgente: "bg-orange-500",
+  critica: "bg-red-600",
 }
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
