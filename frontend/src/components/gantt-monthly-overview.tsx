@@ -24,10 +24,9 @@ interface GanttMonthlyOverviewProps {
   tasks: GanttTask[]
   resources: Resource[]
   viewMode: "operario" | "maquina"
-  onTaskClick?: (task: GanttTask) => void
 }
 
-export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }: GanttMonthlyOverviewProps) {
+export function GanttMonthlyOverview({ tasks, resources, viewMode }: GanttMonthlyOverviewProps) {
   const [currentMonthOffset, setCurrentMonthOffset] = useState(0)
 
   const monthDates = getMonthDates(currentMonthOffset * 4)
@@ -48,7 +47,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
   }
 
   return (
-    <Card className="p-6">
+    <Card className="p-6 w-full overflow-hidden">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <h3 className="text-xl font-bold text-foreground">Vista Mensual General - 4 Semanas de Planificación</h3>
@@ -182,12 +181,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
                                       text-primary-foreground
                                       rounded px-1 py-0.5 text-[10px]
                                       truncate
-                                      cursor-pointer hover:opacity-80
                                     `}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onTaskClick?.(task);
-                                    }}
                                   >
                                     {task.workOrderNumber}
                                   </div>
@@ -302,6 +296,6 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick }
           </div>
         )}
       </div>
-    </Card>
+    </Card >
   )
 }

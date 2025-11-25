@@ -35,6 +35,7 @@ interface GanttWeeklyDetailedProps {
 export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, onTaskClick }: GanttWeeklyDetailedProps) {
   const [currentWeek, setCurrentWeek] = useState(0)
   const [draggedTask, setDraggedTask] = useState<string | null>(null)
+  const [dragOverCell, setDragOverCell] = useState<{ resourceId: string; date: string; hour: number } | null>(null)
   // Initialize with all resources collapsed by default to show the full list
   const [expandedResources, setExpandedResources] = useState<Set<string>>(new Set())
 
@@ -65,8 +66,13 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
     setDraggedTask(taskId)
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent, resourceId: string, date: string, hour: number) => {
     e.preventDefault()
+    setDragOverCell({ resourceId, date, hour })
+  }
+
+  const handleDragLeave = () => {
+    setDragOverCell(null)
   }
 
   const handleDrop = (resourceId: string, date: string, hour: number) => {
@@ -78,6 +84,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
       }
     }
     setDraggedTask(null)
+    setDragOverCell(null)
   }
 
   const firstDate = weekDates[0]
@@ -116,7 +123,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Clock className="h-4 w-4" />
-          <span>Turno: 07:00 - 16:00</span>
+          <span>Turno: 09:00 - 18:00</span>
         </div>
       </div>
 
@@ -195,11 +202,21 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                             {hours.map((hour) => {
                               const startingTasks = getTasksStartingInHour(resource.id, dateStr, hour)
 
+                              const isDropTarget = dragOverCell?.resourceId === resource.id &&
+                                dragOverCell?.date === dateStr &&
+                                dragOverCell?.hour === hour
+
                               return (
                                 <div
                                   key={hour}
-                                  className="border-b border-border relative hover:bg-muted/50 transition-colors"
-                                  onDragOver={handleDragOver}
+                                  className={`border-b border-border relative transition-all duration-200 ${isDropTarget
+                                    ? 'bg-primary/20 ring-2 ring-primary ring-inset scale-[1.02]'
+                                    : draggedTask
+                                      ? 'hover:bg-primary/10'
+                                      : 'hover:bg-muted/50'
+                                    }`}
+                                  onDragOver={(e) => handleDragOver(e, resource.id, dateStr, hour)}
+                                  onDragLeave={handleDragLeave}
                                   onDrop={() => handleDrop(resource.id, dateStr, hour)}
                                 >
                                   {/* Hora label */}
@@ -224,12 +241,17 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                             <div
                                               draggable
                                               onDragStart={() => handleDragStart(task.id)}
+                                              onDragEnd={() => setDraggedTask(null)}
                                               className={`
-                                            absolute top-6 cursor-move
+                                            absolute top-6 cursor-grab active:cursor-grabbing
                                             ${PRIORITY_COLORS[task.priority]} 
                                             text-primary-foreground
-                                            rounded p-1 text-xs
-                                            hover:opacity-90 transition-opacity
+                                            rounded-md p-1 text-xs
+                                            transition-all duration-200
+                                            ${draggedTask === task.id
+                                                  ? 'opacity-40 scale-95 shadow-2xl ring-2 ring-white'
+                                                  : 'hover:opacity-90 hover:scale-[1.02] hover:shadow-lg'
+                                                }
                                             shadow-sm
                                             border border-white/20
                                             overflow-hidden
@@ -238,7 +260,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                                 height: `${taskDuration * 40 - 8}px`,
                                                 left: `${leftPercent}%`,
                                                 width: `${widthPercent}%`,
-                                                zIndex: 10 + index
+                                                zIndex: draggedTask === task.id ? 50 : 10 + index
                                               }}
                                             >
                                               <div

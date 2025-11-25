@@ -1,8 +1,8 @@
 import type { WorkOrder, GanttTask, Priority, PlanificacionItem } from "./types"
 
 export const WORK_HOURS = {
-  start: 7,
-  end: 16,
+  start: 9,
+  end: 18,
   total: 9,
 }
 
@@ -48,10 +48,13 @@ export const PROCESS_LABELS = {
 export function getWeekDates(weekOffset = 0): Date[] {
   const today = new Date()
   const currentDay = today.getDay()
+  // Calculate Monday as the start of the week (Sunday = 0, Monday = 1)
+  const daysFromMonday = currentDay === 0 ? -6 : 1 - currentDay
   const monday = new Date(today)
-  monday.setDate(today.getDate() - currentDay + 1 + weekOffset * 7)
+  monday.setDate(today.getDate() + daysFromMonday + weekOffset * 7)
 
   const dates: Date[] = []
+  // Generate 5 days (Monday to Friday)
   for (let i = 0; i < 5; i++) {
     const date = new Date(monday)
     date.setDate(monday.getDate() + i)

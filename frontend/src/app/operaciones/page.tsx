@@ -1,17 +1,17 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper";
-import TablaTareas from "@/components/TablaTareas";
-import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react";
-import { usePanelContext } from "@/contexts/PanelContext";
-import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
-import { Button } from "@/components/ui/button";
+import { useState } from "react"
+import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
+import TablaTareas from "@/components/TablaTareas"
+import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react"
+import { usePanelContext } from "@/contexts/PanelContext"
+import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
+import { Button } from "@/components/ui/button"
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<'gantt' | 'tabla'>('gantt');
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const { isDetailsPanelOpen } = usePanelContext();
+  const [activeTab, setActiveTab] = useState<"gantt" | "tabla">("gantt")
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const { isDetailsPanelOpen } = usePanelContext()
 
   return (
     <div
@@ -32,9 +32,7 @@ export default function OperacionesPage() {
                 </div>
                 Operaciones
               </h1>
-              <p className="text-gray-500 mt-1 text-sm md:text-base">
-                Gestiona las operaciones del sistema
-              </p>
+              <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona las operaciones del sistema</p>
             </div>
             <Button
               onClick={() => setIsCreateModalOpen(true)}
@@ -48,40 +46,36 @@ export default function OperacionesPage() {
           {/* Tabs Navigation */}
           <div className="flex items-center gap-1 mt-6 border-b border-gray-200">
             <button
-              onClick={() => setActiveTab('gantt')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'gantt'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              onClick={() => setActiveTab("gantt")}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gantt"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
             >
               <GanttChartSquare size={18} />
               Gantt
             </button>
             <button
-              onClick={() => setActiveTab('tabla')}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'tabla'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              onClick={() => setActiveTab("tabla")}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "tabla"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
             >
               <LayoutList size={18} />
-              Tabla de Tareas
+              Órdenes de Trabajo
             </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 space-y-8">
+      <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            {activeTab === 'gantt' ? 'Planificación (Gantt)' : 'Listado de Tareas'}
+            {activeTab === "gantt" ? "Planificación (Gantt)" : "Órdenes de Trabajo"}
           </h2>
 
-          {activeTab === 'gantt' ? (
-            <PlanificacionGanttWrapper />
-          ) : (
-            <TablaTareas />
-          )}
+          {activeTab === "gantt" ? <PlanificacionGanttWrapper /> : <TablaTareas />}
         </div>
       </div>
 
@@ -89,11 +83,9 @@ export default function OperacionesPage() {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => {
-          // Aquí podríamos recargar los datos si fuera necesario
-          // Por ahora solo cerramos el modal
-          setIsCreateModalOpen(false);
+          setIsCreateModalOpen(false)
         }}
       />
     </div>
-  );
+  )
 }

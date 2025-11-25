@@ -15,6 +15,7 @@ import {
     GripVertical
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import CreateGroupModal from '@/components/CreateGroupModal';
 import {
     Select,
     SelectContent,
@@ -67,6 +68,7 @@ const TablaTareas = () => {
     const [groups, setGroups] = useState<TaskGroup[]>([]);
     const [operarios, setOperarios] = useState<Operario[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -233,6 +235,16 @@ const TablaTareas = () => {
         return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
     };
 
+    const handleCreateGroup = (name: string, color: string) => {
+        setGroups([...groups, {
+            id: `grupo-${Date.now()}`,
+            title: name,
+            color: color,
+            items: [],
+            isExpanded: true
+        }]);
+    };
+
     if (loading) {
         return <div className="p-8 text-center text-gray-500">Cargando tareas...</div>;
     }
@@ -242,9 +254,6 @@ const TablaTareas = () => {
             <div className="w-full bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 {/* Toolbar */}
                 <div className="p-4 border-b border-gray-200 flex items-center gap-4 overflow-x-auto">
-                    <button className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1 hover:bg-blue-700 transition-colors">
-                        Agregar tarea <ChevronDown size={14} />
-                    </button>
                     <div className="flex items-center gap-2 border rounded px-2 py-1.5 bg-white">
                         <Search size={16} className="text-gray-400" />
                         <input
@@ -265,18 +274,53 @@ const TablaTareas = () => {
                 <div className="overflow-x-auto">
                     <div className="min-w-[800px]">
                         {groups.map(group => (
-                            <div key={group.id} className="mb-6">
-                                {/* Group Header */}
-                                <div className="flex items-center gap-2 px-4 py-2 group cursor-pointer hover:bg-gray-50" onClick={() => toggleGroup(group.id)}>
-                                    <div className={`p-1 rounded hover:bg-gray-200 transition-colors ${!group.isExpanded ? '-rotate-90' : ''}`}>
-                                        <ChevronDown size={16} className="text-gray-500" />
+                            <div key={group.id} className="mb-4">
+                                {/* Group Header with Monday.com style */}
+                                <div
+                                    className="flex items-center gap-3 px-4 py-3 group cursor-pointer hover:bg-gray-50/50 transition-all border-l-4 rounded-l-md"
+                                    style={{ borderLeftColor: group.color }}
+                                    onClick={() => toggleGroup(group.id)}
+                                >
+                                    <div className={`p-0.5 rounded hover:bg-gray-200 transition-all duration-200 ${!group.isExpanded ? '-rotate-90' : ''}`}>
+                                        <ChevronRight size={18} className="text-gray-500" />
                                     </div>
-                                    <h3 className="font-semibold text-lg" style={{ color: group.color }}>
+                                    <h3 className="font-bold text-base" style={{ color: group.color }}>
                                         {group.title}
                                     </h3>
                                     <span className="text-gray-400 text-sm font-normal">
-                                        {group.items.length} tareas
+                                        {group.items.length} Tareas
                                     </span>
+                                    <div className="flex-1" />
+                                    {/* Status indicators */}
+                                    <div className="flex items-center gap-2">
+                                        <div className="text-xs text-gray-500 font-medium">Estado</div>
+                                        <div className="flex gap-0.5 h-4">
+                                            {group.id === 'completados' && (
+                                                <div className="w-16 h-full rounded-sm" style={{ backgroundColor: '#10b981' }} />
+                                            )}
+                                            {group.id === 'en-curso' && (
+                                                <>
+                                                    <div className="w-8 h-full rounded-sm" style={{ backgroundColor: '#10b981' }} />
+                                                    <div className="w-4 h-full rounded-sm" style={{ backgroundColor: '#f59e0b' }} />
+                                                    <div className="w-4 h-full rounded-sm" style={{ backgroundColor: '#ef4444' }} />
+                                                </>
+                                            )}
+                                            {group.id === 'pendientes' && (
+                                                <>
+                                                    <div className="w-10 h-full rounded-sm bg-gray-300" />
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {/* Date badge */}
+                                    {group.items.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <div className="text-xs text-gray-500 font-medium">Vencimiento</div>
+                                            <div className="bg-gray-800 text-white px-2 py-1 rounded-md text-xs font-medium">
+                                                nov. {19 + (group.id === 'completados' ? 0 : group.id === 'en-curso' ? 1 : 2)} - {25 + (group.id === 'completados' ? 0 : group.id === 'en-curso' ? 1 : 2)}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {group.isExpanded && (
@@ -465,9 +509,27 @@ const TablaTareas = () => {
                                 )}
                             </div>
                         ))}
+
+                        {/* Add New Group Button */}
+                        <div className="px-4 mt-4 mb-6">
+                            <button
+                                className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-all text-gray-600 font-medium text-sm w-full md:w-auto"
+                                onClick={() => setIsCreateGroupModalOpen(true)}
+                            >
+                                <Plus size={18} />
+                                Agregar grupo nuevo
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            {/* Create Group Modal */}
+            <CreateGroupModal
+                isOpen={isCreateGroupModalOpen}
+                onClose={() => setIsCreateGroupModalOpen(false)}
+                onCreateGroup={handleCreateGroup}
+            />
         </DragDropContext>
     );
 };
