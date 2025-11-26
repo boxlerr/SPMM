@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Activity, Phone } from "lucide-react";
+import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import OperarioForm from "./_components/OperarioForm";
 import MaquinaForm from "./_components/MaquinaForm";
@@ -35,14 +35,14 @@ export default function RecursosPage() {
   const [itemAEditar, setItemAEditar] = useState<Operario | Maquina | null>(null);
   const [operarioCambiarEstado, setOperarioCambiarEstado] = useState<Operario | null>(null);
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const cleanUrl = apiUrl.replace(/\/$/, "");
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const cleanUrl = apiUrl.replace(/\/$/, "");
   const api = useApi<any>();
 
   useEffect(() => {
     if (tabActiva === "operarios") {
       fetchOperarios();
-      } else {
+    } else {
       fetchMaquinas();
     }
   }, [tabActiva]);
@@ -63,7 +63,7 @@ export default function RecursosPage() {
       if (response.ok) {
         const data = await response.json();
         setOperarioSeleccionado(data.data || operario);
-        } else {
+      } else {
         setOperarioSeleccionado(operario);
       }
     } catch {
@@ -188,7 +188,7 @@ export default function RecursosPage() {
           onClick={() => setTabActiva("maquinas")}
           className={`flex-1 ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
-          <Activity className="h-4 w-4 sm:mr-2" />
+          <Factory className="h-4 w-4 sm:mr-2" />
           <span className="hidden xs:inline">Máquinas</span>
         </Button>
       </div>
@@ -295,27 +295,27 @@ export default function RecursosPage() {
                         {operario.disponible ? "Activo" : "Ausente"}
                       </Badge>
                     </div>
-                    
+
                     {(operario.celular || operario.telefono) && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
                         <Phone className="h-4 w-4" />
                         <span>{formatPhone(operario.celular) || formatPhone(operario.telefono)}</span>
                       </div>
                     )}
-                    
+
                     <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleVerOperario(operario)}
                         className="flex-1"
                       >
                         <Eye className="h-4 w-4 mr-1" />
                         Ver
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleEditar("operario", operario)}
                         className="flex-1"
                       >
@@ -347,7 +347,7 @@ export default function RecursosPage() {
         <div className="rounded-lg border bg-card">
           <div className="p-4 md:p-6 border-b">
             <div className="flex items-center gap-2">
-              <Activity className="h-5 w-5 text-muted-foreground" />
+              <Factory className="h-5 w-5 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Máquinas y Equipos</h2>
             </div>
             <p className="text-sm text-muted-foreground mt-1">Gestión de maquinaria industrial</p>
@@ -375,8 +375,7 @@ export default function RecursosPage() {
                     <tr>
                       <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
                       <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Código</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Especialidad</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Capacidad</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Limitación</th>
                       <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                     </tr>
                   </thead>
@@ -385,13 +384,9 @@ export default function RecursosPage() {
                       <tr key={maquina.id} className="hover:bg-muted/50 transition-colors">
                         <td className="px-6 py-4 text-sm font-medium">{maquina.nombre}</td>
                         <td className="px-6 py-4 text-sm">{maquina.cod_maquina || "-"}</td>
-                        <td className="px-6 py-4 text-sm">{maquina.especialidad || "-"}</td>
-                        <td className="px-6 py-4 text-sm">{maquina.capacidad || "-"}</td>
+                        <td className="px-6 py-4 text-sm">{maquina.limitacion || "-"}</td>
                         <td className="px-6 py-4">
                           <div className="flex justify-end gap-2">
-                            <Button variant="ghost" size="icon" onClick={() => handleVerMaquina(maquina)} className="h-8 w-8">
-                              <Eye className="h-4 w-4" />
-                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -425,32 +420,20 @@ export default function RecursosPage() {
                           <span className="text-muted-foreground">Código:</span>
                           <span className="ml-2 font-medium">{maquina.cod_maquina || "-"}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">Capacidad:</span>
-                          <span className="ml-2 font-medium">{maquina.capacidad || "-"}</span>
-                        </div>
                       </div>
-                      {maquina.especialidad && (
+                      {maquina.limitacion && (
                         <div className="mt-2 text-sm">
-                          <span className="text-muted-foreground">Especialidad:</span>
-                          <span className="ml-2 font-medium">{maquina.especialidad}</span>
+                          <span className="text-muted-foreground">Limitación:</span>
+                          <span className="ml-2 font-medium">{maquina.limitacion}</span>
                         </div>
                       )}
                     </div>
-                    
+
                     <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={() => handleVerMaquina(maquina)}
-                        className="flex-1"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        Ver
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleEditar("maquina", maquina)}
                         className="flex-1"
                       >

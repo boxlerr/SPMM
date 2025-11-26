@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { GanttWeeklyDetailed } from "./gantt-weekly-detailed";
 import { GanttMonthlyOverview } from "./gantt-monthly-overview";
+import { GanttDetailedWorkOrders } from "./gantt/gantt-detailed-work-orders";
 import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils";
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -202,6 +203,7 @@ export default function PlanificacionGanttWrapper() {
                     <TabsList>
                         <TabsTrigger value="weekly">Semanal Detallado</TabsTrigger>
                         <TabsTrigger value="monthly">Mensual General</TabsTrigger>
+                        <TabsTrigger value="orders">Ordenes Detalladas</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="weekly" className="mt-4 flex-1 overflow-auto">
@@ -219,6 +221,14 @@ export default function PlanificacionGanttWrapper() {
                             tasks={tasks}
                             resources={resources}
                             viewMode={viewMode}
+                            onTaskClick={handleTaskClick}
+                            onTaskMove={handleTaskMove}
+                        />
+                    </TabsContent>
+
+                    <TabsContent value="orders" className="mt-4 flex-1 overflow-auto">
+                        <GanttDetailedWorkOrders
+                            tasks={tasks}
                             onTaskClick={handleTaskClick}
                             onTaskMove={handleTaskMove}
                         />

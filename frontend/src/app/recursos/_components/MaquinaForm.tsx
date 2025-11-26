@@ -94,14 +94,8 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
             <Label>Código</Label>
             <Input value={formData.cod_maquina} onChange={(e) => setFormData({ ...formData, cod_maquina: e.target.value })} placeholder="TORNO-01" />
           </div>
-          <div className="space-y-2">
-            <Label>Especialidad</Label>
-            <Input value={formData.especialidad} onChange={(e) => setFormData({ ...formData, especialidad: e.target.value })} placeholder="Mecanizado de precisión" />
-          </div>
-          <div className="space-y-2">
-            <Label>Capacidad</Label>
-            <Input value={formData.capacidad} onChange={(e) => setFormData({ ...formData, capacidad: e.target.value })} placeholder="Ejes X, Y, Z; potencia 7.5HP" />
-          </div>
+
+
           <div className="space-y-2">
             <Label>Limitación</Label>
             <Input value={formData.limitacion} onChange={(e) => setFormData({ ...formData, limitacion: e.target.value })} placeholder="Falla en avance automático" />

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
-import { 
+import {
   BarChart3,
   ArrowLeftRight,
   Users,
@@ -13,7 +13,8 @@ import {
   Menu,
   LogOut,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ClipboardList
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
@@ -86,15 +87,15 @@ export default function Sidebar() {
           {sidebarItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-            
+
             return (
               <Link
                 key={item.name}
                 href={item.href}
                 className={`
                   flex items-center justify-center p-3 rounded-xl transition-all duration-200
-                  ${isActive 
-                    ? 'bg-blue-50 text-blue-600 shadow-sm' 
+                  ${isActive
+                    ? 'bg-blue-50 text-blue-600 shadow-sm'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                   }
                 `}
@@ -107,7 +108,7 @@ export default function Sidebar() {
             );
           })}
         </nav>
-        
+
         {/* Logout Button - Estado inicial */}
         <div className="border-t border-gray-200 p-2">
           <button
@@ -125,14 +126,14 @@ export default function Sidebar() {
     <>
       {/* Overlay para móvil */}
       {isMobile && isMobileOpen && (
-        <div 
+        <div
           className="fixed inset-0 backdrop-blur-[1px] z-40 lg:hidden"
           onClick={closeMobileSidebar}
         />
       )}
 
       {/* Sidebar */}
-      <div 
+      <div
         className={`
           fixed lg:relative top-0 left-0 h-full bg-white border-r border-gray-200 
           transition-all duration-300 ease-in-out z-50 lg:z-auto
@@ -145,19 +146,18 @@ export default function Sidebar() {
         style={{ overflow: isCollapsed && !isMobile ? 'visible' : 'hidden' }}
       >
         {/* Header */}
-        <div className={`flex items-center border-b border-gray-200 transition-all duration-300 ${
-          isMobile ? (
-            isMobileOpen ? 'justify-between p-6' : 'justify-center p-4'
-          ) : (
-            isCollapsed ? 'justify-center p-4' : 'justify-between p-6'
-          )
-        }`}>
+        <div className={`flex items-center border-b border-gray-200 transition-all duration-300 ${isMobile ? (
+          isMobileOpen ? 'justify-between p-6' : 'justify-center p-4'
+        ) : (
+          isCollapsed ? 'justify-center p-4' : 'justify-between p-6'
+        )
+          }`}>
           {(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? (
             <div className="flex items-center overflow-hidden">
-              <Image 
-                src="/longchamps_logo.png" 
-                alt="Metalúrgica Longchamps" 
-                width={180} 
+              <Image
+                src="/longchamps_logo.png"
+                alt="Metalúrgica Longchamps"
+                width={180}
                 height={60}
                 className="object-contain"
               />
@@ -168,18 +168,18 @@ export default function Sidebar() {
               className="bg-white rounded-lg p-1.5 flex items-center justify-center border-2 border-[#DC143C] shadow-sm hover:shadow-md hover:border-[#B8112E] transition-all duration-200 cursor-pointer"
               title="Abrir menú"
             >
-              <Image 
-                src="/logo.png" 
-                alt="Metalúrgica Longchamps" 
-                width={28} 
+              <Image
+                src="/logo.png"
+                alt="Metalúrgica Longchamps"
+                width={28}
                 height={28}
                 className="object-contain"
               />
             </button>
           )}
-          
-          
-          
+
+
+
           {/* Botón toggle - solo visible cuando el sidebar está abierto */}
           {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
             <button
@@ -196,13 +196,12 @@ export default function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className={`flex-1 space-y-2 ${
-          (!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
-        }`}>
+        <nav className={`flex-1 space-y-2 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
+          }`}>
           {sidebarItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-            
+
             return (
               <Link
                 key={item.name}
@@ -210,8 +209,8 @@ export default function Sidebar() {
                 onClick={closeMobileSidebar}
                 className={`
                   flex items-center rounded-xl transition-all duration-200 group relative
-                  ${isActive 
-                    ? 'bg-blue-50 text-blue-600 shadow-sm' 
+                  ${isActive
+                    ? 'bg-blue-50 text-blue-600 shadow-sm'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                   }
                   ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'justify-center p-3' : 'px-4 py-3'}
@@ -223,7 +222,7 @@ export default function Sidebar() {
                   ${isActive ? 'text-blue-600' : 'text-gray-500 group-hover:text-gray-700'}
                   ${(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? 'mr-3' : ''}
                 `} />
-                
+
                 {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
                   <span className="font-medium text-sm whitespace-nowrap transition-opacity duration-200">
                     {item.name}
@@ -236,9 +235,8 @@ export default function Sidebar() {
 
         {/* User Info */}
         {user && (
-          <div className={`border-t border-gray-200 ${
-            (!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
-          }`}>
+          <div className={`border-t border-gray-200 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
+            }`}>
             {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) ? (
               <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
                 <p className="text-sm font-semibold text-gray-900 truncate">
@@ -259,9 +257,8 @@ export default function Sidebar() {
         )}
 
         {/* Logout Button */}
-        <div className={`border-t border-gray-200 ${
-          (!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
-        }`}>
+        <div className={`border-t border-gray-200 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
+          }`}>
           <button
             onClick={handleLogout}
             className={`
@@ -276,7 +273,7 @@ export default function Sidebar() {
               text-gray-500 group-hover:text-red-600
               ${(!isMobile && !isCollapsed) || (isMobile && isMobileOpen) ? 'mr-3' : ''}
             `} />
-            
+
             {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) && (
               <span className="font-medium text-sm whitespace-nowrap transition-opacity duration-200">
                 Cerrar Sesión
@@ -293,10 +290,10 @@ export default function Sidebar() {
           className="fixed bottom-4 left-4 z-[60] flex items-center justify-center w-14 h-14 bg-white border-2 border-[#DC143C] rounded-full shadow-lg hover:shadow-xl hover:border-[#B8112E] transition-all duration-200"
           title="Abrir menú"
         >
-          <Image 
-            src="/logo.png" 
-            alt="Metalúrgica Longchamps" 
-            width={32} 
+          <Image
+            src="/logo.png"
+            alt="Metalúrgica Longchamps"
+            width={32}
             height={32}
             className="object-contain"
           />
