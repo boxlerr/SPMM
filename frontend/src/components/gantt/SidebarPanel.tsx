@@ -85,27 +85,36 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
     if (!isOpen || !selectedItem) return null;
 
     return (
-        <div className="fixed right-0 top-0 bottom-0 w-80 bg-white shadow-2xl z-50 border-l border-gray-200 flex flex-col transform transition-transform duration-300 ease-in-out">
+        <div
+            className={`
+                fixed right-0 top-0 bottom-0 w-64 md:w-80 bg-white/95 backdrop-blur-md
+                border-l border-gray-300 flex flex-col z-50
+                transform transition-all duration-300 ease-out
+                shadow-[-8px_0_24px_-8px_rgba(0,0,0,0.15)]
+                ${isOpen ? 'translate-x-0' : 'translate-x-full'}
+            `}
+        >
             {/* Header del panel con branding rojo */}
-            <div className="relative bg-gradient-to-r from-[#DC143C] to-[#B8112E] p-4 text-white">
+            <div className="relative bg-gradient-to-r from-[#DC143C] to-[#B8112E] p-4 text-white shadow-lg">
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                            <Activity className="h-5 w-5 text-white" />
+                    <div className="flex items-center gap-2.5">
+                        <div className="p-1.5 bg-white/20 rounded-lg backdrop-blur-sm">
+                            <Activity className="h-4 w-4 text-white" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-bold">Detalle de Planificación</h2>
-                            <p className="text-xs text-white/80 mt-0.5">
+                            <h2 className="text-base font-bold tracking-tight">Detalle</h2>
+                            <p className="text-xs text-white/90 font-medium">
                                 OT #{selectedItem.orden_id}
                             </p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-white/80 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/20"
+                        className="text-white/90 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/20 active:bg-white/30"
                         title="Cerrar panel"
+                        aria-label="Cerrar panel"
                     >
-                        <X size={20} />
+                        <X size={18} />
                     </button>
                 </div>
             </div>
@@ -115,19 +124,19 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
                 <div className="space-y-4">
                     {/* Proceso */}
                     <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                             Proceso
                         </label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5 bg-gray-50 p-2.5 rounded-lg border border-gray-200">
                             <div
-                                className="w-4 h-4 rounded-full flex-shrink-0"
+                                className="w-4 h-4 rounded-full flex-shrink-0 shadow-sm"
                                 style={{
                                     backgroundColor: getProcessColor(
                                         selectedItem.nombre_proceso || "default"
                                     ),
                                 }}
                             />
-                            <span className="text-base text-gray-900 font-medium">
+                            <span className="text-sm text-gray-900 font-semibold">
                                 {capitalizeFirstLetter(selectedItem.nombre_proceso)}
                             </span>
                         </div>
@@ -135,24 +144,26 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 
                     {/* Orden de Trabajo */}
                     <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                             Orden de Trabajo
                         </label>
-                        <span className="text-base text-gray-900 font-medium">
-                            #{selectedItem.orden_id}
-                        </span>
+                        <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                            <span className="text-sm text-gray-900 font-semibold">
+                                #{selectedItem.orden_id}
+                            </span>
+                        </div>
                     </div>
 
                     {/* Operario */}
                     <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                             Operario
                         </label>
                         <Select
                             value={selectedItem.id_operario?.toString() || ""}
                             onValueChange={onOperatorChange}
                         >
-                            <SelectTrigger className="w-full">
+                            <SelectTrigger className="w-full h-10 text-sm">
                                 <SelectValue placeholder="Seleccionar operario" />
                             </SelectTrigger>
                             <SelectContent>
@@ -168,41 +179,46 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 
                     {/* Maquinaria */}
                     <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                             Maquinaria
                         </label>
-                        <span className="text-base text-gray-900">
-                            {selectedItem.nombre_maquinaria || "Sin asignar"}
-                        </span>
+                        <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                            <span className="text-sm text-gray-900">
+                                {selectedItem.nombre_maquinaria || "Sin asignar"}
+                            </span>
+                        </div>
                     </div>
 
                     {/* Duración */}
                     <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                             Duración
                         </label>
-                        <span className="text-base text-gray-900">
-                            {selectedItem.fin_min - selectedItem.inicio_min} minutos
-                        </span>
+                        <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                            <span className="text-sm text-gray-900 font-semibold">
+                                {selectedItem.fin_min - selectedItem.inicio_min} minutos
+                            </span>
+                        </div>
                     </div>
 
                     {/* Artículo */}
-                    <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-                            Artículo
-                        </label>
-                        <div className="text-base text-gray-900">
+                    <div>                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
+                        Artículo
+                    </label>
+                        <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200 min-h-[50px]">
                             {isLoadingDetails ? (
-                                <span className="text-gray-400">Cargando...</span>
+                                <span className="text-gray-400 text-xs">Cargando...</span>
                             ) : ordenDetails?.articulo ? (
                                 <>
-                                    <div className="font-medium">{ordenDetails.articulo.descripcion}</div>
-                                    <div className="text-sm text-gray-500 mt-1">
-                                        {ordenDetails.articulo.cod_articulo}
+                                    <div className="font-semibold text-gray-900 text-sm leading-snug">
+                                        {ordenDetails.articulo.descripcion}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 font-medium">
+                                        Código: {ordenDetails.articulo.cod_articulo}
                                     </div>
                                 </>
                             ) : (
-                                "Sin información"
+                                <span className="text-gray-500 text-xs">Sin información</span>
                             )}
                         </div>
                     </div>
@@ -210,10 +226,10 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
                     {/* Observaciones */}
                     {!isLoadingDetails && ordenDetails?.observaciones && (
                         <div>
-                            <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                                 Observaciones
                             </label>
-                            <div className="text-base text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                            <div className="text-xs text-gray-900 bg-amber-50 p-2.5 rounded-lg border border-amber-200 leading-relaxed">
                                 {ordenDetails.observaciones}
                             </div>
                         </div>
@@ -221,12 +237,14 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 
                     {/* Fecha Prometida */}
                     <div>
-                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2 block">
                             Fecha Prometida
                         </label>
-                        <span className="text-base text-gray-900">
-                            {selectedItem.fecha_prometida || "N/A"}
-                        </span>
+                        <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                            <span className="text-sm text-gray-900 font-semibold">
+                                {selectedItem.fecha_prometida || "N/A"}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>

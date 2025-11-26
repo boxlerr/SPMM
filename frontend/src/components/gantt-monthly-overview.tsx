@@ -43,7 +43,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
   const velocityRef = useRef(0)
   const lastXRef = useRef(0)
   const lastTimeRef = useRef(0)
-  const requestRef = useRef<number>()
+  const requestRef = useRef<number | undefined>(undefined)
 
   const handleMouseDown = (e: MouseEvent) => {
     if (!scrollContainerRef.current) return

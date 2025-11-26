@@ -14,13 +14,7 @@ export default function OperacionesPage() {
   const { isDetailsPanelOpen } = usePanelContext()
 
   return (
-    <div
-      className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100"
-      style={{
-        marginRight: isDetailsPanelOpen ? "320px" : "0",
-        transition: "margin-right 0.3s ease-in-out",
-      }}
-    >
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Header sticky mejorado */}
       <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
