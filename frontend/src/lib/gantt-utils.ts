@@ -124,13 +124,14 @@ export function convertWorkOrdersToGanttTasks(workOrders: WorkOrder[]): GanttTas
 }
 
 export function convertPlanificacionToGanttTasks(
-  data: PlanificacionItem[],
-  baseDate: Date = new Date()
+  data: PlanificacionItem[]
 ): GanttTask[] {
-  const normalizedBaseDate = new Date(baseDate);
-  normalizedBaseDate.setHours(9, 0, 0, 0);
-
   return data.map((item) => {
+    // Use creado_en as the base date, defaulting to now if missing (though it should be there)
+    const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
+    const normalizedBaseDate = new Date(baseDate);
+    normalizedBaseDate.setHours(9, 0, 0, 0);
+
     const start = new Date(normalizedBaseDate.getTime() + item.inicio_min * 60000);
     const end = new Date(normalizedBaseDate.getTime() + item.fin_min * 60000);
 
