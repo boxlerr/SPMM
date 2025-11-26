@@ -428,7 +428,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
                                         </div>
                                         <div className="text-xs text-gray-600 mb-1 font-medium">{task.client}</div>
                                         <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-gray-500">
-                                          <div>Proceso: <span className="text-gray-700">{PROCESS_LABELS[task.process]}</span></div>
+                                          <div>Proceso: <span className="text-gray-700">{PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process}</span></div>
                                           <div>Horario: <span className="text-gray-700">{task.startTime} - {task.endTime}</span></div>
                                         </div>
                                       </div>
