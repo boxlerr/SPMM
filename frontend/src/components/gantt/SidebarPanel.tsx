@@ -31,6 +31,12 @@ interface PlanificacionItem {
     prioridad_peso?: number;
 }
 
+// Helper function to capitalize first letter
+const capitalizeFirstLetter = (text: string): string => {
+    if (!text) return text;
+    return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+}
+
 interface SidebarPanelProps {
     isOpen: boolean;
     selectedItem: PlanificacionItem | null;
@@ -48,6 +54,34 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
     operarios,
     onOperatorChange,
 }) => {
+    const [ordenDetails, setOrdenDetails] = React.useState<any>(null);
+    const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
+
+    // Fetch work order details when selectedItem changes
+    React.useEffect(() => {
+        const fetchOrdenDetails = async () => {
+            if (!selectedItem || !isOpen) {
+                setOrdenDetails(null);
+                return;
+            }
+
+            setIsLoadingDetails(true);
+            try {
+                const response = await fetch(`http://localhost:8000/ordenes/${selectedItem.orden_id}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setOrdenDetails(data.data || data);
+                }
+            } catch (error) {
+                console.error("Error fetching orden details:", error);
+            } finally {
+                setIsLoadingDetails(false);
+            }
+        };
+
+        fetchOrdenDetails();
+    }, [selectedItem?.orden_id, isOpen]);
+
     if (!isOpen || !selectedItem) return null;
 
     return (
@@ -94,7 +128,7 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
                                 }}
                             />
                             <span className="text-base text-gray-900 font-medium">
-                                {selectedItem.nombre_proceso}
+                                {capitalizeFirstLetter(selectedItem.nombre_proceso)}
                             </span>
                         </div>
                     </div>
@@ -151,6 +185,39 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
                             {selectedItem.fin_min - selectedItem.inicio_min} minutos
                         </span>
                     </div>
+
+                    {/* Artículo */}
+                    <div>
+                        <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                            Artículo
+                        </label>
+                        <div className="text-base text-gray-900">
+                            {isLoadingDetails ? (
+                                <span className="text-gray-400">Cargando...</span>
+                            ) : ordenDetails?.articulo ? (
+                                <>
+                                    <div className="font-medium">{ordenDetails.articulo.descripcion}</div>
+                                    <div className="text-sm text-gray-500 mt-1">
+                                        {ordenDetails.articulo.cod_articulo}
+                                    </div>
+                                </>
+                            ) : (
+                                "Sin información"
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Observaciones */}
+                    {!isLoadingDetails && ordenDetails?.observaciones && (
+                        <div>
+                            <label className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                                Observaciones
+                            </label>
+                            <div className="text-base text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                {ordenDetails.observaciones}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Fecha Prometida */}
                     <div>

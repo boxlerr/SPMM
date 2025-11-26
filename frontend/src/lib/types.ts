@@ -78,4 +78,8 @@ export interface PlanificacionItem {
     apellido_operario?: string;
     fecha_prometida?: string;
     prioridad_peso?: number;
+    cod_articulo?: string;
+    descripcion_articulo?: string;
+    abreviatura_articulo?: string;
+    observaciones_ot?: string;
 }
