@@ -21,3 +21,9 @@ export interface Maquina {
   especialidad?: string;
 }
 
+
+export interface Proceso {
+  id: number;
+  nombre: string;
+  descripcion?: string;
+}

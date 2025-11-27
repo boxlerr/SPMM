@@ -227,7 +227,7 @@ export function convertPlanificacionToGanttTasks(
   return levelResources(initialTasks);
 }
 
-export function levelResources(tasks: GanttTask[]): GanttTask[] {
+function levelResources(tasks: GanttTask[]): GanttTask[] {
   // Group tasks by resource
   const tasksByResource: Record<string, GanttTask[]> = {};
   tasks.forEach(task => {
@@ -255,6 +255,21 @@ export function levelResources(tasks: GanttTask[]): GanttTask[] {
 
     resourceTasks.forEach(task => {
       let start = new Date(`${task.startDate}T${task.startTime}`);
+
+      // Clamp start time to work hours
+      const startHour = start.getHours();
+      if (startHour < WORK_HOURS.start) {
+        start.setHours(WORK_HOURS.start, 0, 0, 0);
+      } else if (startHour >= WORK_HOURS.end) {
+        start.setDate(start.getDate() + 1);
+        start.setHours(WORK_HOURS.start, 0, 0, 0);
+      }
+
+      // Ensure start is on a working day
+      while (start.getDay() === 0 || start.getDay() === 6) {
+        start.setDate(start.getDate() + 1);
+        start.setHours(WORK_HOURS.start, 0, 0, 0);
+      }
 
       // If this task starts before the previous one ends, push it forward
       if (nextAvailableTime && start < nextAvailableTime) {
@@ -429,4 +444,83 @@ export function addWorkMinutes(startDate: Date, minutesToAdd: number): Date {
   // Result: Monday. Correct.
 
   return resultDate;
+}
+
+export function calculateWorkingMinutes(startDate: Date, endDate: Date): number {
+  if (startDate >= endDate) return 0;
+
+  let current = new Date(startDate);
+  let totalMinutes = 0;
+
+  // Normalize start/end to work hours if they are outside?
+  // Actually, we should just iterate.
+  // But for efficiency, we can calculate full days.
+
+  // Simple iterative approach for correctness first (can optimize if needed)
+  // Or better:
+  // 1. Calculate minutes in the first partial day.
+  // 2. Calculate minutes in the last partial day.
+  // 3. Calculate minutes in full intervening days.
+
+  // Let's use a robust loop that advances by days.
+
+  const target = new Date(endDate);
+
+  while (current < target) {
+    const currentDay = current.getDay();
+    const isWeekend = currentDay === 0 || currentDay === 6;
+
+    // If weekend, skip to next Monday 09:00
+    if (isWeekend) {
+      current.setDate(current.getDate() + 1);
+      current.setHours(WORK_HOURS.start, 0, 0, 0);
+      continue;
+    }
+
+    // Current is a workday.
+    // Determine the end of the work day for current
+    const workStart = new Date(current);
+    workStart.setHours(WORK_HOURS.start, 0, 0, 0);
+
+    const workEnd = new Date(current);
+    workEnd.setHours(WORK_HOURS.end, 0, 0, 0);
+
+    // If current is before work start, move to work start
+    if (current < workStart) {
+      current = new Date(workStart);
+    }
+
+    // If current is after work end, move to next day
+    if (current >= workEnd) {
+      current.setDate(current.getDate() + 1);
+      current.setHours(WORK_HOURS.start, 0, 0, 0);
+      continue;
+    }
+
+    // Now current is within work hours (or at start).
+    // Determine how much we can add today.
+    // We stop at either workEnd or target.
+
+    let nextStop = new Date(workEnd);
+    if (target < nextStop) {
+      nextStop = new Date(target);
+    }
+
+    // Add difference
+    const diffMs = nextStop.getTime() - current.getTime();
+    if (diffMs > 0) {
+      totalMinutes += Math.floor(diffMs / 60000);
+    }
+
+    // Advance current
+    current = new Date(nextStop);
+
+    // If we reached workEnd, move to next day start to avoid infinite loop if target is far
+    if (current.getTime() === workEnd.getTime()) {
+      current.setDate(current.getDate() + 1);
+      current.setHours(WORK_HOURS.start, 0, 0, 0);
+    }
+  }
+
+  return totalMinutes;
 }

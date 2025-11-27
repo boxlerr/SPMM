@@ -111,7 +111,9 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-4">
-                    <h3 className="text-xl font-bold text-foreground">Ordenes de Trabajo Detallado</h3>
+                    <h3 className="text-xl font-bold text-foreground">
+                        Procesos
+                    </h3>
                     <div className="flex items-center gap-2">
                         <Button variant="outline" size="sm" onClick={() => setCurrentWeek((prev) => prev - 1)}>
                             <ChevronLeft className="h-4 w-4" />
@@ -150,14 +152,15 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
             </div>
 
             {/* Main Content */}
-            <div
+            < div
                 className="overflow-auto cursor-grab"
                 ref={containerRef}
                 onMouseDown={handleMouseDown}
                 onMouseLeave={handleMouseLeave}
                 onMouseUp={handleMouseUp}
                 onMouseMove={handleMouseMove}
-                style={{ height: 'calc(100vh - 240px)' }}
+                style={{ height: 'calc(100vh - 240px)' }
+                }
             >
                 <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }}>
                     <div>
@@ -301,7 +304,7 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                         </div>
                     </div>
                 </div>
-            </div>
-        </Card>
+            </div >
+        </Card >
     );
 }

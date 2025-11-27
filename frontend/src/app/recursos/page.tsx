@@ -4,25 +4,30 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone } from "lucide-react";
+import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import OperarioForm from "./_components/OperarioForm";
 import MaquinaForm from "./_components/MaquinaForm";
+import ProcesoForm from "./_components/ProcesoForm";
 import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
 import CambiarEstado from "./_components/CambiarEstado";
-import { Operario, Maquina } from "./_types";
+import { Operario, Maquina, Proceso } from "./_types";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 
 export default function RecursosPage() {
   const { addNotification } = useNotifications();
   const { showToast } = useToast();
-  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas">("operarios");
+
+  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
+  const [procesos, setProcesos] = useState<Proceso[]>([]);
+  const [busquedaProceso, setBusquedaProceso] = useState("");
   const [operarioSeleccionado, setOperarioSeleccionado] = useState<Operario | null>(null);
   const [maquinaSeleccionada, setMaquinaSeleccionada] = useState<Maquina | null>(null);
   const [mostrarDialogo, setMostrarDialogo] = useState({
@@ -31,8 +36,8 @@ export default function RecursosPage() {
     editar: false,
     cambiarEstado: false,
   });
-  const [itemAEliminar, setItemAEliminar] = useState<{ tipo: "operario" | "maquina"; id: number; nombre: string } | null>(null);
-  const [itemAEditar, setItemAEditar] = useState<Operario | Maquina | null>(null);
+  const [itemAEliminar, setItemAEliminar] = useState<{ tipo: "operario" | "maquina" | "proceso"; id: number; nombre: string } | null>(null);
+  const [itemAEditar, setItemAEditar] = useState<Operario | Maquina | Proceso | null>(null);
   const [operarioCambiarEstado, setOperarioCambiarEstado] = useState<Operario | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -42,8 +47,10 @@ export default function RecursosPage() {
   useEffect(() => {
     if (tabActiva === "operarios") {
       fetchOperarios();
-    } else {
+    } else if (tabActiva === "maquinas") {
       fetchMaquinas();
+    } else {
+      fetchProcesos();
     }
   }, [tabActiva]);
 
@@ -55,6 +62,11 @@ export default function RecursosPage() {
   const fetchMaquinas = async () => {
     const data = await api.fetchData(`${cleanUrl}/maquinarias`);
     setMaquinas(data);
+  };
+
+  const fetchProcesos = async () => {
+    const data = await api.fetchData(`${cleanUrl}/procesos`);
+    setProcesos(data);
   };
 
   const handleVerOperario = async (operario: Operario) => {
@@ -85,7 +97,7 @@ export default function RecursosPage() {
     }
   };
 
-  const handleEditar = async (tipo: "operario" | "maquina", item: Operario | Maquina) => {
+  const handleEditar = async (tipo: "operario" | "maquina" | "proceso", item: Operario | Maquina | Proceso) => {
     setItemAEditar(item);
     setMostrarDialogo({ ...mostrarDialogo, editar: true });
   };
@@ -95,7 +107,9 @@ export default function RecursosPage() {
 
     const url = itemAEliminar.tipo === "operario"
       ? `${cleanUrl}/operarios/${itemAEliminar.id}`
-      : `${cleanUrl}/maquinarias/${itemAEliminar.id}`;
+      : itemAEliminar.tipo === "maquina"
+        ? `${cleanUrl}/maquinarias/${itemAEliminar.id}`
+        : `${cleanUrl}/procesos/${itemAEliminar.id}`;
 
     const success = await api.executeOperation(url, "DELETE");
     if (success) {
@@ -106,9 +120,12 @@ export default function RecursosPage() {
         );
         showToast(`Operario ${itemAEliminar.nombre} eliminado correctamente`, 'success');
         await fetchOperarios();
-      } else {
+      } else if (itemAEliminar.tipo === "maquina") {
         showToast(`Máquina ${itemAEliminar.nombre} eliminada correctamente`, 'success');
         await fetchMaquinas();
+      } else {
+        showToast(`Proceso ${itemAEliminar.nombre} eliminado correctamente`, 'success');
+        await fetchProcesos();
       }
     }
     setMostrarDialogo({ ...mostrarDialogo, eliminar: false });
@@ -144,6 +161,10 @@ export default function RecursosPage() {
       .join(" ");
   };
 
+  const procesosFiltrados = procesos.filter(p =>
+    p.nombre.toLowerCase().includes(busquedaProceso.toLowerCase())
+  );
+
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
       <div className="mb-4 md:mb-6">
@@ -153,10 +174,11 @@ export default function RecursosPage() {
         <div className="flex flex-col sm:flex-row gap-2">
           <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
             <Plus className="h-4 w-4 mr-2" />
-            {tabActiva === "operarios" ? "Nuevo Operario" : "Nueva Maquinaria"}
+            <Plus className="h-4 w-4 mr-2" />
+            {tabActiva === "operarios" ? "Nuevo Operario" : tabActiva === "maquinas" ? "Nueva Maquinaria" : "Nuevo Proceso"}
           </Button>
           <Button
-            onClick={tabActiva === "operarios" ? fetchOperarios : fetchMaquinas}
+            onClick={tabActiva === "operarios" ? fetchOperarios : tabActiva === "maquinas" ? fetchMaquinas : fetchProcesos}
             disabled={api.loading}
             variant="outline"
             size="sm"
@@ -190,6 +212,14 @@ export default function RecursosPage() {
         >
           <Factory className="h-4 w-4 sm:mr-2" />
           <span className="hidden xs:inline">Máquinas</span>
+        </Button>
+        <Button
+          variant={tabActiva === "procesos" ? "default" : "outline"}
+          onClick={() => setTabActiva("procesos")}
+          className={`flex-1 ${tabActiva === "procesos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+        >
+          <Layers className="h-4 w-4 sm:mr-2" />
+          <span className="hidden xs:inline">Procesos</span>
         </Button>
       </div>
 
@@ -460,6 +490,126 @@ export default function RecursosPage() {
         </div>
       )}
 
+      {/* TABLA DE PROCESOS */}
+      {tabActiva === "procesos" && (
+        <div className="rounded-lg border bg-card">
+          <div className="p-4 md:p-6 border-b">
+            <div className="flex items-center gap-2">
+              <Layers className="h-5 w-5 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">Procesos</h2>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">Gestión de procesos productivos</p>
+          </div>
+
+          <div className="p-4 md:p-6 border-b bg-muted/20">
+            <div className="relative max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar proceso..."
+                value={busquedaProceso}
+                onChange={(e) => setBusquedaProceso(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+          </div>
+
+          {api.loading && (
+            <div className="flex items-center justify-center py-12">
+              <Spinner className="h-8 w-8" />
+              <span className="ml-3 text-muted-foreground">Cargando procesos...</span>
+            </div>
+          )}
+
+          {!api.loading && procesosFiltrados.length === 0 && (
+            <div className="py-12 text-center text-muted-foreground">
+              <p className="text-lg">No se encontraron procesos</p>
+            </div>
+          )}
+
+          {!api.loading && procesosFiltrados.length > 0 && (
+            <>
+              {/* Vista Desktop - Tabla */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full">
+                  <thead className="border-b bg-muted/50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Descripción</th>
+                      <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {procesosFiltrados.map((proceso) => (
+                      <tr key={proceso.id} className="hover:bg-muted/50 transition-colors">
+                        <td className="px-6 py-4 text-sm font-medium">{proceso.nombre}</td>
+                        <td className="px-6 py-4 text-sm">{proceso.descripcion || "-"}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="icon" onClick={() => handleEditar("proceso", proceso)} className="h-8 w-8">
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setItemAEliminar({ tipo: "proceso", id: proceso.id, nombre: proceso.nombre });
+                                setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                              }}
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Vista Mobile - Tarjetas */}
+              <div className="md:hidden divide-y">
+                {procesosFiltrados.map((proceso) => (
+                  <div key={proceso.id} className="p-4 hover:bg-muted/50 transition-colors">
+                    <div className="mb-3">
+                      <h3 className="font-semibold text-base mb-2">{proceso.nombre}</h3>
+                      {proceso.descripcion && (
+                        <div className="text-sm text-muted-foreground">
+                          {proceso.descripcion}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditar("proceso", proceso)}
+                        className="flex-1"
+                      >
+                        <Pencil className="h-4 w-4 mr-1" />
+                        Editar
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setItemAEliminar({ tipo: "proceso", id: proceso.id, nombre: proceso.nombre });
+                          setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                        }}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* DIÁLOGOS */}
       <Dialog open={mostrarDialogo.eliminar} onOpenChange={(open) => setMostrarDialogo({ ...mostrarDialogo, eliminar: open })}>
         <DialogContent>
@@ -495,6 +645,18 @@ export default function RecursosPage() {
         onClose={() => setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false })}
         onSuccess={async () => {
           await fetchMaquinas();
+          setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false });
+        }}
+        cleanUrl={cleanUrl}
+      />
+
+      <ProcesoForm
+        open={(mostrarDialogo.crear || mostrarDialogo.editar) && tabActiva === "procesos"}
+        editing={!!mostrarDialogo.editar}
+        data={itemAEditar as Proceso}
+        onClose={() => setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false })}
+        onSuccess={async () => {
+          await fetchProcesos();
           setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false });
         }}
         cleanUrl={cleanUrl}

@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { GanttWeeklyDetailed } from "./gantt-weekly-detailed";
 import { GanttMonthlyOverview } from "./gantt-monthly-overview";
 import { GanttDetailedWorkOrders } from "./gantt/gantt-detailed-work-orders";
-import { convertPlanificacionToGanttTasks, levelResources } from "@/lib/gantt-utils";
+import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils";
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -77,44 +77,65 @@ export default function PlanificacionGanttWrapper() {
         const task = tasks.find(t => t.id === taskId);
         if (!task) return;
 
-        // 1. Calculate time difference
         const oldStart = new Date(`${task.startDate}T${task.startTime}:00`);
         const newStart = new Date(`${newDate}T${newStartTime}:00`);
-
-        const diffMillis = newStart.getTime() - oldStart.getTime();
-        const diffMinutes = Math.round(diffMillis / 60000);
-
-        if (diffMinutes === 0 && task.resourceId === newResourceId) return;
-
-        // 2. Calculate new values
-        const newInicioMin = (task.originalInicioMin || 0) + diffMinutes;
-        const newFinMin = (task.originalFinMin || 0) + diffMinutes;
         const newOperarioId = parseInt(newResourceId);
 
-        // 3. Optimistic Update
-        const oldTasks = [...tasks];
-        setTasks(prev => prev.map(t => {
-            if (t.id === taskId) {
-                // Calculate new end time for UI
-                const newEndMillis = newStart.getTime() + (t.duration * 60 * 60 * 1000);
-                const newEnd = new Date(newEndMillis);
+        // Import calculateWorkingMinutes dynamically
+        const { calculateWorkingMinutes } = require("@/lib/gantt-utils");
 
+        // Calculate the new start time in minutes from the base date
+        // We need to be careful here. 
+        // originalInicioMin is relative to the base date (creado_en).
+        // But the task might have been clamped visually to 09:00 if it was outside work hours.
+        // If we just add diffMinutes to originalInicioMin, we might still end up with a time < 09:00 if originalInicioMin was way off.
+
+        // Instead, let's calculate the working minutes from the base date (creado_en normalized to 09:00) to the NEW start date.
+        // This is more robust.
+
+        const rawItem = rawPlanificacion.find(i => i.id === task.dbId);
+        if (!rawItem) return;
+
+        const baseDate = rawItem.creado_en ? new Date(rawItem.creado_en) : new Date();
+        const normalizedBaseDate = new Date(baseDate);
+        normalizedBaseDate.setHours(9, 0, 0, 0);
+
+        const newInicioMin = calculateWorkingMinutes(normalizedBaseDate, newStart);
+
+        // Calculate new duration in minutes
+        // If we have original duration, use it. Otherwise calculate from current duration.
+        let durationMinutes = 0;
+        if (task.originalFinMin !== undefined && task.originalInicioMin !== undefined) {
+            durationMinutes = task.originalFinMin - task.originalInicioMin;
+        } else {
+            durationMinutes = Math.round(task.duration * 60);
+        }
+
+        const newFinMin = newInicioMin + durationMinutes;
+
+        // 3. Optimistic Update with Re-Leveling
+        const oldTasks = [...tasks];
+        const oldRawPlanificacion = [...rawPlanificacion];
+
+        // Update the raw item in a new array
+        const updatedRawPlanificacion = rawPlanificacion.map(item => {
+            if (item.id === task.dbId) {
                 return {
-                    ...t,
-                    startDate: newDate,
-                    startTime: newStartTime,
-                    endDate: newEnd.toISOString().split('T')[0],
-                    endTime: `${newEnd.getHours().toString().padStart(2, '0')}:${newEnd.getMinutes().toString().padStart(2, '0')}`,
-                    resourceId: newResourceId,
-                    originalInicioMin: newInicioMin,
-                    originalFinMin: newFinMin
+                    ...item,
+                    inicio_min: newInicioMin,
+                    fin_min: newFinMin,
+                    id_operario: isNaN(newOperarioId) ? item.id_operario : newOperarioId
                 };
             }
-            return t;
-        }));
+            return item;
+        });
 
-        // Apply resource leveling to the updated tasks
-        setTasks(prev => levelResources(prev));
+        // Regenerate tasks (this runs levelResources)
+        const newGanttTasks = convertPlanificacionToGanttTasks(updatedRawPlanificacion);
+
+        // Update state
+        setRawPlanificacion(updatedRawPlanificacion);
+        setTasks(newGanttTasks);
 
         // 4. API Call
         try {
@@ -135,6 +156,7 @@ export default function PlanificacionGanttWrapper() {
             console.error("Error updating task:", error);
             // Rollback
             setTasks(oldTasks);
+            setRawPlanificacion(oldRawPlanificacion);
             // TODO: Show toast error
         }
     };
@@ -201,12 +223,11 @@ export default function PlanificacionGanttWrapper() {
                         </Button>
                     </div>
                 </div>
-
                 <Tabs defaultValue="weekly" className="w-full flex-1 flex flex-col">
                     <TabsList>
                         <TabsTrigger value="weekly">Semanal Detallado</TabsTrigger>
                         <TabsTrigger value="monthly">Mensual General</TabsTrigger>
-                        <TabsTrigger value="orders">Ordenes Detalladas</TabsTrigger>
+                        <TabsTrigger value="orders">Procesos</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="weekly" className="mt-4 flex-1 overflow-auto">

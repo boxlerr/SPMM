@@ -3,13 +3,14 @@
 import { useState } from "react"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import TablaTareas from "@/components/TablaTareas"
+import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
 import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "tabla">("gantt")
+  const [activeTab, setActiveTab] = useState<"gantt" | "tabla" | "work_orders">("gantt")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen } = usePanelContext()
 
@@ -57,6 +58,16 @@ export default function OperacionesPage() {
                 }`}
             >
               <LayoutList size={18} />
+              Procesos
+            </button>
+            <button
+              onClick={() => setActiveTab("work_orders")}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "work_orders"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+            >
+              <LayoutList size={18} />
               Órdenes de Trabajo
             </button>
           </div>
@@ -66,10 +77,12 @@ export default function OperacionesPage() {
       <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">
-            {activeTab === "gantt" ? "Planificación (Gantt)" : "Órdenes de Trabajo"}
+            {activeTab === "gantt" ? "Planificación (Gantt)" : activeTab === "tabla" ? "Procesos" : "Órdenes de Trabajo"}
           </h2>
 
-          {activeTab === "gantt" ? <PlanificacionGanttWrapper /> : <TablaTareas />}
+          {activeTab === "gantt" && <PlanificacionGanttWrapper />}
+          {activeTab === "tabla" && <TablaTareas />}
+          {activeTab === "work_orders" && <WorkOrdersListWrapper />}
         </div>
       </div>
 

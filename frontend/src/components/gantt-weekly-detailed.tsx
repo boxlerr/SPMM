@@ -74,16 +74,27 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
   }
 
   const handleDragStart = (taskId: string) => {
-    setDraggedTask(taskId)
+    // Delay state update to allow drag to start properly
+    setTimeout(() => setDraggedTask(taskId), 0)
   }
 
   const handleDragOver = (e: React.DragEvent, resourceId: string, date: string, hour: number) => {
     e.preventDefault()
-    setDragOverCell({ resourceId, date, hour })
+    // Only update state if the cell actually changed to prevent excessive re-renders
+    if (
+      dragOverCell?.resourceId !== resourceId ||
+      dragOverCell?.date !== date ||
+      dragOverCell?.hour !== hour
+    ) {
+      setDragOverCell({ resourceId, date, hour })
+    }
   }
 
   const handleDragLeave = () => {
-    setDragOverCell(null)
+    // We don't strictly need to clear it on leave of every cell if we update on enter of the next.
+    // But clearing it when leaving the grid area might be good.
+    // For now, let's keep it simple and rely on DragOver updates.
+    // setDragOverCell(null) 
   }
 
   const handleDrop = (resourceId: string, date: string, hour: number) => {
@@ -227,7 +238,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                       : 'hover:bg-muted/50'
                                     }`}
                                   onDragOver={(e) => handleDragOver(e, resource.id, dateStr, hour)}
-                                  onDragLeave={handleDragLeave}
+                                  // onDragLeave={handleDragLeave} // Removed to prevent flickering
                                   onDrop={() => handleDrop(resource.id, dateStr, hour)}
                                 >
                                   {/* Hora label */}
@@ -270,7 +281,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                             rounded-md p-1 text-xs
                                             transition-all duration-200
                                             ${draggedTask === task.id
-                                                  ? 'opacity-40 scale-95 shadow-2xl ring-2 ring-white'
+                                                  ? 'opacity-50 scale-95 shadow-2xl ring-2 ring-white pointer-events-none'
                                                   : 'hover:opacity-90 hover:scale-[1.02] hover:shadow-lg'
                                                 }
                                             shadow-sm
