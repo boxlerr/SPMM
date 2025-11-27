@@ -56,9 +56,20 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
 
   const getTasksStartingInHour = (resourceId: string, date: string, hour: number) => {
     return tasks.filter((task) => {
-      if (task.resourceId !== resourceId || task.startDate !== date) return false
-      const taskStartHour = Number.parseInt(task.startTime.split(":")[0])
-      return taskStartHour === hour
+      if (task.resourceId !== resourceId) return false
+
+      // Case 1: Task starts on this day at this hour
+      if (task.startDate === date) {
+        const taskStartHour = Number.parseInt(task.startTime.split(":")[0])
+        return taskStartHour === hour
+      }
+
+      // Case 2: Task started before this day, continues today, and this is the first hour of the day
+      if (task.startDate < date && task.endDate >= date && hour === WORK_HOURS.start) {
+        return true
+      }
+
+      return false
     })
   }
 
@@ -226,9 +237,19 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
 
                                   {/* Tareas */}
                                   {startingTasks.map((task, index) => {
-                                    const taskDuration =
-                                      Number.parseInt(task.endTime.split(":")[0]) -
-                                      Number.parseInt(task.startTime.split(":")[0])
+                                    // Calculate duration for THIS day
+                                    let startH = Number.parseInt(task.startTime.split(":")[0])
+                                    let endH = Number.parseInt(task.endTime.split(":")[0])
+
+                                    // Adjust start/end for multi-day logic
+                                    if (task.startDate < dateStr) {
+                                      startH = WORK_HOURS.start
+                                    }
+                                    if (task.endDate > dateStr) {
+                                      endH = WORK_HOURS.end
+                                    }
+
+                                    const taskDuration = endH - startH
 
                                     // Calculate width and position for overlapping tasks
                                     const widthPercent = 100 / startingTasks.length
@@ -351,7 +372,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                         {/* Resumen de carga */}
                         <div className="p-2 text-center text-xs">
                           <span className={overloaded ? "text-destructive font-semibold" : "text-muted-foreground"}>
-                            {load}h / {WORK_HOURS.total}h
+                            {Number(load.toFixed(2))}h / {WORK_HOURS.total}h
                           </span>
                         </div>
                       </div>

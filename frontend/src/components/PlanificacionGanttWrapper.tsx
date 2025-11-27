@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { GanttWeeklyDetailed } from "./gantt-weekly-detailed";
 import { GanttMonthlyOverview } from "./gantt-monthly-overview";
 import { GanttDetailedWorkOrders } from "./gantt/gantt-detailed-work-orders";
-import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils";
+import { convertPlanificacionToGanttTasks, levelResources } from "@/lib/gantt-utils";
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,9 @@ export default function PlanificacionGanttWrapper() {
             }
             return t;
         }));
+
+        // Apply resource leveling to the updated tasks
+        setTasks(prev => levelResources(prev));
 
         // 4. API Call
         try {
