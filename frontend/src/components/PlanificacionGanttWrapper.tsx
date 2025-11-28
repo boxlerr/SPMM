@@ -8,7 +8,7 @@ import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils";
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import SidebarPanel from "./gantt/SidebarPanel";
+import TaskDetailsModal from "./gantt/TaskDetailsModal";
 import { usePanelContext } from "@/contexts/PanelContext";
 
 export default function PlanificacionGanttWrapper() {
@@ -260,7 +260,7 @@ export default function PlanificacionGanttWrapper() {
                 </Tabs>
             </div>
 
-            <SidebarPanel
+            <TaskDetailsModal
                 isOpen={isDetailsPanelOpen}
                 selectedItem={selectedTask}
                 onClose={() => setIsDetailsPanelOpen(false)}

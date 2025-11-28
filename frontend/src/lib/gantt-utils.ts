@@ -221,6 +221,7 @@ export function convertPlanificacionToGanttTasks(
       subsector: "Subsector Generico", // Placeholder
       quantity: 1, // Placeholder
       materials: [], // Placeholder
+      notes: item.observaciones_ot || "",
     };
   });
 
