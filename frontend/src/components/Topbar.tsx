@@ -95,14 +95,12 @@ export default function Topbar() {
     router.push("/configuracion?tab=notificaciones");
   };
 
-  const recentNotifications = notifications.slice(0, 5);
-
   // Ajustar la posición derecha basado en si el panel está abierto
-  const rightPosition = isDetailsPanelOpen ? 336 : 16; // 320px (panel) + 16px (margen)
+  const rightPosition = isDetailsPanelOpen ? 416 : 16; // 400px (panel) + 16px (margen)
 
   return createPortal(
     (
-      <div className="fixed z-[2147483647] transition-all duration-300" style={{ top: 16, right: rightPosition }}>
+      <div className="fixed z-50 transition-all duration-300" style={{ top: 16, right: rightPosition }}>
         <button
           ref={buttonRef}
           type="button"

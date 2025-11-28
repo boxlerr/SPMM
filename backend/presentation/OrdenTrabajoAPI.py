@@ -88,7 +88,25 @@ async def obtener_proximas_entregas(dias: int = 7, db=Depends(get_db)):
     service = OrdenTrabajoService(db)
     return await service.obtenerProximasEntregasTimeline(dias)
 
-app.include_router(router)
+from pydantic import BaseModel
+
+class EstadoUpdate(BaseModel):
+    estado: str
+
+@router.put("/ordenes/{id_orden}/procesos/{id_proceso}/estado")
+async def actualizar_estado_proceso(id_orden: int, id_proceso: int, body: EstadoUpdate, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/estado")
+    service = OrdenTrabajoService(db)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.estado)
+
+@router.put("/ordenes/{id_orden}/procesos/{id_proceso}/status")
+async def update_process_status(id_orden: int, id_proceso: int, body: dict, db=Depends(get_db)):
+    # Endpoint alternativo recibiendo JSON
+    new_status = body.get("estado")
+    logger.info(f"API - Update Status: {new_status}")
+    service = OrdenTrabajoService(db)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status)
+
 
 
 

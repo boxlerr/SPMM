@@ -357,3 +357,31 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en get_proximas_entregas_timeline: {e}")
             raise InfrastructureException("Error al obtener timeline de próximas entregas.") from e
 
+
+    async def update_proceso_status(self, id_orden: int, id_proceso: int, nuevo_estado: str):
+        try:
+            logger.info(f"Repository - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso}, Estado {nuevo_estado}")
+            
+            # Buscar la relación específica
+            query = select(OrdenTrabajoProceso).where(
+                OrdenTrabajoProceso.id_orden_trabajo == id_orden,
+                OrdenTrabajoProceso.id_proceso == id_proceso
+            )
+            result = await self.db.execute(query)
+            ot_proceso = result.scalar_one_or_none()
+            
+            if not ot_proceso:
+                logger.info("Repository - Relación Orden-Proceso no encontrada.")
+                return False
+                
+            ot_proceso.estado = nuevo_estado
+            await self.db.commit()
+            await self.db.refresh(ot_proceso)
+            
+            logger.info("Repository - Estado actualizado correctamente.")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en update_proceso_status: {e}")
+            raise InfrastructureException("Error al actualizar estado del proceso.") from e

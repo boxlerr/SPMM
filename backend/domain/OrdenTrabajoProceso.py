@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey, PrimaryKeyConstraint
+from sqlalchemy import Column, Integer, ForeignKey, PrimaryKeyConstraint, String
 from sqlalchemy.orm import relationship
 from backend.infrastructure.db import Base
 
@@ -9,6 +9,7 @@ class OrdenTrabajoProceso(Base):
     id_proceso = Column(Integer, ForeignKey("proceso.id"))
     orden = Column(Integer, nullable=False)
     tiempo_proceso = Column(Integer, nullable=True)
+    estado = Column(String(50), default='pendiente')
 
 
 

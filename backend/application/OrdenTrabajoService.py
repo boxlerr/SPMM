@@ -173,3 +173,20 @@ class OrdenTrabajoService:
         except Exception as e:
             raise ApplicationException("Error al obtener timeline de próximas entregas.") from e
 
+
+    async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, nuevo_estado: str):
+        logger.info(f"Service - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso} -> {nuevo_estado}")
+        
+        # Validar estado (opcional, pero recomendado)
+        estados_validos = ['pendiente', 'en_curso', 'completado']
+        if nuevo_estado not in estados_validos:
+             # Permitir variaciones o mapear si es necesario, por ahora estricto o flexible según frontend
+             # Si el frontend manda "En curso", lo normalizamos? Mejor que el frontend mande el key correcto.
+             pass
+
+        ok = await self.repository.update_proceso_status(id_orden, id_proceso, nuevo_estado)
+        
+        if not ok:
+            raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
+            
+        return ResponseDTO(status=True, data={"updated": True, "nuevo_estado": nuevo_estado})

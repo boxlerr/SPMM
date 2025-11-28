@@ -82,4 +82,5 @@ export interface PlanificacionItem {
     descripcion_articulo?: string;
     abreviatura_articulo?: string;
     observaciones_ot?: string;
+    estado?: string;
 }

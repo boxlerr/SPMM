@@ -19,6 +19,15 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
         return acc;
     }, {} as Record<string, GanttTask[]>);
 
+    const capitalizeFirstLetter = (string: string) => {
+        return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
+    };
+
+    const formatDate = (dateStr: string) => {
+        const [year, month, day] = dateStr.split('-');
+        return `${day}/${month}`;
+    };
+
     const sortedOTs = Object.keys(tasksByOT).sort((a, b) => parseInt(a) - parseInt(b));
 
     return (
