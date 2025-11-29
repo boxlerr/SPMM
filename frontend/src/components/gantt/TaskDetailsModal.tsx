@@ -31,6 +31,9 @@ interface PlanificacionItem {
     fecha_prometida?: string;
     prioridad_peso?: number;
     estado?: string;
+    id_estado?: number;
+    observaciones_ot?: string;
+    observaciones_proceso?: string;
 }
 
 // Helper function to capitalize first letter
@@ -50,6 +53,12 @@ interface TaskDetailsModalProps {
     variant?: "modal" | "sidebar";
 }
 
+// Helper function to get initials
+const getInitials = (nombre?: string, apellido?: string): string => {
+    if (!nombre) return "??";
+    return `${nombre.charAt(0)}${apellido ? apellido.charAt(0) : ""}`.toUpperCase();
+}
+
 const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
     isOpen,
     selectedItem,
@@ -60,9 +69,77 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
     onStatusChange,
     variant = "modal",
 }) => {
-    console.log("TaskDetailsModal rendering. Variant:", variant, "IsOpen:", isOpen);
+    console.log("TaskDetailsModal rendering. Variant:", variant, "IsOpen:", isOpen, "id_estado:", selectedItem?.id_estado);
     const [ordenDetails, setOrdenDetails] = React.useState<any>(null);
     const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
+
+    // Local state for editable fields
+    const [localObservaciones, setLocalObservaciones] = React.useState("");
+    const [localStatus, setLocalStatus] = React.useState<string>("1");
+    const [localOperator, setLocalOperator] = React.useState<string>("");
+
+    const [isSaving, setIsSaving] = React.useState(false);
+    const [showSuccess, setShowSuccess] = React.useState(false);
+
+    // Initialize local state when selectedItem changes
+    React.useEffect(() => {
+        if (selectedItem) {
+            setLocalObservaciones(selectedItem.observaciones_proceso || selectedItem.observaciones_ot || "");
+            setLocalStatus(selectedItem.id_estado?.toString() || "1");
+            setLocalOperator(selectedItem.id_operario?.toString() || "");
+            setShowSuccess(false);
+        }
+    }, [selectedItem]);
+
+    const handleSaveAll = async () => {
+        if (!selectedItem) return;
+
+        setIsSaving(true);
+        setShowSuccess(false);
+
+        try {
+            // 1. Save Observations if changed
+            const currentOriginalObs = selectedItem.observaciones_proceso || selectedItem.observaciones_ot || "";
+            if (localObservaciones !== currentOriginalObs) {
+                const response = await fetch(`http://localhost:8000/ordenes/${selectedItem.orden_id}/procesos/${selectedItem.proceso_id}/observaciones`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ observaciones: localObservaciones }),
+                });
+
+                if (response.ok) {
+                    console.log("Observaciones guardadas correctamente");
+                    selectedItem.observaciones_proceso = localObservaciones;
+                } else {
+                    console.error("Error al guardar observaciones");
+                }
+            }
+
+            // 2. Save Status if changed
+            if (localStatus !== (selectedItem.id_estado?.toString() || "1")) {
+                onStatusChange(localStatus);
+            }
+
+            // 3. Save Operator if changed
+            if (localOperator !== (selectedItem.id_operario?.toString() || "")) {
+                onOperatorChange(localOperator);
+            }
+
+            // Show success animation
+            setShowSuccess(true);
+            setTimeout(() => {
+                setShowSuccess(false);
+                onClose(); // Close modal after successful save
+            }, 1000);
+
+        } catch (error) {
+            console.error("Error al guardar cambios:", error);
+        } finally {
+            setIsSaving(false);
+        }
+    };
 
     // Fetch work order details when selectedItem changes
     React.useEffect(() => {
@@ -92,9 +169,9 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
     if (!selectedItem) return null;
 
     const Content = (
-        <div className={`flex flex-col h-full ${variant === "sidebar" ? "bg-white w-full" : ""}`}>
+        <div className={`flex flex-col h-full ${variant === "sidebar" ? "bg-white w-full" : "max-h-[inherit]"}`}>
             {/* Header */}
-            <div className="bg-white border-b border-gray-100 p-6 flex-shrink-0">
+            <div className="bg-white border-b border-gray-100 p-4 sm:p-6 flex-shrink-0">
                 <div className="flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
                         <div className="p-2 rounded-lg bg-red-50 text-red-600">
@@ -119,37 +196,37 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             </div>
 
             {/* Contenido */}
-            <div className="flex-1 overflow-y-auto">
-                <div className="p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="p-4 sm:p-6 space-y-6">
                     {/* Estado - Highlighted */}
                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
                         <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 block">
                             Estado Actual
                         </label>
                         <Select
-                            value={selectedItem.estado || "pendiente"}
-                            onValueChange={onStatusChange}
+                            value={localStatus}
+                            onValueChange={setLocalStatus}
                         >
-                            <SelectTrigger className={`w-full h-11 border-0 font-medium shadow-sm ${selectedItem.estado === 'completado' ? 'bg-green-50 text-green-700 ring-1 ring-green-200' :
-                                selectedItem.estado === 'en_curso' ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200' :
+                            <SelectTrigger className={`w-full h-12 sm:h-11 border-0 font-medium shadow-sm ${localStatus === "3" ? 'bg-green-50 text-green-700 ring-1 ring-green-200' :
+                                localStatus === "2" ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200' :
                                     'bg-white text-gray-900 ring-1 ring-gray-200'
                                 }`}>
                                 <SelectValue placeholder="Seleccionar estado" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="pendiente">
+                                <SelectItem value="1">
                                     <div className="flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-gray-300" />
                                         Pendiente
                                     </div>
                                 </SelectItem>
-                                <SelectItem value="en_curso">
+                                <SelectItem value="2">
                                     <div className="flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                                         En Curso
                                     </div>
                                 </SelectItem>
-                                <SelectItem value="completado">
+                                <SelectItem value="3">
                                     <div className="flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-green-500" />
                                         Completado
@@ -165,7 +242,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                             <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
                                 Proceso
                             </label>
-                            <div className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-white hover:border-gray-300 transition-colors">
+                            <div className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-white hover:border-gray-300 transition-colors h-12 sm:h-auto">
                                 <div
                                     className="w-3 h-3 rounded-full shadow-sm ring-2 ring-white"
                                     style={{
@@ -186,17 +263,39 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                 Operario Asignado
                             </label>
                             <Select
-                                value={selectedItem.id_operario?.toString() || ""}
-                                onValueChange={onOperatorChange}
+                                value={localOperator}
+                                onValueChange={setLocalOperator}
                             >
-                                <SelectTrigger className="w-full h-11 text-sm bg-white border-gray-200 hover:border-gray-300 transition-colors">
-                                    <SelectValue placeholder="Seleccionar operario" />
+                                <SelectTrigger className="w-full h-12 text-sm bg-white border-gray-200 hover:border-gray-300 transition-colors">
+                                    <SelectValue placeholder="Seleccionar operario">
+                                        {localOperator && (
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white flex items-center justify-center text-xs font-bold shadow-sm">
+                                                    {getInitials(
+                                                        operarios.find(op => op.id.toString() === localOperator)?.nombre,
+                                                        operarios.find(op => op.id.toString() === localOperator)?.apellido
+                                                    )}
+                                                </div>
+                                                <span className="font-medium text-gray-900">
+                                                    {capitalizeFirstLetter(operarios.find(op => op.id.toString() === localOperator)?.nombre || "")} {capitalizeFirstLetter(operarios.find(op => op.id.toString() === localOperator)?.apellido || "")}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {!localOperator && <span className="text-gray-500">Seleccionar operario</span>}
+                                    </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
                                     {Array.isArray(operarios) &&
                                         operarios.map((op) => (
                                             <SelectItem key={op.id} value={op.id.toString()}>
-                                                {op.nombre} {op.apellido}
+                                                <div className="flex items-center gap-3 py-1">
+                                                    <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-bold">
+                                                        {getInitials(op.nombre, op.apellido)}
+                                                    </div>
+                                                    <span className="text-gray-700">
+                                                        {capitalizeFirstLetter(op.nombre)} {capitalizeFirstLetter(op.apellido)}
+                                                    </span>
+                                                </div>
                                             </SelectItem>
                                         ))}
                                 </SelectContent>
@@ -204,13 +303,13 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                         </div>
 
                         {/* Detalles Grid */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {/* Maquinaria */}
                             <div>
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
                                     Maquinaria
                                 </label>
-                                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50/50">
+                                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50/50 h-12 flex items-center">
                                     <span className="text-sm text-gray-700 font-medium">
                                         {selectedItem.nombre_maquinaria || "Sin asignar"}
                                     </span>
@@ -222,7 +321,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
                                     Duración Est.
                                 </label>
-                                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50/50">
+                                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50/50 h-12 flex items-center">
                                     <span className="text-sm text-gray-700 font-medium">
                                         {selectedItem.fin_min - selectedItem.inicio_min} min
                                     </span>
@@ -257,16 +356,21 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                         </div>
 
                         {/* Observaciones */}
-                        {!isLoadingDetails && ordenDetails?.observaciones && (
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block">
                                     Observaciones
                                 </label>
-                                <div className="text-sm text-gray-700 bg-amber-50 p-4 rounded-lg border border-amber-100 leading-relaxed">
-                                    {ordenDetails.observaciones}
-                                </div>
                             </div>
-                        )}
+                            <div className="relative">
+                                <textarea
+                                    className="w-full text-sm text-gray-700 bg-amber-50 p-4 rounded-lg border border-amber-100 focus:ring-2 focus:ring-amber-200 focus:border-amber-300 outline-none resize-none min-h-[120px] transition-all duration-200"
+                                    placeholder="Agregar observaciones..."
+                                    value={localObservaciones}
+                                    onChange={(e) => setLocalObservaciones(e.target.value)}
+                                />
+                            </div>
+                        </div>
 
                         {/* Fecha Prometida */}
                         <div>
@@ -278,10 +382,43 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                 {selectedItem.fecha_prometida || "No definida"}
                             </div>
                         </div>
-                    </div>
-                </div>
+                    </div >
+                </div >
+            </div >
+
+            {/* Footer with Save Button */}
+            <div className="bg-white border-t border-gray-100 p-4 sm:p-6 flex-shrink-0 sticky bottom-0 z-10">
+                <button
+                    onClick={handleSaveAll}
+                    disabled={isSaving}
+                    className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-white shadow-lg transition-all duration-300 active:scale-[0.98]
+                        ${isSaving
+                            ? "bg-gray-400 cursor-wait"
+                            : showSuccess
+                                ? "bg-green-500 hover:bg-green-600"
+                                : "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 hover:shadow-blue-200 hover:-translate-y-0.5"
+                        }
+                    `}
+                >
+                    {isSaving ? (
+                        <>
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <span>Guardando...</span>
+                        </>
+                    ) : showSuccess ? (
+                        <>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                            <span>¡Guardado!</span>
+                        </>
+                    ) : (
+                        <>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
+                            <span>Guardar Cambios</span>
+                        </>
+                    )}
+                </button>
             </div>
-        </div>
+        </div >
     );
 
     if (variant === "sidebar") {
@@ -290,7 +427,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-[500px] bg-white rounded-xl shadow-2xl border-0 p-0 overflow-hidden">
+            <DialogContent className="w-[95vw] sm:w-full sm:max-w-[500px] max-h-[90vh] h-[90vh] flex flex-col bg-white rounded-xl shadow-2xl border-0 p-0 overflow-hidden">
                 <DialogTitle className="sr-only">Detalle del Proceso</DialogTitle>
                 {Content}
             </DialogContent>

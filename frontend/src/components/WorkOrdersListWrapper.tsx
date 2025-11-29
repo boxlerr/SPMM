@@ -95,6 +95,45 @@ export default function WorkOrdersListWrapper() {
         }
     };
 
+    const handleStatusChange = async (newStatusId: string) => {
+        if (!selectedTask) return;
+        const idEstado = parseInt(newStatusId);
+
+        let statusString = 'pendiente';
+        if (idEstado === 2) statusString = 'en_curso';
+        if (idEstado === 3) statusString = 'completado';
+
+        // Optimistic update
+        const updatedItem = { ...selectedTask, id_estado: idEstado, estado: statusString };
+        setSelectedTask(updatedItem);
+
+        // Update raw list
+        setRawPlanificacion(prev => prev.map(p => p.id === selectedTask.id ? updatedItem : p));
+
+        // Update Gantt tasks
+        setTasks(prev => prev.map(t => {
+            if (t.dbId === selectedTask.id) {
+                let mappedStatus: any = 'nuevo';
+                if (idEstado === 2) mappedStatus = 'en_proceso';
+                else if (idEstado === 3) mappedStatus = 'finalizado_total';
+                else if (idEstado === 1) mappedStatus = 'nuevo';
+
+                return { ...t, status: mappedStatus };
+            }
+            return t;
+        }));
+
+        try {
+            await fetch(`http://localhost:8000/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id_estado: idEstado }),
+            });
+        } catch (error) {
+            console.error("Error updating status:", error);
+        }
+    };
+
     if (loading) {
         return <div className="p-8 text-center text-gray-500">Cargando órdenes de trabajo...</div>;
     }
@@ -110,6 +149,7 @@ export default function WorkOrdersListWrapper() {
                 getProcessColor={getProcessColor}
                 operarios={rawOperarios}
                 onOperatorChange={handleOperatorChange}
+                onStatusChange={handleStatusChange}
             />
         </div>
     );

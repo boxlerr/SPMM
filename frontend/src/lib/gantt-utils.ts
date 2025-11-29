@@ -1,4 +1,4 @@
-import type { WorkOrder, GanttTask, Priority, PlanificacionItem } from "./types"
+import type { WorkOrder, GanttTask, Priority, PlanificacionItem, Status } from "./types"
 
 export const WORK_HOURS = {
   start: 9,
@@ -211,7 +211,7 @@ export function convertPlanificacionToGanttTasks(
       endTime,
       duration: Number(durationHours.toFixed(2)),
       priority: priority,
-      status: "en_proceso" as const, // Default as we don't have status in PlanificacionItem yet
+      status: (item.id_estado === 3 ? "finalizado_total" : item.id_estado === 2 ? "en_proceso" : "nuevo") as Status,
       progress: 0,
       isDelayed: false,
       originalInicioMin: item.inicio_min,
@@ -221,7 +221,7 @@ export function convertPlanificacionToGanttTasks(
       subsector: "Subsector Generico", // Placeholder
       quantity: 1, // Placeholder
       materials: [], // Placeholder
-      notes: item.observaciones_ot || "",
+      notes: item.observaciones_proceso || item.observaciones_ot || "",
     };
   });
 

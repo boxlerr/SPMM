@@ -121,8 +121,10 @@ class OrdenTrabajoRepository:
                 select(OrdenTrabajo)
                 .options(
                     joinedload(OrdenTrabajo.procesos)
-                    .joinedload(OrdenTrabajoProceso.proceso)
-                    .joinedload(Proceso.rangos),
+                    .options(
+                        joinedload(OrdenTrabajoProceso.proceso).joinedload(Proceso.rangos),
+                        joinedload(OrdenTrabajoProceso.estado_proceso)
+                    ),
                     joinedload(OrdenTrabajo.prioridad) 
                 )
             )
@@ -358,9 +360,9 @@ class OrdenTrabajoRepository:
             raise InfrastructureException("Error al obtener timeline de próximas entregas.") from e
 
 
-    async def update_proceso_status(self, id_orden: int, id_proceso: int, nuevo_estado: str):
+    async def update_proceso_status(self, id_orden: int, id_proceso: int, id_estado: int):
         try:
-            logger.info(f"Repository - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso}, Estado {nuevo_estado}")
+            logger.info(f"Repository - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso}, ID Estado {id_estado}")
             
             # Buscar la relación específica
             query = select(OrdenTrabajoProceso).where(
@@ -374,7 +376,7 @@ class OrdenTrabajoRepository:
                 logger.info("Repository - Relación Orden-Proceso no encontrada.")
                 return False
                 
-            ot_proceso.estado = nuevo_estado
+            ot_proceso.id_estado = id_estado
             await self.db.commit()
             await self.db.refresh(ot_proceso)
             
@@ -385,3 +387,30 @@ class OrdenTrabajoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error en update_proceso_status: {e}")
             raise InfrastructureException("Error al actualizar estado del proceso.") from e
+
+    async def update_proceso_observaciones(self, id_orden: int, id_proceso: int, observaciones: str):
+        try:
+            logger.info(f"Repository - Actualizar observaciones proceso: Orden {id_orden}, Proceso {id_proceso}")
+            
+            query = select(OrdenTrabajoProceso).where(
+                OrdenTrabajoProceso.id_orden_trabajo == id_orden,
+                OrdenTrabajoProceso.id_proceso == id_proceso
+            )
+            result = await self.db.execute(query)
+            ot_proceso = result.scalar_one_or_none()
+            
+            if not ot_proceso:
+                logger.info("Repository - Relación Orden-Proceso no encontrada.")
+                return False
+                
+            ot_proceso.observaciones = observaciones
+            await self.db.commit()
+            await self.db.refresh(ot_proceso)
+            
+            logger.info("Repository - Observaciones actualizadas correctamente.")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en update_proceso_observaciones: {e}")
+            raise InfrastructureException("Error al actualizar observaciones del proceso.") from e

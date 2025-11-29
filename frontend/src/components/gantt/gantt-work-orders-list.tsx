@@ -3,6 +3,7 @@
 import React from "react";
 import { Card } from "@/components/ui/card";
 import { GanttTask } from "@/lib/types";
+import { toTitleCase } from "@/lib/gantt-utils";
 
 interface GanttWorkOrdersListProps {
     tasks: GanttTask[];
@@ -10,8 +11,19 @@ interface GanttWorkOrdersListProps {
 }
 
 export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListProps) {
+    const [searchTerm, setSearchTerm] = React.useState("");
+
+    const filteredTasks = tasks.filter(task => {
+        const term = searchTerm.toLowerCase();
+        return (
+            task.workOrderNumber.toLowerCase().includes(term) ||
+            task.process.toLowerCase().includes(term) ||
+            task.resourceName.toLowerCase().includes(term)
+        );
+    });
+
     // Group tasks by Work Order
-    const tasksByOT = tasks.reduce((acc, task) => {
+    const tasksByOT = filteredTasks.reduce((acc, task) => {
         if (!acc[task.workOrderNumber]) {
             acc[task.workOrderNumber] = [];
         }
@@ -31,14 +43,31 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
     const sortedOTs = Object.keys(tasksByOT).sort((a, b) => parseInt(a) - parseInt(b));
 
     return (
-        <Card className="p-6 bg-gradient-to-br from-white to-gray-50 border-none shadow-xl">
-            <div className="flex items-center gap-3 mb-8">
-                <div className="p-2 bg-red-100 rounded-lg">
-                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        <Card className="p-4 sm:p-6 bg-gradient-to-br from-white to-gray-50 border-none shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 sm:mb-8">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-100 rounded-lg shrink-0">
+                        <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                    </div>
+                    <h3 className="text-xl sm:text-2xl font-bold text-gray-800 tracking-tight">Listado de Órdenes de Trabajo</h3>
+                </div>
+            </div>
+
+            <div className="mb-6 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                 </div>
-                <h3 className="text-2xl font-bold text-gray-800 tracking-tight">Listado de Órdenes de Trabajo</h3>
+                <input
+                    type="text"
+                    className="block w-full pl-10 pr-3 py-3 sm:py-2 border border-gray-300 rounded-xl sm:rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-red-500 focus:border-red-500 text-base sm:text-sm transition duration-150 ease-in-out shadow-sm"
+                    placeholder="Buscar por OT, proceso u operario..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
             </div>
 
             <div className="space-y-6">
@@ -51,12 +80,12 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                     return (
                         <div
                             key={otNumber}
-                            className="group border border-gray-100 rounded-xl p-6 bg-white shadow-sm hover:shadow-md transition-all duration-300 ease-in-out animate-in fade-in slide-in-from-bottom-4"
+                            className="group border border-gray-100 rounded-xl p-4 sm:p-6 bg-white shadow-sm hover:shadow-md transition-all duration-300 ease-in-out animate-in fade-in slide-in-from-bottom-4"
                             style={{ animationDelay: `${index * 100}ms` }}
                         >
-                            <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-50">
+                            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-4 sm:mb-6 pb-4 border-b border-gray-50">
                                 <div className="flex items-center gap-4">
-                                    <div className="h-10 w-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 font-bold text-lg shadow-inner">
+                                    <div className="h-10 w-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 font-bold text-lg shadow-inner shrink-0">
                                         #{otNumber}
                                     </div>
                                     <div>
@@ -64,9 +93,9 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                                         <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
                                     </div>
                                 </div>
-                                <div className="flex flex-col items-end gap-1">
+                                <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-1 w-full sm:w-auto bg-gray-50 sm:bg-transparent p-3 sm:p-0 rounded-lg sm:rounded-none">
                                     <span className="text-sm font-bold text-red-600">{progress}% Completado</span>
-                                    <div className="w-32 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div className="w-full sm:w-32 h-2 bg-gray-200 sm:bg-gray-100 rounded-full overflow-hidden">
                                         <div
                                             className="h-full bg-red-500 rounded-full transition-all duration-1000 ease-out"
                                             style={{ width: `${progress}%` }}
@@ -75,34 +104,39 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
                                 {otTasks.map((task, taskIndex) => (
                                     <div
                                         key={task.id}
-                                        className="relative group/card bg-white border border-gray-200 rounded-xl p-4 hover:border-red-300 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden"
+                                        className="relative group/card bg-white border border-gray-200 rounded-xl p-4 hover:border-red-300 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden active:scale-[0.98]"
                                         onClick={() => onTaskClick?.(task)}
                                         style={{ animationDelay: `${(index * 100) + (taskIndex * 50)}ms` }}
                                     >
                                         <div className="absolute top-0 left-0 w-1 h-full bg-red-500 opacity-0 group-hover/card:opacity-100 transition-opacity duration-300" />
 
                                         <div className="flex justify-between items-start mb-3">
-                                            <h5 className="font-bold text-gray-800 text-base leading-tight group-hover/card:text-red-700 transition-colors">
+                                            <h5 className="font-bold text-gray-800 text-base leading-tight group-hover/card:text-red-700 transition-colors pr-2">
                                                 {capitalizeFirstLetter(task.process)}
                                             </h5>
                                             {task.status === 'finalizado_total' && (
-                                                <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                                                <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
                                                     Completado
+                                                </span>
+                                            )}
+                                            {task.status === 'en_proceso' && (
+                                                <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
+                                                    En Curso
                                                 </span>
                                             )}
                                         </div>
 
                                         <div className="flex items-center gap-2 mb-4">
-                                            <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                                            <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 shrink-0">
                                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                                                 </svg>
                                             </div>
-                                            <span className="text-sm text-gray-600 font-medium">{task.resourceName}</span>
+                                            <span className="text-sm text-gray-600 font-medium truncate">{toTitleCase(task.resourceName)}</span>
                                         </div>
 
                                         <div className="space-y-2 bg-gray-50 rounded-lg p-3 border border-gray-100">

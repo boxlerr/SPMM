@@ -91,21 +91,30 @@ async def obtener_proximas_entregas(dias: int = 7, db=Depends(get_db)):
 from pydantic import BaseModel
 
 class EstadoUpdate(BaseModel):
-    estado: str
+    id_estado: int
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/estado")
 async def actualizar_estado_proceso(id_orden: int, id_proceso: int, body: EstadoUpdate, db=Depends(get_db)):
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/estado")
     service = OrdenTrabajoService(db)
-    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.estado)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.id_estado)
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/status")
 async def update_process_status(id_orden: int, id_proceso: int, body: dict, db=Depends(get_db)):
     # Endpoint alternativo recibiendo JSON
-    new_status = body.get("estado")
-    logger.info(f"API - Update Status: {new_status}")
+    new_status_id = body.get("id_estado")
+    logger.info(f"API - Update Status ID: {new_status_id}")
     service = OrdenTrabajoService(db)
-    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status_id)
+
+class ObservacionesUpdate(BaseModel):
+    observaciones: str
+
+@router.put("/ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
+async def actualizar_observaciones_proceso(id_orden: int, id_proceso: int, body: ObservacionesUpdate, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
+    service = OrdenTrabajoService(db)
+    return await service.actualizarObservacionesProceso(id_orden, id_proceso, body.observaciones)
 
 
 

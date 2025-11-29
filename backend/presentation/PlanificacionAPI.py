@@ -41,10 +41,15 @@ async def planificar_endpoint(db = Depends(get_db)):
 @router.get("/planificacion")
 async def obtener_planificacion(db = Depends(get_db)):
     query = text("""
-        SELECT p.*, m.nombre as nombre_maquinaria, o.nombre as nombre_operario, o.apellido as apellido_operario
+        SELECT p.*, m.nombre as nombre_maquinaria, o.nombre as nombre_operario, o.apellido as apellido_operario,
+               otp.id_estado, ep.descripcion as estado, otp.observaciones as observaciones_proceso,
+               ot.observaciones as observaciones_ot
         FROM planificacion p
         LEFT JOIN maquinaria m ON p.id_maquinaria = m.id
         LEFT JOIN operario o ON p.id_operario = o.id
+        LEFT JOIN orden_trabajo_proceso otp ON p.orden_id = otp.id_orden_trabajo AND p.proceso_id = otp.id_proceso
+        LEFT JOIN estado_proceso ep ON otp.id_estado = ep.id
+        LEFT JOIN orden_trabajo ot ON p.orden_id = ot.id
         ORDER BY p.inicio_min ASC
     """)
     result = await db.execute(query)

@@ -9,9 +9,8 @@ class OrdenTrabajoProceso(Base):
     id_proceso = Column(Integer, ForeignKey("proceso.id"))
     orden = Column(Integer, nullable=False)
     tiempo_proceso = Column(Integer, nullable=True)
-    estado = Column(String(50), default='pendiente')
-
-
+    id_estado = Column(Integer, ForeignKey("estado_proceso.id"), default=1)
+    observaciones = Column(String, nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint('id_orden_trabajo', 'id_proceso'),
@@ -20,4 +19,5 @@ class OrdenTrabajoProceso(Base):
     # 🔹 Relaciones
     orden_trabajo = relationship("OrdenTrabajo", back_populates="procesos")
     proceso = relationship("Proceso", back_populates="ordenes_trabajo_proceso")
+    estado_proceso = relationship("EstadoProceso", back_populates="ordenes_trabajo_proceso")
 
