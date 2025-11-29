@@ -8,10 +8,13 @@ import { toTitleCase } from "@/lib/gantt-utils";
 interface GanttWorkOrdersListProps {
     tasks: GanttTask[];
     onTaskClick?: (task: GanttTask) => void;
+    onBulkStatusChange?: (taskIds: string[], newStatus: string) => void;
 }
 
-export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListProps) {
+export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: GanttWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = React.useState("");
+    const [isSelectionMode, setIsSelectionMode] = React.useState(false);
+    const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
 
     const filteredTasks = tasks.filter(task => {
         const term = searchTerm.toLowerCase();
@@ -35,6 +38,13 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
         return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
     };
 
+    const getInitials = (name: string) => {
+        if (!name || name === "Sin Asignar") return "?";
+        const parts = name.trim().split(' ');
+        if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    };
+
     const formatDate = (dateStr: string) => {
         const [year, month, day] = dateStr.split('-');
         return `${day}/${month}`;
@@ -42,9 +52,44 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
 
     const sortedOTs = Object.keys(tasksByOT).sort((a, b) => parseInt(a) - parseInt(b));
 
+    const toggleSelectionMode = () => {
+        setIsSelectionMode(!isSelectionMode);
+        setSelectedTaskIds(new Set());
+    };
+
+    const toggleTaskSelection = (taskId: string) => {
+        const newSelected = new Set(selectedTaskIds);
+        if (newSelected.has(taskId)) {
+            newSelected.delete(taskId);
+        } else {
+            newSelected.add(taskId);
+        }
+        setSelectedTaskIds(newSelected);
+    };
+
+    const toggleGroupSelection = (otNumber: string, tasks: GanttTask[]) => {
+        const newSelected = new Set(selectedTaskIds);
+        const allSelected = tasks.every(t => newSelected.has(t.id));
+
+        if (allSelected) {
+            tasks.forEach(t => newSelected.delete(t.id));
+        } else {
+            tasks.forEach(t => newSelected.add(t.id));
+        }
+        setSelectedTaskIds(newSelected);
+    };
+
+    const handleBulkComplete = () => {
+        if (onBulkStatusChange) {
+            onBulkStatusChange(Array.from(selectedTaskIds), 'finalizado_total');
+            setIsSelectionMode(false);
+            setSelectedTaskIds(new Set());
+        }
+    };
+
     return (
-        <Card className="p-4 sm:p-6 bg-gradient-to-br from-white to-gray-50 border-none shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6 sm:mb-8">
+        <Card className="p-4 sm:p-6 bg-gradient-to-br from-white to-gray-50 border-none shadow-xl relative min-h-[500px]">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-red-100 rounded-lg shrink-0">
                         <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -52,6 +97,31 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                         </svg>
                     </div>
                     <h3 className="text-xl sm:text-2xl font-bold text-gray-800 tracking-tight">Listado de Órdenes de Trabajo</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={toggleSelectionMode}
+                        className={`px-4 py-2 rounded-lg transition-all duration-200 font-medium shadow-sm border flex items-center gap-2 ${isSelectionMode
+                            ? 'bg-gray-800 text-white border-gray-800 ring-2 ring-gray-200'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                    >
+                        {isSelectionMode ? (
+                            <>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                Cancelar Selección
+                            </>
+                        ) : (
+                            <>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                Edición Rápida
+                            </>
+                        )}
+                    </button>
                 </div>
             </div>
 
@@ -70,12 +140,13 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                 />
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-6 pb-20">
                 {sortedOTs.map((otNumber, index) => {
                     const otTasks = tasksByOT[otNumber];
                     const totalTasks = otTasks.length;
                     const completedTasks = otTasks.filter(t => t.status === 'finalizado_total').length;
                     const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                    const allGroupSelected = otTasks.every(t => selectedTaskIds.has(t.id));
 
                     return (
                         <div
@@ -85,9 +156,24 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                         >
                             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-4 sm:mb-6 pb-4 border-b border-gray-50">
                                 <div className="flex items-center gap-4">
-                                    <div className="h-10 w-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 font-bold text-lg shadow-inner shrink-0">
-                                        #{otNumber}
-                                    </div>
+                                    {isSelectionMode ? (
+                                        <div
+                                            onClick={() => toggleGroupSelection(otNumber, otTasks)}
+                                            className={`h-10 w-10 rounded-full flex items-center justify-center cursor-pointer transition-colors ${allGroupSelected ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                                        >
+                                            {allGroupSelected ? (
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                            ) : (
+                                                <div className="w-5 h-5 border-2 border-current rounded" />
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="h-10 w-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 font-bold text-lg shadow-inner shrink-0">
+                                            #{otNumber}
+                                        </div>
+                                    )}
                                     <div>
                                         <h4 className="font-bold text-lg text-gray-800">Orden de Trabajo {otNumber}</h4>
                                         <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
@@ -108,22 +194,48 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                                 {otTasks.map((task, taskIndex) => (
                                     <div
                                         key={task.id}
-                                        className="relative group/card bg-white border border-gray-200 rounded-xl p-4 hover:border-red-300 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden active:scale-[0.98]"
-                                        onClick={() => onTaskClick?.(task)}
+                                        className={`relative group/card bg-white border rounded-xl p-4 transition-all duration-200 cursor-pointer overflow-hidden active:scale-[0.98] ${isSelectionMode
+                                            ? selectedTaskIds.has(task.id)
+                                                ? 'border-red-500 ring-2 ring-red-100 shadow-md bg-red-50/30'
+                                                : 'border-gray-200 hover:border-red-300 hover:shadow-md'
+                                            : 'border-gray-200 hover:border-red-300 hover:shadow-lg hover:-translate-y-1'
+                                            }`}
+                                        onClick={() => {
+                                            if (isSelectionMode) {
+                                                toggleTaskSelection(task.id);
+                                            } else {
+                                                onTaskClick?.(task);
+                                            }
+                                        }}
                                         style={{ animationDelay: `${(index * 100) + (taskIndex * 50)}ms` }}
                                     >
-                                        <div className="absolute top-0 left-0 w-1 h-full bg-red-500 opacity-0 group-hover/card:opacity-100 transition-opacity duration-300" />
+                                        <div className={`absolute top-0 left-0 w-1 h-full bg-red-500 transition-opacity duration-300 ${isSelectionMode && selectedTaskIds.has(task.id) ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-100'}`} />
+
+                                        {isSelectionMode && (
+                                            <div className="absolute top-3 right-3 z-10">
+                                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 ${selectedTaskIds.has(task.id)
+                                                    ? 'bg-red-500 border-red-500 text-white scale-110'
+                                                    : 'bg-white border-gray-300 group-hover/card:border-red-300'
+                                                    }`}>
+                                                    {selectedTaskIds.has(task.id) && (
+                                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                        </svg>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
 
                                         <div className="flex justify-between items-start mb-3">
-                                            <h5 className="font-bold text-gray-800 text-base leading-tight group-hover/card:text-red-700 transition-colors pr-2">
+                                            <h5 className={`font-bold text-base leading-tight transition-colors pr-8 ${isSelectionMode && selectedTaskIds.has(task.id) ? 'text-red-900' : 'text-gray-800 group-hover/card:text-red-700'}`}>
                                                 {capitalizeFirstLetter(task.process)}
                                             </h5>
-                                            {task.status === 'finalizado_total' && (
+                                            {!isSelectionMode && task.status === 'finalizado_total' && (
                                                 <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
                                                     Completado
                                                 </span>
                                             )}
-                                            {task.status === 'en_proceso' && (
+                                            {!isSelectionMode && task.status === 'en_proceso' && (
                                                 <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
                                                     En Curso
                                                 </span>
@@ -131,10 +243,8 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                                         </div>
 
                                         <div className="flex items-center gap-2 mb-4">
-                                            <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 shrink-0">
-                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                                </svg>
+                                            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-bold text-xs shrink-0 border border-gray-200">
+                                                {getInitials(task.resourceName)}
                                             </div>
                                             <span className="text-sm text-gray-600 font-medium truncate">{toTitleCase(task.resourceName)}</span>
                                         </div>
@@ -195,6 +305,40 @@ export function GanttWorkOrdersList({ tasks, onTaskClick }: GanttWorkOrdersListP
                     </div>
                 )}
             </div>
+
+            {/* Floating Action Bar */}
+            {isSelectionMode && selectedTaskIds.size > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
+                    <div className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-6 border border-gray-700">
+                        <div className="flex items-center gap-2 border-r border-gray-700 pr-6">
+                            <span className="bg-white text-gray-900 text-xs font-bold px-2 py-0.5 rounded-full min-w-[20px] text-center">
+                                {selectedTaskIds.size}
+                            </span>
+                            <span className="font-medium text-sm">Seleccionados</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleBulkComplete}
+                                className="bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-full text-sm font-bold transition-colors flex items-center gap-2 shadow-lg shadow-green-900/20"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Marcar Completados
+                            </button>
+                            <button
+                                onClick={() => setSelectedTaskIds(new Set())}
+                                className="text-gray-400 hover:text-white transition-colors p-1"
+                                title="Limpiar selección"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </Card>
     );
 }

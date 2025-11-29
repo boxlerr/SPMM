@@ -57,33 +57,38 @@ export default function PlanificacionGanttWrapper({
 
     return (
         <div ref={containerRef} className="flex h-[calc(100vh-180px)] overflow-hidden w-full">
-            <div className="flex-1 flex flex-col space-y-4 p-4 min-w-0 overflow-hidden">
-                <div className="flex justify-between items-center">
-                    <h2 className="text-2xl font-bold">Planificación de Producción</h2>
-                    <div className="flex gap-2">
-                        <Button
-                            variant={viewMode === "operario" ? "default" : "outline"}
-                            onClick={() => setViewMode("operario")}
-                        >
-                            Operarios
-                        </Button>
-                        <Button
-                            variant={viewMode === "maquina" ? "default" : "outline"}
-                            onClick={() => setViewMode("maquina")}
-                        >
-                            Máquinas
-                        </Button>
+            <Tabs defaultValue="weekly" className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                <div className="px-4 pt-4 pb-0">
+                    <div className="flex flex-wrap items-center justify-between gap-4 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                        <TabsList className="bg-white border border-gray-200 shadow-sm">
+                            <TabsTrigger value="weekly" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Semanal Detallado</TabsTrigger>
+                            <TabsTrigger value="monthly" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Mensual General</TabsTrigger>
+                            <TabsTrigger value="orders" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Procesos</TabsTrigger>
+                        </TabsList>
+
+                        <div className="flex bg-white rounded-md border border-gray-200 shadow-sm p-1">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className={`rounded-sm px-3 ${viewMode === "operario" ? "bg-red-100 text-red-800 font-medium" : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"}`}
+                                onClick={() => setViewMode("operario")}
+                            >
+                                Operarios
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className={`rounded-sm px-3 ${viewMode === "maquina" ? "bg-red-100 text-red-800 font-medium" : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"}`}
+                                onClick={() => setViewMode("maquina")}
+                            >
+                                Máquinas
+                            </Button>
+                        </div>
                     </div>
                 </div>
-                <Tabs defaultValue="weekly" className="w-full flex-1 flex flex-col overflow-hidden">
-                    <TabsList>
-                        <TabsTrigger value="weekly">Semanal Detallado</TabsTrigger>
-                        <TabsTrigger value="monthly">Mensual General</TabsTrigger>
-                        <TabsTrigger value="orders">Procesos</TabsTrigger>
-                    </TabsList>
 
-                    <TabsContent value="weekly" className="mt-4 flex-1 overflow-auto">
-                        {/* Key forces re-render on width change to fix layout bugs */}
+                <div className="flex-1 overflow-hidden p-4 pt-2">
+                    <TabsContent value="weekly" className="h-full mt-0 overflow-auto">
                         <GanttWeeklyDetailed
                             key={`weekly-${containerWidth}`}
                             tasks={tasks}
@@ -94,7 +99,7 @@ export default function PlanificacionGanttWrapper({
                         />
                     </TabsContent>
 
-                    <TabsContent value="monthly" className="mt-4 flex-1 overflow-auto">
+                    <TabsContent value="monthly" className="h-full mt-0 overflow-auto">
                         <GanttMonthlyOverview
                             key={`monthly-${containerWidth}`}
                             tasks={tasks}
@@ -105,7 +110,7 @@ export default function PlanificacionGanttWrapper({
                         />
                     </TabsContent>
 
-                    <TabsContent value="orders" className="mt-4 flex-1 overflow-auto">
+                    <TabsContent value="orders" className="h-full mt-0 overflow-auto">
                         <GanttDetailedWorkOrders
                             key={`orders-${containerWidth}`}
                             tasks={tasks}
@@ -113,8 +118,8 @@ export default function PlanificacionGanttWrapper({
                             onTaskMove={onTaskMove}
                         />
                     </TabsContent>
-                </Tabs>
-            </div>
+                </div>
+            </Tabs>
         </div>
     );
 }

@@ -134,13 +134,60 @@ export default function WorkOrdersListWrapper() {
         }
     };
 
+    const handleBulkStatusChange = async (taskIds: string[], newStatus: string) => {
+        // Map newStatus string to ID (assuming 'finalizado_total' -> 3)
+        let idEstado = 1;
+        if (newStatus === 'en_proceso') idEstado = 2;
+        if (newStatus === 'finalizado_total') idEstado = 3;
+
+        // Find tasks to update
+        const tasksToUpdate = tasks.filter(t => taskIds.includes(t.id));
+
+        // Optimistic update
+        setTasks(prev => prev.map(t => {
+            if (taskIds.includes(t.id)) {
+                return { ...t, status: newStatus as any };
+            }
+            return t;
+        }));
+
+        // Update raw planificacion
+        setRawPlanificacion(prev => prev.map(p => {
+            const task = tasksToUpdate.find(t => t.dbId === p.id);
+            if (task) {
+                return { ...p, id_estado: idEstado, estado: newStatus === 'finalizado_total' ? 'completado' : 'pendiente' };
+            }
+            return p;
+        }));
+
+        // API calls
+        for (const task of tasksToUpdate) {
+            const item = rawPlanificacion.find(p => p.id === task.dbId);
+            if (item) {
+                try {
+                    await fetch(`http://localhost:8000/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id_estado: idEstado }),
+                    });
+                } catch (error) {
+                    console.error(`Error updating task ${task.id}:`, error);
+                }
+            }
+        }
+    };
+
     if (loading) {
         return <div className="p-8 text-center text-gray-500">Cargando órdenes de trabajo...</div>;
     }
 
     return (
         <div className="relative">
-            <GanttWorkOrdersList tasks={tasks} onTaskClick={handleTaskClick} />
+            <GanttWorkOrdersList
+                tasks={tasks}
+                onTaskClick={handleTaskClick}
+                onBulkStatusChange={handleBulkStatusChange}
+            />
 
             <TaskDetailsModal
                 isOpen={isDetailsPanelOpen}

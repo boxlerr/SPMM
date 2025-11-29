@@ -267,7 +267,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
           {/* Header de Semanas */}
           <div className="flex sticky top-0 z-20 shadow-md">
             <div
-              className="sticky left-0 z-30 bg-gray-900 text-white border-r border-gray-800 font-semibold text-sm p-3 flex items-center justify-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]"
+              className="sticky left-0 z-30 bg-red-700 text-white border-r border-red-600 font-bold text-sm p-3 flex items-center justify-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]"
               style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
             >
               {viewMode === "operario" ? "Operario" : "Máquina"}
@@ -275,7 +275,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
             {[0, 1, 2, 3].map((week) => (
               <div
                 key={week}
-                className="text-center border-r border-gray-800 last:border-r-0 font-semibold text-sm py-2 bg-gray-900 text-white"
+                className="text-center border-r border-red-600 last:border-r-0 font-bold text-sm py-2 bg-red-700 text-white uppercase tracking-wider"
                 style={{ width: DAY_WIDTH * 5 }}
               >
                 Semana {week + 1}
@@ -284,15 +284,15 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
           </div>
 
           {/* Header de Días */}
-          <div className="flex border-b bg-gray-50 sticky top-[41px] z-20 shadow-sm">
+          <div className="flex border-b border-red-100 bg-red-50 sticky top-[41px] z-20 shadow-sm">
             <div
-              className="sticky left-0 z-30 bg-gray-100 border-r shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]"
+              className="sticky left-0 z-30 bg-red-50 border-r border-red-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]"
               style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
             />
             {monthDates.map((date, idx) => (
               <div
                 key={idx}
-                className="text-center border-r last:border-r-0 py-2 px-1 bg-white hover:bg-gray-50 transition-colors"
+                className="text-center border-r border-red-100 last:border-r-0 py-2 px-1 bg-white hover:bg-red-50 transition-colors"
                 style={{ width: DAY_WIDTH }}
               >
                 <div className="font-bold text-xs text-gray-900 uppercase tracking-wider">{WORK_DAYS[idx % 5]}</div>

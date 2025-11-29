@@ -165,20 +165,21 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                 <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }}>
                     <div>
                         {/* Table Header */}
-                        <div className="grid grid-cols-[150px_repeat(5,1fr)] gap-px bg-border mb-4 rounded-xl shadow-sm sticky top-0 z-40">
-                            <div className="bg-primary text-primary-foreground p-3 font-semibold flex items-center justify-center sticky left-0 z-50 rounded-tl-xl rounded-bl-xl shadow-[4px_0_8px_rgba(0,0,0,0.1)]">
+                        {/* Table Header */}
+                        <div className="grid grid-cols-[150px_repeat(5,1fr)] gap-px bg-red-700 border-b border-red-800 mb-4 rounded-t-xl shadow-md sticky top-0 z-40">
+                            <div className="bg-red-700 text-white p-3 font-bold flex items-center justify-center sticky left-0 z-50 border-r border-red-600/30 shadow-[4px_0_8px_rgba(0,0,0,0.1)]">
                                 ORDEN TRABAJO
                             </div>
                             {weekDates.map((date, idx) => (
-                                <div key={idx} className={`bg-primary text-primary-foreground p-2 text-center ${idx === weekDates.length - 1 ? 'rounded-tr-xl rounded-br-xl' : ''}`}>
-                                    <div className="font-semibold">{WORK_DAYS[idx]}</div>
-                                    <div className="text-xs opacity-90 mb-1">
+                                <div key={idx} className="bg-red-700 text-white p-2 text-center border-r border-red-600/30 last:border-r-0">
+                                    <div className="font-bold text-sm uppercase tracking-wider">{WORK_DAYS[idx]}</div>
+                                    <div className="text-xs text-red-100 mb-1 font-medium">
                                         {date.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}
                                     </div>
-                                    <div className="flex justify-between text-[10px] opacity-80 px-1">
+                                    <div className="flex justify-between text-[10px] opacity-80 px-1 font-mono">
                                         {zoom < 1.5 ? (
                                             <>
-                                                <span>9</span>
+                                                <span>09</span>
                                                 <span>12</span>
                                                 <span>15</span>
                                                 <span>18</span>

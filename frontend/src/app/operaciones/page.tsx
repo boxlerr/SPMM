@@ -220,8 +220,8 @@ export default function OperacionesPage() {
 
   return (
     <div className={`min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out ${isDetailsPanelOpen && activeTab === 'gantt' ? 'mr-[400px]' : 'mr-0'}`}>
-      {/* Header sticky mejorado */}
-      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40 flex-shrink-0">
+      {/* Header normal (no sticky) */}
+      <div className="bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div>
@@ -235,7 +235,7 @@ export default function OperacionesPage() {
             </div>
             <Button
               onClick={() => setIsCreateModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg"
+              className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg"
             >
               <Plus className="mr-2 h-4 w-4" />
               Nueva Orden
@@ -247,7 +247,7 @@ export default function OperacionesPage() {
             <button
               onClick={() => setActiveTab("gantt")}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gantt"
-                ? "border-blue-600 text-blue-600"
+                ? "border-red-700 text-red-700"
                 : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
             >
@@ -257,7 +257,7 @@ export default function OperacionesPage() {
             <button
               onClick={() => setActiveTab("tabla")}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "tabla"
-                ? "border-blue-600 text-blue-600"
+                ? "border-red-700 text-red-700"
                 : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
             >
@@ -267,7 +267,7 @@ export default function OperacionesPage() {
             <button
               onClick={() => setActiveTab("work_orders")}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "work_orders"
-                ? "border-blue-600 text-blue-600"
+                ? "border-red-700 text-red-700"
                 : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
             >
@@ -278,12 +278,10 @@ export default function OperacionesPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-visible">
         <div className={`flex-1 transition-all duration-300 flex flex-col ${activeTab === 'gantt' ? 'max-w-full px-2 py-4' : 'max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 w-full'}`}>
           <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex-1 flex flex-col ${activeTab === 'gantt' ? 'p-2' : 'p-6'}`}>
-            <h2 className="text-xl font-semibold text-gray-900 mb-4 flex-shrink-0">
-              {activeTab === "gantt" ? "Planificación (Gantt)" : activeTab === "tabla" ? "Procesos" : "Órdenes de Trabajo"}
-            </h2>
+            {/* Redundant header removed */}
 
             {activeTab === "gantt" && (
               <PlanificacionGanttWrapper

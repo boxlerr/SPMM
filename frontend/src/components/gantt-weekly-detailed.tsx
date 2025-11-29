@@ -152,14 +152,15 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
       <div className="overflow-x-auto">
         <div className="min-w-[1200px]">
           {/* Header con días */}
-          <div className="grid grid-cols-[200px_repeat(5,1fr)] gap-px bg-border mb-4 rounded-xl overflow-hidden shadow-sm">
-            <div className="bg-primary text-primary-foreground p-3 font-semibold">
+          {/* Header con días */}
+          <div className="sticky top-0 z-30 grid grid-cols-[200px_repeat(5,1fr)] gap-px bg-red-700 border-b border-red-800 shadow-md rounded-t-xl overflow-hidden">
+            <div className="bg-red-700 text-white p-3 font-bold flex items-center justify-center border-r border-red-600/30">
               {viewMode === "operario" ? "Operario" : "Máquina"}
             </div>
             {weekDates.map((date, idx) => (
-              <div key={idx} className="bg-primary text-primary-foreground p-3 text-center">
-                <div className="font-semibold">{WORK_DAYS[idx]}</div>
-                <div className="text-xs opacity-90">
+              <div key={idx} className="bg-red-700 text-white p-3 text-center flex flex-col justify-center items-center border-r border-red-600/30 last:border-r-0">
+                <div className="font-bold text-sm uppercase tracking-wider">{WORK_DAYS[idx]}</div>
+                <div className="text-xs text-red-100 font-medium">
                   {date.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}
                 </div>
               </div>
@@ -169,13 +170,14 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
           {/* Filas de recursos */}
           <div className="space-y-4 pb-8">
             {filteredResources.map((resource) => (
-              <div key={resource.id} className="border rounded-xl shadow-sm bg-card mb-4 overflow-hidden">
+              <div key={resource.id} className="border border-gray-200 rounded-xl shadow-sm bg-white mb-3 overflow-hidden hover:shadow-md transition-shadow duration-200">
                 <div className="grid grid-cols-[200px_repeat(5,1fr)] gap-px bg-border">
                   {/* Nombre del recurso */}
                   <div
-                    className="bg-card p-4 flex items-start gap-3 border-r-2 border-primary cursor-pointer hover:bg-accent/50 transition-colors"
+                    className="bg-white p-4 flex items-start gap-3 border-r border-gray-100 cursor-pointer hover:bg-red-50/50 transition-colors relative group"
                     onClick={() => toggleResource(resource.id)}
                   >
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-700 opacity-0 group-hover:opacity-100 transition-opacity" />
                     <Button
                       variant="ghost"
                       size="sm"
@@ -190,9 +192,9 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
 
                     <div className="flex items-center gap-2 mt-0.5">
                       {viewMode === "operario" ? (
-                        <User className="h-4 w-4 text-primary shrink-0" />
+                        <User className="h-4 w-4 text-red-700 shrink-0" />
                       ) : (
-                        <Wrench className="h-4 w-4 text-primary shrink-0" />
+                        <Wrench className="h-4 w-4 text-red-700 shrink-0" />
                       )}
                       <div>
                         <div className="font-semibold text-sm">
