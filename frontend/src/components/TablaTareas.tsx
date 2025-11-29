@@ -1,20 +1,18 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
-    ChevronDown,
     ChevronRight,
     User,
     Plus,
     Search,
     Filter,
     MoreHorizontal,
-    Calendar,
-    CheckCircle2,
-    Circle,
-    GripVertical
+    GripVertical,
+    Calendar
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { motion, AnimatePresence } from "framer-motion";
 import CreateGroupModal from '@/components/CreateGroupModal';
 import {
     Select,
@@ -23,318 +21,358 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import type { GanttTask } from "@/lib/types";
 
-interface PlanificacionItem {
-    id: number;
-    orden_id: number;
-    proceso_id: number;
-    nombre_proceso: string;
-    inicio_min: number;
-    fin_min: number;
-    creado_en: string;
-    id_operario?: number;
-    id_maquinaria?: number;
-    nombre_maquinaria?: string;
-    nombre_operario?: string;
-    apellido_operario?: string;
-    fecha_prometida?: string;
-    prioridad_peso?: number;
-}
-
-interface Operario {
-    id: number;
-    nombre: string;
-    apellido: string;
-    sector?: string;
-    categoria?: string;
-    disponible?: boolean;
-    fecha_nacimiento?: string;
-    fecha_ingreso?: string;
-    telefono?: string;
-    celular?: string;
-    dni?: string;
+interface TablaTareasProps {
+    tasks: GanttTask[];
+    operarios: any[];
+    onStatusChange: (taskId: string, newStatusId: string) => void;
+    onResponsibleChange: (taskId: string, newOpId: string) => void;
 }
 
 interface TaskGroup {
     id: string;
     title: string;
     color: string;
-    items: PlanificacionItem[];
+    items: GanttTask[];
     isExpanded: boolean;
 }
 
-const TablaTareas = () => {
-    const [items, setItems] = useState<PlanificacionItem[]>([]);
-    const [groups, setGroups] = useState<TaskGroup[]>([]);
-    const [operarios, setOperarios] = useState<Operario[]>([]);
-    const [loading, setLoading] = useState(true);
+// Memoized Task Row Component to prevent re-renders during drag
+const TaskRow = React.memo(({ item, index, groupColor, groupId, operarios, onStatusChange, onResponsibleChange }: {
+    item: GanttTask;
+    index: number;
+    groupColor: string;
+    groupId: string;
+    operarios: any[];
+    onStatusChange: (taskId: string, newStatusId: string) => void;
+    onResponsibleChange: (taskId: string, newOpId: string) => void;
+}) => {
+    const capitalizeFirst = (text: string) => {
+        if (!text) return '';
+        return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+    };
+
+    const getInitials = (name: string) => {
+        if (!name) return '';
+        return name
+            .split(' ')
+            .map(n => n[0])
+            .join('')
+            .substring(0, 2)
+            .toUpperCase();
+    };
+
+    const getStatusColor = (statusId: string) => {
+        switch (statusId) {
+            case 'en_proceso': return 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-200';
+            case 'finalizado_total': return 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-200';
+            default: return 'bg-slate-400 text-white hover:bg-slate-500 shadow-slate-200';
+        }
+    };
+
+    const getStatusLabel = (statusId: string) => {
+        switch (statusId) {
+            case 'en_proceso': return 'En curso';
+            case 'finalizado_total': return 'Listo';
+            default: return 'Pendiente';
+        }
+    };
+
+    return (
+        <Draggable draggableId={item.id} index={index}>
+            {(provided, snapshot) => (
+                <motion.div
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+                    layout
+                    className={`flex items-center border-b border-gray-100 py-3 hover:bg-gray-50 group/row transition-colors ${snapshot.isDragging ? 'shadow-xl bg-white ring-1 ring-gray-200 rounded-md z-50' : ''
+                        }`}
+                >
+                    <div className="w-10 flex justify-center">
+                        <div {...provided.dragHandleProps} className="cursor-grab active:cursor-grabbing p-1.5 hover:bg-gray-200 rounded-md transition-colors opacity-0 group-hover/row:opacity-100">
+                            <GripVertical size={16} className="text-gray-400" />
+                        </div>
+                    </div>
+                    <div className="flex-1 px-4 border-r border-gray-100 flex items-center gap-3 overflow-hidden">
+                        <div className="flex flex-col min-w-0">
+                            <span className="text-sm text-gray-700 font-medium truncate capitalize" title={item.process}>
+                                {item.process}
+                            </span>
+                            <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                    OT #{item.workOrderNumber}
+                                </span>
+                                {item.client && (
+                                    <span className="text-[10px] text-gray-400 truncate max-w-[100px]" title={item.client}>
+                                        {item.client}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="w-56 px-4 border-r border-gray-100 flex justify-center" onPointerDown={(e) => e.stopPropagation()}>
+                        <Select
+                            value={item.resourceId || "unassigned"}
+                            onValueChange={(value) => {
+                                if (value !== "unassigned") {
+                                    const taskId = item.dbId ? item.dbId.toString() : item.id;
+                                    onResponsibleChange(taskId, value);
+                                }
+                            }}
+                        >
+                            <SelectTrigger size="sm" className="w-full border-none shadow-none bg-transparent hover:bg-gray-100 h-9 focus:ring-0 px-2">
+                                <SelectValue>
+                                    {item.resourceName && item.resourceName !== "Sin Asignar" ? (
+                                        <div className="flex items-center gap-2 w-full">
+                                            <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shrink-0 border border-blue-200 shadow-sm">
+                                                {getInitials(item.resourceName)}
+                                            </div>
+                                            <span className="text-xs text-gray-700 truncate font-medium">
+                                                {capitalizeFirst(item.resourceName)}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-gray-400 group-hover/row:text-gray-500">
+                                            <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center border border-gray-200 border-dashed">
+                                                <User size={14} />
+                                            </div>
+                                            <span className="text-xs">Asignar</span>
+                                        </div>
+                                    )}
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="unassigned">
+                                    <div className="flex items-center gap-2">
+                                        <User size={14} />
+                                        <span>Sin asignar</span>
+                                    </div>
+                                </SelectItem>
+                                {operarios.map(op => (
+                                    <SelectItem key={op.id} value={op.id.toString()}>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">
+                                                {getInitials(op.nombre + ' ' + op.apellido)}
+                                            </div>
+                                            <span>{capitalizeFirst(op.nombre)} {capitalizeFirst(op.apellido)}</span>
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="w-40 px-4 border-r border-gray-100 flex justify-center" onPointerDown={(e) => e.stopPropagation()}>
+                        <Select
+                            value={groupId}
+                            onValueChange={(value) => {
+                                let statusId = '1';
+                                if (value === 'en_proceso') statusId = '2';
+                                if (value === 'finalizado_total') statusId = '3';
+
+                                const taskId = item.dbId ? item.dbId.toString() : item.id;
+                                onStatusChange(taskId, statusId);
+                            }}
+                        >
+                            <SelectTrigger size="sm" className="w-full border-none shadow-none bg-transparent hover:bg-gray-100 h-9 focus:ring-0 p-0 flex justify-center group/status">
+                                <SelectValue>
+                                    <span className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wide shadow-sm transition-all duration-300 w-28 block text-center group-hover/status:scale-105 ${getStatusColor(groupId)}`}>
+                                        {getStatusLabel(groupId)}
+                                    </span>
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="nuevo">
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium text-slate-600">
+                                        Pendiente
+                                    </span>
+                                </SelectItem>
+                                <SelectItem value="en_proceso">
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium text-blue-600">
+                                        En curso
+                                    </span>
+                                </SelectItem>
+                                <SelectItem value="finalizado_total">
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium text-emerald-600">
+                                        Listo
+                                    </span>
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="w-32 px-4 flex justify-center">
+                        <div className="flex items-center gap-1.5 text-gray-400 group-hover/row:text-gray-600 transition-colors">
+                            {/* Placeholder for date */}
+                            <span className="text-xs">-</span>
+                        </div>
+                    </div>
+                    <div className="w-12 flex justify-center opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600">
+                            <MoreHorizontal size={16} />
+                        </button>
+                    </div>
+                </motion.div>
+            )}
+        </Draggable>
+    );
+});
+TaskRow.displayName = "TaskRow";
+
+const TablaTareas = ({ tasks, operarios, onStatusChange, onResponsibleChange }: TablaTareasProps) => {
+    const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+        'en_proceso': true,
+        'nuevo': true,
+        'finalizado_total': true
+    });
     const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const [planRes, opRes] = await Promise.all([
-                    fetch('http://localhost:8000/planificacion'),
-                    fetch('http://localhost:8000/operarios')
-                ]);
+    // Use useMemo to calculate groups only when tasks or search changes
+    const groups = useMemo(() => {
+        const pendientes: GanttTask[] = [];
+        const enCurso: GanttTask[] = [];
+        const completados: GanttTask[] = [];
 
-                if (!planRes.ok || !opRes.ok) {
-                    throw new Error('Error al obtener datos');
-                }
-
-                const planData: PlanificacionItem[] = await planRes.json();
-                const opResponse = await opRes.json();
-
-                // Extract data from ResponseDTO wrapper
-                const opData: Operario[] = opResponse.data || [];
-
-                setItems(planData);
-                setOperarios(opData);
-                organizeGroups(planData);
-            } catch (error) {
-                console.error("Error fetching data:", error);
-            } finally {
-                setLoading(false);
+        tasks.forEach(task => {
+            // Filter by search term
+            if (searchTerm && !task.workOrderNumber.toLowerCase().includes(searchTerm.toLowerCase()) &&
+                !task.process.toLowerCase().includes(searchTerm.toLowerCase())) {
+                return;
             }
-        };
 
-        fetchData();
-    }, []);
-
-    const organizeGroups = (data: PlanificacionItem[]) => {
-        const now = new Date();
-        const baseDate = new Date();
-        baseDate.setHours(9, 0, 0, 0);
-
-        const pendientes: PlanificacionItem[] = [];
-        const enCurso: PlanificacionItem[] = [];
-        const completados: PlanificacionItem[] = [];
-
-        data.forEach(item => {
-            const start = new Date(baseDate.getTime() + item.inicio_min * 60000);
-            const end = new Date(baseDate.getTime() + item.fin_min * 60000);
-
-            if (end < now) {
-                completados.push(item);
-            } else if (start <= now && end >= now) {
-                enCurso.push(item);
+            if (task.status === 'finalizado_total' || task.status === 'finalizado_parcial') {
+                completados.push(task);
+            } else if (task.status === 'en_proceso') {
+                enCurso.push(task);
             } else {
-                pendientes.push(item);
+                pendientes.push(task);
             }
         });
 
-        setGroups([
+        return [
             {
-                id: 'en-curso',
+                id: 'en_proceso',
                 title: 'En Curso',
-                color: '#f59e0b',
+                color: '#3b82f6', // Blue
                 items: enCurso,
-                isExpanded: true
             },
             {
-                id: 'pendientes',
+                id: 'nuevo',
                 title: 'Pendientes',
-                color: '#3b82f6',
+                color: '#64748b', // Slate Gray
                 items: pendientes,
-                isExpanded: true
             },
             {
-                id: 'completados',
+                id: 'finalizado_total',
                 title: 'Completado',
-                color: '#10b981',
+                color: '#10b981', // Emerald
                 items: completados,
-                isExpanded: true
             }
-        ]);
-    };
+        ];
+    }, [tasks, searchTerm]);
 
     const toggleGroup = (groupId: string) => {
-        setGroups(groups.map(g =>
-            g.id === groupId ? { ...g, isExpanded: !g.isExpanded } : g
-        ));
+        setExpandedGroups(prev => ({
+            ...prev,
+            [groupId]: !prev[groupId]
+        }));
     };
 
-    const updateTask = async (id: number, updates: Partial<PlanificacionItem>) => {
-        try {
-            const updatedItems = items.map(item =>
-                item.id === id ? { ...item, ...updates } : item
-            );
-            setItems(updatedItems);
-            organizeGroups(updatedItems);
-
-            const response = await fetch(`http://localhost:8000/planificacion/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
-
-            if (!response.ok) throw new Error('Failed to update task');
-        } catch (error) {
-            console.error("Error updating task:", error);
-        }
-    };
-
-    const handleStatusChange = (taskId: number, newStatus: string) => {
-        const now = new Date();
-        const baseDate = new Date();
-        baseDate.setHours(9, 0, 0, 0);
-
-        const currentMinutes = Math.floor((now.getTime() - baseDate.getTime()) / 60000);
-
-        let updates: Partial<PlanificacionItem> = {};
-
-        if (newStatus === 'en-curso') {
-            updates = { inicio_min: currentMinutes };
-        } else if (newStatus === 'completados') {
-            updates = { fin_min: currentMinutes };
-        } else if (newStatus === 'pendientes') {
-            updates = { inicio_min: currentMinutes + 60 };
-        }
-
-        updateTask(taskId, updates);
-    };
-
-    const handleResponsibleChange = (taskId: number, operarioId: string) => {
-        const opId = parseInt(operarioId);
-        const operario = operarios.find(o => o.id === opId);
-        updateTask(taskId, {
-            id_operario: opId,
-            nombre_operario: operario?.nombre,
-            apellido_operario: operario?.apellido
-        });
-    };
-
-    const onDragEnd = (result: DropResult) => {
+    const onDragEnd = useCallback((result: DropResult) => {
         const { source, destination, draggableId } = result;
 
         if (!destination) return;
 
         if (source.droppableId !== destination.droppableId) {
-            const taskId = parseInt(draggableId);
-            handleStatusChange(taskId, destination.droppableId);
-        }
-    };
+            let newStatusId = '1'; // Pendiente
+            if (destination.droppableId === 'en_proceso') newStatusId = '2';
+            if (destination.droppableId === 'finalizado_total') newStatusId = '3';
 
-    const getStatusColor = (groupId: string) => {
-        switch (groupId) {
-            case 'en-curso': return 'bg-amber-400 text-white';
-            case 'completados': return 'bg-emerald-400 text-white';
-            default: return 'bg-gray-400 text-white';
+            // We need to find the task to get its dbId, or pass it in the draggableId if possible.
+            // But draggableId is the string ID. We need to parse it or find the task.
+            // Since we don't have the task object here easily without searching, 
+            // and we know the format is task-OT-PROC-DBID, we can try to extract it,
+            // OR better, just find it in the tasks array.
+            const task = tasks.find(t => t.id === draggableId);
+            if (task) {
+                const taskId = task.dbId ? task.dbId.toString() : task.id;
+                onStatusChange(taskId, newStatusId);
+            }
         }
-    };
-
-    const getStatusLabel = (groupId: string) => {
-        switch (groupId) {
-            case 'en-curso': return 'En curso';
-            case 'completados': return 'Listo';
-            default: return 'Pendiente';
-        }
-    };
-
-    const capitalizeFirst = (text: string) => {
-        return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-    };
+    }, [onStatusChange, tasks]);
 
     const handleCreateGroup = (name: string, color: string) => {
-        setGroups([...groups, {
-            id: `grupo-${Date.now()}`,
-            title: name,
-            color: color,
-            items: [],
-            isExpanded: true
-        }]);
+        // Visual only
     };
-
-    if (loading) {
-        return <div className="p-8 text-center text-gray-500">Cargando tareas...</div>;
-    }
 
     return (
         <DragDropContext onDragEnd={onDragEnd}>
-            <div className="w-full bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div className="w-full bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 {/* Toolbar */}
-                <div className="p-4 border-b border-gray-200 flex items-center gap-4 overflow-x-auto">
-                    <div className="flex items-center gap-2 border rounded px-2 py-1.5 bg-white">
-                        <Search size={16} className="text-gray-400" />
+                <div className="p-4 border-b border-gray-200 flex items-center gap-4 overflow-x-auto bg-gray-50/50">
+                    <div className="flex items-center gap-2 border border-gray-300 rounded-lg px-3 py-2 bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all">
+                        <Search size={18} className="text-gray-400" />
                         <input
                             type="text"
-                            placeholder="Buscar"
-                            className="outline-none text-sm w-32 md:w-48"
+                            placeholder="Buscar tareas..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="outline-none text-sm w-48 md:w-64 placeholder:text-gray-400"
                         />
                     </div>
-                    <button className="text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded text-sm flex items-center gap-1">
-                        <User size={16} /> Persona
+                    <div className="h-6 w-px bg-gray-300 mx-2"></div>
+                    <button className="text-gray-600 hover:bg-white hover:shadow-sm hover:text-gray-900 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all">
+                        <User size={16} />
+                        <span>Persona</span>
                     </button>
-                    <button className="text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded text-sm flex items-center gap-1">
-                        <Filter size={16} /> Filtrar
+                    <button className="text-gray-600 hover:bg-white hover:shadow-sm hover:text-gray-900 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all">
+                        <Filter size={16} />
+                        <span>Filtrar</span>
                     </button>
                 </div>
 
                 {/* Table Content */}
                 <div className="overflow-x-auto">
-                    <div className="min-w-[800px]">
+                    <div className="min-w-[900px] pb-10">
                         {groups.map(group => (
-                            <div key={group.id} className="mb-4">
-                                {/* Group Header with Monday.com style */}
+                            <div key={group.id} className="mb-6">
+                                {/* Group Header */}
                                 <div
-                                    className="flex items-center gap-3 px-4 py-3 group cursor-pointer hover:bg-gray-50/50 transition-all border-l-4 rounded-l-md"
-                                    style={{ borderLeftColor: group.color }}
+                                    className="flex items-center gap-3 px-6 py-3 group cursor-pointer hover:bg-gray-50 transition-all sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-y border-transparent hover:border-gray-100"
                                     onClick={() => toggleGroup(group.id)}
                                 >
-                                    <div className={`p-0.5 rounded hover:bg-gray-200 transition-all duration-200 ${!group.isExpanded ? '-rotate-90' : ''}`}>
-                                        <ChevronRight size={18} className="text-gray-500" />
+                                    <div className={`p-1 rounded-md hover:bg-gray-100 text-gray-400 transition-all duration-200 ${!expandedGroups[group.id] ? '-rotate-90' : ''}`}>
+                                        <ChevronRight size={20} />
                                     </div>
-                                    <h3 className="font-bold text-base" style={{ color: group.color }}>
+                                    <h3 className="font-bold text-lg tracking-tight" style={{ color: group.color }}>
                                         {group.title}
                                     </h3>
-                                    <span className="text-gray-400 text-sm font-normal">
-                                        {group.items.length} Tareas
+                                    <span className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full text-xs font-medium">
+                                        {group.items.length}
                                     </span>
                                     <div className="flex-1" />
                                     {/* Status indicators */}
-                                    <div className="flex items-center gap-2">
-                                        <div className="text-xs text-gray-500 font-medium">Estado</div>
-                                        <div className="flex gap-0.5 h-4">
-                                            {group.id === 'completados' && (
-                                                <div className="w-16 h-full rounded-sm" style={{ backgroundColor: '#10b981' }} />
-                                            )}
-                                            {group.id === 'en-curso' && (
-                                                <>
-                                                    <div className="w-8 h-full rounded-sm" style={{ backgroundColor: '#10b981' }} />
-                                                    <div className="w-4 h-full rounded-sm" style={{ backgroundColor: '#f59e0b' }} />
-                                                    <div className="w-4 h-full rounded-sm" style={{ backgroundColor: '#ef4444' }} />
-                                                </>
-                                            )}
-                                            {group.id === 'pendientes' && (
-                                                <>
-                                                    <div className="w-10 h-full rounded-sm bg-gray-300" />
-                                                </>
-                                            )}
+                                    <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex gap-1 h-2">
+                                            <div className="w-16 h-full rounded-full opacity-50" style={{ backgroundColor: group.color }} />
                                         </div>
                                     </div>
-                                    {/* Date badge */}
-                                    {group.items.length > 0 && (
-                                        <div className="flex items-center gap-2">
-                                            <div className="text-xs text-gray-500 font-medium">Vencimiento</div>
-                                            <div className="bg-gray-800 text-white px-2 py-1 rounded-md text-xs font-medium">
-                                                nov. {19 + (group.id === 'completados' ? 0 : group.id === 'en-curso' ? 1 : 2)} - {25 + (group.id === 'completados' ? 0 : group.id === 'en-curso' ? 1 : 2)}
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
 
-                                {group.isExpanded && (
-                                    <div className="pl-4 pr-4">
+                                {expandedGroups[group.id] && (
+                                    <div className="px-6">
                                         {/* Table Header */}
-                                        <div className="flex items-center border-b border-gray-200 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            <div className="w-8 flex justify-center">
-                                                <input type="checkbox" className="rounded border-gray-300" />
+                                        <div className="flex items-center border-b border-gray-200 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                                            <div className="w-10 flex justify-center">
                                             </div>
-                                            <div className="flex-1 px-4 border-r border-gray-100">Tarea</div>
-                                            <div className="w-40 px-4 border-r border-gray-100 text-center">Responsable</div>
-                                            <div className="w-40 px-4 border-r border-gray-100 text-center">Estado</div>
+                                            <div className="flex-1 px-4 border-r border-transparent">Tarea</div>
+                                            <div className="w-56 px-4 border-r border-transparent text-center">Responsable</div>
+                                            <div className="w-40 px-4 border-r border-transparent text-center">Estado</div>
                                             <div className="w-32 px-4 text-center">Vencimiento</div>
-                                            <div className="w-10"></div>
+                                            <div className="w-12"></div>
                                         </div>
 
                                         {/* Group Items with Drag and Drop */}
@@ -343,181 +381,39 @@ const TablaTareas = () => {
                                                 <div
                                                     ref={provided.innerRef}
                                                     {...provided.droppableProps}
-                                                    className="border-l-4"
-                                                    style={{
-                                                        borderColor: group.color,
-                                                        backgroundColor: snapshot.isDraggingOver ? '#f9fafb' : 'transparent'
-                                                    }}
+                                                    className={`min-h-[50px] transition-colors rounded-b-lg ${snapshot.isDraggingOver ? 'bg-blue-50/30' : ''}`}
                                                 >
-                                                    {group.items.map((item, index) => (
-                                                        <Draggable
-                                                            key={item.id.toString()}
-                                                            draggableId={item.id.toString()}
-                                                            index={index}
-                                                        >
-                                                            {(provided, snapshot) => (
-                                                                <div
-                                                                    ref={provided.innerRef}
-                                                                    {...provided.draggableProps}
-                                                                    className={`flex items-center border-b border-gray-100 py-2 hover:bg-gray-50 group/row transition-all ${snapshot.isDragging ? 'shadow-lg bg-white' : ''
-                                                                        }`}
-                                                                >
-                                                                    <div className="w-8 flex justify-center">
-                                                                        <div {...provided.dragHandleProps} className="cursor-grab active:cursor-grabbing">
-                                                                            <GripVertical size={16} className="text-gray-400" />
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="flex-1 px-4 border-r border-gray-100 flex items-center gap-2">
-                                                                        <span className="text-sm text-gray-700 font-medium truncate capitalize">
-                                                                            {item.nombre_proceso}
-                                                                        </span>
-                                                                        <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                                                                            OT: {item.orden_id}
-                                                                        </span>
-                                                                    </div>
-                                                                    <div className="w-40 px-4 border-r border-gray-100 flex justify-center">
-                                                                        <Select
-                                                                            value={item.id_operario?.toString() || "unassigned"}
-                                                                            onValueChange={(value) => {
-                                                                                if (value !== "unassigned") {
-                                                                                    handleResponsibleChange(item.id, value);
-                                                                                }
-                                                                            }}
-                                                                        >
-                                                                            <SelectTrigger size="sm" className="w-full">
-                                                                                <SelectValue>
-                                                                                    {item.nombre_operario ? (
-                                                                                        <div className="flex items-center gap-2">
-                                                                                            <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">
-                                                                                                {item.nombre_operario.charAt(0).toUpperCase()}
-                                                                                            </div>
-                                                                                            <span className="text-xs truncate">
-                                                                                                {capitalizeFirst(item.nombre_operario)} {item.apellido_operario ? capitalizeFirst(item.apellido_operario) : ''}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    ) : (
-                                                                                        <div className="flex items-center gap-2 text-gray-400">
-                                                                                            <User size={14} />
-                                                                                            <span className="text-xs">Sin asignar</span>
-                                                                                        </div>
-                                                                                    )}
-                                                                                </SelectValue>
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                <SelectItem value="unassigned">
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <User size={14} />
-                                                                                        <span>Sin asignar</span>
-                                                                                    </div>
-                                                                                </SelectItem>
-                                                                                {operarios.map(op => (
-                                                                                    <SelectItem key={op.id} value={op.id.toString()}>
-                                                                                        <div className="flex items-center gap-2">
-                                                                                            <div className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">
-                                                                                                {op.nombre.charAt(0).toUpperCase()}
-                                                                                            </div>
-                                                                                            <span>{capitalizeFirst(op.nombre)} {capitalizeFirst(op.apellido)}</span>
-                                                                                        </div>
-                                                                                    </SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    </div>
-                                                                    <div className="w-40 px-4 border-r border-gray-100 flex justify-center">
-                                                                        <Select
-                                                                            value={group.id}
-                                                                            onValueChange={(value) => handleStatusChange(item.id, value)}
-                                                                        >
-                                                                            <SelectTrigger size="sm" className="w-full">
-                                                                                <SelectValue>
-                                                                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(group.id)}`}>
-                                                                                        {getStatusLabel(group.id)}
-                                                                                    </span>
-                                                                                </SelectValue>
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                <SelectItem value="pendientes">
-                                                                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-400 text-white">
-                                                                                        Pendiente
-                                                                                    </span>
-                                                                                </SelectItem>
-                                                                                <SelectItem value="en-curso">
-                                                                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-400 text-white">
-                                                                                        En curso
-                                                                                    </span>
-                                                                                </SelectItem>
-                                                                                <SelectItem value="completados">
-                                                                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-400 text-white">
-                                                                                        Listo
-                                                                                    </span>
-                                                                                </SelectItem>
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    </div>
-                                                                    <div className="w-32 px-4 flex justify-center">
-                                                                        <span className="text-sm text-gray-600">
-                                                                            {item.fecha_prometida || '-'}
-                                                                        </span>
-                                                                    </div>
-                                                                    <div className="w-10 flex justify-center opacity-0 group-hover/row:opacity-100 transition-opacity">
-                                                                        <button className="text-gray-400 hover:text-gray-600">
-                                                                            <MoreHorizontal size={16} />
-                                                                        </button>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </Draggable>
-                                                    ))}
+                                                    <AnimatePresence mode="popLayout">
+                                                        {group.items.map((item, index) => (
+                                                            <TaskRow
+                                                                key={item.id}
+                                                                item={item}
+                                                                index={index}
+                                                                groupColor={group.color}
+                                                                groupId={group.id}
+                                                                operarios={operarios}
+                                                                onStatusChange={onStatusChange}
+                                                                onResponsibleChange={onResponsibleChange}
+                                                            />
+                                                        ))}
+                                                    </AnimatePresence>
                                                     {provided.placeholder}
-
-                                                    {/* Add Task Row (Visual) */}
-                                                    <div className="flex items-center py-2 hover:bg-gray-50 cursor-pointer">
-                                                        <div className="w-8 flex justify-center">
-                                                            <div className="w-4 h-4 rounded border border-gray-300"></div>
-                                                        </div>
-                                                        <div className="flex-1 px-4 flex items-center gap-2 text-gray-400 text-sm">
-                                                            <Plus size={14} />
-                                                            <span>Agregar tarea</span>
-                                                        </div>
-                                                    </div>
                                                 </div>
                                             )}
                                         </Droppable>
-
-                                        {/* Group Summary Footer */}
-                                        <div className="flex items-center py-2">
-                                            <div className="w-8"></div>
-                                            <div className="flex-1"></div>
-                                            <div className="w-40"></div>
-                                            <div className="w-40 px-4">
-                                                <div className="h-6 w-full bg-gray-200 rounded relative overflow-hidden">
-                                                    <div
-                                                        className="absolute top-0 left-0 h-full transition-all"
-                                                        style={{
-                                                            width: '100%',
-                                                            backgroundColor: group.color
-                                                        }}
-                                                    ></div>
-                                                </div>
-                                            </div>
-                                            <div className="w-32 px-4 text-center text-xs text-gray-500">
-                                                {/* Date range summary could go here */}
-                                            </div>
-                                            <div className="w-10"></div>
-                                        </div>
                                     </div>
                                 )}
                             </div>
                         ))}
 
                         {/* Add New Group Button */}
-                        <div className="px-4 mt-4 mb-6">
+                        <div className="px-6 mt-8">
                             <button
-                                className="flex items-center gap-2 px-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-all text-gray-600 font-medium text-sm w-full md:w-auto"
+                                className="flex items-center gap-2 px-5 py-3 border border-gray-200 shadow-sm rounded-xl hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 transition-all text-gray-500 font-medium text-sm"
                                 onClick={() => setIsCreateGroupModalOpen(true)}
                             >
                                 <Plus size={18} />
-                                Agregar grupo nuevo
+                                Nuevo Grupo
                             </button>
                         </div>
                     </div>

@@ -153,24 +153,30 @@ export default function OperacionesPage() {
     }
   };
 
-  const handleOperatorChange = async (newOpId: string) => {
-    if (!selectedTask) return;
+  const handleOperatorChange = async (newOpId: string, taskId?: string) => {
+    const targetTask = taskId ? rawPlanificacion.find(p => p.id === parseInt(taskId)) : selectedTask;
+    if (!targetTask) return;
+
     const opId = parseInt(newOpId);
 
-    const updatedItem = { ...selectedTask, id_operario: opId };
-    setSelectedTask(updatedItem);
+    const updatedItem = { ...targetTask, id_operario: opId };
 
-    setRawPlanificacion(prev => prev.map(p => p.id === selectedTask.id ? updatedItem : p));
+    // If updating the currently selected task, update that state too
+    if (selectedTask && selectedTask.id === targetTask.id) {
+      setSelectedTask(updatedItem);
+    }
+
+    setRawPlanificacion(prev => prev.map(p => p.id === targetTask.id ? updatedItem : p));
 
     setTasks(prev => prev.map(t => {
-      if (t.dbId === selectedTask.id) {
+      if (t.dbId === targetTask.id) {
         return { ...t, resourceId: newOpId };
       }
       return t;
     }));
 
     try {
-      await fetch(`http://localhost:8000/planificacion/${selectedTask.id}`, {
+      await fetch(`http://localhost:8000/planificacion/${targetTask.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_operario: opId }),
@@ -180,9 +186,12 @@ export default function OperacionesPage() {
     }
   };
 
-  const handleStatusChange = async (newStatusId: string) => {
-    console.log("handleStatusChange called with:", newStatusId);
-    if (!selectedTask) return;
+  const handleStatusChange = async (newStatusId: string, taskId?: string) => {
+    console.log("handleStatusChange called with:", newStatusId, taskId);
+
+    const targetTask = taskId ? rawPlanificacion.find(p => p.id === parseInt(taskId)) : selectedTask;
+    if (!targetTask) return;
+
     const idEstado = parseInt(newStatusId);
     console.log("Parsed idEstado:", idEstado);
 
@@ -190,13 +199,17 @@ export default function OperacionesPage() {
     if (idEstado === 2) statusString = 'en_curso';
     if (idEstado === 3) statusString = 'completado';
 
-    const updatedItem = { ...selectedTask, id_estado: idEstado, estado: statusString };
-    setSelectedTask(updatedItem);
+    const updatedItem = { ...targetTask, id_estado: idEstado, estado: statusString };
 
-    setRawPlanificacion(prev => prev.map(p => p.id === selectedTask.id ? updatedItem : p));
+    // If updating the currently selected task, update that state too
+    if (selectedTask && selectedTask.id === targetTask.id) {
+      setSelectedTask(updatedItem);
+    }
+
+    setRawPlanificacion(prev => prev.map(p => p.id === targetTask.id ? updatedItem : p));
 
     setTasks(prev => prev.map(t => {
-      if (t.dbId === selectedTask.id) {
+      if (t.dbId === targetTask.id) {
         let mappedStatus: any = 'nuevo';
         if (idEstado === 2) mappedStatus = 'en_proceso';
         else if (idEstado === 3) mappedStatus = 'finalizado_total';
@@ -208,7 +221,7 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch(`http://localhost:8000/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
+      await fetch(`http://localhost:8000/ordenes/${targetTask.orden_id}/procesos/${targetTask.proceso_id}/estado`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: idEstado }),
@@ -294,7 +307,14 @@ export default function OperacionesPage() {
                 isLoading={isLoading}
               />
             )}
-            {activeTab === "tabla" && <TablaTareas />}
+            {activeTab === "tabla" && (
+              <TablaTareas
+                tasks={tasks}
+                operarios={rawOperarios}
+                onStatusChange={(taskId, statusId) => handleStatusChange(statusId, taskId)}
+                onResponsibleChange={(taskId, opId) => handleOperatorChange(opId, taskId)}
+              />
+            )}
             {activeTab === "work_orders" && <WorkOrdersListWrapper />}
           </div>
         </div>
