@@ -6,418 +6,585 @@ import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ChevronLeft, ChevronRight, Clock, AlertTriangle, User, Wrench, Calendar, ChevronDown, ChevronUp } from "lucide-react"
+import { ChevronLeft, ChevronRight, Clock, AlertTriangle, User, Wrench, Calendar, ChevronDown, ChevronUp, MoreHorizontal, CheckCircle2, Circle } from "lucide-react"
 import type { GanttTask, Resource } from "@/lib/types"
 import {
-  WORK_HOURS,
-  WORK_DAYS,
-  PRIORITY_COLORS,
-  PRIORITY_LABELS,
-  STATUS_LABELS,
-  PROCESS_LABELS,
-  getWeekDates,
-  formatDate,
-  formatTime,
-  calculateResourceLoad,
-  isOverloaded,
-  toTitleCase,
+    WORK_HOURS,
+    WORK_DAYS,
+    PRIORITY_COLORS,
+    PRIORITY_LABELS,
+    STATUS_LABELS,
+    PROCESS_LABELS,
+    getWeekDates,
+    formatDate,
+    formatTime,
+    calculateResourceLoad,
+    isOverloaded,
+    toTitleCase,
 } from "@/lib/gantt-utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { motion, AnimatePresence } from "framer-motion"
+import { cn } from "@/lib/utils"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 interface GanttWeeklyDetailedProps {
-  tasks: GanttTask[]
-  resources: Resource[]
-  viewMode: "operario" | "maquina"
-  onTaskMove?: (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => void
-  onTaskClick?: (task: GanttTask) => void
+    tasks: GanttTask[]
+    resources: Resource[]
+    viewMode: "operario" | "maquina"
+    onTaskMove?: (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => void
+    onTaskClick?: (task: GanttTask) => void
+    onStatusChange?: (taskId: string, newStatusId: string) => void
 }
 
-export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, onTaskClick }: GanttWeeklyDetailedProps) {
-  const [currentWeek, setCurrentWeek] = useState(0)
-  const [draggedTask, setDraggedTask] = useState<string | null>(null)
-  const [dragOverCell, setDragOverCell] = useState<{ resourceId: string; date: string; hour: number } | null>(null)
-  // Initialize with all resources collapsed by default to show the full list
-  const [expandedResources, setExpandedResources] = useState<Set<string>>(new Set())
+export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, onTaskClick, onStatusChange }: GanttWeeklyDetailedProps) {
+    const [trayTasks, setTrayTasks] = useState<GanttTask[]>([])
+    const [isTrayOpen, setIsTrayOpen] = useState(false)
+    const [currentWeek, setCurrentWeek] = useState(0)
+    const [draggedTask, setDraggedTask] = useState<string | null>(null)
+    const [dragOverCell, setDragOverCell] = useState<{ resourceId: string; date: string; hour: number } | null>(null)
+    const [expandedResources, setExpandedResources] = useState<Set<string>>(new Set())
 
-  const toggleResource = (resourceId: string) => {
-    const newExpanded = new Set(expandedResources)
-    if (newExpanded.has(resourceId)) {
-      newExpanded.delete(resourceId)
-    } else {
-      newExpanded.add(resourceId)
+    const toggleResource = (resourceId: string) => {
+        const newExpanded = new Set(expandedResources)
+        if (newExpanded.has(resourceId)) {
+            newExpanded.delete(resourceId)
+        } else {
+            newExpanded.add(resourceId)
+        }
+        setExpandedResources(newExpanded)
     }
-    setExpandedResources(newExpanded)
-  }
 
-  const weekDates = getWeekDates(currentWeek)
-  const filteredResources = resources.filter((r) => r.type === viewMode)
+    const weekDates = getWeekDates(currentWeek)
+    // Filter out tasks that are currently in the tray
+    const visibleTasks = tasks.filter(t => !trayTasks.some(trayTask => trayTask.id === t.id))
+    const filteredResources = resources.filter((r) => r.type === viewMode)
 
-  const hours = Array.from({ length: WORK_HOURS.total }, (_, i) => WORK_HOURS.start + i)
+    const hours = Array.from({ length: WORK_HOURS.total }, (_, i) => WORK_HOURS.start + i)
 
-  const getTasksStartingInHour = (resourceId: string, date: string, hour: number) => {
-    return tasks.filter((task) => {
-      if (task.resourceId !== resourceId) return false
+    const getTasksStartingInHour = (resourceId: string, date: string, hour: number) => {
+        return visibleTasks.filter((task) => {
+            if (task.resourceId !== resourceId) return false
 
-      // Case 1: Task starts on this day at this hour
-      if (task.startDate === date) {
-        const taskStartHour = Number.parseInt(task.startTime.split(":")[0])
-        return taskStartHour === hour
-      }
+            // Case 1: Task starts on this day at this hour
+            if (task.startDate === date) {
+                const taskStartHour = Number.parseInt(task.startTime.split(":")[0])
+                return taskStartHour === hour
+            }
 
-      // Case 2: Task started before this day, continues today, and this is the first hour of the day
-      if (task.startDate < date && task.endDate >= date && hour === WORK_HOURS.start) {
-        return true
-      }
+            // Case 2: Task started before this day, continues today, and this is the first hour of the day
+            if (task.startDate < date && task.endDate >= date && hour === WORK_HOURS.start) {
+                return true
+            }
 
-      return false
-    })
-  }
-
-  const handleDragStart = (taskId: string) => {
-    // Delay state update to allow drag to start properly
-    setTimeout(() => setDraggedTask(taskId), 0)
-  }
-
-  const handleDragOver = (e: React.DragEvent, resourceId: string, date: string, hour: number) => {
-    e.preventDefault()
-    // Only update state if the cell actually changed to prevent excessive re-renders
-    if (
-      dragOverCell?.resourceId !== resourceId ||
-      dragOverCell?.date !== date ||
-      dragOverCell?.hour !== hour
-    ) {
-      setDragOverCell({ resourceId, date, hour })
+            return false
+        })
     }
-  }
 
-  const handleDragLeave = () => {
-    // We don't strictly need to clear it on leave of every cell if we update on enter of the next.
-    // But clearing it when leaving the grid area might be good.
-    // For now, let's keep it simple and rely on DragOver updates.
-    // setDragOverCell(null) 
-  }
-
-  const handleDrop = (resourceId: string, date: string, hour: number) => {
-    if (draggedTask && onTaskMove) {
-      const task = tasks.find((t) => t.id === draggedTask)
-      if (task) {
-        const newStartTime = formatTime(hour)
-        onTaskMove(draggedTask, resourceId, date, newStartTime)
-      }
+    const handleDragStart = (task: GanttTask) => {
+        // Delay state update to allow drag to start properly
+        setTimeout(() => setDraggedTask(task.id), 0)
     }
-    setDraggedTask(null)
-    setDragOverCell(null)
-  }
 
-  const firstDate = weekDates[0]
-  const lastDate = weekDates[4]
+    const handleDragOver = (e: React.DragEvent, resourceId: string, date: string, hour: number) => {
+        e.preventDefault()
+        // Only update state if the cell actually changed to prevent excessive re-renders
+        if (
+            dragOverCell?.resourceId !== resourceId ||
+            dragOverCell?.date !== date ||
+            dragOverCell?.hour !== hour
+        ) {
+            setDragOverCell({ resourceId, date, hour })
+        }
+    }
 
-  return (
-    <Card className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <h3 className="text-xl font-bold text-foreground">
-            Vista Semanal Detallada - {viewMode === "operario" ? "Por Operario" : "Por Máquina"}
-          </h3>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCurrentWeek((prev) => prev - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <div className="flex flex-col items-center px-3">
-              <span className="text-sm font-medium">
-                {currentWeek === 0 ? "Semana Actual" : `Semana ${currentWeek > 0 ? "+" : ""}${currentWeek}`}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {firstDate.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })} -{" "}
-                {lastDate.toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" })}
-              </span>
+    const handleDrop = (resourceId: string, date: string, hour: number) => {
+        if (draggedTask && onTaskMove) {
+            // Check if task is in tray
+            const trayTaskIndex = trayTasks.findIndex(t => t.id === draggedTask)
+
+            if (trayTaskIndex !== -1) {
+                // Task came from tray
+                const task = trayTasks[trayTaskIndex]
+                const newStartTime = formatTime(hour)
+                onTaskMove(task.id, resourceId, date, newStartTime)
+
+                // Remove from tray
+                const newTray = [...trayTasks]
+                newTray.splice(trayTaskIndex, 1)
+                setTrayTasks(newTray)
+            } else {
+                // Task came from grid
+                const task = tasks.find((t) => t.id === draggedTask)
+                if (task) {
+                    const newStartTime = formatTime(hour)
+                    onTaskMove(draggedTask, resourceId, date, newStartTime)
+                }
+            }
+        }
+        setDraggedTask(null)
+        setDragOverCell(null)
+    }
+
+    const handleDragOverTray = (e: React.DragEvent) => {
+        e.preventDefault()
+        if (!isTrayOpen) setIsTrayOpen(true)
+    }
+
+    const handleDropToTray = (e: React.DragEvent) => {
+        e.preventDefault()
+        if (draggedTask) {
+            // Check if already in tray
+            if (trayTasks.some(t => t.id === draggedTask)) return
+
+            const task = tasks.find(t => t.id === draggedTask)
+            if (task) {
+                setTrayTasks([...trayTasks, task])
+            }
+        }
+        setDraggedTask(null)
+    }
+
+    const firstDate = weekDates[0]
+    const lastDate = weekDates[4]
+
+    return (
+        <div className="space-y-6 relative min-h-screen pb-32">
+            {/* Background Decor */}
+            <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-red-500/5 blur-[120px]" />
+                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-blue-500/5 blur-[120px]" />
             </div>
-            <Button variant="outline" size="sm" onClick={() => setCurrentWeek((prev) => prev + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            {currentWeek !== 0 && (
-              <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(0)}>
-                <Calendar className="h-4 w-4 mr-1" />
-                Hoy
-              </Button>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Clock className="h-4 w-4" />
-          <span>Turno: 09:00 - 18:00</span>
-        </div>
-      </div>
 
-      <div className="overflow-x-auto">
-        <div className="min-w-[1200px]">
-          {/* Header con días */}
-          {/* Header con días */}
-          <div className="sticky top-0 z-30 grid grid-cols-[200px_repeat(5,1fr)] gap-px bg-red-700 border-b border-red-800 shadow-md rounded-t-xl overflow-hidden">
-            <div className="bg-red-700 text-white p-3 font-bold flex items-center justify-center border-r border-red-600/30">
-              {viewMode === "operario" ? "Operario" : "Máquina"}
-            </div>
-            {weekDates.map((date, idx) => (
-              <div key={idx} className="bg-red-700 text-white p-3 text-center flex flex-col justify-center items-center border-r border-red-600/30 last:border-r-0">
-                <div className="font-bold text-sm uppercase tracking-wider">{WORK_DAYS[idx]}</div>
-                <div className="text-xs text-red-100 font-medium">
-                  {date.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Filas de recursos */}
-          <div className="space-y-4 pb-8">
-            {filteredResources.map((resource) => (
-              <div key={resource.id} className="border border-gray-200 rounded-xl shadow-sm bg-white mb-3 overflow-hidden hover:shadow-md transition-shadow duration-200">
-                <div className="grid grid-cols-[200px_repeat(5,1fr)] gap-px bg-border">
-                  {/* Nombre del recurso */}
-                  <div
-                    className="bg-white p-4 flex items-start gap-3 border-r border-gray-100 cursor-pointer hover:bg-red-50/50 transition-colors relative group"
-                    onClick={() => toggleResource(resource.id)}
-                  >
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-700 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 w-6 p-0 mt-0.5 shrink-0"
-                    >
-                      {expandedResources.has(resource.id) ? (
-                        <ChevronUp className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
-                      )}
-                    </Button>
-
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {viewMode === "operario" ? (
-                        <User className="h-4 w-4 text-red-700 shrink-0" />
-                      ) : (
-                        <Wrench className="h-4 w-4 text-red-700 shrink-0" />
-                      )}
-                      <div>
-                        <div className="font-semibold text-sm">
-                          {toTitleCase(resource.name)}
-                        </div>
-                        {resource.skills && (
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {resource.skills.map((s) => PROCESS_LABELS[s as keyof typeof PROCESS_LABELS] || s).join(", ")}
-                          </div>
-                        )}
-                      </div>
+            {/* Header Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white/80 backdrop-blur-xl p-4 rounded-3xl shadow-lg border border-white/20 items-center sticky top-4 z-40 transition-all duration-300 hover:shadow-xl">
+                <div className="flex items-center gap-4 justify-self-start">
+                    <div className="bg-gradient-to-br from-red-50 to-red-100 p-2.5 rounded-2xl shadow-inner">
+                        {viewMode === "operario" ? <User className="h-6 w-6 text-red-600" /> : <Wrench className="h-6 w-6 text-red-600" />}
                     </div>
-                  </div>
-
-                  {/* Días */}
-                  {weekDates.map((date, dayIdx) => {
-                    const dateStr = formatDate(date)
-                    const load = calculateResourceLoad(tasks, resource.id, dateStr)
-                    const overloaded = isOverloaded(load)
-
-                    return (
-                      <div key={dayIdx} className="bg-card relative">
-                        {/* Indicador de carga */}
-                        <div className={`h-1 ${overloaded ? "bg-destructive" : load > 0 ? "bg-accent" : "bg-muted"}`} />
-
-                        {/* Grid de horas (Collapsible) */}
-                        {expandedResources.has(resource.id) && (
-                          <div className="grid grid-rows-9 h-[360px] animate-in slide-in-from-top-2 duration-200 mb-4">
-                            {hours.map((hour) => {
-                              const startingTasks = getTasksStartingInHour(resource.id, dateStr, hour)
-
-                              const isDropTarget = dragOverCell?.resourceId === resource.id &&
-                                dragOverCell?.date === dateStr &&
-                                dragOverCell?.hour === hour
-
-                              return (
-                                <div
-                                  key={hour}
-                                  className={`border-b border-border relative transition-all duration-200 ${isDropTarget
-                                    ? 'bg-primary/20 ring-2 ring-primary ring-inset scale-[1.02]'
-                                    : draggedTask
-                                      ? 'hover:bg-primary/10'
-                                      : 'hover:bg-muted/50'
-                                    }`}
-                                  onDragOver={(e) => handleDragOver(e, resource.id, dateStr, hour)}
-                                  // onDragLeave={handleDragLeave} // Removed to prevent flickering
-                                  onDrop={() => handleDrop(resource.id, dateStr, hour)}
-                                >
-                                  {/* Hora label */}
-                                  <div className="absolute left-1 top-1 text-[10px] text-muted-foreground">
-                                    {formatTime(hour)}
-                                  </div>
-
-                                  {/* Tareas */}
-                                  {startingTasks.map((task, index) => {
-                                    // Calculate duration for THIS day
-                                    let startH = Number.parseInt(task.startTime.split(":")[0])
-                                    let endH = Number.parseInt(task.endTime.split(":")[0])
-
-                                    // Adjust start/end for multi-day logic
-                                    if (task.startDate < dateStr) {
-                                      startH = WORK_HOURS.start
-                                    }
-                                    if (task.endDate > dateStr) {
-                                      endH = WORK_HOURS.end
-                                    }
-
-                                    const taskDuration = endH - startH
-
-                                    // Calculate width and position for overlapping tasks
-                                    const widthPercent = 100 / startingTasks.length
-                                    const leftPercent = widthPercent * index
-
-                                    return (
-                                      <TooltipProvider key={task.id}>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div
-                                              draggable
-                                              onDragStart={() => handleDragStart(task.id)}
-                                              onDragEnd={() => setDraggedTask(null)}
-                                              className={`
-                                            absolute top-6 cursor-grab active:cursor-grabbing
-                                            ${PRIORITY_COLORS[task.priority]} 
-                                            text-primary-foreground
-                                            rounded-md p-1 text-xs
-                                            transition-all duration-200
-                                            ${draggedTask === task.id
-                                                  ? 'opacity-50 scale-95 shadow-2xl ring-2 ring-white pointer-events-none'
-                                                  : 'hover:opacity-90 hover:scale-[1.02] hover:shadow-lg'
-                                                }
-                                            shadow-sm
-                                            border border-white/20
-                                            overflow-hidden
-                                          `}
-                                              style={{
-                                                height: `${taskDuration * 40 - 8}px`,
-                                                left: `${leftPercent}%`,
-                                                width: `${widthPercent}%`,
-                                                zIndex: draggedTask === task.id ? 50 : 10 + index
-                                              }}
-                                            >
-                                              <div
-                                                className="h-full w-full"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  onTaskClick?.(task);
-                                                }}
-                                              >
-                                                <div className="font-semibold truncate">{toTitleCase(task.workOrderNumber)}</div>
-                                                <div className="text-[10px] opacity-90 truncate">
-                                                  {toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}
-                                                </div>
-                                                <div className="text-[10px] opacity-90">{task.progress}%</div>
-                                                {task.isDelayed && (
-                                                  <AlertTriangle className="h-3 w-3 absolute top-1 right-1" />
-                                                )}
-                                              </div>
-                                            </div>
-                                          </TooltipTrigger>
-                                          <TooltipContent side="right" className="max-w-sm">
-                                            <div className="space-y-2">
-                                              <div className="font-bold">{toTitleCase(task.workOrderNumber)}</div>
-                                              <div className="grid grid-cols-2 gap-2 text-xs">
-                                                <div>
-                                                  <span className="text-muted-foreground">Cliente:</span>
-                                                  <div className="font-medium">{task.client}</div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Proceso:</span>
-                                                  <div className="font-medium">{toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}</div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Sector:</span>
-                                                  <div className="font-medium">{task.sector}</div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Subsector:</span>
-                                                  <div className="font-medium">{task.subsector}</div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Horario:</span>
-                                                  <div className="font-medium">
-                                                    {task.startTime} - {task.endTime}
-                                                  </div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Duración:</span>
-                                                  <div className="font-medium">{task.duration}h</div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Cantidad:</span>
-                                                  <div className="font-medium">{task.quantity} unidades</div>
-                                                </div>
-                                                <div>
-                                                  <span className="text-muted-foreground">Progreso:</span>
-                                                  <div className="font-medium">{task.progress}%</div>
-                                                </div>
-                                              </div>
-                                              <div>
-                                                <span className="text-muted-foreground text-xs">Materiales:</span>
-                                                <div className="text-xs">{(task.materials || []).join(", ")}</div>
-                                              </div>
-                                              {task.notes && (
-                                                <div>
-                                                  <span className="text-muted-foreground text-xs">Notas:</span>
-                                                  <div className="text-xs">{task.notes}</div>
-                                                </div>
-                                              )}
-                                              <div className="flex gap-2 pt-2">
-                                                <Badge variant="outline" className={PRIORITY_COLORS[task.priority]}>
-                                                  {PRIORITY_LABELS[task.priority]}
-                                                </Badge>
-                                                <Badge variant="outline">{STATUS_LABELS[task.status]}</Badge>
-                                              </div>
-                                            </div>
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                    )
-                                  })}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-
-                        {/* Resumen de carga */}
-                        <div className="p-2 text-center text-xs">
-                          <span className={overloaded ? "text-destructive font-semibold" : "text-muted-foreground"}>
-                            {Number(load.toFixed(2))}h / {WORK_HOURS.total}h
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })}
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900 tracking-tight">
+                            {viewMode === "operario" ? "Planificación por Operario" : "Planificación por Máquina"}
+                        </h3>
+                        <p className="text-sm text-gray-500 font-medium">Vista Semanal Detallada</p>
+                    </div>
                 </div>
-              </div>
 
-            ))}
-          </div>
-        </div>
-      </div>
+                <div className="flex items-center gap-2 bg-gray-100/50 p-1.5 rounded-2xl border border-gray-200/50 justify-self-center backdrop-blur-sm">
+                    <Button variant="ghost" size="icon" onClick={() => setCurrentWeek((prev) => prev - 1)} className="h-9 w-9 rounded-xl hover:bg-white hover:shadow-md transition-all">
+                        <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <div className="flex flex-col items-center justify-center px-6 w-[200px]">
+                        <span className="text-sm font-bold text-gray-900 whitespace-nowrap">
+                            {currentWeek === 0 ? "Semana Actual" : `Semana ${currentWeek > 0 ? "+" : ""}${currentWeek}`}
+                        </span>
+                        <span className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold whitespace-nowrap mt-0.5">
+                            {firstDate.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })} -{" "}
+                            {lastDate.toLocaleDateString("es-AR", { day: "2-digit", month: "short" })}
+                        </span>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => setCurrentWeek((prev) => prev + 1)} className="h-9 w-9 rounded-xl hover:bg-white hover:shadow-md transition-all">
+                        <ChevronRight className="h-4 w-4" />
+                    </Button>
+                </div>
 
-      {/* Leyenda */}
-      <div className="mt-6 flex flex-wrap gap-4 text-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-primary rounded" />
-          <span>Normal</span>
+                <div className="flex items-center gap-3 justify-self-end">
+                    {currentWeek !== 0 && (
+                        <Button variant="outline" size="sm" onClick={() => setCurrentWeek(0)} className="text-xs h-9 rounded-xl border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition-colors">
+                            <Calendar className="h-3.5 w-3.5 mr-1.5" />
+                            Volver a Hoy
+                        </Button>
+                    )}
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50/80 text-blue-700 rounded-xl text-xs font-bold border border-blue-100/50 shadow-sm backdrop-blur-sm">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>09:00 - 18:00</span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="overflow-x-auto pb-4 px-1">
+                <div className="min-w-[1200px] bg-white/60 backdrop-blur-md rounded-3xl shadow-xl border border-white/40 overflow-hidden">
+                    {/* Main Grid Header */}
+                    <div className="grid grid-cols-[220px_repeat(5,1fr)] bg-gray-50/50 border-b border-gray-200/60 backdrop-blur-sm">
+                        <div className="p-4 font-semibold text-gray-700 flex items-center border-r border-gray-200/60 bg-gray-50/30">
+                            Recurso
+                        </div>
+                        {weekDates.map((date, idx) => {
+                            const isToday = new Date().toDateString() === date.toDateString()
+                            return (
+                                <div
+                                    key={idx}
+                                    className={cn(
+                                        "p-3 text-center border-r border-gray-200/60 last:border-r-0 flex flex-col items-center justify-center relative overflow-hidden transition-colors duration-300",
+                                        isToday ? "bg-red-50/40" : "hover:bg-gray-50/30"
+                                    )}
+                                >
+                                    {isToday && <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500 to-red-600 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />}
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-1.5">{WORK_DAYS[idx]}</span>
+                                    <div className={cn(
+                                        "text-sm font-bold w-9 h-9 flex items-center justify-center rounded-xl transition-all duration-300",
+                                        isToday ? "bg-gradient-to-br from-red-500 to-red-600 text-white shadow-lg shadow-red-500/30 scale-110" : "text-gray-700 bg-white shadow-sm border border-gray-100"
+                                    )}>
+                                        {date.getDate()}
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+
+                    {/* Resources Rows */}
+                    <div className="divide-y divide-gray-100/60">
+                        {filteredResources.map((resource) => (
+                            <div key={resource.id} className="group bg-white/40 hover:bg-white/80 transition-all duration-300">
+                                <div className="grid grid-cols-[220px_repeat(5,1fr)]">
+                                    {/* Resource Info Column */}
+                                    <div
+                                        className="p-4 border-r border-gray-200/60 relative group/resource flex flex-col justify-center cursor-pointer hover:bg-gray-50/50 transition-colors"
+                                        onClick={() => toggleResource(resource.id)}
+                                    >
+                                        <div className="flex items-start gap-3">
+                                            <div className={cn(
+                                                "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300 shadow-sm",
+                                                expandedResources.has(resource.id)
+                                                    ? "bg-gradient-to-br from-red-500 to-red-600 text-white shadow-red-500/20"
+                                                    : "bg-white border border-gray-200 text-gray-400 group-hover/resource:border-red-200 group-hover/resource:text-red-500"
+                                            )}>
+                                                {viewMode === "operario" ? <User className="h-5 w-5" /> : <Wrench className="h-5 w-5" />}
+                                            </div>
+                                            <div className="min-w-0 flex-1 pt-0.5">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="font-bold text-sm text-gray-800 truncate group-hover/resource:text-red-600 transition-colors">{toTitleCase(resource.name)}</div>
+                                                    {expandedResources.has(resource.id) ? (
+                                                        <ChevronUp className="h-3 w-3 text-gray-400" />
+                                                    ) : (
+                                                        <ChevronDown className="h-3 w-3 text-gray-400" />
+                                                    )}
+                                                </div>
+                                                <div className="text-[11px] text-gray-400 mt-0.5 truncate font-medium">
+                                                    {resource.skills ? resource.skills.map((s) => PROCESS_LABELS[s as keyof typeof PROCESS_LABELS] || s).join(", ") : "Sin especialidad"}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Days Columns */}
+                                    {weekDates.map((date, dayIdx) => {
+                                        const dateStr = formatDate(date)
+                                        const load = calculateResourceLoad(visibleTasks, resource.id, dateStr)
+                                        const overloaded = isOverloaded(load)
+                                        const isToday = new Date().toDateString() === date.toDateString()
+
+                                        return (
+                                            <div key={dayIdx} className={cn(
+                                                "relative border-r border-gray-100/60 last:border-r-0 min-h-[70px] transition-colors duration-300",
+                                                isToday ? "bg-red-50/20" : ""
+                                            )}>
+                                                {/* Load Indicator */}
+                                                <div className="absolute top-2 right-2 z-10">
+                                                    <TooltipProvider>
+                                                        <Tooltip>
+                                                            <TooltipTrigger>
+                                                                <div className={cn(
+                                                                    "text-[10px] font-bold px-2 py-1 rounded-lg border shadow-sm backdrop-blur-sm",
+                                                                    overloaded
+                                                                        ? "bg-red-100/80 text-red-700 border-red-200"
+                                                                        : load > 0
+                                                                            ? "bg-green-100/80 text-green-700 border-green-200"
+                                                                            : "bg-gray-100/80 text-gray-400 border-gray-200"
+                                                                )}>
+                                                                    {Number(load.toFixed(1))}h
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>Carga: {Number(load.toFixed(2))}h / {WORK_HOURS.total}h</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
+                                                </div>
+
+                                                {/* Expanded View (Hourly Grid) */}
+                                                <AnimatePresence>
+                                                    {expandedResources.has(resource.id) && (
+                                                        <motion.div
+                                                            initial={{ height: 0, opacity: 0 }}
+                                                            animate={{ height: "auto", opacity: 1 }}
+                                                            exit={{ height: 0, opacity: 0 }}
+                                                            transition={{ duration: 0.3, ease: "easeInOut" }}
+                                                            className="overflow-hidden"
+                                                        >
+                                                            <div className="grid grid-rows-9 border-t border-gray-100/60 mt-12 bg-white/30">
+                                                                {hours.map((hour) => {
+                                                                    const startingTasks = getTasksStartingInHour(resource.id, dateStr, hour)
+                                                                    const isDropTarget = dragOverCell?.resourceId === resource.id &&
+                                                                        dragOverCell?.date === dateStr &&
+                                                                        dragOverCell?.hour === hour
+
+                                                                    return (
+                                                                        <div
+                                                                            key={hour}
+                                                                            className={cn(
+                                                                                "h-14 border-b border-gray-50/60 relative transition-all duration-200",
+                                                                                isDropTarget ? "bg-blue-50/60 shadow-inner" : "hover:bg-white/40"
+                                                                            )}
+                                                                            onDragOver={(e) => handleDragOver(e, resource.id, dateStr, hour)}
+                                                                            onDrop={() => handleDrop(resource.id, dateStr, hour)}
+                                                                        >
+                                                                            {/* Hour Label */}
+                                                                            {dayIdx === 0 && (
+                                                                                <span className="absolute left-1 top-1 text-[9px] text-gray-300 font-mono font-medium tracking-tighter">
+                                                                                    {formatTime(hour)}
+                                                                                </span>
+                                                                            )}
+
+                                                                            {/* Tasks */}
+                                                                            <div className="relative h-full w-full px-1 py-0.5">
+                                                                                {startingTasks.map((task, index) => {
+                                                                                    let startH = Number.parseInt(task.startTime.split(":")[0])
+                                                                                    let endH = Number.parseInt(task.endTime.split(":")[0])
+                                                                                    if (task.startDate < dateStr) startH = WORK_HOURS.start
+                                                                                    if (task.endDate > dateStr) endH = WORK_HOURS.end
+                                                                                    const taskDuration = endH - startH
+                                                                                    const widthPercent = 100 / startingTasks.length
+                                                                                    const leftPercent = widthPercent * index
+
+                                                                                    return (
+                                                                                        <TooltipProvider key={task.id}>
+                                                                                            <Tooltip delayDuration={100}>
+                                                                                                <TooltipTrigger asChild>
+                                                                                                    <motion.div
+                                                                                                        layoutId={task.id}
+                                                                                                        draggable
+                                                                                                        onDragStart={() => handleDragStart(task)}
+                                                                                                        onDragEnd={() => setDraggedTask(null)}
+                                                                                                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                                                                                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                                                        whileHover={{ scale: 1.02, zIndex: 50, y: -2 }}
+                                                                                                        whileDrag={{ scale: 1.05, zIndex: 100, opacity: 0.8 }}
+                                                                                                        className={cn(
+                                                                                                            "absolute rounded-xl p-2.5 text-xs cursor-grab active:cursor-grabbing shadow-sm border border-white/20 overflow-hidden group/task transition-shadow duration-200",
+                                                                                                            PRIORITY_COLORS[task.priority],
+                                                                                                            draggedTask === task.id && "opacity-50 grayscale blur-[1px]"
+                                                                                                        )}
+                                                                                                        style={{
+                                                                                                            height: `${taskDuration * 56 - 4}px`, // 56px per hour row
+                                                                                                            top: "2px",
+                                                                                                            left: `${leftPercent}%`,
+                                                                                                            width: `${widthPercent}%`,
+                                                                                                            zIndex: 10 + index
+                                                                                                        }}
+                                                                                                    >
+                                                                                                        {/* Glass Shine Effect */}
+                                                                                                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover/task:opacity-100 transition-opacity duration-300" />
+
+                                                                                                        <div className="relative z-10 flex flex-col h-full text-white">
+                                                                                                            <div className="font-bold truncate text-[11px] leading-tight drop-shadow-sm">
+                                                                                                                {toTitleCase(task.workOrderNumber)}
+                                                                                                            </div>
+                                                                                                            <div className="text-[10px] opacity-90 truncate mt-0.5 font-medium">
+                                                                                                                {toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}
+                                                                                                            </div>
+
+                                                                                                            {task.isDelayed && (
+                                                                                                                <div className="absolute top-1 right-1 bg-red-500 rounded-full p-1 shadow-sm animate-pulse">
+                                                                                                                    <AlertTriangle className="h-2 w-2 text-white" />
+                                                                                                                </div>
+                                                                                                            )}
+                                                                                                        </div>
+                                                                                                    </motion.div>
+                                                                                                </TooltipTrigger>
+                                                                                                <TooltipContent side="right" className="p-0 border-0 overflow-hidden rounded-2xl shadow-2xl bg-white/95 backdrop-blur-xl ring-1 ring-black/5">
+                                                                                                    <div className="w-72">
+                                                                                                        <div className={cn("p-4 text-white relative overflow-hidden", PRIORITY_COLORS[task.priority])}>
+                                                                                                            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
+                                                                                                            <div className="relative z-10">
+                                                                                                                <div className="font-bold text-xl tracking-tight">{toTitleCase(task.workOrderNumber)}</div>
+                                                                                                                <div className="text-xs opacity-90 flex items-center gap-2 mt-2">
+                                                                                                                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px] h-6 px-2 backdrop-blur-md">
+                                                                                                                        {PRIORITY_LABELS[task.priority]}
+                                                                                                                    </Badge>
+                                                                                                                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px] h-6 px-2 backdrop-blur-md">
+                                                                                                                        {STATUS_LABELS[task.status]}
+                                                                                                                    </Badge>
+                                                                                                                </div>
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                        <div className="p-5 space-y-4 text-sm">
+                                                                                                            <div className="grid grid-cols-2 gap-4">
+                                                                                                                <div>
+                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Cliente</span>
+                                                                                                                    <span className="font-semibold text-gray-900">{task.client}</span>
+                                                                                                                </div>
+                                                                                                                <div>
+                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Proceso</span>
+                                                                                                                    <span className="font-semibold text-gray-900">{toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}</span>
+                                                                                                                </div>
+                                                                                                                <div>
+                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Horario</span>
+                                                                                                                    <span className="font-semibold text-gray-900 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">{task.startTime} - {task.endTime}</span>
+                                                                                                                </div>
+                                                                                                                <div>
+                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Duración</span>
+                                                                                                                    <span className="font-semibold text-gray-900">{task.duration}h</span>
+                                                                                                                </div>
+                                                                                                            </div>
+
+                                                                                                            {task.notes && (
+                                                                                                                <div className="bg-amber-50/80 p-3 rounded-xl border border-amber-100 text-xs text-amber-800 leading-relaxed">
+                                                                                                                    <span className="font-bold block mb-1 flex items-center gap-1">
+                                                                                                                        <MoreHorizontal className="h-3 w-3" /> Notas:
+                                                                                                                    </span>
+                                                                                                                    {task.notes}
+                                                                                                                </div>
+                                                                                                            )}
+
+                                                                                                            <div className="flex gap-2 pt-4 border-t border-gray-100 mt-2">
+                                                                                                                <DropdownMenu>
+                                                                                                                    <DropdownMenuTrigger asChild>
+                                                                                                                        <Button variant="outline" size="sm" className="w-full justify-between text-xs h-9 font-medium border-gray-200 hover:bg-gray-50 hover:text-gray-900">
+                                                                                                                            {STATUS_LABELS[task.status]} <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
+                                                                                                                        </Button>
+                                                                                                                    </DropdownMenuTrigger>
+                                                                                                                    <DropdownMenuContent className="w-56 p-1 rounded-xl shadow-xl border-gray-100">
+                                                                                                                        <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "1")} className="rounded-lg focus:bg-gray-50">
+                                                                                                                            <Circle className="h-2 w-2 mr-2 fill-gray-400 text-gray-400" />
+                                                                                                                            Pendiente
+                                                                                                                        </DropdownMenuItem>
+                                                                                                                        <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "2")} className="rounded-lg focus:bg-blue-50 focus:text-blue-700">
+                                                                                                                            <Circle className="h-2 w-2 mr-2 fill-blue-500 text-blue-500" />
+                                                                                                                            En Proceso
+                                                                                                                        </DropdownMenuItem>
+                                                                                                                        <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "3")} className="rounded-lg focus:bg-green-50 focus:text-green-700">
+                                                                                                                            <CheckCircle2 className="h-2 w-2 mr-2 text-green-500" />
+                                                                                                                            Finalizado
+                                                                                                                        </DropdownMenuItem>
+                                                                                                                    </DropdownMenuContent>
+                                                                                                                </DropdownMenu>
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                </TooltipContent>
+                                                                                            </Tooltip>
+                                                                                        </TooltipProvider>
+                                                                                    )
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        </motion.div>
+                                                    )}
+                                                </AnimatePresence>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {/* Task Tray (Bandeja de Tareas) */}
+            <motion.div
+                initial={{ y: "80%" }}
+                animate={{ y: isTrayOpen || draggedTask ? "0%" : "85%" }}
+                transition={{ type: "spring", damping: 20, stiffness: 100 }}
+                className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4 pt-10 pointer-events-none flex justify-center"
+            >
+                <div
+                    className="w-full max-w-4xl bg-white/90 backdrop-blur-2xl rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] border border-white/50 pointer-events-auto overflow-hidden"
+                    onMouseEnter={() => setIsTrayOpen(true)}
+                    onMouseLeave={() => setIsTrayOpen(false)}
+                    onDragOver={handleDragOverTray}
+                    onDrop={handleDropToTray}
+                >
+                    {/* Handle */}
+                    <div className="absolute top-0 left-0 w-full h-8 flex items-center justify-center cursor-pointer bg-gradient-to-b from-white/50 to-transparent" onClick={() => setIsTrayOpen(!isTrayOpen)}>
+                        <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
+                    </div>
+
+                    <div className="p-6 pt-8">
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-indigo-100 p-2 rounded-xl text-indigo-600">
+                                    <MoreHorizontal className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-gray-900">Bandeja de Tareas</h3>
+                                    <p className="text-xs text-gray-500">Arrastra tareas aquí para moverlas entre semanas</p>
+                                </div>
+                            </div>
+                            <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 border-indigo-100">
+                                {trayTasks.length} Tareas
+                            </Badge>
+                        </div>
+
+                        <div className={cn(
+                            "min-h-[100px] rounded-2xl border-2 border-dashed transition-colors flex gap-3 p-3 overflow-x-auto items-center",
+                            draggedTask && !trayTasks.some(t => t.id === draggedTask)
+                                ? "border-indigo-400 bg-indigo-50/50"
+                                : "border-gray-200 bg-gray-50/30"
+                        )}>
+                            {trayTasks.length === 0 ? (
+                                <div className="w-full text-center text-gray-400 text-sm py-4">
+                                    {draggedTask ? "¡Suelta aquí para guardar!" : "La bandeja está vacía"}
+                                </div>
+                            ) : (
+                                trayTasks.map((task) => (
+                                    <motion.div
+                                        key={task.id}
+                                        layoutId={task.id}
+                                        draggable
+                                        onDragStart={() => handleDragStart(task)}
+                                        onDragEnd={() => setDraggedTask(null)}
+                                        whileHover={{ scale: 1.05, y: -5 }}
+                                        whileDrag={{ scale: 1.1, opacity: 0.8 }}
+                                        className={cn(
+                                            "flex-shrink-0 w-48 p-3 rounded-xl shadow-sm border border-white/50 cursor-grab active:cursor-grabbing relative group",
+                                            PRIORITY_COLORS[task.priority]
+                                        )}
+                                    >
+                                        <div className="text-white">
+                                            <div className="font-bold text-xs truncate">{toTitleCase(task.workOrderNumber)}</div>
+                                            <div className="text-[10px] opacity-90 truncate mt-0.5">{task.client}</div>
+                                            <div className="mt-2 flex items-center justify-between text-[10px] opacity-80 border-t border-white/20 pt-1">
+                                                <span>{task.duration}h</span>
+                                                <span>{STATUS_LABELS[task.status]}</span>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </motion.div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap gap-6 justify-center bg-white/60 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-white/40">
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full shadow-sm shadow-blue-500/50" />
+                    <span className="text-sm text-gray-600 font-medium">Normal</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-amber-500 rounded-full shadow-sm shadow-amber-500/50" />
+                    <span className="text-sm text-gray-600 font-medium">Urgente</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-red-600 rounded-full shadow-sm shadow-red-600/50" />
+                    <span className="text-sm text-gray-600 font-medium">Crítica</span>
+                </div>
+                <div className="w-px h-4 bg-gray-300" />
+                <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-500" />
+                    <span className="text-sm text-gray-600 font-medium">Con retraso</span>
+                </div>
+            </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-warning rounded" />
-          <span>Urgente</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-destructive rounded" />
-          <span>Crítica</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-destructive" />
-          <span>Con retraso</span>
-        </div>
-      </div>
-    </Card >
-  )
+    )
 }

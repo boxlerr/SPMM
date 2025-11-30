@@ -304,6 +304,7 @@ export default function OperacionesPage() {
                 setViewMode={setViewMode}
                 onTaskMove={handleTaskMove}
                 onTaskClick={handleTaskClick}
+                onStatusChange={(taskId, statusId) => handleStatusChange(statusId, taskId)}
                 isLoading={isLoading}
               />
             )}

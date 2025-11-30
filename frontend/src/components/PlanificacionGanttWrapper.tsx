@@ -18,6 +18,7 @@ interface PlanificacionGanttWrapperProps {
     setViewMode: (mode: "operario" | "maquina") => void;
     onTaskMove: (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => void;
     onTaskClick: (task: GanttTask) => void;
+    onStatusChange?: (taskId: string, newStatusId: string) => void;
     isLoading: boolean;
 }
 
@@ -28,6 +29,7 @@ export default function PlanificacionGanttWrapper({
     setViewMode,
     onTaskMove,
     onTaskClick,
+    onStatusChange,
     isLoading
 }: PlanificacionGanttWrapperProps) {
 
@@ -56,8 +58,8 @@ export default function PlanificacionGanttWrapper({
     }
 
     return (
-        <div ref={containerRef} className="flex h-[calc(100vh-180px)] overflow-hidden w-full">
-            <Tabs defaultValue="weekly" className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div ref={containerRef} className="flex flex-col w-full">
+            <Tabs defaultValue="weekly" className="flex-1 flex flex-col min-w-0">
                 <div className="px-4 pt-4 pb-0">
                     <div className="flex flex-wrap items-center justify-between gap-4 bg-gray-50 p-2 rounded-lg border border-gray-100">
                         <TabsList className="bg-white border border-gray-200 shadow-sm">
@@ -87,8 +89,8 @@ export default function PlanificacionGanttWrapper({
                     </div>
                 </div>
 
-                <div className="flex-1 overflow-hidden p-4 pt-2">
-                    <TabsContent value="weekly" className="h-full mt-0 overflow-auto">
+                <div className="flex-1 p-4 pt-2">
+                    <TabsContent value="weekly" className="mt-0">
                         <GanttWeeklyDetailed
                             key={`weekly-${containerWidth}`}
                             tasks={tasks}
@@ -96,10 +98,11 @@ export default function PlanificacionGanttWrapper({
                             viewMode={viewMode}
                             onTaskMove={onTaskMove}
                             onTaskClick={onTaskClick}
+                            onStatusChange={onStatusChange}
                         />
                     </TabsContent>
 
-                    <TabsContent value="monthly" className="h-full mt-0 overflow-auto">
+                    <TabsContent value="monthly" className="mt-0">
                         <GanttMonthlyOverview
                             key={`monthly-${containerWidth}`}
                             tasks={tasks}
@@ -110,7 +113,7 @@ export default function PlanificacionGanttWrapper({
                         />
                     </TabsContent>
 
-                    <TabsContent value="orders" className="h-full mt-0 overflow-auto">
+                    <TabsContent value="orders" className="mt-0">
                         <GanttDetailedWorkOrders
                             key={`orders-${containerWidth}`}
                             tasks={tasks}
