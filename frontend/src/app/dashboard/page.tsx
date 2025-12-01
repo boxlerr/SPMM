@@ -10,7 +10,7 @@ import DistribucionPrioridades from "@/components/dashboard/DistribucionPriorida
 import MostUsedProcesses from "@/components/dashboard/MostUsedProcesses"
 import TopArticles from "@/components/dashboard/TopArticles"
 import AverageTime from "@/components/dashboard/AverageTime"
-import SystemStatus from "@/components/dashboard/SystemStatus"
+
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
 import StatusOrdersModal from "@/components/dashboard/StatusOrdersModal"
 
@@ -130,8 +130,7 @@ export default function DashboardPage() {
         {/* Timeline de entregas */}
         <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />
 
-        {/* Sección de información del sistema */}
-        <SystemStatus apiUrl={apiUrl} />
+
       </div>
 
       {/* Modal de Órdenes por Prioridad */}

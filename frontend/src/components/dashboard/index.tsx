@@ -6,5 +6,5 @@ export { default as DistribucionPrioridades } from "./DistribucionPrioridades"
 export { default as MostUsedProcesses } from "./MostUsedProcesses"
 export { default as TopArticles } from "./TopArticles"
 export { default as AverageTime } from "./AverageTime"
-export { default as SystemStatus } from "./SystemStatus"
+
 export { default as PriorityOrdersModal } from "./PriorityOrdersModal"
