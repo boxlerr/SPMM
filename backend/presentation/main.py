@@ -12,6 +12,7 @@ from backend.presentation.PrioridadAPI import router as prioridad_router
 from backend.presentation.MaquinariaAPI import router as maquinaria_router
 from backend.presentation.AuthAPI import router as auth_router
 from backend.presentation.NotificacionAPI import router as notificacion_router
+from backend.presentation.DashboardAPI import router as dashboard_router
 
 import logging
 
@@ -59,6 +60,7 @@ app.include_router(plan_router,tags=["planificacion"])
 app.include_router(prioridad_router,tags=["prioridades"])
 app.include_router(maquinaria_router,tags=["maquinarias"])
 app.include_router(notificacion_router, tags=["notificaciones"])
+app.include_router(dashboard_router, tags=["dashboard"])
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)
@@ -77,3 +79,7 @@ logger = logging.getLogger("uvicorn")
 @app.get("/")
 def root():
     return {"message": "Backend funcionando correctamente"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
