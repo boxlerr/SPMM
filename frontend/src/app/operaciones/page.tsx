@@ -9,6 +9,7 @@ import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
 import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
+import { toast } from "sonner"
 import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib/gantt-utils"
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types"
 
@@ -48,9 +49,44 @@ export default function OperacionesPage() {
         const planResponse = await fetch("http://localhost:8000/planificacion");
         if (!planResponse.ok) throw new Error("Error fetching planificacion");
         const planData: PlanificacionItem[] = await planResponse.json();
-        setRawPlanificacion(planData);
 
-        const ganttTasks = convertPlanificacionToGanttTasks(planData);
+        // Parse rangos_permitidos if it comes as a string or array of strings
+        const parsedPlanData = planData.map(item => {
+          let ranges = item.rangos_permitidos;
+
+          if (typeof ranges === 'string') {
+            try {
+              ranges = JSON.parse(ranges);
+            } catch (e) {
+              ranges = [];
+            }
+          }
+
+          // Handle case where it's an array of strings (e.g. ["4", "10"] or ["'[4, 10]'"])
+          if (Array.isArray(ranges) && ranges.length > 0 && typeof ranges[0] === 'string') {
+            try {
+              // If the first element looks like a JSON array, parse it (e.g. ["'[4, 10]'"])
+              if ((ranges[0] as string).trim().startsWith('[')) {
+                ranges = JSON.parse(ranges[0] as string);
+              } else {
+                // Otherwise assume it's ["4", "10"] and convert to numbers
+                ranges = (ranges as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
+              }
+            } catch (e) {
+              console.error("Error parsing ranges array:", ranges);
+              ranges = [];
+            }
+          }
+
+          return {
+            ...item,
+            rangos_permitidos: Array.isArray(ranges) ? ranges : []
+          };
+        });
+
+        setRawPlanificacion(parsedPlanData);
+
+        const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData);
         setTasks(ganttTasks);
 
         // Fetch Operarios
@@ -64,7 +100,8 @@ export default function OperacionesPage() {
             id: op.id.toString(),
             name: `${op.nombre} ${op.apellido}`,
             type: "operario",
-            skills: [] // TODO: Add skills if available in API
+            skills: [], // We use ranges for qualification now
+            ranges: op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []
           }));
           setResources(mappedResources);
         }
@@ -92,6 +129,19 @@ export default function OperacionesPage() {
     const normalizedBaseDate = new Date(baseDate);
     normalizedBaseDate.setHours(9, 0, 0, 0);
 
+    if (isNaN(newStart.getTime()) || isNaN(normalizedBaseDate.getTime())) {
+      console.error("Invalid date detected in handleTaskMove", {
+        newDate,
+        newStartTime,
+        newStart,
+        creado_en: rawItem.creado_en,
+        baseDate,
+        normalizedBaseDate
+      });
+      toast.error("Error al mover la tarea: Fecha inválida");
+      return;
+    }
+
     const newInicioMin = calculateWorkingMinutes(normalizedBaseDate, newStart);
 
     let durationMinutes = 0;
@@ -102,6 +152,17 @@ export default function OperacionesPage() {
     }
 
     const newFinMin = newInicioMin + durationMinutes;
+
+    console.log("handleTaskMove Debug:", {
+      taskId,
+      newResourceId,
+      newDate,
+      newStartTime,
+      baseDate: normalizedBaseDate.toISOString(),
+      newStart: newStart.toISOString(),
+      newInicioMin,
+      durationMinutes
+    });
 
     // Optimistic Update
     const oldTasks = [...tasks];

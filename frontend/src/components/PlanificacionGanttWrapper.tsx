@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import TaskDetailsModal from "./gantt/TaskDetailsModal";
 import { usePanelContext } from "@/contexts/PanelContext";
+import { isOperatorQualified } from "@/lib/gantt-utils";
+import { toast } from "sonner";
 
 interface PlanificacionGanttWrapperProps {
     tasks: GanttTask[];
@@ -36,6 +38,24 @@ export default function PlanificacionGanttWrapper({
     // Force re-render on resize to fix Gantt width issues during transition
     const [containerWidth, setContainerWidth] = useState(0);
     const containerRef = React.useRef<HTMLDivElement>(null);
+
+    const handleTaskMove = (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+            // Validate operator capability
+            if (viewMode === "operario") {
+                const targetResource = resources.find(r => r.id === newResourceId);
+                if (targetResource && targetResource.type === "operario") {
+                    if (!isOperatorQualified(targetResource.ranges || [], task.allowedRanges || [])) {
+                        toast.error("Este operario no tiene la capacidad para realizar este proceso");
+                        return; // Cancel move
+                    }
+                }
+            }
+
+            onTaskMove(taskId, newResourceId, newDate, newStartTime);
+        }
+    };
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -96,7 +116,7 @@ export default function PlanificacionGanttWrapper({
                             tasks={tasks}
                             resources={resources}
                             viewMode={viewMode}
-                            onTaskMove={onTaskMove}
+                            onTaskMove={handleTaskMove}
                             onTaskClick={onTaskClick}
                             onStatusChange={onStatusChange}
                         />
@@ -104,21 +124,19 @@ export default function PlanificacionGanttWrapper({
 
                     <TabsContent value="monthly" className="mt-0">
                         <GanttMonthlyOverview
-                            key={`monthly-${containerWidth}`}
                             tasks={tasks}
                             resources={resources}
                             viewMode={viewMode}
                             onTaskClick={onTaskClick}
-                            onTaskMove={onTaskMove}
+                            onTaskMove={handleTaskMove}
                         />
                     </TabsContent>
 
                     <TabsContent value="orders" className="mt-0">
                         <GanttDetailedWorkOrders
-                            key={`orders-${containerWidth}`}
                             tasks={tasks}
                             onTaskClick={onTaskClick}
-                            onTaskMove={onTaskMove}
+                            onTaskMove={handleTaskMove}
                         />
                     </TabsContent>
                 </div>

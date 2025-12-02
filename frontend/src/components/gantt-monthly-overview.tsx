@@ -19,6 +19,14 @@ import {
   WORK_HOURS,
   toTitleCase,
 } from "@/lib/gantt-utils"
+
+const STATUS_GRADIENTS: Record<string, string> = {
+  nuevo: "bg-gradient-to-br from-gray-400 to-gray-500 border-gray-300 shadow-gray-500/20",
+  en_proceso: "bg-gradient-to-br from-blue-500 to-blue-600 border-blue-400 shadow-blue-500/20",
+  finalizado_total: "bg-gradient-to-br from-green-500 to-green-600 border-green-400 shadow-green-500/20",
+  pausado: "bg-gradient-to-br from-amber-500 to-amber-600 border-amber-400 shadow-amber-500/20",
+  finalizado_parcial: "bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-400 shadow-emerald-500/20",
+}
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -179,8 +187,8 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
   const tasksMap = useMemo(() => {
     const map = new Map<string, GanttTask[]>()
     tasks.forEach(task => {
-      const start = new Date(task.startDate)
-      const end = new Date(task.endDate)
+      const start = new Date(task.startDate + "T00:00:00")
+      const end = new Date(task.endDate + "T00:00:00")
 
       // Iterate through each day of the task
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
@@ -225,8 +233,8 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
       </div>
 
       {/* Header Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white/80 backdrop-blur-xl p-4 rounded-3xl shadow-lg border border-white/20 items-center sticky top-4 z-40 transition-all duration-300 hover:shadow-xl">
-        <div className="flex items-center gap-4 justify-self-start">
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-white/80 backdrop-blur-xl p-4 rounded-3xl shadow-lg border border-white/20 sticky top-4 z-40 transition-all duration-300 hover:shadow-xl">
+        <div className="flex items-center gap-4">
           <div className="bg-gradient-to-br from-red-50 to-red-100 p-2.5 rounded-2xl shadow-inner">
             {viewMode === "operario" ? <User className="h-6 w-6 text-red-600" /> : <Wrench className="h-6 w-6 text-red-600" />}
           </div>
@@ -236,7 +244,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-gray-100/50 p-1.5 rounded-2xl border border-gray-200/50 justify-self-center backdrop-blur-sm">
+        <div className="flex items-center gap-2 bg-gray-100/50 p-1.5 rounded-2xl border border-gray-200/50 backdrop-blur-sm">
           <Button variant="ghost" size="icon" onClick={() => setCurrentMonthOffset((prev) => prev - 1)} className="h-9 w-9 rounded-xl hover:bg-white hover:shadow-md transition-all">
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -254,7 +262,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
           </Button>
         </div>
 
-        <div className="flex items-center gap-3 justify-self-end">
+        <div className="flex items-center gap-3">
           {currentMonthOffset !== 0 && (
             <Button variant="outline" size="sm" onClick={() => setCurrentMonthOffset(0)} className="text-xs h-9 rounded-xl border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition-colors">
               <Calendar className="h-3.5 w-3.5 mr-1.5" />
@@ -450,7 +458,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
                                     onTaskClick?.(task)
                                   }}
                                   className={`
-                                    ${PRIORITY_COLORS[task.priority]}
+                                    ${STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"]}
                                     text-white
                                     rounded-lg px-2.5 py-2 text-xs font-medium
                                     shadow-sm border border-white/10
@@ -551,16 +559,16 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
       {/* Footer Leyenda */}
       <div className="flex flex-wrap gap-6 justify-center bg-white/60 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-white/40">
         <div className="flex items-center gap-2">
+          <div className="w-3 h-3 bg-gray-400 rounded-full shadow-sm shadow-gray-400/50" />
+          <span className="text-sm text-gray-600 font-medium">Pendiente</span>
+        </div>
+        <div className="flex items-center gap-2">
           <div className="w-3 h-3 bg-blue-500 rounded-full shadow-sm shadow-blue-500/50" />
-          <span className="text-sm text-gray-600 font-medium">Normal</span>
+          <span className="text-sm text-gray-600 font-medium">En Proceso</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-amber-500 rounded-full shadow-sm shadow-amber-500/50" />
-          <span className="text-sm text-gray-600 font-medium">Urgente</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-red-600 rounded-full shadow-sm shadow-red-600/50" />
-          <span className="text-sm text-gray-600 font-medium">Crítica</span>
+          <div className="w-3 h-3 bg-green-500 rounded-full shadow-sm shadow-green-500/50" />
+          <span className="text-sm text-gray-600 font-medium">Finalizado</span>
         </div>
         <div className="w-px h-4 bg-gray-300" />
         <div className="flex items-center gap-2">

@@ -21,7 +21,9 @@ import {
     calculateResourceLoad,
     isOverloaded,
     toTitleCase,
+    isOperatorQualified,
 } from "@/lib/gantt-utils"
+import { toast } from "sonner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"
@@ -31,6 +33,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 
 interface GanttWeeklyDetailedProps {
     tasks: GanttTask[]
@@ -65,6 +68,14 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
     const filteredResources = resources.filter((r) => r.type === viewMode)
 
     const hours = Array.from({ length: WORK_HOURS.total }, (_, i) => WORK_HOURS.start + i)
+
+    const STATUS_GRADIENTS: Record<string, string> = {
+        nuevo: "bg-gradient-to-br from-gray-400 to-gray-500 border-gray-300 shadow-gray-500/20",
+        en_proceso: "bg-gradient-to-br from-blue-500 to-blue-600 border-blue-400 shadow-blue-500/20",
+        finalizado_total: "bg-gradient-to-br from-green-500 to-green-600 border-green-400 shadow-green-500/20",
+        pausado: "bg-gradient-to-br from-amber-500 to-amber-600 border-amber-400 shadow-amber-500/20",
+        finalizado_parcial: "bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-400 shadow-emerald-500/20",
+    }
 
     const getTasksStartingInHour = (resourceId: string, date: string, hour: number) => {
         return visibleTasks.filter((task) => {
@@ -104,24 +115,60 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
 
     const handleDrop = (resourceId: string, date: string, hour: number) => {
         if (draggedTask && onTaskMove) {
+            // Find target resource to check qualification
+            const targetResource = resources.find(r => r.id === resourceId)
+
             // Check if task is in tray
             const trayTaskIndex = trayTasks.findIndex(t => t.id === draggedTask)
+            let taskToMove: GanttTask | undefined
 
             if (trayTaskIndex !== -1) {
-                // Task came from tray
-                const task = trayTasks[trayTaskIndex]
-                const newStartTime = formatTime(hour)
-                onTaskMove(task.id, resourceId, date, newStartTime)
-
-                // Remove from tray
-                const newTray = [...trayTasks]
-                newTray.splice(trayTaskIndex, 1)
-                setTrayTasks(newTray)
+                taskToMove = trayTasks[trayTaskIndex]
             } else {
-                // Task came from grid
-                const task = tasks.find((t) => t.id === draggedTask)
-                if (task) {
-                    const newStartTime = formatTime(hour)
+                taskToMove = tasks.find((t) => t.id === draggedTask)
+            }
+
+            if (taskToMove && targetResource) {
+                // Check qualification
+                // Ensure we have ranges/allowedRanges. 
+                // Resources in this view are 'Resource' type which has 'ranges'.
+                // Tasks are 'GanttTask' which has 'allowedRanges'.
+                const opRanges = targetResource.ranges || []
+                const allowedRanges = taskToMove.allowedRanges || []
+
+                // Determine target hour
+                let targetHour = hour
+                if (targetHour === -1) {
+                    // If dropped on summary row, preserve current start time
+                    const currentStartHour = taskToMove.startTime ? Number.parseInt(taskToMove.startTime.split(":")[0]) : WORK_HOURS.start
+
+                    console.log("Drop on summary row:", {
+                        taskId: taskToMove.id,
+                        startTime: taskToMove.startTime,
+                        currentStartHour,
+                        hour
+                    })
+
+                    targetHour = isNaN(currentStartHour) ? WORK_HOURS.start : currentStartHour
+
+                    // Ensure it's within work hours
+                    if (targetHour < WORK_HOURS.start || targetHour >= WORK_HOURS.end) {
+                        targetHour = WORK_HOURS.start
+                    }
+                }
+
+                if (trayTaskIndex !== -1) {
+                    // Task came from tray
+                    const newStartTime = formatTime(targetHour)
+                    onTaskMove(taskToMove.id, resourceId, date, newStartTime)
+
+                    // Remove from tray
+                    const newTray = [...trayTasks]
+                    newTray.splice(trayTaskIndex, 1)
+                    setTrayTasks(newTray)
+                } else {
+                    // Task came from grid
+                    const newStartTime = formatTime(targetHour)
                     onTaskMove(draggedTask, resourceId, date, newStartTime)
                 }
             }
@@ -278,11 +325,21 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                         const overloaded = isOverloaded(load)
                                         const isToday = new Date().toDateString() === date.toDateString()
 
+                                        const isDropTarget = dragOverCell?.resourceId === resource.id &&
+                                            dragOverCell?.date === dateStr &&
+                                            dragOverCell?.hour === -1
+
                                         return (
-                                            <div key={dayIdx} className={cn(
-                                                "relative border-r border-gray-100/60 last:border-r-0 min-h-[70px] transition-colors duration-300",
-                                                isToday ? "bg-red-50/20" : ""
-                                            )}>
+                                            <div
+                                                key={dayIdx}
+                                                className={cn(
+                                                    "relative border-r border-gray-100/60 last:border-r-0 min-h-[70px] transition-colors duration-300",
+                                                    isToday ? "bg-red-50/20" : "",
+                                                    isDropTarget ? "bg-blue-50/60 shadow-inner ring-2 ring-inset ring-blue-200" : ""
+                                                )}
+                                                onDragOver={(e) => handleDragOver(e, resource.id, dateStr, -1)}
+                                                onDrop={() => handleDrop(resource.id, dateStr, -1)}
+                                            >
                                                 {/* Load Indicator */}
                                                 <div className="absolute top-2 right-2 z-10">
                                                     <TooltipProvider>
@@ -352,123 +409,193 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                                                                     const leftPercent = widthPercent * index
 
                                                                                     return (
-                                                                                        <TooltipProvider key={task.id}>
-                                                                                            <Tooltip delayDuration={100}>
-                                                                                                <TooltipTrigger asChild>
-                                                                                                    <motion.div
-                                                                                                        layoutId={task.id}
-                                                                                                        draggable
-                                                                                                        onDragStart={() => handleDragStart(task)}
-                                                                                                        onDragEnd={() => setDraggedTask(null)}
-                                                                                                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                                                                                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                                                                        whileHover={{ scale: 1.02, zIndex: 50, y: -2 }}
-                                                                                                        whileDrag={{ scale: 1.05, zIndex: 100, opacity: 0.8 }}
-                                                                                                        className={cn(
-                                                                                                            "absolute rounded-xl p-2.5 text-xs cursor-grab active:cursor-grabbing shadow-sm border border-white/20 overflow-hidden group/task transition-shadow duration-200",
-                                                                                                            PRIORITY_COLORS[task.priority],
-                                                                                                            draggedTask === task.id && "opacity-50 grayscale blur-[1px]"
+                                                                                        <HoverCard key={task.id} openDelay={0} closeDelay={400}>
+                                                                                            <HoverCardTrigger asChild>
+                                                                                                <motion.div
+                                                                                                    layoutId={task.id}
+                                                                                                    draggable
+                                                                                                    onDragStart={() => handleDragStart(task)}
+                                                                                                    onDragEnd={() => setDraggedTask(null)}
+                                                                                                    onClick={(e) => {
+                                                                                                        // Prevent click if dragging (though usually handled by DnD logic)
+                                                                                                        if (draggedTask) return;
+                                                                                                        e.stopPropagation();
+                                                                                                        onTaskClick?.(task);
+                                                                                                    }}
+                                                                                                    initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                                                    whileHover={{ scale: 1.02, zIndex: 50, y: -2 }}
+                                                                                                    whileDrag={{ scale: 1.05, zIndex: 100, opacity: 0.8 }}
+                                                                                                    className={cn(
+                                                                                                        "absolute rounded-xl p-2.5 text-xs cursor-pointer active:cursor-grabbing shadow-sm border border-white/20 overflow-hidden group/task transition-shadow duration-200",
+                                                                                                        STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"],
+                                                                                                        draggedTask === task.id && "opacity-50 grayscale blur-[1px]"
+                                                                                                    )}
+                                                                                                    style={{
+                                                                                                        height: `${taskDuration * 56 - 4}px`, // 56px per hour row
+                                                                                                        top: "2px",
+                                                                                                        left: `${leftPercent}%`,
+                                                                                                        width: `${widthPercent}%`,
+                                                                                                        zIndex: 10 + index
+                                                                                                    }}
+                                                                                                >
+                                                                                                    {/* Glass Shine Effect */}
+                                                                                                    <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover/task:opacity-100 transition-opacity duration-300" />
+
+                                                                                                    <div className="relative z-10 flex flex-col h-full text-white">
+                                                                                                        <div className="font-bold truncate text-[11px] leading-tight drop-shadow-sm">
+                                                                                                            {toTitleCase(task.workOrderNumber)}
+                                                                                                        </div>
+                                                                                                        <div className="text-[10px] opacity-90 truncate mt-0.5 font-medium">
+                                                                                                            {toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}
+                                                                                                        </div>
+
+                                                                                                        {task.isDelayed && (
+                                                                                                            <div className="absolute top-1 right-1 bg-red-500 rounded-full p-1 shadow-sm animate-pulse">
+                                                                                                                <AlertTriangle className="h-2 w-2 text-white" />
+                                                                                                            </div>
                                                                                                         )}
-                                                                                                        style={{
-                                                                                                            height: `${taskDuration * 56 - 4}px`, // 56px per hour row
-                                                                                                            top: "2px",
-                                                                                                            left: `${leftPercent}%`,
-                                                                                                            width: `${widthPercent}%`,
-                                                                                                            zIndex: 10 + index
-                                                                                                        }}
-                                                                                                    >
-                                                                                                        {/* Glass Shine Effect */}
-                                                                                                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 group-hover/task:opacity-100 transition-opacity duration-300" />
-
-                                                                                                        <div className="relative z-10 flex flex-col h-full text-white">
-                                                                                                            <div className="font-bold truncate text-[11px] leading-tight drop-shadow-sm">
-                                                                                                                {toTitleCase(task.workOrderNumber)}
-                                                                                                            </div>
-                                                                                                            <div className="text-[10px] opacity-90 truncate mt-0.5 font-medium">
-                                                                                                                {toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}
-                                                                                                            </div>
-
-                                                                                                            {task.isDelayed && (
-                                                                                                                <div className="absolute top-1 right-1 bg-red-500 rounded-full p-1 shadow-sm animate-pulse">
-                                                                                                                    <AlertTriangle className="h-2 w-2 text-white" />
-                                                                                                                </div>
-                                                                                                            )}
+                                                                                                    </div>
+                                                                                                </motion.div>
+                                                                                            </HoverCardTrigger>
+                                                                                            <HoverCardContent side="right" align="start" sideOffset={0} className="p-0 border-0 overflow-hidden rounded-2xl shadow-2xl bg-white/95 backdrop-blur-xl ring-1 ring-black/5 w-80 z-[60]">
+                                                                                                <div>
+                                                                                                    {/* Header */}
+                                                                                                    <div className={cn("p-5 text-white relative overflow-hidden",
+                                                                                                        STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"]
+                                                                                                    )}>
+                                                                                                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
+                                                                                                        <div className="absolute bottom-0 right-0 opacity-10 transform translate-x-1/4 translate-y-1/4">
+                                                                                                            <Wrench className="w-24 h-24" />
                                                                                                         </div>
-                                                                                                    </motion.div>
-                                                                                                </TooltipTrigger>
-                                                                                                <TooltipContent side="right" className="p-0 border-0 overflow-hidden rounded-2xl shadow-2xl bg-white/95 backdrop-blur-xl ring-1 ring-black/5">
-                                                                                                    <div className="w-72">
-                                                                                                        <div className={cn("p-4 text-white relative overflow-hidden", PRIORITY_COLORS[task.priority])}>
-                                                                                                            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent" />
-                                                                                                            <div className="relative z-10">
-                                                                                                                <div className="font-bold text-xl tracking-tight">{toTitleCase(task.workOrderNumber)}</div>
-                                                                                                                <div className="text-xs opacity-90 flex items-center gap-2 mt-2">
-                                                                                                                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px] h-6 px-2 backdrop-blur-md">
-                                                                                                                        {PRIORITY_LABELS[task.priority]}
-                                                                                                                    </Badge>
-                                                                                                                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px] h-6 px-2 backdrop-blur-md">
-                                                                                                                        {STATUS_LABELS[task.status]}
-                                                                                                                    </Badge>
-                                                                                                                </div>
-                                                                                                            </div>
-                                                                                                        </div>
-                                                                                                        <div className="p-5 space-y-4 text-sm">
-                                                                                                            <div className="grid grid-cols-2 gap-4">
+                                                                                                        <div className="relative z-10">
+                                                                                                            <div className="flex items-start justify-between">
                                                                                                                 <div>
-                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Cliente</span>
-                                                                                                                    <span className="font-semibold text-gray-900">{task.client}</span>
+                                                                                                                    <div className="text-[10px] uppercase tracking-wider font-bold opacity-80 mb-1">Orden de Trabajo</div>
+                                                                                                                    <div className="font-bold text-2xl tracking-tight leading-none">{toTitleCase(task.workOrderNumber)}</div>
                                                                                                                 </div>
-                                                                                                                <div>
-                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Proceso</span>
-                                                                                                                    <span className="font-semibold text-gray-900">{toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}</span>
-                                                                                                                </div>
-                                                                                                                <div>
-                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Horario</span>
-                                                                                                                    <span className="font-semibold text-gray-900 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">{task.startTime} - {task.endTime}</span>
-                                                                                                                </div>
-                                                                                                                <div>
-                                                                                                                    <span className="text-gray-400 text-[10px] uppercase tracking-wider font-bold block mb-1">Duración</span>
-                                                                                                                    <span className="font-semibold text-gray-900">{task.duration}h</span>
-                                                                                                                </div>
+                                                                                                                {task.isDelayed && (
+                                                                                                                    <div className="bg-red-500/20 backdrop-blur-md p-1.5 rounded-lg border border-white/20 shadow-sm">
+                                                                                                                        <AlertTriangle className="h-5 w-5 text-white animate-pulse" />
+                                                                                                                    </div>
+                                                                                                                )}
                                                                                                             </div>
 
-                                                                                                            {task.notes && (
-                                                                                                                <div className="bg-amber-50/80 p-3 rounded-xl border border-amber-100 text-xs text-amber-800 leading-relaxed">
-                                                                                                                    <span className="font-bold block mb-1 flex items-center gap-1">
-                                                                                                                        <MoreHorizontal className="h-3 w-3" /> Notas:
-                                                                                                                    </span>
-                                                                                                                    {task.notes}
-                                                                                                                </div>
-                                                                                                            )}
-
-                                                                                                            <div className="flex gap-2 pt-4 border-t border-gray-100 mt-2">
-                                                                                                                <DropdownMenu>
-                                                                                                                    <DropdownMenuTrigger asChild>
-                                                                                                                        <Button variant="outline" size="sm" className="w-full justify-between text-xs h-9 font-medium border-gray-200 hover:bg-gray-50 hover:text-gray-900">
-                                                                                                                            {STATUS_LABELS[task.status]} <ChevronDown className="h-3 w-3 ml-1 opacity-50" />
-                                                                                                                        </Button>
-                                                                                                                    </DropdownMenuTrigger>
-                                                                                                                    <DropdownMenuContent className="w-56 p-1 rounded-xl shadow-xl border-gray-100">
-                                                                                                                        <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "1")} className="rounded-lg focus:bg-gray-50">
-                                                                                                                            <Circle className="h-2 w-2 mr-2 fill-gray-400 text-gray-400" />
-                                                                                                                            Pendiente
-                                                                                                                        </DropdownMenuItem>
-                                                                                                                        <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "2")} className="rounded-lg focus:bg-blue-50 focus:text-blue-700">
-                                                                                                                            <Circle className="h-2 w-2 mr-2 fill-blue-500 text-blue-500" />
-                                                                                                                            En Proceso
-                                                                                                                        </DropdownMenuItem>
-                                                                                                                        <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "3")} className="rounded-lg focus:bg-green-50 focus:text-green-700">
-                                                                                                                            <CheckCircle2 className="h-2 w-2 mr-2 text-green-500" />
-                                                                                                                            Finalizado
-                                                                                                                        </DropdownMenuItem>
-                                                                                                                    </DropdownMenuContent>
-                                                                                                                </DropdownMenu>
+                                                                                                            <div className="flex flex-wrap gap-2 mt-4">
+                                                                                                                <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px] h-6 px-2.5 backdrop-blur-md shadow-sm">
+                                                                                                                    {PRIORITY_LABELS[task.priority]}
+                                                                                                                </Badge>
+                                                                                                                <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px] h-6 px-2.5 backdrop-blur-md shadow-sm">
+                                                                                                                    {STATUS_LABELS[task.status]}
+                                                                                                                </Badge>
                                                                                                             </div>
                                                                                                         </div>
                                                                                                     </div>
-                                                                                                </TooltipContent>
-                                                                                            </Tooltip>
-                                                                                        </TooltipProvider>
+
+                                                                                                    {/* Body */}
+                                                                                                    <div className="p-5 space-y-5">
+                                                                                                        {/* Info Grid */}
+                                                                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+                                                                                                            <div className="col-span-2">
+                                                                                                                <div className="flex items-center gap-2 mb-1.5">
+                                                                                                                    <User className="w-3.5 h-3.5 text-gray-400" />
+                                                                                                                    <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Cliente</span>
+                                                                                                                </div>
+                                                                                                                <div className="font-semibold text-gray-900 text-sm pl-5.5">
+                                                                                                                    {task.client || <span className="text-gray-400 italic font-normal">Sin cliente asignado</span>}
+                                                                                                                </div>
+                                                                                                            </div>
+
+                                                                                                            <div className="col-span-2">
+                                                                                                                <div className="flex items-center gap-2 mb-1.5">
+                                                                                                                    <Wrench className="w-3.5 h-3.5 text-gray-400" />
+                                                                                                                    <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Proceso</span>
+                                                                                                                </div>
+                                                                                                                <div className="font-semibold text-gray-900 text-sm pl-5.5 leading-snug">
+                                                                                                                    {toTitleCase(PROCESS_LABELS[task.process as keyof typeof PROCESS_LABELS] || task.process)}
+                                                                                                                </div>
+                                                                                                            </div>
+
+                                                                                                            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                                                                                                <div className="flex items-center gap-2 mb-1">
+                                                                                                                    <Clock className="w-3.5 h-3.5 text-blue-500" />
+                                                                                                                    <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Horario</span>
+                                                                                                                </div>
+                                                                                                                <div className="font-bold text-gray-900 text-sm">
+                                                                                                                    {task.startTime} - {task.endTime}
+                                                                                                                </div>
+                                                                                                            </div>
+
+                                                                                                            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                                                                                                <div className="flex items-center gap-2 mb-1">
+                                                                                                                    <Calendar className="w-3.5 h-3.5 text-purple-500" />
+                                                                                                                    <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Duración</span>
+                                                                                                                </div>
+                                                                                                                <div className="font-bold text-gray-900 text-sm">
+                                                                                                                    {task.duration}h
+                                                                                                                </div>
+                                                                                                            </div>
+                                                                                                        </div>
+
+                                                                                                        {/* Notes */}
+                                                                                                        {task.notes && (
+                                                                                                            <div className="bg-amber-50/60 p-3.5 rounded-xl border border-amber-100/60 text-xs text-amber-900/80 leading-relaxed relative overflow-hidden">
+                                                                                                                <div className="absolute top-0 left-0 w-1 h-full bg-amber-300" />
+                                                                                                                <span className="font-bold block mb-1.5 flex items-center gap-1.5 text-amber-700">
+                                                                                                                    <MoreHorizontal className="h-3.5 w-3.5" /> Notas
+                                                                                                                </span>
+                                                                                                                {task.notes}
+                                                                                                            </div>
+                                                                                                        )}
+
+                                                                                                        {/* Actions */}
+                                                                                                        <div className="pt-2">
+                                                                                                            <DropdownMenu>
+                                                                                                                <DropdownMenuTrigger asChild>
+                                                                                                                    <Button
+                                                                                                                        variant="outline"
+                                                                                                                        size="sm"
+                                                                                                                        className="w-full justify-between text-xs h-9 font-medium border-gray-200 hover:bg-gray-50 hover:text-gray-900 hover:border-gray-300 transition-all shadow-sm"
+                                                                                                                    >
+                                                                                                                        <span className="flex items-center gap-2">
+                                                                                                                            <span className={cn("w-2 h-2 rounded-full",
+                                                                                                                                task.status === "nuevo" ? "bg-gray-400" :
+                                                                                                                                    task.status === "en_proceso" ? "bg-blue-500" : "bg-green-500"
+                                                                                                                            )} />
+                                                                                                                            {STATUS_LABELS[task.status]}
+                                                                                                                        </span>
+                                                                                                                        <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+                                                                                                                    </Button>
+                                                                                                                </DropdownMenuTrigger>
+                                                                                                                <DropdownMenuContent className="w-72 p-1.5 rounded-xl shadow-xl border-gray-100 z-[70]">
+                                                                                                                    <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "1")} className="rounded-lg py-2.5 px-3 focus:bg-gray-50 cursor-pointer">
+                                                                                                                        <Circle className="h-2.5 w-2.5 mr-3 fill-gray-400 text-gray-400" />
+                                                                                                                        <div className="flex flex-col">
+                                                                                                                            <span className="font-medium text-gray-700">Pendiente</span>
+                                                                                                                            <span className="text-[10px] text-gray-400">La tarea aún no ha comenzado</span>
+                                                                                                                        </div>
+                                                                                                                    </DropdownMenuItem>
+                                                                                                                    <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "2")} className="rounded-lg py-2.5 px-3 focus:bg-blue-50 focus:text-blue-700 cursor-pointer">
+                                                                                                                        <Circle className="h-2.5 w-2.5 mr-3 fill-blue-500 text-blue-500" />
+                                                                                                                        <div className="flex flex-col">
+                                                                                                                            <span className="font-medium text-blue-700">En Proceso</span>
+                                                                                                                            <span className="text-[10px] text-blue-400/80">La tarea está en curso</span>
+                                                                                                                        </div>
+                                                                                                                    </DropdownMenuItem>
+                                                                                                                    <DropdownMenuItem onClick={() => task.dbId && onStatusChange?.(task.dbId.toString(), "3")} className="rounded-lg py-2.5 px-3 focus:bg-green-50 focus:text-green-700 cursor-pointer">
+                                                                                                                        <CheckCircle2 className="h-2.5 w-2.5 mr-3 text-green-500" />
+                                                                                                                        <div className="flex flex-col">
+                                                                                                                            <span className="font-medium text-green-700">Finalizado</span>
+                                                                                                                            <span className="text-[10px] text-green-400/80">La tarea se ha completado</span>
+                                                                                                                        </div>
+                                                                                                                    </DropdownMenuItem>
+                                                                                                                </DropdownMenuContent>
+                                                                                                            </DropdownMenu>
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </HoverCardContent>
+                                                                                        </HoverCard>
                                                                                     )
                                                                                 })}
                                                                             </div>
@@ -546,7 +673,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                         whileDrag={{ scale: 1.1, opacity: 0.8 }}
                                         className={cn(
                                             "flex-shrink-0 w-48 p-3 rounded-xl shadow-sm border border-white/50 cursor-grab active:cursor-grabbing relative group",
-                                            PRIORITY_COLORS[task.priority]
+                                            STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"]
                                         )}
                                     >
                                         <div className="text-white">
@@ -568,16 +695,16 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
             {/* Legend */}
             <div className="flex flex-wrap gap-6 justify-center bg-white/60 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-white/40">
                 <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-gray-400 rounded-full shadow-sm shadow-gray-400/50" />
+                    <span className="text-sm text-gray-600 font-medium">Pendiente</span>
+                </div>
+                <div className="flex items-center gap-2">
                     <div className="w-3 h-3 bg-blue-500 rounded-full shadow-sm shadow-blue-500/50" />
-                    <span className="text-sm text-gray-600 font-medium">Normal</span>
+                    <span className="text-sm text-gray-600 font-medium">En Proceso</span>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-amber-500 rounded-full shadow-sm shadow-amber-500/50" />
-                    <span className="text-sm text-gray-600 font-medium">Urgente</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 bg-red-600 rounded-full shadow-sm shadow-red-600/50" />
-                    <span className="text-sm text-gray-600 font-medium">Crítica</span>
+                    <div className="w-3 h-3 bg-green-500 rounded-full shadow-sm shadow-green-500/50" />
+                    <span className="text-sm text-gray-600 font-medium">Finalizado</span>
                 </div>
                 <div className="w-px h-4 bg-gray-300" />
                 <div className="flex items-center gap-2">

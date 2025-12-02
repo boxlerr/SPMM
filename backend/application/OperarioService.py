@@ -85,6 +85,7 @@ class OperarioService:
                     "telefono": o.telefono,
                     "celular": o.celular,
                     "dni": o.dni,
+                    "rangos": [r.id_rango for r in o.rangos]
                 }
                 for o in operarios
             ]

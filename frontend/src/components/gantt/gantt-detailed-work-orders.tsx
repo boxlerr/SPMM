@@ -6,13 +6,28 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Calendar, Clock, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
     getWeekDates,
     formatDate,
     formatTime,
     WORK_DAYS,
     PRIORITY_COLORS,
+    toTitleCase,
 } from "@/lib/gantt-utils";
 import type { GanttTask } from "@/lib/types";
+
+const STATUS_GRADIENTS: Record<string, string> = {
+    nuevo: "bg-gradient-to-br from-gray-400 to-gray-500 border-gray-300 shadow-gray-500/20",
+    en_proceso: "bg-gradient-to-br from-blue-500 to-blue-600 border-blue-400 shadow-blue-500/20",
+    finalizado_total: "bg-gradient-to-br from-green-500 to-green-600 border-green-400 shadow-green-500/20",
+    pausado: "bg-gradient-to-br from-amber-500 to-amber-600 border-amber-400 shadow-amber-500/20",
+    finalizado_parcial: "bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-400 shadow-emerald-500/20",
+}
 
 interface GanttDetailedWorkOrdersProps {
     tasks: GanttTask[];
@@ -169,13 +184,13 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
 
             {/* Main Content */}
             <div
-                className="overflow-auto cursor-grab pb-4 px-1"
+                className="cursor-grab pb-4 px-1"
                 ref={containerRef}
                 onMouseDown={handleMouseDown}
                 onMouseLeave={handleMouseLeave}
                 onMouseUp={handleMouseUp}
                 onMouseMove={handleMouseMove}
-                style={{ height: 'calc(100vh - 240px)' }}
+                style={{ minHeight: 'calc(100vh - 240px)' }}
             >
                 <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }} className="bg-white/60 backdrop-blur-md rounded-3xl shadow-xl border border-white/40 overflow-hidden">
                     <div>
@@ -238,7 +253,7 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                         return (weekTaskGroups[dStr] || []).length;
                                     })
                                 );
-                                const rowHeight = Math.max(100, maxTasksInDay * 45 + 20);
+                                const rowHeight = Math.max(120, maxTasksInDay * 60 + 20); // Increased height
 
                                 return (
                                     <div key={otNumber} className="grid grid-cols-[150px_repeat(5,1fr)] gap-px bg-white/40 hover:bg-white/80 transition-all duration-300 group">
@@ -256,7 +271,8 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                     "relative border-r border-gray-100/60 last:border-r-0 transition-colors duration-300",
                                                     isToday ? "bg-red-50/20" : ""
                                                 )} style={{ height: `${rowHeight}px` }}>
-                                                    <div className="absolute inset-0 flex px-2">
+                                                    {/* Grid Lines for Hours */}
+                                                    <div className="absolute inset-0 flex px-2 pointer-events-none">
                                                         {[...Array(9)].map((_, i) => {
                                                             const hour = 9 + i;
                                                             const isDropTarget =
@@ -268,8 +284,21 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                                     key={i}
                                                                     className={cn(
                                                                         "flex-1 border-r border-gray-100/40 last:border-r-0 h-full transition-colors",
-                                                                        isDropTarget ? "bg-blue-50/60 shadow-inner" : "hover:bg-white/40"
+                                                                        isDropTarget ? "bg-blue-50/60 shadow-inner" : ""
                                                                     )}
+                                                                ></div>
+                                                            );
+                                                        })}
+                                                    </div>
+
+                                                    {/* Drop Targets (Interactive Layer) */}
+                                                    <div className="absolute inset-0 flex px-2 z-0">
+                                                        {[...Array(9)].map((_, i) => {
+                                                            const hour = 9 + i;
+                                                            return (
+                                                                <div
+                                                                    key={i}
+                                                                    className="flex-1 h-full"
                                                                     onDragOver={(e) => handleDragOver(e, otNumber, dateStr, hour)}
                                                                     onDragLeave={handleDragLeave}
                                                                     onDrop={() => handleDrop(otNumber, dateStr, hour)}
@@ -277,6 +306,7 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                             );
                                                         })}
                                                     </div>
+
                                                     {dayTasks.map((task, taskIdx) => {
                                                         const startHour = parseInt(task.startTime.split(':')[0]);
                                                         const startMin = parseInt(task.startTime.split(':')[1]);
@@ -287,35 +317,68 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                         const totalWorkDayMins = 9 * 60;
                                                         const leftPercent = (startTotalMins / totalWorkDayMins) * 100;
                                                         const widthPercent = (durationMins / totalWorkDayMins) * 100;
-                                                        return (
-                                                            <div
-                                                                key={task.id}
-                                                                draggable
-                                                                onDragStart={() => handleDragStart(task.id)}
-                                                                className={cn(
-                                                                    "absolute h-10 rounded-xl text-xs text-white flex items-center px-2.5 cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all shadow-sm border border-white/20 overflow-hidden whitespace-nowrap z-10",
-                                                                    PRIORITY_COLORS[task.priority],
-                                                                    draggedTask === task.id && "opacity-50 grayscale blur-[1px]"
-                                                                )}
-                                                                style={{
-                                                                    top: `${taskIdx * 45 + 10}px`,
-                                                                    left: `${Math.max(0, leftPercent)}%`,
-                                                                    width: `${Math.max(widthPercent, 2)}%`,
-                                                                }}
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    onTaskClick?.(task);
-                                                                }}
-                                                                title={`${task.process} - ${task.resourceName} (${task.startTime} - ${task.endTime})`}
-                                                            >
-                                                                {/* Glass Shine Effect */}
-                                                                <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300" />
 
-                                                                <div className="flex flex-col leading-none pointer-events-none relative z-10">
-                                                                    <span className="font-bold text-[11px] truncate drop-shadow-sm">{task.process}</span>
-                                                                    <span className="opacity-90 text-[10px] truncate font-medium">{task.resourceName}</span>
-                                                                </div>
-                                                            </div>
+                                                        // Minimum width for visibility (approx 27 mins)
+                                                        const displayWidth = Math.max(widthPercent, 5);
+                                                        // Determine if block is too small for full text
+                                                        const isSmallBlock = displayWidth < 15;
+
+                                                        const processName = toTitleCase(task.process);
+                                                        const resourceName = toTitleCase(task.resourceName);
+
+                                                        return (
+                                                            <TooltipProvider key={task.id}>
+                                                                <Tooltip delayDuration={0}>
+                                                                    <TooltipTrigger asChild>
+                                                                        <div
+                                                                            draggable
+                                                                            onDragStart={() => handleDragStart(task.id)}
+                                                                            className={cn(
+                                                                                "absolute h-12 rounded-xl text-xs text-white flex items-center px-3 cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all shadow-md border border-white/20 overflow-hidden z-10 group/task",
+                                                                                STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"],
+                                                                                draggedTask === task.id && "opacity-50 grayscale blur-[1px] scale-95"
+                                                                            )}
+                                                                            style={{
+                                                                                top: `${taskIdx * 60 + 15}px`, // Adjusted spacing
+                                                                                left: `${Math.max(0, leftPercent)}%`,
+                                                                                width: `${widthPercent}%`,
+                                                                                minWidth: '60px', // Ensure visibility for short tasks
+                                                                            }}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                onTaskClick?.(task);
+                                                                            }}
+                                                                        >
+                                                                            {/* Glass Shine Effect */}
+                                                                            <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover/task:opacity-100 transition-opacity duration-300" />
+
+                                                                            {/* Content */}
+                                                                            <div className="flex flex-col leading-tight pointer-events-none relative z-10 w-full">
+                                                                                <span className="font-bold text-[11px] truncate drop-shadow-sm">{processName}</span>
+                                                                                <div className="flex items-center justify-between mt-0.5 opacity-90">
+                                                                                    <span className="text-[10px] truncate font-medium">{resourceName}</span>
+                                                                                    <span className="text-[9px] font-mono opacity-80 ml-1 hidden sm:inline">{task.startTime}-{task.endTime}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent side="top" className="bg-gray-900/95 backdrop-blur-sm border-gray-800 text-white p-3 rounded-xl shadow-xl">
+                                                                        <div className="space-y-1">
+                                                                            <p className="font-bold text-sm">{processName}</p>
+                                                                            <div className="flex items-center gap-2 text-xs text-gray-300">
+                                                                                <span className="bg-white/10 px-1.5 py-0.5 rounded text-white">{resourceName}</span>
+                                                                                <span>•</span>
+                                                                                <span className="font-mono">{task.startTime} - {task.endTime}</span>
+                                                                            </div>
+                                                                            {task.notes && (
+                                                                                <p className="text-xs text-gray-400 italic mt-1 border-t border-gray-700 pt-1">
+                                                                                    "{task.notes}"
+                                                                                </p>
+                                                                            )}
+                                                                        </div>
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                            </TooltipProvider>
                                                         );
                                                     })}
                                                 </div>
@@ -326,22 +389,40 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                             })}
 
                             {/* Empty State */}
-                            {sortedOTs.every((otNumber) => {
-                                const otTasks = tasksByOT[otNumber];
-                                return !weekDates.some((d) => {
-                                    const dStr = formatDate(d);
-                                    return otTasks.some((t) => t.startDate === dStr);
-                                });
-                            }) && (
+                            {
+                                sortedOTs.every((otNumber) => {
+                                    const otTasks = tasksByOT[otNumber];
+                                    return !weekDates.some((d) => {
+                                        const dStr = formatDate(d);
+                                        return otTasks.some((t) => t.startDate === dStr);
+                                    });
+                                }) && (
                                     <div className="text-center p-12 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 m-4">
                                         <p className="text-muted-foreground font-medium">No hay actividades planificadas para esta semana</p>
                                         <p className="text-sm text-gray-400 mt-1">Intenta navegar a otras semanas usando los controles superiores</p>
                                     </div>
-                                )}
-                        </div>
-                    </div>
+                                )
+                            }
+                        </div >
+                    </div >
+                </div >
+            </div >
+
+            {/* Legend */}
+            <div className="flex flex-wrap gap-6 justify-center bg-white/60 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-white/40">
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-gray-400 rounded-full shadow-sm shadow-gray-400/50" />
+                    <span className="text-sm text-gray-600 font-medium">Pendiente</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full shadow-sm shadow-blue-500/50" />
+                    <span className="text-sm text-gray-600 font-medium">En Proceso</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full shadow-sm shadow-green-500/50" />
+                    <span className="text-sm text-gray-600 font-medium">Finalizado</span>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

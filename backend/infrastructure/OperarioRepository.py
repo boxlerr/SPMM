@@ -27,8 +27,10 @@ class OperarioRepository:
     async def find_all(self):
         try:
             logger.info("Repository - Obtener todos los operarios desde la base de datos.")
-            result = await self.db.execute(select(Operario))
-            data = result.scalars().all()
+            result = await self.db.execute(
+                select(Operario).options(joinedload(Operario.rangos))
+            )
+            data = result.scalars().unique().all()
             logger.info(f"Repository - Resultado OK ({len(data)} registros)")
             return data
         except Exception as e:

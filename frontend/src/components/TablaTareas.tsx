@@ -21,6 +21,9 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { isOperatorQualified } from "@/lib/gantt-utils";
+import { AlertCircle } from "lucide-react";
 import type { GanttTask } from "@/lib/types";
 
 interface TablaTareasProps {
@@ -152,16 +155,59 @@ const TaskRow = React.memo(({ item, index, groupColor, groupId, operarios, onSta
                                         <span>Sin asignar</span>
                                     </div>
                                 </SelectItem>
-                                {operarios.map(op => (
-                                    <SelectItem key={op.id} value={op.id.toString()}>
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">
-                                                {getInitials(op.nombre + ' ' + op.apellido)}
+                                {operarios.map(op => {
+                                    // Handle both 'ranges' (frontend type) and 'rangos' (backend response)
+                                    const opRanges = op.ranges || (op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []);
+                                    // Ensure item.allowedRanges is available. If not, we might need to rely on item.rangos_permitidos if it exists on GanttTask
+                                    // Based on types.ts, GanttTask might not have rangos_permitidos directly unless we added it.
+                                    // Let's check if we can access it. If item comes from convertPlanificacionToGanttTasks, it might be missing.
+                                    // However, for now, let's assume we can access it or we need to pass it.
+                                    // Actually, looking at TablaTareas usage in page.tsx, 'tasks' are GanttTask[].
+                                    // We need to ensure GanttTask has 'allowedRanges' or similar.
+                                    // Let's check types.ts first to be sure.
+                                    // Wait, I can't check types.ts inside this replace.
+                                    // I will assume 'allowedRanges' exists on GanttTask as per previous work, or I'll use 'rangos_permitidos' if I added it.
+                                    // Let's use a safe check.
+                                    const allowedRanges = (item as any).allowedRanges || (item as any).rangos_permitidos || [];
+
+                                    // Import isOperatorQualified at the top first!
+                                    // I will add the import in a separate block or assume it's added.
+                                    // Wait, I need to add the import first.
+
+                                    const isQualified = isOperatorQualified(opRanges, allowedRanges);
+
+                                    return (
+                                        <SelectItem
+                                            key={op.id}
+                                            value={op.id.toString()}
+                                            disabled={!isQualified}
+                                            className={!isQualified ? "opacity-50 cursor-not-allowed bg-gray-50" : ""}
+                                        >
+                                            <div className="flex items-center justify-between w-full gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">
+                                                        {getInitials(op.nombre + ' ' + op.apellido)}
+                                                    </div>
+                                                    <span>{capitalizeFirst(op.nombre)} {capitalizeFirst(op.apellido)}</span>
+                                                </div>
+                                                {!isQualified && (
+                                                    <TooltipProvider>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="p-1">
+                                                                    <AlertCircle className="w-3 h-3 text-gray-400" />
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                <p>No tiene la capacidad para realizar este proceso</p>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
+                                                )}
                                             </div>
-                                            <span>{capitalizeFirst(op.nombre)} {capitalizeFirst(op.apellido)}</span>
-                                        </div>
-                                    </SelectItem>
-                                ))}
+                                        </SelectItem>
+                                    )
+                                })}
                             </SelectContent>
                         </Select>
                     </div>

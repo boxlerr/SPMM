@@ -28,6 +28,7 @@ export interface GanttTask {
     originalInicioMin?: number;
     originalFinMin?: number;
     dbId?: number;
+    allowedRanges?: number[];
 }
 
 export interface Resource {
@@ -35,6 +36,7 @@ export interface Resource {
     name: string;
     type: "operario" | "maquina";
     skills?: string[];
+    ranges?: number[];
 }
 
 export interface WorkOrder {
@@ -85,4 +87,5 @@ export interface PlanificacionItem {
     estado?: string;
     id_estado?: number;
     observaciones_proceso?: string;
+    rangos_permitidos?: number[];
 }

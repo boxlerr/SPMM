@@ -1,6 +1,12 @@
-import React from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Activity } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Activity, AlertCircle } from "lucide-react";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
 import {
     Select,
     SelectContent,
@@ -8,11 +14,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { isOperatorQualified } from "@/lib/gantt-utils";
 
 interface Operario {
     id: number;
     nombre: string;
     apellido: string;
+    ranges?: number[];
 }
 
 interface PlanificacionItem {
@@ -34,6 +43,7 @@ interface PlanificacionItem {
     id_estado?: number;
     observaciones_ot?: string;
     observaciones_proceso?: string;
+    rangos_permitidos?: number[];
 }
 
 // Helper function to capitalize first letter
@@ -69,7 +79,6 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
     onStatusChange,
     variant = "modal",
 }) => {
-    console.log("TaskDetailsModal rendering. Variant:", variant, "IsOpen:", isOpen, "id_estado:", selectedItem?.id_estado);
     const [ordenDetails, setOrdenDetails] = React.useState<any>(null);
     const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
 
@@ -213,7 +222,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                 }`}>
                                 <SelectValue placeholder="Seleccionar estado" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="z-[70]">
                                 <SelectItem value="1">
                                     <div className="flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-gray-300" />
@@ -284,20 +293,40 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                         {!localOperator && <span className="text-gray-500">Seleccionar operario</span>}
                                     </SelectValue>
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-[70]">
                                     {Array.isArray(operarios) &&
-                                        operarios.map((op) => (
-                                            <SelectItem key={op.id} value={op.id.toString()}>
-                                                <div className="flex items-center gap-3 py-1">
-                                                    <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-bold">
-                                                        {getInitials(op.nombre, op.apellido)}
+                                        operarios.map((op: any) => {
+                                            // Handle both 'ranges' (frontend type) and 'rangos' (backend response)
+                                            const opRanges = op.ranges || (op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []);
+                                            const isQualified = isOperatorQualified(opRanges, selectedItem.rangos_permitidos || []);
+
+                                            return (
+                                                <SelectItem
+                                                    key={op.id}
+                                                    value={op.id.toString()}
+                                                    disabled={!isQualified}
+                                                    className={!isQualified ? "opacity-50 cursor-not-allowed bg-gray-50" : ""}
+                                                >
+                                                    <div className="flex items-center justify-between w-full gap-2">
+                                                        <span>{op.nombre} {op.apellido}</span>
+                                                        {!isQualified && (
+                                                            <TooltipProvider>
+                                                                <Tooltip delayDuration={0}>
+                                                                    <TooltipTrigger asChild>
+                                                                        <div className="p-1">
+                                                                            <AlertCircle className="w-4 h-4 text-gray-400" />
+                                                                        </div>
+                                                                    </TooltipTrigger>
+                                                                    <TooltipContent className="z-[80] bg-red-50 text-red-600 border-red-100">
+                                                                        <p>No tiene la capacidad para realizar este proceso</p>
+                                                                    </TooltipContent>
+                                                                </Tooltip>
+                                                            </TooltipProvider>
+                                                        )}
                                                     </div>
-                                                    <span className="text-gray-700">
-                                                        {capitalizeFirstLetter(op.nombre)} {capitalizeFirstLetter(op.apellido)}
-                                                    </span>
-                                                </div>
-                                            </SelectItem>
-                                        ))}
+                                                </SelectItem>
+                                            );
+                                        })}
                                 </SelectContent>
                             </Select>
                         </div>

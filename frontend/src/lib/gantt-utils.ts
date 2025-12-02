@@ -29,7 +29,7 @@ export const STATUS_COLORS = {
 }
 
 export const STATUS_LABELS = {
-  nuevo: "Nuevo",
+  nuevo: "Pendiente",
   en_proceso: "En Proceso",
   pausado: "Pausado",
   finalizado_parcial: "Finalizado Parcial",
@@ -72,7 +72,10 @@ export function getMonthDates(weekOffset = 0): Date[] {
 }
 
 export function formatDate(date: Date): string {
-  return date.toISOString().split("T")[0]
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function formatTime(hour: number): string {
@@ -82,8 +85,7 @@ export function formatTime(hour: number): string {
 export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, date: string): number {
   const resourceTasks = tasks.filter((task) => task.resourceId === resourceId)
 
-  const targetDate = new Date(date)
-  const targetDateStr = formatDate(targetDate)
+  const targetDateStr = date
 
   return resourceTasks.reduce((total, task) => {
     // Check if task overlaps with this day
@@ -178,6 +180,7 @@ export function convertPlanificacionToGanttTasks(
   const initialTasks = data.map((item) => {
     // Use creado_en as the base date, defaulting to now if missing (though it should be there)
     const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
+    // console.log(`Task ${item.id}: creado_en=${item.creado_en}, baseDate=${baseDate}, inicio_min=${item.inicio_min}`);
     const normalizedBaseDate = new Date(baseDate);
     normalizedBaseDate.setHours(9, 0, 0, 0);
 
@@ -196,33 +199,36 @@ export function convertPlanificacionToGanttTasks(
     if (item.prioridad_peso && item.prioridad_peso > 10) priority = "urgente";
     if (item.prioridad_peso && item.prioridad_peso > 20) priority = "critica";
 
-    return {
+    const task = {
       id: `task-${item.orden_id}-${item.proceso_id}-${item.id}`,
       dbId: item.id,
       workOrderId: item.orden_id,
       workOrderNumber: item.orden_id.toString(),
-      resourceId: item.id_operario ? item.id_operario.toString() : "unassigned",
+      resourceId: (() => {
+        const rid = item.id_operario ? item.id_operario.toString() : "unassigned";
+        return rid;
+      })(),
       resourceName: item.nombre_operario ? `${item.nombre_operario} ${item.apellido_operario || ''}`.trim() : "Sin Asignar",
       resourceType: "operario" as const,
       process: item.nombre_proceso,
-      startDate,
-      endDate,
-      startTime,
-      endTime,
-      duration: Number(durationHours.toFixed(2)),
-      priority: priority,
-      status: (item.id_estado === 3 ? "finalizado_total" : item.id_estado === 2 ? "en_proceso" : "nuevo") as Status,
-      progress: 0,
-      isDelayed: false,
+      startDate: startDate,
+      endDate: endDate,
+      startTime: startTime,
+      endTime: endTime,
+      duration: Number(((item.fin_min - item.inicio_min) / 60).toFixed(2)),
       originalInicioMin: item.inicio_min,
       originalFinMin: item.fin_min,
-      client: "Cliente Generico", // Placeholder
-      sector: "Sector Generico", // Placeholder
-      subsector: "Subsector Generico", // Placeholder
-      quantity: 1, // Placeholder
-      materials: [], // Placeholder
       notes: item.observaciones_proceso || item.observaciones_ot || "",
+      progress: item.id_estado === 3 ? 100 : item.id_estado === 2 ? 50 : 0,
+      status: (item.id_estado === 3 ? "finalizado_total" : item.id_estado === 2 ? "en_proceso" : "nuevo") as Status,
+      dependencies: [],
+      priority: priority,
+      isDelayed: false,
+      allowedRanges: item.rangos_permitidos || [],
     };
+
+    console.log(`Converted Task ${task.id}: resourceId=${task.resourceId}, start=${task.startDate} ${task.startTime}`);
+    return task;
   });
 
   return levelResources(initialTasks);
@@ -393,79 +399,127 @@ export function addWorkMinutes(startDate: Date, minutesToAdd: number): Date {
   // Work hours per day in minutes
   const workMinutesPerDay = (WORK_HOURS.end - WORK_HOURS.start) * 60;
 
-  // Calculate how many full working days to add
-  let daysToAdd = Math.floor(minutesToAdd / workMinutesPerDay);
-  let remainingMinutes = minutesToAdd % workMinutesPerDay;
-
-  // Calculate the new time
-  // Start date is always normalized to 09:00 in our usage, but let's be safe
-  // If we assume startDate is at WORK_HOURS.start (09:00)
-
   const resultDate = new Date(startDate);
 
-  // Add working days, skipping weekends
-  let daysAdded = 0;
-  while (daysAdded < daysToAdd) {
-    resultDate.setDate(resultDate.getDate() + 1);
-    // If it's Saturday (6) or Sunday (0), don't count it as a work day added
-    // But we still advanced the date.
-    // Wait, we need to add *working* days.
-    // So if we land on Sat/Sun, we just keep advancing until we hit a weekday?
-    // No, simpler: loop until we have added 'daysToAdd' working days.
-    const day = resultDate.getDay();
-    if (day !== 0 && day !== 6) {
-      daysAdded++;
+  if (minutesToAdd >= 0) {
+    // Positive addition (forward in time)
+    let daysToAdd = Math.floor(minutesToAdd / workMinutesPerDay);
+    let remainingMinutes = minutesToAdd % workMinutesPerDay;
+
+    // Add working days
+    let daysAdded = 0;
+    while (daysAdded < daysToAdd) {
+      resultDate.setDate(resultDate.getDate() + 1);
+      const day = resultDate.getDay();
+      if (day !== 0 && day !== 6) {
+        daysAdded++;
+      }
     }
+
+    // Add remaining minutes
+    resultDate.setHours(WORK_HOURS.start, 0, 0, 0);
+    resultDate.setMinutes(resultDate.getMinutes() + remainingMinutes);
+
+    return resultDate;
+  } else {
+    // Negative addition (backward in time)
+    let minutesToSubtract = Math.abs(minutesToAdd);
+    let daysToSubtract = Math.floor(minutesToSubtract / workMinutesPerDay);
+    let remainingMinutesToSubtract = minutesToSubtract % workMinutesPerDay;
+
+    // Subtract working days
+    let daysSubtracted = 0;
+    while (daysSubtracted < daysToSubtract) {
+      resultDate.setDate(resultDate.getDate() - 1);
+      const day = resultDate.getDay();
+      if (day !== 0 && day !== 6) {
+        daysSubtracted++;
+      }
+    }
+
+    // Subtract remaining minutes
+    // We assume we are starting from 09:00 (start of day) effectively
+    // So subtracting minutes means going to previous day's end
+    // Wait, the logic for positive was: set to 09:00 + remaining.
+    // For negative, we should set to 18:00 - remaining?
+    // If we are at 09:00 (normalized base), and we subtract 1 minute.
+    // We should go to previous working day 17:59.
+
+    // Let's simplify:
+    // 1. Move back N full days.
+    // 2. Move back remaining minutes from 09:00? No, from 09:00 of the *current* day?
+    // If we are at 09:00, and subtract 10 mins.
+    // We go to previous day 17:50.
+
+    // So, first subtract full days.
+    // Then subtract remaining minutes.
+
+    // If we are at 09:00.
+    // Subtract remainingMinutesToSubtract.
+    // We need to wrap to previous day.
+
+    // Actually, let's just use a loop for the remaining minutes part to be safe.
+
+    // But wait, the positive logic sets time to 09:00 + remaining.
+    // This implies the base date is always 09:00.
+    // So for negative:
+    // 18:00 - remaining?
+
+    // Example: -60 mins.
+    // 18:00 - 60 = 17:00.
+    // If -540 mins (9 hours).
+    // 18:00 - 540 = 09:00.
+
+    // So yes, set to 18:00 and subtract remaining.
+
+    // But we need to ensure we are on a working day.
+    // If we just subtracted days, we might be on a weekend?
+    // The loop ensures we land on a weekday (or we skipped weekends).
+    // But wait, if we land on Monday 09:00.
+    // And we need to subtract 1 minute.
+    // We should go to Friday 17:59.
+
+    // So:
+    // 1. Subtract full days.
+    // 2. If remaining > 0:
+    //    Move back 1 more day (skipping weekends).
+    //    Set time to 18:00 - remaining.
+
+    if (remainingMinutesToSubtract > 0) {
+      // Move back 1 day to start subtracting from its end
+      resultDate.setDate(resultDate.getDate() - 1);
+      while (resultDate.getDay() === 0 || resultDate.getDay() === 6) {
+        resultDate.setDate(resultDate.getDate() - 1);
+      }
+      resultDate.setHours(WORK_HOURS.end, 0, 0, 0);
+      resultDate.setMinutes(resultDate.getMinutes() - remainingMinutesToSubtract);
+    } else {
+      // Exact day boundary, set to 09:00
+      resultDate.setHours(WORK_HOURS.start, 0, 0, 0);
+    }
+
+    return resultDate;
   }
-
-  // Now add the remaining minutes
-  // We assume the time is currently WORK_HOURS.start (09:00) because we added full days
-  // But wait, resultDate still has the original time.
-  // If startDate was 09:00, resultDate is 09:00.
-
-  // Set time to start of day + remaining minutes
-  resultDate.setHours(WORK_HOURS.start, 0, 0, 0);
-  resultDate.setMinutes(resultDate.getMinutes() + remainingMinutes);
-
-  // Check if we landed on a weekend after adding days (the loop handles adding *full* days)
-  // But what if daysToAdd was 0? We might still be on a weekend if startDate was weekend?
-  // Assuming startDate is a valid workday.
-
-  // Also check if we overflowed the day? 
-  // No, remainingMinutes < workMinutesPerDay, so we are within 09:00 - 18:00.
-
-  // However, we need to ensure we didn't land on a weekend.
-  // The loop ensures we added N working days.
-  // If we started on Friday and added 1 day, we should be on Monday.
-  // My loop:
-  // Start Friday. daysToAdd=1.
-  // Iter 1: Date becomes Saturday. Day=6. daysAdded=0.
-  // Iter 2: Date becomes Sunday. Day=0. daysAdded=0.
-  // Iter 3: Date becomes Monday. Day=1. daysAdded=1. Loop ends.
-  // Result: Monday. Correct.
-
-  return resultDate;
 }
 
 export function calculateWorkingMinutes(startDate: Date, endDate: Date): number {
-  if (startDate >= endDate) return 0;
+  // console.log("calculateWorkingMinutes input:", startDate.toISOString(), endDate.toISOString());
+  let isNegative = false;
+  let start = new Date(startDate);
+  let end = new Date(endDate);
 
-  let current = new Date(startDate);
+  if (start > end) {
+    isNegative = true;
+    // Swap
+    const temp = start;
+    start = end;
+    end = temp;
+  }
+
+  let current = new Date(start);
   let totalMinutes = 0;
 
-  // Normalize start/end to work hours if they are outside?
-  // Actually, we should just iterate.
-  // But for efficiency, we can calculate full days.
-
-  // Simple iterative approach for correctness first (can optimize if needed)
-  // Or better:
-  // 1. Calculate minutes in the first partial day.
-  // 2. Calculate minutes in the last partial day.
-  // 3. Calculate minutes in full intervening days.
-
-  // Let's use a robust loop that advances by days.
-
-  const target = new Date(endDate);
+  const target = new Date(end);
 
   while (current < target) {
     const currentDay = current.getDay();
@@ -523,5 +577,41 @@ export function calculateWorkingMinutes(startDate: Date, endDate: Date): number 
     }
   }
 
-  return totalMinutes;
+  return isNegative ? -totalMinutes : totalMinutes;
 }
+
+export const isOperatorQualified = (operatorRanges: number[], allowedRanges: number[] | string | any[]): boolean => {
+  let parsedAllowed: number[] = [];
+
+  if (Array.isArray(allowedRanges)) {
+    // Check if it's an array of strings like ["4, 10"] or ["4", "10"]
+    if (allowedRanges.length > 0 && typeof allowedRanges[0] === 'string') {
+      const first = allowedRanges[0] as string;
+      if (first.trim().startsWith('[')) {
+        try {
+          parsedAllowed = JSON.parse(first);
+        } catch { parsedAllowed = []; }
+      } else {
+        // Assume ["4", "10"]
+        parsedAllowed = allowedRanges.map(r => parseInt(r as string, 10)).filter(n => !isNaN(n));
+      }
+    } else {
+      parsedAllowed = allowedRanges as number[];
+    }
+  } else if (typeof allowedRanges === 'string') {
+    try {
+      parsedAllowed = JSON.parse(allowedRanges);
+    } catch (e) {
+      console.error("Error parsing allowedRanges string:", allowedRanges);
+      parsedAllowed = [];
+    }
+  } else {
+    // If null/undefined, return true (no restrictions)
+    return true;
+  }
+
+  if (!Array.isArray(parsedAllowed) || parsedAllowed.length === 0) return true; // No restrictions
+  if (!Array.isArray(operatorRanges) || operatorRanges.length === 0) return false; // Operator has no skills
+
+  return parsedAllowed.some(r => operatorRanges.includes(r));
+};
