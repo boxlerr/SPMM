@@ -193,3 +193,17 @@ class OrdenTrabajoService:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
             
         return ResponseDTO(status=True, data={"updated": True, "observaciones": observaciones})
+
+    async def obtenerOrdenesNoPlanificadas(self):
+        """
+        Obtiene las órdenes de trabajo que no han sido planificadas
+        """
+        try:
+            logger.info("Service - Obtener órdenes no planificadas.")
+            ordenes = await self.repository.find_unplanned()
+            logger.info(f"Service - Órdenes no planificadas obtenidas: {len(ordenes)}")
+            return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
+        except InfrastructureException:
+            raise
+        except Exception as e:
+            raise ApplicationException("Error al obtener órdenes no planificadas.") from e

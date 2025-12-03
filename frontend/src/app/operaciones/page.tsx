@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import TablaTareas from "@/components/TablaTareas"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
+import { UnplannedWorkOrders } from "@/components/gantt/unplanned-work-orders"
 import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
@@ -354,7 +355,7 @@ export default function OperacionesPage() {
 
       <div className="flex-1 flex overflow-visible">
         <div className={`flex-1 transition-all duration-300 flex flex-col ${activeTab === 'gantt' ? 'max-w-full px-2 py-4' : 'max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 w-full'}`}>
-          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex-1 flex flex-col ${activeTab === 'gantt' ? 'p-2' : 'p-6'}`}>
+          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : 'p-6'}`}>
             {/* Redundant header removed */}
 
             {activeTab === "gantt" && (
@@ -378,6 +379,9 @@ export default function OperacionesPage() {
               />
             )}
             {activeTab === "work_orders" && <WorkOrdersListWrapper />}
+
+            {/* Sección de Órdenes No Planificadas */}
+            {activeTab === "gantt" && <UnplannedWorkOrders />}
           </div>
         </div>
       </div>

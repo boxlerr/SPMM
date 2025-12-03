@@ -116,6 +116,13 @@ async def actualizar_observaciones_proceso(id_orden: int, id_proceso: int, body:
     service = OrdenTrabajoService(db)
     return await service.actualizarObservacionesProceso(id_orden, id_proceso, body.observaciones)
 
+# 🔹 Obtener órdenes no planificadas
+@router.get("/ordenes-no-planificadas")
+async def obtener_ordenes_no_planificadas(db=Depends(get_db)):
+    logger.info("API - Inicio GET /ordenes-no-planificadas")
+    service = OrdenTrabajoService(db)
+    return await service.obtenerOrdenesNoPlanificadas()
+
 
 
 

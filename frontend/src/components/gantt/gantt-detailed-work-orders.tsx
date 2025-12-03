@@ -123,7 +123,7 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
     const zoomOut = () => setZoom((z) => Math.max(z - 0.25, 1));
 
     return (
-        <div className="space-y-6 relative min-h-screen pb-32">
+        <div className="space-y-6 relative">
             {/* Background Decor */}
             <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
                 <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-red-500/5 blur-[120px]" />

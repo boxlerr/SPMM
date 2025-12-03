@@ -10,6 +10,7 @@
     "start": "npm run start --prefix frontend"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "badge": "^1.0.3",
     "ui": "^0.2.4"
   }

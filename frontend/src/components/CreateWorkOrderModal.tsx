@@ -85,7 +85,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
 
             if (prioridadesRes.ok) {
                 const data = await prioridadesRes.json();
-                setPrioridades(Array.isArray(data) ? data : (data.data || []));
+                const rawData = Array.isArray(data) ? data : (data.data || []);
+                setPrioridades(rawData.map((p: any) => ({ id: p.id, nombre: p.descripcion })));
             }
             if (procesosRes.ok) {
                 const data = await procesosRes.json();

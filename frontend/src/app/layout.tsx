@@ -7,6 +7,7 @@ import { NotificationProvider } from "../contexts/NotificationContext";
 import { AuthProvider } from "../contexts/AuthContext";
 import { ToastProvider } from "../components/ui/toast";
 import { Toaster } from "sonner";
+import { Analytics } from "@vercel/analytics/next"
 
 
 const geistSans = Geist({
@@ -49,6 +50,7 @@ export default function RootLayout({
             </ToastProvider>
           </NotificationProvider>
         </AuthProvider>
+        <Analytics />
       </body>
     </html>
   );

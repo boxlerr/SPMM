@@ -414,3 +414,38 @@ class OrdenTrabajoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error en update_proceso_observaciones: {e}")
             raise InfrastructureException("Error al actualizar observaciones del proceso.") from e
+
+    async def find_unplanned(self):
+        """
+        Obtiene las órdenes de trabajo que NO están en la tabla de planificación.
+        """
+        try:
+            logger.info("Repository - Buscar órdenes no planificadas.")
+            
+            # Subquery para obtener IDs de órdenes ya planificadas
+            # Asumiendo que existe una tabla/modelo Planificacion
+            # Si no tienes el modelo importado, puedes usar text() o importarlo
+            # Para evitar dependencias circulares, usaremos text() si es simple, 
+            # o mejor, asumimos que la tabla se llama 'planificacion'
+            
+            from sqlalchemy import text
+            
+            query = select(OrdenTrabajo).where(
+                ~OrdenTrabajo.id.in_(
+                    select(text("orden_id FROM planificacion"))
+                )
+            ).options(
+                joinedload(OrdenTrabajo.articulo),
+                joinedload(OrdenTrabajo.sector),
+                joinedload(OrdenTrabajo.prioridad)
+            )
+            
+            result = await self.db.execute(query)
+            ordenes = result.scalars().unique().all()
+            
+            logger.info(f"Repository - Órdenes no planificadas encontradas: {len(ordenes)}")
+            return ordenes
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en find_unplanned: {e}")
+            raise InfrastructureException("Error al buscar órdenes no planificadas.") from e
