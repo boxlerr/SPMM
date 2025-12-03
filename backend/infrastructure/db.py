@@ -53,6 +53,7 @@ if TRUSTED and TRUSTED.lower() == "yes":
         f"SERVER={DB_SERVER};"
         f"DATABASE={DB_NAME};"
         f"Trusted_Connection=yes;"
+        f"MARS_Connection=yes;"
     )
 else:
     connection_string = (
@@ -61,6 +62,7 @@ else:
         f"DATABASE={DB_NAME};"
         f"UID={DB_USER};"
         f"PWD={DB_PASSWORD};"
+        f"MARS_Connection=yes;"
     )
 
 # 🔹 Codificar correctamente para aioodbc
