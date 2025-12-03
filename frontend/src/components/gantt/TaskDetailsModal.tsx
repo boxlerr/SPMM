@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Activity, AlertCircle } from "lucide-react";
+import { Activity, AlertCircle, FileText, Image as ImageIcon, Eye, Download } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -398,6 +398,56 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                     value={localObservaciones}
                                     onChange={(e) => setLocalObservaciones(e.target.value)}
                                 />
+                            </div>
+                        </div>
+
+                        {/* Archivos Adjuntos (Mock) */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 block">
+                                Archivos Adjuntos
+                            </label>
+                            <div className="space-y-3">
+                                {/* Mock File 1: Image */}
+                                <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white hover:border-blue-300 transition-all group">
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 text-blue-600">
+                                            <ImageIcon className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                            <span className="text-sm font-medium text-gray-900 truncate">plano_pieza_v2.png</span>
+                                            <span className="text-xs text-gray-500">2.4 MB • 12/05/2024</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors" title="Ver archivo">
+                                            <Eye className="w-4 h-4" />
+                                        </button>
+                                        <button className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors" title="Descargar">
+                                            <Download className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Mock File 2: PDF */}
+                                <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white hover:border-red-300 transition-all group">
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                        <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0 text-red-600">
+                                            <FileText className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                            <span className="text-sm font-medium text-gray-900 truncate">especificaciones_tecnicas.pdf</span>
+                                            <span className="text-xs text-gray-500">1.8 MB • 10/05/2024</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors" title="Ver archivo">
+                                            <Eye className="w-4 h-4" />
+                                        </button>
+                                        <button className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors" title="Descargar">
+                                            <Download className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

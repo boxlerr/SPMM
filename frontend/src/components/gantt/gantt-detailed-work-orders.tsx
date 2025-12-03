@@ -333,6 +333,10 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                                         <div
                                                                             draggable
                                                                             onDragStart={() => handleDragStart(task.id)}
+                                                                            onDragEnd={() => {
+                                                                                setDraggedTask(null);
+                                                                                setDragOverCell(null);
+                                                                            }}
                                                                             className={cn(
                                                                                 "absolute h-12 rounded-xl text-xs text-white flex items-center px-3 cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all shadow-md border border-white/20 overflow-hidden z-10 group/task",
                                                                                 STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"],

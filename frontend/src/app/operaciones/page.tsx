@@ -70,7 +70,7 @@ export default function OperacionesPage() {
                 ranges = JSON.parse(ranges[0] as string);
               } else {
                 // Otherwise assume it's ["4", "10"] and convert to numbers
-                ranges = (ranges as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
+                ranges = (ranges as unknown as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
               }
             } catch (e) {
               console.error("Error parsing ranges array:", ranges);
@@ -305,7 +305,7 @@ export default function OperacionesPage() {
                 </div>
                 Operaciones
               </h1>
-              <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona las operaciones del sistema</p>
+              <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona la planificación de las órdenes de trabajo</p>
             </div>
             <Button
               onClick={() => setIsCreateModalOpen(true)}

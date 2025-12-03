@@ -284,9 +284,15 @@ const TablaTareas = ({ tasks, operarios, onStatusChange, onResponsibleChange }: 
 
         tasks.forEach(task => {
             // Filter by search term
-            if (searchTerm && !task.workOrderNumber.toLowerCase().includes(searchTerm.toLowerCase()) &&
-                !task.process.toLowerCase().includes(searchTerm.toLowerCase())) {
-                return;
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                const matchesOT = task.workOrderNumber.toLowerCase().includes(term);
+                const matchesProcess = task.process.toLowerCase().includes(term);
+                const matchesResource = task.resourceName ? task.resourceName.toLowerCase().includes(term) : false;
+
+                if (!matchesOT && !matchesProcess && !matchesResource) {
+                    return;
+                }
             }
 
             if (task.status === 'finalizado_total' || task.status === 'finalizado_parcial') {
@@ -358,26 +364,19 @@ const TablaTareas = ({ tasks, operarios, onStatusChange, onResponsibleChange }: 
         <DragDropContext onDragEnd={onDragEnd}>
             <div className="w-full bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 {/* Toolbar */}
-                <div className="p-4 border-b border-gray-200 flex items-center gap-4 overflow-x-auto bg-gray-50/50">
-                    <div className="flex items-center gap-2 border border-gray-300 rounded-lg px-3 py-2 bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-400 transition-all">
-                        <Search size={18} className="text-gray-400" />
+                <div className="p-4 border-b border-gray-200 bg-gray-50/50">
+                    <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="h-5 w-5 text-gray-400" />
+                        </div>
                         <input
                             type="text"
-                            placeholder="Buscar tareas..."
+                            className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-red-500 focus:border-red-500 sm:text-sm transition duration-150 ease-in-out shadow-sm"
+                            placeholder="Buscar por OT, proceso u operario..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="outline-none text-sm w-48 md:w-64 placeholder:text-gray-400"
                         />
                     </div>
-                    <div className="h-6 w-px bg-gray-300 mx-2"></div>
-                    <button className="text-gray-600 hover:bg-white hover:shadow-sm hover:text-gray-900 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all">
-                        <User size={16} />
-                        <span>Persona</span>
-                    </button>
-                    <button className="text-gray-600 hover:bg-white hover:shadow-sm hover:text-gray-900 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all">
-                        <Filter size={16} />
-                        <span>Filtrar</span>
-                    </button>
                 </div>
 
                 {/* Table Content */}
