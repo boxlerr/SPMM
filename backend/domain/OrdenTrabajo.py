@@ -25,3 +25,7 @@ class OrdenTrabajo(Base):
     prioridad = relationship("Prioridad")
     sector = relationship("Sector")
     articulo = relationship("Articulo")
+    
+    #relacion con plano
+    planos = relationship("Plano", back_populates="orden_trabajo")
+

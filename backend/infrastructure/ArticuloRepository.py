@@ -7,8 +7,6 @@ class ArticuloRepository:
     def __init__(self, db):
         self.db = db
 
-
-
     async def save(self, articulo: Articulo):
         try:
             logger.info("Repository - Crear Artículo.")
