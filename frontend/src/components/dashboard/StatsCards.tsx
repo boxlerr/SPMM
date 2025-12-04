@@ -53,7 +53,7 @@ export default function StatsCards({ estadisticas, loading, error, onStatusClick
             progressColor: "bg-green-500",
         },
         {
-            label: "EN PROCESO",
+            label: "EN CURSO",
             value: estadisticas.en_proceso,
             percentage: estadisticas.porcentaje_en_proceso,
             icon: Clock,

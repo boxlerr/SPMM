@@ -181,6 +181,18 @@ class OrdenTrabajoService:
         
         if not ok:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
+
+        # Verificar SIEMPRE si la orden está completa o no
+        is_complete = await self.repository.check_all_processes_completed(id_orden)
+        print(f"DEBUG: Orden {id_orden} is_complete={is_complete}")
+        
+        if is_complete:
+            print(f"DEBUG: Marking order {id_orden} as completed")
+            await self.repository.mark_as_completed(id_orden)
+        else:
+            # Si no está completa (porque se movió un proceso a no finalizado), marcar como incompleta
+            print(f"DEBUG: Marking order {id_orden} as incomplete")
+            await self.repository.mark_as_incomplete(id_orden)
             
         return ResponseDTO(status=True, data={"updated": True, "id_estado": id_estado})
 

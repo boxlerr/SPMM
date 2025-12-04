@@ -69,4 +69,7 @@ export interface OrdenEstado {
     sector: string
     prioridad: string
     cantidad: number
+    proceso_actual?: string
+    procesos_totales?: number
+    procesos_pendientes?: number
 }

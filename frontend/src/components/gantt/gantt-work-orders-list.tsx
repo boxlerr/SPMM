@@ -96,7 +96,12 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                         </svg>
                     </div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-gray-800 tracking-tight">Listado de Órdenes de Trabajo</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold text-gray-800 tracking-tight flex items-center gap-3">
+                        Listado de Órdenes de Trabajo Planificadas
+                        <span className="text-sm font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full border border-gray-200">
+                            {sortedOTs.length}
+                        </span>
+                    </h3>
                 </div>
                 <div className="flex items-center gap-2">
                     <button

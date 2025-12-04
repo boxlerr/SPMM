@@ -449,3 +449,88 @@ class OrdenTrabajoRepository:
         except Exception as e:
             logger.error(f"Repository - Error en find_unplanned: {e}")
             raise InfrastructureException("Error al buscar órdenes no planificadas.") from e
+
+    async def check_all_processes_completed(self, id_orden: int) -> bool:
+        """
+        Verifica si todos los procesos de una orden están en estado Finalizado (ID 3).
+        """
+        try:
+            logger.info(f"Repository - Verificar si orden {id_orden} está completa.")
+            
+            # Contar total de procesos
+            query_total = select(func.count()).where(OrdenTrabajoProceso.id_orden_trabajo == id_orden)
+            result_total = await self.db.execute(query_total)
+            total = result_total.scalar() or 0
+            
+            if total == 0:
+                return False # Si no tiene procesos, no se considera completa automáticamente (o sí? depende de la lógica, asumimos no)
+
+            # Contar procesos finalizados (id_estado = 3)
+            query_completed = select(func.count()).where(
+                OrdenTrabajoProceso.id_orden_trabajo == id_orden,
+                OrdenTrabajoProceso.id_estado == 3
+            )
+            result_completed = await self.db.execute(query_completed)
+            completed = result_completed.scalar() or 0
+            
+            is_complete = total == completed
+            logger.info(f"Repository - Orden {id_orden}: {completed}/{total} procesos finalizados. Completa: {is_complete}")
+            return is_complete
+            
+        except Exception as e:
+            logger.error(f"Repository - Error en check_all_processes_completed: {e}")
+            raise InfrastructureException("Error al verificar completitud de la orden.") from e
+
+    async def mark_as_completed(self, id_orden: int):
+        """
+        Marca la orden como completada estableciendo fecha_entrega = NOW.
+        """
+        try:
+            logger.info(f"Repository - Marcar orden {id_orden} como completada.")
+            
+            result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id_orden))
+            orden = result.scalar_one_or_none()
+            
+            if not orden:
+                logger.error(f"Repository - Orden {id_orden} no encontrada para marcar como completada.")
+                return False
+                
+            orden.fecha_entrega = datetime.now()
+            await self.db.commit()
+            await self.db.refresh(orden)
+            
+            logger.info(f"Repository - Orden {id_orden} marcada como completada correctamente.")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en mark_as_completed: {e}")
+            raise InfrastructureException("Error al marcar orden como completada.") from e
+
+    async def mark_as_incomplete(self, id_orden: int):
+        """
+        Marca la orden como NO completada estableciendo fecha_entrega = 1950-01-01 (NULL).
+        """
+        try:
+            logger.info(f"Repository - Marcar orden {id_orden} como NO completada.")
+            
+            result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id_orden))
+            orden = result.scalar_one_or_none()
+            
+            if not orden:
+                logger.error(f"Repository - Orden {id_orden} no encontrada para marcar como NO completada.")
+                return False
+            
+            print(f"DEBUG: Repository marking {id_orden} as incomplete (1950-01-01)")
+            orden.fecha_entrega = datetime(1950, 1, 1) # Use datetime instead of date
+            await self.db.commit()
+            await self.db.refresh(orden)
+            
+            logger.info(f"Repository - Orden {id_orden} marcada como NO completada correctamente.")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en mark_as_incomplete: {e}")
+            raise InfrastructureException("Error al marcar orden como NO completada.") from e
+
