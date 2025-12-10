@@ -88,4 +88,7 @@ export interface PlanificacionItem {
     id_estado?: number;
     observaciones_proceso?: string;
     rangos_permitidos?: number[];
+    fecha_entrada?: string;
+    id_prioridad?: number;
+    id_articulo?: number;
 }

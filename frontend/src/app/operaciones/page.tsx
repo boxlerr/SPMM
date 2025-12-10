@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import TablaTareas from "@/components/TablaTareas"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
+import { PlanningListTable } from "@/components/planning/PlanningListTable"
 import { UnplannedWorkOrders } from "@/components/gantt/unplanned-work-orders"
 import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
@@ -15,7 +16,7 @@ import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types"
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "tabla" | "work_orders">("gantt")
+  const [activeTab, setActiveTab] = useState<"gantt" | "tabla" | "work_orders" | "lista_planificacion">("gantt")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -294,7 +295,7 @@ export default function OperacionesPage() {
   };
 
   return (
-    <div className={`min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out ${isDetailsPanelOpen && activeTab === 'gantt' ? 'mr-[400px]' : 'mr-0'}`}>
+    <div className={`min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out ${(isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'mr-[400px]' : 'mr-0'}`}>
       {/* Header normal (no sticky) */}
       <div className="bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
@@ -328,6 +329,16 @@ export default function OperacionesPage() {
             >
               <GanttChartSquare size={18} />
               Gantt
+            </button>
+            <button
+              onClick={() => setActiveTab("lista_planificacion")}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "lista_planificacion"
+                ? "border-red-700 text-red-700"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+            >
+              <LayoutList size={18} />
+              Planificación
             </button>
             <button
               onClick={() => setActiveTab("tabla")}
@@ -379,6 +390,16 @@ export default function OperacionesPage() {
               />
             )}
             {activeTab === "work_orders" && <WorkOrdersListWrapper />}
+            {activeTab === "lista_planificacion" && (
+              <PlanningListTable
+                data={rawPlanificacion}
+                isLoading={isLoading}
+                onRowClick={(item) => {
+                  setSelectedTask(item);
+                  setIsDetailsPanelOpen(true);
+                }}
+              />
+            )}
 
             {/* Sección de Órdenes No Planificadas */}
             {activeTab === "gantt" && <UnplannedWorkOrders />}
@@ -387,7 +408,7 @@ export default function OperacionesPage() {
       </div>
 
       {/* Sidebar rendered as Fixed Sidebar (Full Height) */}
-      <div className={`fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] ${isDetailsPanelOpen && activeTab === 'gantt' ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div className={`fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] ${(isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'translate-x-0' : 'translate-x-full'}`}>
         <TaskDetailsModal
           isOpen={isDetailsPanelOpen}
           selectedItem={selectedTask}

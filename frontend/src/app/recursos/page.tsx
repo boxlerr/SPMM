@@ -18,6 +18,7 @@ import CambiarEstado from "./_components/CambiarEstado";
 import { Operario, Maquina, Proceso } from "./_types";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
+import { PlanificacionItem } from "@/lib/types";
 
 export default function RecursosPage() {
   const { addNotification } = useNotifications();
@@ -39,6 +40,10 @@ export default function RecursosPage() {
   const [itemAEliminar, setItemAEliminar] = useState<{ tipo: "operario" | "maquina" | "proceso"; id: number; nombre: string } | null>(null);
   const [itemAEditar, setItemAEditar] = useState<Operario | Maquina | Proceso | null>(null);
   const [operarioCambiarEstado, setOperarioCambiarEstado] = useState<Operario | null>(null);
+
+  // State for assigned tasks
+  const [tasks, setTasks] = useState<PlanificacionItem[]>([]);
+  const [operatorTasks, setOperatorTasks] = useState<PlanificacionItem[]>([]);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const cleanUrl = apiUrl.replace(/\/$/, "");
@@ -71,6 +76,7 @@ export default function RecursosPage() {
 
   const handleVerOperario = async (operario: Operario) => {
     try {
+      // 1. Fetch Operario Details
       const response = await fetch(`${cleanUrl}/operarios/${operario.id}`);
       if (response.ok) {
         const data = await response.json();
@@ -78,7 +84,19 @@ export default function RecursosPage() {
       } else {
         setOperarioSeleccionado(operario);
       }
-    } catch {
+
+      // 2. Fetch Assigned Tasks (if not already fetched, or always re-fetch)
+      const planResponse = await fetch(`${cleanUrl}/planificacion`);
+      if (planResponse.ok) {
+        const planData: PlanificacionItem[] = await planResponse.json();
+        setTasks(planData);
+        // Filter for this operator
+        const assigned = planData.filter(t => t.id_operario === operario.id);
+        setOperatorTasks(assigned);
+      }
+
+    } catch (e) {
+      console.error("Error loading operator details:", e);
       setOperarioSeleccionado(operario);
     }
   };
@@ -664,6 +682,7 @@ export default function RecursosPage() {
 
       <DetalleOperario
         operario={operarioSeleccionado}
+        tasks={operatorTasks}
         onClose={() => setOperarioSeleccionado(null)}
         onCambiarEstado={(operario: Operario) => handleCambiarEstado(operario)}
       />

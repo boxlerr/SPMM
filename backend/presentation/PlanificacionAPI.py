@@ -43,7 +43,8 @@ async def obtener_planificacion(db = Depends(get_db)):
     query = text("""
         SELECT p.*, m.nombre as nombre_maquinaria, o.nombre as nombre_operario, o.apellido as apellido_operario,
                otp.id_estado, ep.descripcion as estado, otp.observaciones as observaciones_proceso,
-               ot.observaciones as observaciones_ot
+               ot.observaciones as observaciones_ot,
+               ot.fecha_entrada, ot.fecha_prometida, ot.id_prioridad, ot.id_articulo
         FROM planificacion p
         LEFT JOIN maquinaria m ON p.id_maquinaria = m.id
         LEFT JOIN operario o ON p.id_operario = o.id
