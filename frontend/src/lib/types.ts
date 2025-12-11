@@ -91,4 +91,7 @@ export interface PlanificacionItem {
     fecha_entrada?: string;
     id_prioridad?: number;
     id_articulo?: number;
+    cantidad?: number;
+    sector?: string;
+    pedido_externo?: number | string;
 }

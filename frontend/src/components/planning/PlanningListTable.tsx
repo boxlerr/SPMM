@@ -111,10 +111,10 @@ export function PlanningListTable({ data, isLoading, onRowClick }: PlanningListT
                                         {formatDate(item.fecha_entrada)}
                                     </td>
                                     <td className="px-4 py-3 text-gray-500 italic">
-                                        - {/* Pedido placeholder */}
+                                        {item.pedido_externo || item.orden_id}
                                     </td>
                                     <td className="px-4 py-3 text-gray-500 italic">
-                                        - {/* Cliente placeholder */}
+                                        {item.sector || "-"}
                                     </td>
                                     <td className="px-4 py-3 font-mono text-xs">
                                         {item.cod_articulo || "-"}
@@ -130,7 +130,7 @@ export function PlanningListTable({ data, isLoading, onRowClick }: PlanningListT
                                         </div>
                                     </td>
                                     <td className="px-4 py-3 text-center font-medium">
-                                        - {/* Cantidad placeholder */}
+                                        {item.cantidad || "-"}
                                     </td>
                                     <td className="px-4 py-3 text-center">
                                         <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
