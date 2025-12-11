@@ -1,5 +1,6 @@
 
-import { calculateResourceLoad, GanttTask } from "./gantt-utils";
+import { calculateResourceLoad } from "./gantt-utils";
+import type { GanttTask } from "./types";
 
 console.log("Debugging Load Mismatch...");
 

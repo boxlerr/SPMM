@@ -17,6 +17,8 @@ export default function Topbar() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const router = useRouter();
 
+  const recentNotifications = notifications.slice(0, 5);
+
   useEffect(() => {
     setMounted(true);
   }, []);
