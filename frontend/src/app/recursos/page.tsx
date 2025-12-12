@@ -288,7 +288,11 @@ export default function RecursosPage() {
                   </thead>
                   <tbody className="divide-y">
                     {operarios.map((operario) => (
-                      <tr key={operario.id} className="hover:bg-muted/50 transition-colors">
+                      <tr
+                        key={operario.id}
+                        className="hover:bg-muted/50 transition-colors cursor-pointer"
+                        onClick={() => handleVerOperario(operario)}
+                      >
                         <td className="px-6 py-4 text-sm font-medium">
                           {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
                         </td>
@@ -305,12 +309,9 @@ export default function RecursosPage() {
                           </Badge>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex justify-end gap-2">
+                          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                             <Button variant="ghost" size="icon" onClick={() => handleVerOperario(operario)} className="h-8 w-8">
                               <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleEditar("operario", operario)} className="h-8 w-8">
-                              <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="ghost"
@@ -334,7 +335,11 @@ export default function RecursosPage() {
               {/* Vista Mobile - Tarjetas */}
               <div className="md:hidden divide-y">
                 {operarios.map((operario) => (
-                  <div key={operario.id} className="p-4 hover:bg-muted/50 transition-colors">
+                  <div
+                    key={operario.id}
+                    className="p-4 hover:bg-muted/50 transition-colors cursor-pointer"
+                    onClick={() => handleVerOperario(operario)}
+                  >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
                         <h3 className="font-semibold text-base mb-1">
@@ -357,7 +362,7 @@ export default function RecursosPage() {
                       </div>
                     )}
 
-                    <div className="flex gap-2">
+                    <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                       <Button
                         variant="outline"
                         size="sm"
@@ -366,15 +371,6 @@ export default function RecursosPage() {
                       >
                         <Eye className="h-4 w-4 mr-1" />
                         Ver
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditar("operario", operario)}
-                        className="flex-1"
-                      >
-                        <Pencil className="h-4 w-4 mr-1" />
-                        Editar
                       </Button>
                       <Button
                         variant="outline"
@@ -692,6 +688,10 @@ export default function RecursosPage() {
         tasks={operatorTasks}
         onClose={() => setOperarioSeleccionado(null)}
         onCambiarEstado={(operario: Operario) => handleCambiarEstado(operario)}
+        onOperatorUpdated={() => {
+          fetchOperarios();
+          if (operarioSeleccionado) handleVerOperario(operarioSeleccionado);
+        }}
       />
 
       <DetalleMaquina maquina={maquinaSeleccionada} onClose={() => setMaquinaSeleccionada(null)} />
