@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
-import TablaTareas from "@/components/TablaTareas"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PlanningListTable } from "@/components/planning/PlanningListTable"
 import { UnplannedWorkOrders } from "@/components/gantt/unplanned-work-orders"
+import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
@@ -16,7 +17,7 @@ import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib
 import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types"
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "tabla" | "work_orders" | "lista_planificacion">("gantt")
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("gantt")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -340,16 +341,7 @@ export default function OperacionesPage() {
               <LayoutList size={18} />
               Planificación
             </button>
-            <button
-              onClick={() => setActiveTab("tabla")}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "tabla"
-                ? "border-red-700 text-red-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
-            >
-              <LayoutList size={18} />
-              Procesos
-            </button>
+
             <button
               onClick={() => setActiveTab("work_orders")}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "work_orders"
@@ -381,24 +373,136 @@ export default function OperacionesPage() {
                 isLoading={isLoading}
               />
             )}
-            {activeTab === "tabla" && (
-              <TablaTareas
-                tasks={tasks}
-                operarios={rawOperarios}
-                onStatusChange={(taskId, statusId) => handleStatusChange(statusId, taskId)}
-                onResponsibleChange={(taskId, opId) => handleOperatorChange(opId, taskId)}
-              />
-            )}
+
             {activeTab === "work_orders" && <WorkOrdersListWrapper />}
             {activeTab === "lista_planificacion" && (
-              <PlanningListTable
-                data={rawPlanificacion}
-                isLoading={isLoading}
-                onRowClick={(item) => {
-                  setSelectedTask(item);
-                  setIsDetailsPanelOpen(true);
-                }}
-              />
+              <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
+                <div className="border-b px-4 bg-gray-50/50">
+                  <TabsList className="bg-transparent p-0 h-auto gap-4">
+                    <TabsTrigger
+                      value="general"
+                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                    >
+                      General
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="semanal"
+                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                    >
+                      Semanal
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="mensual"
+                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                    >
+                      Mensual
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+
+                <div className="flex-1 p-0">
+                  <TabsContent value="general" className="m-0 h-full">
+                    {/* General: Show all */}
+                    <PlanningListTable
+                      data={rawPlanificacion}
+                      isLoading={isLoading}
+                      onRowClick={(item) => {
+                        setSelectedTask(item);
+                        setIsDetailsPanelOpen(true);
+                      }}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="semanal" className="m-0 h-full">
+                    {/* Weekly: Filter by current week */}
+                    <PlanningListTable
+                      data={(() => {
+                        const weekDates = getWeekDates(); // Assuming imports are available or I need to import them
+                        const startWeek = formatDate(weekDates[0]);
+                        const endWeek = formatDate(weekDates[4]); // Friday? Or should we take whole range?
+                        // Actually, getWeekDates returns Mon-Fri. Let's just use the string comparison logic
+                        // But wait, the component might not have getWeekDates imported.
+                        // I'll assume I can import it or implement simple check.
+
+                        // Let's rely on the tasks which have the computed strings.
+                        // We want tasks that overlap with THIS week. 
+                        // But wait, "Semanal" usually means relative to NOW.
+                        // Let's use the same logic as the Gantt: "Semanal" view implies current week.
+
+                        if (tasks.length === 0) return [];
+
+                        // We filter the rawPlanificacion based on whether their corresponding GanttTask is in the list
+                        // AND that GanttTask falls within this week.
+                        // Since `tasks` contains ALL tasks converted, we need to filter `tasks` first.
+
+                        // Simple approach: Filter distinct dbIds from tasks that fall in range.
+                        const validIds = new Set<number>();
+                        const now = new Date();
+                        const currentDay = now.getDay();
+                        const diff = currentDay === 0 ? -6 : 1 - currentDay;
+                        const monday = new Date(now);
+                        monday.setDate(now.getDate() + diff);
+                        monday.setHours(0, 0, 0, 0);
+
+                        const friday = new Date(monday);
+                        friday.setDate(monday.getDate() + 4);
+                        friday.setHours(23, 59, 59, 999);
+
+                        const mondayStr = monday.toISOString().split('T')[0];
+                        const fridayStr = friday.toISOString().split('T')[0];
+
+                        tasks.forEach(t => {
+                          // Check overlap or start date
+                          // If start date is within range, or checks overlap
+                          if (t.startDate >= mondayStr && t.startDate <= fridayStr) {
+                            if (t.dbId) validIds.add(t.dbId);
+                          }
+                          // Also if it started before and ends after/during
+                          else if (t.endDate >= mondayStr && t.startDate <= fridayStr) {
+                            if (t.dbId) validIds.add(t.dbId);
+                          }
+                        });
+
+                        return rawPlanificacion.filter(p => validIds.has(p.id));
+                      })()}
+                      isLoading={isLoading}
+                      onRowClick={(item) => {
+                        setSelectedTask(item);
+                        setIsDetailsPanelOpen(true);
+                      }}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="mensual" className="m-0 h-full">
+                    {/* Monthly: Filter by current month */}
+                    <PlanningListTable
+                      data={(() => {
+                        const now = new Date();
+                        const startMonthStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-01`;
+                        // End of month
+                        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                        const endMonthStr = `${lastDay.getFullYear()}-${(lastDay.getMonth() + 1).toString().padStart(2, '0')}-${lastDay.getDate().toString().padStart(2, '0')}`;
+
+                        const validIds = new Set<number>();
+                        tasks.forEach(t => {
+                          // Check if task falls within month
+                          if ((t.startDate >= startMonthStr && t.startDate <= endMonthStr) ||
+                            (t.endDate >= startMonthStr && t.startDate <= endMonthStr)) {
+                            if (t.dbId) validIds.add(t.dbId);
+                          }
+                        });
+
+                        return rawPlanificacion.filter(p => validIds.has(p.id));
+                      })()}
+                      isLoading={isLoading}
+                      onRowClick={(item) => {
+                        setSelectedTask(item);
+                        setIsDetailsPanelOpen(true);
+                      }}
+                    />
+                  </TabsContent>
+                </div>
+              </Tabs>
             )}
 
             {/* Sección de Órdenes No Planificadas */}
