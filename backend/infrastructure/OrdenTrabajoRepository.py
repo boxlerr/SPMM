@@ -136,6 +136,39 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en find_with_procesos: {e}")
             raise InfrastructureException("Error al obtener órdenes con procesos asociados.") from e
 
+    async def find_with_procesos_by_ids(self, ordenes_ids: list[int]):
+        try:
+            logger.info(f"Repository - Obtener órdenes con procesos por IDs: {ordenes_ids}")
+
+            if not ordenes_ids:
+                logger.info("Repository - Lista de IDs vacía, no se buscarán órdenes.")
+                return []
+
+            result = await self.db.execute(
+                select(OrdenTrabajo)
+                .where(OrdenTrabajo.id.in_(ordenes_ids))
+                .options(
+                    joinedload(OrdenTrabajo.procesos)
+                    .options(
+                        joinedload(OrdenTrabajoProceso.proceso)
+                        .joinedload(Proceso.rangos),
+                        joinedload(OrdenTrabajoProceso.estado_proceso)
+                    ),
+                    joinedload(OrdenTrabajo.prioridad)
+                )
+            )
+
+            ordenes = result.scalars().unique().all()
+
+            logger.info(f"Repository - Resultado OK: {len(ordenes)} órdenes encontradas.")
+            return ordenes
+
+        except Exception as e:
+            logger.error(f"Repository - Error en find_with_procesos_by_ids: {e}")
+            raise InfrastructureException("Error al obtener órdenes con procesos por IDs.") from e
+
+
+
 
     async def get_estadisticas_estados(self):
         """

@@ -8,6 +8,7 @@ from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
+from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
 
 from sqlalchemy import text
 
@@ -19,20 +20,15 @@ async def get_db():
         yield session
 
 @router.post("/planificar")
-async def planificar_endpoint(db = Depends(get_db)):
-    """repo_orden = OrdenTrabajoRepository(db)
-    repo_proceso = ProcesoRepository(db)
-    repo_maquina = MaquinariaRepository(db)
-    repo_operario = OperarioRepository(db)"""
+async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO | None = None):
 
-    """resultados = await planificar(repo_orden, repo_proceso, repo_maquina, repo_operario)
-    return resultados"""
-    
     repo_orden = OrdenTrabajoRepository(db)
     repo_operario = OperarioRepository(db)
     repo_maquinaria = MaquinariaRepository(db)
     repo_planificacion = PlanificacionRepository(db)
-    resultados = await planificar(repo_orden,repo_operario,repo_maquinaria,repo_planificacion,db)
+    ordenes_ids = body.ordenes_ids if body else None
+
+    resultados = await planificar(repo_orden,repo_operario,repo_maquinaria,repo_planificacion,db,ordenes_ids)
     return resultados
     
     

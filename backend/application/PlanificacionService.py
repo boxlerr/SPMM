@@ -661,11 +661,18 @@ async def planificar(
     repo_operario: OperarioRepository,
     repo_maquinaria: MaquinariaRepository,
     repo_planificacion: PlanificacionRepository,
-    db
+    db,
+    ordenes_ids: list[int] | None = None
 ):
-    ordenes = await repo_orden.find_with_procesos()
-    operarios = await repo_operario.find_with_rangos()
+    
+    ##ordenes = await repo_orden.find_with_procesos()
+    if ordenes_ids:
+        ordenes = await repo_orden.find_with_procesos_by_ids(ordenes_ids)
+    else:
+        ordenes = await repo_orden.find_with_procesos()
 
+    operarios = await repo_operario.find_with_rangos()
+    
     # Cargar maquinarias (con rangos)
     maquinarias_orm = await repo_maquinaria.find_with_rangos()
     maquinarias = []
