@@ -1,6 +1,6 @@
 # backend/presentation/controllers/PlanificacionAPI.py
 from fastapi import FastAPI,APIRouter, Depends
-from backend.application.PlanificacionService import planificar
+from backend.application.PlanificacionService import planificar,planificar_pendientes
 from backend.infrastructure.db import SessionLocal
 
 from backend.infrastructure.OperarioRepository import OperarioRepository
@@ -9,6 +9,7 @@ from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
+from backend.dto.PlanificacionUpdateDTO import PlanificacionUpdateDTO
 
 from sqlalchemy import text
 
@@ -32,7 +33,26 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     return resultados
     
     
+@router.post("/planificar/pendientes") 
+async def planificar_pendientes_endpoint(
+    body: PlanificarRequestDTO | None = None,
+    db = Depends(get_db)
+):
+    repo_orden = OrdenTrabajoRepository(db)
+    repo_operario = OperarioRepository(db)
+    repo_maquinaria = MaquinariaRepository(db)
+    repo_planificacion = PlanificacionRepository(db)
 
+    ordenes_ids = body.ordenes_ids if body else None
+
+    return await planificar_pendientes(
+        repo_orden,
+        repo_operario,
+        repo_maquinaria,
+        repo_planificacion,
+        db,
+        ordenes_ids
+    )
 
 @router.get("/planificacion")
 async def obtener_planificacion(db = Depends(get_db)):
@@ -55,8 +75,6 @@ async def obtener_planificacion(db = Depends(get_db)):
     result = await db.execute(query)
     rows = result.fetchall()
     return [dict(row._mapping) for row in rows]
-
-from backend.dto.PlanificacionUpdateDTO import PlanificacionUpdateDTO
 
 @router.put("/planificacion/{id}")
 async def actualizar_planificacion(id: int, dto: PlanificacionUpdateDTO, db = Depends(get_db)):

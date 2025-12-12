@@ -182,8 +182,39 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en find_with_procesos_by_ids: {e}")
             raise InfrastructureException("Error al obtener órdenes con procesos por IDs.") from e
 
+    async def find_with_pending_procesos(self, ordenes_ids: list[int] | None = None):
+        try:
+            logger.info("Repository - Obtener órdenes con procesos pendientes.")
 
+            query = (
+                select(OrdenTrabajo)
+                .join(OrdenTrabajo.procesos)
+                .where(OrdenTrabajoProceso.id_estado != 3)  # NO finalizados
+                .options(
+                    joinedload(OrdenTrabajo.procesos)
+                    .options(
+                        joinedload(OrdenTrabajoProceso.proceso)
+                        .joinedload(Proceso.rangos),
+                        joinedload(OrdenTrabajoProceso.estado_proceso)
+                    ),
+                    joinedload(OrdenTrabajo.prioridad)
+                )
+            )
 
+            if ordenes_ids:
+                query = query.where(OrdenTrabajo.id.in_(ordenes_ids))
+
+            result = await self.db.execute(query)
+            ordenes = result.scalars().unique().all()
+
+            logger.info(f"Repository - Órdenes con procesos pendientes: {len(ordenes)}")
+            return ordenes
+
+        except Exception as e:
+            logger.error(f"Repository - Error en find_with_pending_procesos: {e}")
+            raise InfrastructureException(
+                "Error al obtener órdenes con procesos pendientes."
+            ) from e
 
     async def get_estadisticas_estados(self):
         """

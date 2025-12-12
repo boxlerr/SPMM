@@ -13,8 +13,41 @@ from backend.commons.loggers.logger import logger
 
 from sqlalchemy import text
 import time
+import math
 
-    
+
+MIN_LABORAL_DIA = 495
+MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 2775
+
+TRAMOS_LV_LAB = [
+    (0, 120),
+    (120, 285),
+    (285, 495),
+]
+
+TRAMOS_SAB_LAB = [
+    (0, 300),
+]
+
+def construir_ventanas_semanales(num_semanas: int):
+    ventanas = []
+
+    for semana in range(num_semanas):
+        base_semana = semana * MIN_LABORAL_SEMANA
+
+        # Lun–Vie
+        for dia in range(5):
+            base_dia = base_semana + dia * MIN_LABORAL_DIA
+            for ini, fin in TRAMOS_LV_LAB:
+                ventanas.append((base_dia + ini, base_dia + fin))
+
+        # Sábado
+        base_sab = base_semana + 5 * MIN_LABORAL_DIA
+        for ini, fin in TRAMOS_SAB_LAB:
+            ventanas.append((base_sab + ini, base_sab + fin))
+
+    return ventanas
+
 # ------------------------------------------------------------
 # Helpers del solver
 # ------------------------------------------------------------
@@ -48,7 +81,11 @@ def _normalizar_procesos(procesos, prioridad_pesos):
             peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina)
         )
 
-    H = sum(p[5] for p in procesos_norm) + 8 * 60
+    # Horizonte en minutos laborales:
+    # suma total de trabajo + margen (1 día laboral)
+    total_trabajo = sum(p[5] for p in procesos_norm)
+    H = total_trabajo + 495
+
     return procesos_norm, H
 
 
@@ -511,6 +548,31 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
 
     return resultados
 
+def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas):
+    """
+    Obliga a que cada proceso:
+    - empiece dentro de una ventana laboral
+    - termine antes de que esa ventana cierre
+    """
+
+    for (orden_id, proc_id, *_resto) in procesos_norm:
+        start = inicio_vars[(orden_id, proc_id)]
+        dur = dur_map[(orden_id, proc_id)]
+
+        # Un booleano por ventana
+        en_ventana = []
+
+        for idx, (v_ini, v_fin) in enumerate(ventanas):
+            b = model.NewBoolVar(f"vent_{orden_id}_{proc_id}_{idx}")
+
+            # Si b == 1 → el proceso está dentro de esta ventana
+            model.Add(start >= v_ini).OnlyEnforceIf(b)
+            model.Add(start < v_fin).OnlyEnforceIf(b)
+
+            en_ventana.append(b)
+
+        # Debe estar en EXACTAMENTE una ventana
+        model.Add(sum(en_ventana) == 1)
 
 # ------------------------------------------------------------
 # Solver principal (refactorizado)
@@ -572,20 +634,21 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars)
     _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars)
-    
-    _agregar_compatibilidad_op_maq(
+    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,DUMMY_OP_ID,DUMMY_MAQ_ID)
+    # ---- Crear ventanas semanales ----
+    num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
+    ventanas = construir_ventanas_semanales(num_semanas)
+    #ventanas = construir_ventanas_semanales()
+
+    # ---- Restricciones de ventanas horarias ----
+    _agregar_ventanas_horarias(
         model,
         procesos_norm,
-        operario_vars,
-        maq_vars,
-        op_domain_vals,
-        maq_domain_vals,
-        op_to_rango,
-        maq_to_rangos,
-        DUMMY_OP_ID,
-        DUMMY_MAQ_ID,
+        inicio_vars,
+        dur_map,
+        ventanas
     )
-
+    
     # ---- Función objetivo ----
     _agregar_funcion_objetivo(
         model,
@@ -605,6 +668,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         PENAL_DUMMY_MAQ,
         H,
     )
+
 
     # ---- Resolver ----
     solver = cp_model.CpSolver()
@@ -761,3 +825,64 @@ async def planificar(
 
     # Insertar resultados
     return await repo_planificacion.insertar_planificacion_lote(resultados)
+
+async def planificar_pendientes(
+        repo_orden,
+        repo_operario,
+        repo_maquinaria,
+        repo_planificacion,
+        db,
+        ordenes_ids: list[int] | None = None
+    ):
+        logger.info("Service - Planificación de procesos pendientes.")
+
+        # 🔹 SOLO órdenes con procesos pendientes
+        ordenes = await repo_orden.find_with_pending_procesos(ordenes_ids)
+
+        if not ordenes:
+            logger.info("Service - No hay procesos pendientes para planificar.")
+            return []
+
+        operarios = await repo_operario.find_with_rangos()
+
+        maquinarias_orm = await repo_maquinaria.find_with_rangos()
+        maquinarias = [
+            (m.id, {rm.id_rango for rm in (m.rango_maquinarias or [])}, m.nombre)
+            for m in maquinarias_orm
+        ]
+
+        procesos_para_solver = []
+
+        for orden in ordenes:
+            prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
+
+            for rel in orden.procesos:
+                # 🛑 Saltar procesos finalizados (doble seguridad)
+                if rel.id_estado == 3:
+                    continue
+
+                dur_min = rel.tiempo_proceso or 1
+                nombre_proceso = rel.proceso.nombre.lower() if rel.proceso else ""
+                usa_maquina = proceso_usa_maquina(nombre_proceso)
+                rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
+
+                procesos_para_solver.append((
+                    orden.id,
+                    rel.proceso.id,
+                    rel.orden,
+                    orden.fecha_prometida,
+                    prioridad_desc,
+                    dur_min,
+                    rangos_validos,
+                    nombre_proceso,
+                    usa_maquina
+                ))
+
+        resultados = await asyncio.to_thread(
+            _resolver_planificacion,
+            procesos_para_solver,
+            operarios,
+            maquinarias
+        )
+
+        return await repo_planificacion.insertar_planificacion_lote(resultados)
