@@ -139,40 +139,7 @@ export function isOverloaded(load: number): boolean {
   return load > WORK_HOURS.total
 }
 
-export function convertWorkOrdersToGanttTasks(workOrders: WorkOrder[]): GanttTask[] {
-  const tasks: GanttTask[] = []
 
-  workOrders.forEach((wo) => {
-    wo.employeeAssignments.forEach((assignment) => {
-      tasks.push({
-        id: assignment.id,
-        workOrderId: wo.id,
-        workOrderNumber: wo.orderNumber,
-        resourceId: assignment.employeeId,
-        resourceName: assignment.employeeName,
-        resourceType: "operario" as const,
-        process: assignment.process,
-        startDate: assignment.date,
-        endDate: assignment.date,
-        startTime: assignment.startTime,
-        endTime: assignment.endTime,
-        duration: assignment.totalHours,
-        priority: wo.priority,
-        status: wo.status,
-        progress: assignment.progress,
-        client: wo.client,
-        sector: wo.sector,
-        subsector: wo.subsector,
-        quantity: wo.quantity,
-        materials: wo.materials,
-        notes: assignment.notes || wo.notes1,
-        isDelayed: (wo.delayHours || 0) > 0,
-      })
-    })
-  })
-
-  return tasks
-}
 
 export function convertPlanificacionToGanttTasks(
   data: PlanificacionItem[]
@@ -204,6 +171,7 @@ export function convertPlanificacionToGanttTasks(
       dbId: item.id,
       workOrderId: item.orden_id,
       workOrderNumber: item.orden_id.toString(),
+      quantity: item.cantidad,
       resourceId: (() => {
         const rid = item.id_operario ? item.id_operario.toString() : "unassigned";
         return rid;

@@ -7,6 +7,7 @@ from backend.commons.loggers.logger import logger
 from datetime import datetime, date
 
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Proceso import Proceso
 
 class OrdenTrabajoRepository:
@@ -29,8 +30,22 @@ class OrdenTrabajoRepository:
     async def find_all(self):
         try:
             logger.info("Repository - Obtener todas las órdenes de trabajo.")
-            result = await self.db.execute(select(OrdenTrabajo))
-            data = result.scalars().all()
+            # Added eager loading for basic relations
+            result = await self.db.execute(
+                select(OrdenTrabajo)
+                .options(
+                    joinedload(OrdenTrabajo.articulo),
+                    joinedload(OrdenTrabajo.sector),
+                    joinedload(OrdenTrabajo.prioridad),
+                    # Also load processes for the dropdown
+                    joinedload(OrdenTrabajo.procesos).options(
+                        joinedload(OrdenTrabajoProceso.proceso),
+                        joinedload(OrdenTrabajoProceso.estado_proceso)
+                    )
+                )
+                .order_by(OrdenTrabajo.id.desc())
+            )
+            data = result.scalars().unique().all()
             logger.info(f"Repository - Resultado OK ({len(data)} registros).")
             return data
         except Exception as e:
@@ -565,5 +580,31 @@ class OrdenTrabajoRepository:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Repository - Error en mark_as_incomplete: {e}")
-            raise InfrastructureException("Error al marcar orden como NO completada.") from e
+
+    async def get_planificaciones_by_orden_ids(self, orden_ids: list[int]):
+        """
+        Obtiene las planificaciones (con operario) para una lista de órdenes.
+        Usa RAW SQL para máxima compatibilidad y seguridad.
+        """
+        if not orden_ids:
+            return []
+            
+        try:
+            from sqlalchemy import text, bindparam
+            
+            # Use bindparam with expanding=True to correctly handle IN clause with list/tuple
+            query = text("""
+                SELECT p.orden_id, p.proceso_id, o.nombre, o.apellido
+                FROM planificacion p
+                JOIN operario o ON p.id_operario = o.id
+                WHERE p.orden_id IN :orden_ids
+            """).bindparams(bindparam('orden_ids', expanding=True))
+            
+            # Pass the list directly when using expanding=True
+            result = await self.db.execute(query, {"orden_ids": orden_ids})
+            return result.fetchall()
+            
+        except Exception as e:
+            logger.error(f"Repository - Error obteniendo planificaciones (Raw): {e}")
+            return []
 

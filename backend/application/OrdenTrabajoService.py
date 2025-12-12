@@ -1,6 +1,8 @@
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
+from backend.dto.OrdenTrabajoResponseDTO import OrdenTrabajoResponseDTO
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
+from pydantic import ValidationError
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
@@ -45,7 +47,74 @@ class OrdenTrabajoService:
         if not ordenes:
             logger.info("Service - No hay órdenes de trabajo registradas.")
         
-        return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
+        # Validate and serialize using DTO to ensure structure
+        valid_ordenes = []
+        
+        # 1. Get all Order IDs
+        if ordenes:
+            orden_ids = [o.id for o in ordenes]
+            # 2. Fetch Planificaciones for these orders safely
+            planificaciones = await self.repository.get_planificaciones_by_orden_ids(orden_ids)
+            
+            # 3. Build a lookup map: (orden_id, proceso_id) -> operario_nombre
+            # Assuming Planificacion has orden_id, proceso_id, and relationship to operario
+            # 3. Build a lookup map: (orden_id, proceso_id) -> operario_nombre
+            # Result contains rows: (orden_id, proceso_id, nombre, apellido)
+            plan_map = {}
+            for row in planificaciones:
+                try:
+                    # Robust access using indices since we know the query "SELECT p.orden_id, ... " order
+                    oid = row[0]
+                    pid = row[1]
+                    nombre = row[2]
+                    apellido = row[3]
+                    
+                    if oid is not None and pid is not None:
+                        key = (int(oid), int(pid))
+                        # Format name to Title Case (e.g. "JUAN PEREZ" -> "Juan Perez")
+                        nombre_fmt = nombre.title() if nombre else ""
+                        apellido_fmt = apellido.title() if apellido else ""
+                        plan_map[key] = f"{nombre_fmt} {apellido_fmt}".strip()
+                except Exception as e:
+                    # Log error but don't break the loop or crash
+                    logger.warning(f"Service - Skipping malformed row: {row} - {e}")
+            
+            logger.info(f"Service - Mapeo de operarios construido. Total entradas: {len(plan_map)}")
+
+            if plan_map:
+                logger.info(f"Service - Ejemplo clave mapa: {list(plan_map.keys())[0]}")
+
+            for o in ordenes:
+                try:
+                    # Validate basic structure
+                    dto = OrdenTrabajoResponseDTO.model_validate(o)
+                    
+                    # 4. Inject operario_nombre into processes
+                    if dto.procesos:
+                        for proc in dto.procesos:
+                            # proc is OrdenTrabajoProcesoDTO. It has id_proceso etc.
+                            # We need to match with Planificacion. 
+                            # OrdenTrabajoProcesoDTO usually has nested 'proceso' with id.
+                            # Let's check structure: OrdenTrabajoProcesoDTO has 'proceso' nested object.
+                            
+                            pid = proc.proceso.id if proc.proceso else None
+                            if pid:
+                                key = (o.id, pid)
+                                # Log first few attempts to verify matching logic
+                                if len(valid_ordenes) == 0 and dto.procesos.index(proc) == 0:
+                                     logger.info(f"Service - Buscando clave: {key} en mapa.")
+                                
+                                if key in plan_map:
+                                    proc.operario_nombre = plan_map[key]
+                                
+                    valid_ordenes.append(jsonable_encoder(dto))
+                except ValidationError as e:
+                    logger.error(f"Service - Error validando orden ID {o.id}: {e}")
+                    continue
+        else:
+            return ResponseDTO(status=True, data=[])
+                
+        return ResponseDTO(status=True, data=valid_ordenes)
 
     async def obtenerOrdenPorId(self, id: int):
         logger.info(f"Service - Obtener orden de trabajo ID: {id}")

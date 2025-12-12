@@ -41,27 +41,44 @@ export interface Resource {
 
 export interface WorkOrder {
     id: number;
-    orderNumber: string;
-    priority: Priority;
-    status: Status;
-    client: string;
-    sector: string;
-    subsector: string;
-    quantity: number;
-    materials: string[];
-    notes1: string;
-    delayHours: number;
-    employeeAssignments: {
-        id: string;
-        employeeId: string;
-        employeeName: string;
-        process: string;
-        date: string;
-        startTime: string;
-        endTime: string;
-        totalHours: number;
-        progress: number;
-        notes: string;
+    id_otvieja?: number;
+    observaciones?: string;
+    id_prioridad?: number;
+    id_sector?: number;
+    id_articulo?: number;
+    unidades?: number;
+    fecha_orden?: string;
+    fecha_entrada?: string;
+    fecha_prometida?: string;
+    fecha_entrega?: string;
+
+    prioridad?: {
+        id?: number;
+        descripcion?: string;
+    };
+    sector?: {
+        id?: number;
+        nombre?: string;
+    };
+    articulo?: {
+        id?: number;
+        cod_articulo?: string;
+        descripcion?: string;
+    };
+    procesos: {
+        orden: number;
+        tiempo_proceso: number;
+        observaciones?: string;
+        proceso: {
+            id: number;
+            nombre: string;
+            descripcion?: string;
+        };
+        estado_proceso: {
+            id: number;
+            descripcion: string;
+        };
+        operario_nombre?: string;
     }[];
 }
 

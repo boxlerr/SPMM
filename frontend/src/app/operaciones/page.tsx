@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
 import { toast } from "sonner"
 import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib/gantt-utils"
-import type { GanttTask, Resource, PlanificacionItem } from "@/lib/types"
+import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
 
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("gantt")
@@ -25,6 +25,7 @@ export default function OperacionesPage() {
   const [tasks, setTasks] = useState<GanttTask[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [rawPlanificacion, setRawPlanificacion] = useState<PlanificacionItem[]>([])
+  const [ordenesTrabajo, setOrdenesTrabajo] = useState<WorkOrder[]>([])
   const [rawOperarios, setRawOperarios] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<"operario" | "maquina">("operario")
   const [isLoading, setIsLoading] = useState(true)
@@ -107,6 +108,16 @@ export default function OperacionesPage() {
             ranges: op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []
           }));
           setResources(mappedResources);
+        }
+
+        // Fetch Ordenes (NEW)
+        const ordenesResponse = await fetch("http://localhost:8000/ordenes");
+        if (ordenesResponse.ok) {
+          const ordenesData = await ordenesResponse.json();
+          // The API returns the list directly or { data: [...] } depending on standardization. 
+          // Based on OrdenTrabajoService.listarOrdenes returning a list, ordenesData should be the array.
+          const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
+          setOrdenesTrabajo(ordenesList);
         }
       } catch (error) {
         console.error("Error loading Gantt data:", error);
@@ -404,11 +415,11 @@ export default function OperacionesPage() {
                   <TabsContent value="general" className="m-0 h-full">
                     {/* General: Show all */}
                     <PlanningListTable
-                      data={rawPlanificacion}
+                      data={ordenesTrabajo}
                       isLoading={isLoading}
                       onRowClick={(item) => {
-                        setSelectedTask(item);
-                        setIsDetailsPanelOpen(true);
+                        // Adapting row click for now, maybe open details?
+                        console.log("Clicked order:", item);
                       }}
                     />
                   </TabsContent>
@@ -416,59 +427,18 @@ export default function OperacionesPage() {
                   <TabsContent value="semanal" className="m-0 h-full">
                     {/* Weekly: Filter by current week */}
                     <PlanningListTable
-                      data={(() => {
-                        const weekDates = getWeekDates(); // Assuming imports are available or I need to import them
-                        const startWeek = formatDate(weekDates[0]);
-                        const endWeek = formatDate(weekDates[4]); // Friday? Or should we take whole range?
-                        // Actually, getWeekDates returns Mon-Fri. Let's just use the string comparison logic
-                        // But wait, the component might not have getWeekDates imported.
-                        // I'll assume I can import it or implement simple check.
-
-                        // Let's rely on the tasks which have the computed strings.
-                        // We want tasks that overlap with THIS week. 
-                        // But wait, "Semanal" usually means relative to NOW.
-                        // Let's use the same logic as the Gantt: "Semanal" view implies current week.
-
-                        if (tasks.length === 0) return [];
-
-                        // We filter the rawPlanificacion based on whether their corresponding GanttTask is in the list
-                        // AND that GanttTask falls within this week.
-                        // Since `tasks` contains ALL tasks converted, we need to filter `tasks` first.
-
-                        // Simple approach: Filter distinct dbIds from tasks that fall in range.
-                        const validIds = new Set<number>();
-                        const now = new Date();
-                        const currentDay = now.getDay();
-                        const diff = currentDay === 0 ? -6 : 1 - currentDay;
-                        const monday = new Date(now);
-                        monday.setDate(now.getDate() + diff);
-                        monday.setHours(0, 0, 0, 0);
-
-                        const friday = new Date(monday);
-                        friday.setDate(monday.getDate() + 4);
-                        friday.setHours(23, 59, 59, 999);
-
-                        const mondayStr = monday.toISOString().split('T')[0];
-                        const fridayStr = friday.toISOString().split('T')[0];
-
-                        tasks.forEach(t => {
-                          // Check overlap or start date
-                          // If start date is within range, or checks overlap
-                          if (t.startDate >= mondayStr && t.startDate <= fridayStr) {
-                            if (t.dbId) validIds.add(t.dbId);
-                          }
-                          // Also if it started before and ends after/during
-                          else if (t.endDate >= mondayStr && t.startDate <= fridayStr) {
-                            if (t.dbId) validIds.add(t.dbId);
-                          }
-                        });
-
-                        return rawPlanificacion.filter(p => validIds.has(p.id));
-                      })()}
+                      data={ordenesTrabajo.filter(order => {
+                        // Simple filtering: check if fecha_prometida is this week
+                        if (!order.fecha_prometida) return false;
+                        const date = new Date(order.fecha_prometida);
+                        const today = new Date();
+                        const firstDay = new Date(today.setDate(today.getDate() - today.getDay()));
+                        const lastDay = new Date(today.setDate(today.getDate() - today.getDay() + 6));
+                        return date >= firstDay && date <= lastDay;
+                      })}
                       isLoading={isLoading}
                       onRowClick={(item) => {
-                        setSelectedTask(item);
-                        setIsDetailsPanelOpen(true);
+                        console.log("Clicked order:", item);
                       }}
                     />
                   </TabsContent>
@@ -476,40 +446,15 @@ export default function OperacionesPage() {
                   <TabsContent value="diaria" className="m-0 h-full">
                     {/* Daily: Filter by current day */}
                     <PlanningListTable
-                      data={(() => {
-                        const now = new Date();
-                        // Adjust for timezone if needed, but simplified to local/ISO date for now
-                        // Getting YYYY-MM-DD in local time
-                        const year = now.getFullYear();
-                        const month = String(now.getMonth() + 1).padStart(2, '0');
-                        const day = String(now.getDate()).padStart(2, '0');
-                        const todayStr = `${year}-${month}-${day}`;
-
-                        const validIds = new Set<number>();
-                        tasks.forEach(t => {
-                          // Check if task is active today
-                          // Assuming startDate and endDate are YYYY-MM-DD
-                          // We check if today falls within [startDate, endDate]
-                          // Or if startDate IS today.
-
-                          // Be careful with string comparison if formats differ, but assuming standard YYYY-MM-DD from utils
-                          // If t.startDate is "2023-10-10 10:00", strict string comp might fail if we just compare dates
-                          // But let's assume startDate in GanttTask is just date string based on previous usage
-
-                          const tStart = t.startDate.split(' ')[0]; // safely get date part
-                          const tEnd = t.endDate.split(' ')[0];
-
-                          if (todayStr >= tStart && todayStr <= tEnd) {
-                            if (t.dbId) validIds.add(t.dbId);
-                          }
-                        });
-
-                        return rawPlanificacion.filter(p => validIds.has(p.id));
-                      })()}
+                      data={ordenesTrabajo.filter(order => {
+                        if (!order.fecha_prometida) return false;
+                        const date = new Date(order.fecha_prometida).toISOString().split('T')[0];
+                        const today = new Date().toISOString().split('T')[0];
+                        return date === today;
+                      })}
                       isLoading={isLoading}
                       onRowClick={(item) => {
-                        setSelectedTask(item);
-                        setIsDetailsPanelOpen(true);
+                        console.log("Clicked order:", item);
                       }}
                     />
                   </TabsContent>

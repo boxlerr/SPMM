@@ -180,7 +180,9 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                         </div>
                                     )}
                                     <div>
-                                        <h4 className="font-bold text-lg text-gray-800">Orden de Trabajo {otNumber}</h4>
+                                        <h4 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                            {otNumber}
+                                        </h4>
                                         <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
                                     </div>
                                 </div>
