@@ -36,6 +36,7 @@ class OperarioService:
                 telefono=operario_dto.telefono,
                 celular=operario_dto.celular,
                 dni=operario_dto.dni,
+                email=operario_dto.email,
             )
 
             operario_creado = await self.repository.save(operario)
@@ -85,6 +86,7 @@ class OperarioService:
                     "telefono": o.telefono,
                     "celular": o.celular,
                     "dni": o.dni,
+                    "email": o.email,
                     "rangos": [r.id_rango for r in o.rangos]
                 }
                 for o in operarios
@@ -118,6 +120,7 @@ class OperarioService:
                     "telefono": o.telefono,
                     "celular": o.celular,
                     "dni": o.dni,
+                    "email": o.email,
                 },
                 errorDescription=""
             )   

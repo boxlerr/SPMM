@@ -10,6 +10,7 @@ export interface Operario {
   dni?: string;
   fecha_nacimiento?: string;
   fecha_ingreso?: string;
+  email?: string;
 }
 
 export interface Maquina {

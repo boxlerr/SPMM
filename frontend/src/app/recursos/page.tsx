@@ -76,6 +76,13 @@ export default function RecursosPage() {
 
   const handleVerOperario = async (operario: Operario) => {
     try {
+      // Optimistic / Cache: Show existing tasks immediately or clear stale data
+      if (tasks.length > 0) {
+        setOperatorTasks(tasks.filter(t => t.id_operario === operario.id));
+      } else {
+        setOperatorTasks([]);
+      }
+
       // 1. Fetch Operario Details
       const response = await fetch(`${cleanUrl}/operarios/${operario.id}`);
       if (response.ok) {
@@ -85,7 +92,7 @@ export default function RecursosPage() {
         setOperarioSeleccionado(operario);
       }
 
-      // 2. Fetch Assigned Tasks (if not already fetched, or always re-fetch)
+      // 2. Fetch Assigned Tasks (Background refresh)
       const planResponse = await fetch(`${cleanUrl}/planificacion`);
       if (planResponse.ok) {
         const planData: PlanificacionItem[] = await planResponse.json();
@@ -191,7 +198,6 @@ export default function RecursosPage() {
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
           <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
-            <Plus className="h-4 w-4 mr-2" />
             <Plus className="h-4 w-4 mr-2" />
             {tabActiva === "operarios" ? "Nuevo Operario" : tabActiva === "maquinas" ? "Nueva Maquinaria" : "Nuevo Proceso"}
           </Button>
@@ -681,6 +687,7 @@ export default function RecursosPage() {
       />
 
       <DetalleOperario
+        key={operarioSeleccionado?.id}
         operario={operarioSeleccionado}
         tasks={operatorTasks}
         onClose={() => setOperarioSeleccionado(null)}

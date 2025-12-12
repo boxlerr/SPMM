@@ -18,6 +18,7 @@ class OperarioRequestDTO(BaseModel):
     telefono: Optional[str] = Field(None, max_length=50)
     celular: Optional[str] = Field(None, max_length=50)
     dni: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=150)
 
     class Config:
         json_schema_extra = {

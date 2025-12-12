@@ -80,7 +80,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           const payload = await sectRes.json();
           // El backend retorna ResponseDTO: {status: true, data: [...]}
           const data = payload?.data || [];
-          const lista = Array.isArray(data) 
+          const lista = Array.isArray(data)
             ? data.map((s: any) => s.nombre || s).filter(Boolean)
             : [];
           setSectores(Array.from(new Set(lista)));
@@ -91,7 +91,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       } catch (error) {
         console.error("Error al obtener sectores:", error);
       }
-      
+
       // Cargar categorías desde operarios existentes
       try {
         const opRes = await fetch(`${cleanUrl}/operarios`);
@@ -125,7 +125,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     if (!isValidDate(formData.fecha_nacimiento)) newErrors.fecha_nacimiento = "Fecha inválida";
     if (!isValidDate(formData.fecha_ingreso)) newErrors.fecha_ingreso = "Fecha inválida";
     const cuil = onlyDigits(formData.dni);
-    if (cuil && cuil.length !== 11) newErrors.dni = "CUIL/CUIT debe tener 11 dígitos";
+    if (cuil && (cuil.length < 7 || cuil.length > 11)) newErrors.dni = "Debe tener entre 7 y 11 dígitos";
     if (!isValidEmail(formData.email)) newErrors.email = "Email inválido";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -141,16 +141,16 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       dni: formData.dni ? onlyDigits(formData.dni) : null,
     } as any;
     // No enviar email al backend hasta que el DTO lo soporte
-    delete payload.email;
-    
+    // delete payload.email; // Email is now supported by backend
+
     if (editing && data) {
       // Normalizar datos originales para comparación (teléfonos y DNI solo dígitos)
       const originalTelefono = data.telefono ? onlyDigits(data.telefono) : null;
       const originalCelular = data.celular ? onlyDigits(data.celular) : null;
       const originalDni = data.dni ? onlyDigits(data.dni) : null;
-      
+
       // Comparar datos originales con los nuevos para detectar cambios
-      const hasChanges = 
+      const hasChanges =
         (data.nombre || "") !== (payload.nombre || "") ||
         (data.apellido || "") !== (payload.apellido || "") ||
         (data.sector || "") !== (payload.sector || "") ||
@@ -169,7 +169,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           disponible: data.disponible ?? true,
         }),
       });
-      
+
       if (response.ok && hasChanges) {
         addNotification(
           `Operario ${payload.nombre} ${payload.apellido} ha sido modificado`,
@@ -221,7 +221,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>CUIL / CUIT</Label>
+                <Label>DNI / CUIL / CUIT</Label>
                 <Input value={formData.dni} onChange={(e) => setFormData({ ...formData, dni: e.target.value })} placeholder="20123456789" />
                 {errors.dni && <p className="text-xs text-destructive">{errors.dni}</p>}
               </div>
