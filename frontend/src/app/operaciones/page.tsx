@@ -392,10 +392,10 @@ export default function OperacionesPage() {
                       Semanal
                     </TabsTrigger>
                     <TabsTrigger
-                      value="mensual"
+                      value="diaria"
                       className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
-                      Mensual
+                      Diaria
                     </TabsTrigger>
                   </TabsList>
                 </div>
@@ -473,21 +473,33 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="mensual" className="m-0 h-full">
-                    {/* Monthly: Filter by current month */}
+                  <TabsContent value="diaria" className="m-0 h-full">
+                    {/* Daily: Filter by current day */}
                     <PlanningListTable
                       data={(() => {
                         const now = new Date();
-                        const startMonthStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-01`;
-                        // End of month
-                        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                        const endMonthStr = `${lastDay.getFullYear()}-${(lastDay.getMonth() + 1).toString().padStart(2, '0')}-${lastDay.getDate().toString().padStart(2, '0')}`;
+                        // Adjust for timezone if needed, but simplified to local/ISO date for now
+                        // Getting YYYY-MM-DD in local time
+                        const year = now.getFullYear();
+                        const month = String(now.getMonth() + 1).padStart(2, '0');
+                        const day = String(now.getDate()).padStart(2, '0');
+                        const todayStr = `${year}-${month}-${day}`;
 
                         const validIds = new Set<number>();
                         tasks.forEach(t => {
-                          // Check if task falls within month
-                          if ((t.startDate >= startMonthStr && t.startDate <= endMonthStr) ||
-                            (t.endDate >= startMonthStr && t.startDate <= endMonthStr)) {
+                          // Check if task is active today
+                          // Assuming startDate and endDate are YYYY-MM-DD
+                          // We check if today falls within [startDate, endDate]
+                          // Or if startDate IS today.
+
+                          // Be careful with string comparison if formats differ, but assuming standard YYYY-MM-DD from utils
+                          // If t.startDate is "2023-10-10 10:00", strict string comp might fail if we just compare dates
+                          // But let's assume startDate in GanttTask is just date string based on previous usage
+
+                          const tStart = t.startDate.split(' ')[0]; // safely get date part
+                          const tEnd = t.endDate.split(' ')[0];
+
+                          if (todayStr >= tStart && todayStr <= tEnd) {
                             if (t.dbId) validIds.add(t.dbId);
                           }
                         });
