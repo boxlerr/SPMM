@@ -3,4 +3,5 @@ from backend.domain.RangoProceso import RangoProceso
 from backend.domain.Rango import Rango
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.EstadoProceso import EstadoProceso
+from backend.domain.Cliente import Cliente
 

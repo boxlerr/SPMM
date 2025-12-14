@@ -12,7 +12,10 @@ class OrdenTrabajoProcesoCreateDTO(BaseModel):
 class OrdenTrabajoRequestDTO(BaseModel):
     id_otvieja: int # Este es el numero visible
     observaciones: Optional[str] = None
+    detalle: Optional[str] = None # 🔹 Nuevo campo detalle
     cliente: Optional[str] = None # Campo visual, no se guarda en BD por ahora
+    id_cliente: Optional[int] = None # 🔹 Nuevo campo para asociar cliente real
+    unidades: Optional[int] = None
     unidades: Optional[int] = None
 
     id_prioridad: int

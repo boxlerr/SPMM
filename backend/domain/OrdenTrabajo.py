@@ -9,6 +9,7 @@ class OrdenTrabajo(Base):
     id = Column(Integer, primary_key=True, index=True)
     id_otvieja = Column(Integer)  # el número viejo, no clave
     observaciones = Column(String(255), nullable=True)
+    detalle = Column(String(500), nullable=True) # 🔹 Nuevo campo detalle
 
     id_prioridad = Column(Integer, ForeignKey("prioridad.id"), nullable=False)
     id_sector = Column(Integer, ForeignKey("sector.id"), nullable=False)
@@ -26,6 +27,9 @@ class OrdenTrabajo(Base):
     prioridad = relationship("Prioridad")
     sector = relationship("Sector")
     articulo = relationship("Articulo")
+    
+    id_cliente = Column(Integer, ForeignKey("cliente.id"), nullable=True)
+    cliente = relationship("Cliente")
     
     #relacion con plano
     planos = relationship("Plano", back_populates="orden_trabajo")

@@ -95,7 +95,7 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
         return data.filter(item =>
             item.id.toString().includes(lowerTerm) ||
             String(item.observaciones || "").toLowerCase().includes(lowerTerm) ||
-            String(item.sector?.nombre || "").toLowerCase().includes(lowerTerm) ||
+            String(item.cliente?.nombre || "").toLowerCase().includes(lowerTerm) ||
             String(item.articulo?.cod_articulo || "").toLowerCase().includes(lowerTerm) ||
             String(item.articulo?.descripcion || "").toLowerCase().includes(lowerTerm)
         );
@@ -157,7 +157,7 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                                 <th className="w-10 px-4 py-3"></th> {/* Espacio para el chevron */}
                                 <th className="px-4 py-3 font-bold text-gray-600">OT</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">F. Entrada</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">Sector</th>
+                                <th className="px-4 py-3 font-bold text-gray-600">Cliente</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">Código</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">Descripción</th>
                                 <th
@@ -223,7 +223,7 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                                                 {formatDate(item.fecha_entrada)}
                                             </td>
                                             <td className="px-4 py-3 text-gray-500 italic">
-                                                {item.sector?.nombre || "-"}
+                                                {item.cliente?.nombre || "-"}
                                             </td>
                                             <td className="px-4 py-3 font-mono text-xs">
                                                 {item.articulo?.cod_articulo || "-"}

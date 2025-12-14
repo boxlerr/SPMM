@@ -44,6 +44,7 @@ interface PlanificacionItem {
     observaciones_ot?: string;
     observaciones_proceso?: string;
     rangos_permitidos?: number[];
+    cliente?: string;
 }
 
 // Helper function to capitalize first letter
@@ -182,21 +183,29 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             {/* Header */}
             <div className="bg-white border-b border-gray-100 p-4 sm:p-6 flex-shrink-0">
                 <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-red-50 text-red-600">
+                    <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-red-50 text-red-600 mt-0.5">
                             <Activity className="h-5 w-5" />
                         </div>
-                        <div>
-                            <h3 className="text-lg font-bold text-gray-900 leading-none mb-1">Detalle del Proceso</h3>
-                            <p className="text-sm text-gray-500 font-medium">
-                                OT #{selectedItem.orden_id}
-                            </p>
+                        <div className="min-w-0">
+                            <h3 className="text-lg font-bold text-gray-900 leading-none mb-1.5">Detalle del Proceso</h3>
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-sm text-gray-500 font-medium">
+                                <span className="whitespace-nowrap shrink-0">OT #{selectedItem.orden_id}</span>
+                                {selectedItem.cliente && (
+                                    <>
+                                        <span className="hidden sm:inline w-1 h-1 rounded-full bg-gray-300 shrink-0" />
+                                        <span className="text-gray-700 font-semibold truncate sm:overflow-visible sm:whitespace-normal" title={selectedItem.cliente}>
+                                            {selectedItem.cliente}
+                                        </span>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     </div>
                     {variant === "sidebar" && (
                         <button
                             onClick={onClose}
-                            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-all"
+                            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-full transition-all shrink-0"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                         </button>

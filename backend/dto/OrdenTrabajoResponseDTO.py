@@ -12,6 +12,11 @@ class SectorDTO(BaseModel):
     nombre: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
+class ClienteDTO(BaseModel):
+    id: Optional[int] = None
+    nombre: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
 class ArticuloDTO(BaseModel):
     id: Optional[int] = None
     cod_articulo: Optional[str] = None
@@ -48,6 +53,7 @@ class OrdenTrabajoResponseDTO(BaseModel):
     observaciones: Optional[str] = None
     id_prioridad: Optional[int] = None
     id_sector: Optional[int] = None
+    id_cliente: Optional[int] = None
     id_articulo: Optional[int] = None
     unidades: Optional[int] = None
     
@@ -58,7 +64,9 @@ class OrdenTrabajoResponseDTO(BaseModel):
     
     # Relations
     prioridad: Optional[PrioridadDTO] = None
+    prioridad: Optional[PrioridadDTO] = None
     sector: Optional[SectorDTO] = None
+    cliente: Optional[ClienteDTO] = None
     articulo: Optional[ArticuloDTO] = None
     
     # List of processes

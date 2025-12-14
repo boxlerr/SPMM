@@ -183,7 +183,14 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                         <h4 className="font-bold text-lg text-gray-800 flex items-center gap-2">
                                             {otNumber}
                                         </h4>
-                                        <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
+                                        <div className="flex flex-col gap-0.5">
+                                            {otTasks[0].client && (
+                                                <span className="text-sm font-semibold text-gray-700 block">
+                                                    {otTasks[0].client}
+                                                </span>
+                                            )}
+                                            <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-1 w-full sm:w-auto bg-gray-50 sm:bg-transparent p-3 sm:p-0 rounded-lg sm:rounded-none">

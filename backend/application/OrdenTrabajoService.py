@@ -10,7 +10,7 @@ from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.loggers.logger import logger
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 class OrdenTrabajoService:
     def __init__(self, db_session):
@@ -28,18 +28,22 @@ class OrdenTrabajoService:
             final_id_otvieja = dto.id_otvieja
             if not final_id_otvieja or final_id_otvieja == 0:
                 # Query max id_otvieja
-                max_id = self.repository.db.query(func.max(OrdenTrabajo.id_otvieja)).scalar()
+                stmt = select(func.max(OrdenTrabajo.id_otvieja))
+                result = await self.repository.db.execute(stmt)
+                max_id = result.scalar()
                 final_id_otvieja = (max_id or 0) + 1
 
             # 1. Crear la Orden (Cabecera)
             orden = OrdenTrabajo(
                 id_otvieja=final_id_otvieja,
-                observaciones=dto.observaciones,
+
                 id_prioridad=dto.id_prioridad,
                 id_sector=dto.id_sector,
                 id_articulo=dto.id_articulo,
-                unidades=dto.unidades, # Nuevo campo
-                # cliente=dto.cliente, # ⚠️ Ignorado backend logic
+                unidades=dto.unidades, 
+                id_cliente=dto.id_cliente, 
+                observaciones=dto.observaciones, # Se usa para el Articulo segun logica frontend
+                detalle=dto.detalle, # 🔹 Nuevo campo detalle usuario
                 fecha_orden=dto.fecha_orden,
                 fecha_entrada=dto.fecha_entrada,
                 fecha_prometida=dto.fecha_prometida,
@@ -140,6 +144,8 @@ class OrdenTrabajoService:
             for o in ordenes:
                 try:
                     # Validate basic structure
+                    if len(valid_ordenes) == 0:
+                         logger.info(f"debug - Checking order {o.id}: id_cliente={o.id_cliente} cliente={o.cliente}")
                     dto = OrdenTrabajoResponseDTO.model_validate(o)
                     
                     # 4. Inject operario_nombre into processes

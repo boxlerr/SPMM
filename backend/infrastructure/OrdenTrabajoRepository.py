@@ -9,6 +9,7 @@ from datetime import datetime, date
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Proceso import Proceso
+from backend.domain.Cliente import Cliente
 
 class OrdenTrabajoRepository:
     def __init__(self, db):
@@ -36,6 +37,7 @@ class OrdenTrabajoRepository:
                 .options(
                     joinedload(OrdenTrabajo.articulo),
                     joinedload(OrdenTrabajo.sector),
+                    joinedload(OrdenTrabajo.cliente),
                     joinedload(OrdenTrabajo.prioridad),
                     # Also load processes for the dropdown
                     joinedload(OrdenTrabajo.procesos).options(

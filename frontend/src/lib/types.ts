@@ -60,6 +60,10 @@ export interface WorkOrder {
         id?: number;
         nombre?: string;
     };
+    cliente?: {
+        id?: number;
+        nombre?: string;
+    };
     articulo?: {
         id?: number;
         cod_articulo?: string;
@@ -111,4 +115,5 @@ export interface PlanificacionItem {
     cantidad?: number;
     sector?: string;
     pedido_externo?: number | string;
+    cliente?: string;
 }

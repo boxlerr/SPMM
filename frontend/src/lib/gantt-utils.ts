@@ -193,6 +193,7 @@ export function convertPlanificacionToGanttTasks(
       priority: priority,
       isDelayed: false,
       allowedRanges: item.rangos_permitidos || [],
+      client: item.cliente,
     };
 
     console.log(`Converted Task ${task.id}: resourceId=${task.resourceId}, start=${task.startDate} ${task.startTime}`);

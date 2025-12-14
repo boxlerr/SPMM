@@ -61,7 +61,8 @@ async def obtener_planificacion(db = Depends(get_db)):
                otp.id_estado, ep.descripcion as estado, otp.observaciones as observaciones_proceso,
                ot.observaciones as observaciones_ot,
                ot.fecha_entrada, ot.fecha_prometida, ot.id_prioridad, ot.id_articulo,
-               a.cod_articulo, a.descripcion as descripcion_articulo, ot.unidades as cantidad, s.nombre as sector, ot.id_otvieja as pedido_externo
+               a.cod_articulo, a.descripcion as descripcion_articulo, ot.unidades as cantidad, 
+               s.nombre as sector, pk.nombre as cliente, ot.id_otvieja as pedido_externo
         FROM planificacion p
         LEFT JOIN maquinaria m ON p.id_maquinaria = m.id
         LEFT JOIN operario o ON p.id_operario = o.id
@@ -70,6 +71,7 @@ async def obtener_planificacion(db = Depends(get_db)):
         LEFT JOIN orden_trabajo ot ON p.orden_id = ot.id
         LEFT JOIN articulo a ON ot.id_articulo = a.id
         LEFT JOIN sector s ON ot.id_sector = s.id
+        LEFT JOIN cliente pk ON ot.id_cliente = pk.id
         ORDER BY p.inicio_min ASC
     """)
     result = await db.execute(query)

@@ -89,7 +89,10 @@ export function SearchableSelect({
             </div>
 
             {isOpen && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-2xl max-h-[300px] overflow-hidden flex flex-col animate-in fade-in-0 zoom-in-95 duration-100 ring-1 ring-black/5">
+                <div
+                    className="absolute z-[9999] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-2xl max-h-[300px] overflow-hidden flex flex-col animate-in fade-in-0 zoom-in-95 duration-100 ring-1 ring-black/5"
+                    style={{ position: 'absolute', top: '100%', left: 0, right: 0 }}
+                >
                     <div className="p-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50/80 backdrop-blur sticky top-0 z-10">
                         <Search className="w-4 h-4 text-gray-400" />
                         <input
@@ -114,7 +117,7 @@ export function SearchableSelect({
                                 <div
                                     key={opt.value}
                                     className={cn(
-                                        "px-3 py-2.5 text-base rounded-md cursor-pointer flex items-center justify-between transition-colors mb-0.5",
+                                        "px-3 py-2 text-sm rounded-md cursor-pointer flex items-center justify-between transition-colors mb-0.5",
                                         value === opt.value
                                             ? "bg-blue-50 text-blue-700 font-medium"
                                             : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
