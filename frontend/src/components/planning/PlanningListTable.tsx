@@ -15,14 +15,20 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 
+import { Checkbox } from "@/components/ui/checkbox";
+
 interface PlanningListTableProps {
     data: WorkOrder[];
     isLoading: boolean;
     onRowClick: (item: WorkOrder) => void;
     onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number) => void;
+    selectedIds?: number[];
+    onSelectionChange?: (ids: number[]) => void;
 }
 
-export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange }: PlanningListTableProps) {
+export const PlanningListTable = React.memo(_PlanningListTable);
+
+function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange, selectedIds = [], onSelectionChange }: PlanningListTableProps) {
     const [sortConfig, setSortConfig] = React.useState<{ key: 'unidades' | 'prioridad' | null; direction: 'asc' | 'desc' | null }>({
         key: null,
         direction: null,
@@ -36,6 +42,24 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                 ? prev.filter(id => id !== orderId)
                 : [...prev, orderId]
         );
+    };
+
+    const handleSelectAll = (checked: boolean) => {
+        if (!onSelectionChange) return;
+        if (checked) {
+            onSelectionChange(sortedData.map(item => item.id));
+        } else {
+            onSelectionChange([]);
+        }
+    };
+
+    const handleSelectRow = (orderId: number, checked: boolean) => {
+        if (!onSelectionChange) return;
+        if (checked) {
+            onSelectionChange([...selectedIds, orderId]);
+        } else {
+            onSelectionChange(selectedIds.filter(id => id !== orderId));
+        }
     };
 
     const formatDate = (dateStr?: string) => {
@@ -154,6 +178,14 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                             <tr>
+                                <th className="w-10 px-4 py-3">
+                                    {onSelectionChange && (
+                                        <Checkbox
+                                            checked={sortedData.length > 0 && selectedIds.length === sortedData.length}
+                                            onCheckedChange={(checked) => handleSelectAll(!!checked)}
+                                        />
+                                    )}
+                                </th>
                                 <th className="w-10 px-4 py-3"></th> {/* Espacio para el chevron */}
                                 <th className="px-4 py-3 font-bold text-gray-600">OT</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">F. Entrada</th>
@@ -187,7 +219,7 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                         <tbody>
                             {sortedData.length === 0 ? (
                                 <tr>
-                                    <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
+                                    <td colSpan={11} className="px-4 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
@@ -201,6 +233,14 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                                                 getPriorityColor(item.id_prioridad)
                                             )}
                                         >
+                                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                {onSelectionChange && (
+                                                    <Checkbox
+                                                        checked={selectedIds.includes(item.id)}
+                                                        onCheckedChange={(checked) => handleSelectRow(item.id, !!checked)}
+                                                    />
+                                                )}
+                                            </td>
                                             <td className="px-4 py-3">
                                                 <button
                                                     onClick={(e) => {
@@ -248,7 +288,7 @@ export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatus
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={10} className="px-4 py-4">
+                                                <td colSpan={11} className="px-4 py-4">
                                                     <div className="ml-8 border rounded-md overflow-hidden bg-white shadow-inner">
                                                         <table className="w-full text-sm">
                                                             <thead className="bg-gray-100 text-xs uppercase text-gray-600">

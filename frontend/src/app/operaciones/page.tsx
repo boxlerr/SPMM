@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PlanningListTable } from "@/components/planning/PlanningListTable"
 import { UnplannedWorkOrders } from "@/components/gantt/unplanned-work-orders"
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
-import { Activity, LayoutList, GanttChartSquare, Plus } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,8 @@ import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
 import { toast } from "sonner"
 import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib/gantt-utils"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
+import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
+import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
 
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("lista_planificacion")
@@ -27,9 +29,17 @@ export default function OperacionesPage() {
   const [rawPlanificacion, setRawPlanificacion] = useState<PlanificacionItem[]>([])
   const [ordenesTrabajo, setOrdenesTrabajo] = useState<WorkOrder[]>([])
   const [rawOperarios, setRawOperarios] = useState<any[]>([])
+  const [rawMaquinarias, setRawMaquinarias] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<"operario" | "maquina">("operario")
   const [isLoading, setIsLoading] = useState(true)
   const [selectedTask, setSelectedTask] = useState<PlanificacionItem | null>(null)
+
+  // Selective Planning State
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false)
+  const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]) // Used for confirmation
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+  const [previewResults, setPreviewResults] = useState<any[]>([])
+  const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
 
   // Helper for colors
   const getProcessColor = (processName: string) => {
@@ -45,98 +55,107 @@ export default function OperacionesPage() {
   };
 
   // Fetch data
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        // Fetch Planificacion
-        const planResponse = await fetch("http://localhost:8000/planificacion");
-        if (!planResponse.ok) throw new Error("Error fetching planificacion");
-        const planData: PlanificacionItem[] = await planResponse.json();
+  const fetchData = async () => {
+    try {
+      setIsLoading(true);
+      // Fetch Planificacion
+      const planResponse = await fetch("http://localhost:8000/planificacion");
+      if (!planResponse.ok) throw new Error("Error fetching planificacion");
+      const planData: PlanificacionItem[] = await planResponse.json();
 
-        // Parse rangos_permitidos if it comes as a string or array of strings
-        const parsedPlanData = planData.map(item => {
-          let ranges = item.rangos_permitidos;
+      // Parse rangos_permitidos if it comes as a string or array of strings
+      const parsedPlanData = planData.map(item => {
+        let ranges = item.rangos_permitidos;
 
-          if (typeof ranges === 'string') {
-            try {
-              ranges = JSON.parse(ranges);
-            } catch (e) {
-              ranges = [];
-            }
+        if (typeof ranges === 'string') {
+          try {
+            ranges = JSON.parse(ranges);
+          } catch (e) {
+            ranges = [];
           }
-
-          // Handle case where it's an array of strings (e.g. ["4", "10"] or ["'[4, 10]'"])
-          if (Array.isArray(ranges) && ranges.length > 0 && typeof ranges[0] === 'string') {
-            try {
-              // If the first element looks like a JSON array, parse it (e.g. ["'[4, 10]'"])
-              if ((ranges[0] as string).trim().startsWith('[')) {
-                ranges = JSON.parse(ranges[0] as string);
-              } else {
-                // Otherwise assume it's ["4", "10"] and convert to numbers
-                ranges = (ranges as unknown as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
-              }
-            } catch (e) {
-              console.error("Error parsing ranges array:", ranges);
-              ranges = [];
-            }
-          }
-
-          return {
-            ...item,
-            rangos_permitidos: Array.isArray(ranges) ? ranges : []
-          };
-        });
-
-        setRawPlanificacion(parsedPlanData);
-
-        const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData);
-        setTasks(ganttTasks);
-
-        // Fetch Operarios
-        const opResponse = await fetch("http://localhost:8000/operarios");
-        if (opResponse.ok) {
-          const opData = await opResponse.json();
-          const rawOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
-          setRawOperarios(rawOps);
-
-          const mappedResources: Resource[] = rawOps.map((op: any) => ({
-            id: op.id.toString(),
-            name: `${op.nombre} ${op.apellido}`,
-            type: "operario",
-            skills: [], // We use ranges for qualification now
-            ranges: op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []
-          }));
-          setResources(mappedResources);
         }
 
-        // Fetch Ordenes (NEW)
-        const ordenesResponse = await fetch("http://localhost:8000/ordenes");
-        if (ordenesResponse.ok) {
-          const ordenesData = await ordenesResponse.json();
-          // The API returns the list directly or { data: [...] } depending on standardization. 
-          // Based on OrdenTrabajoService.listarOrdenes returning a list, ordenesData should be the array.
-          const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
-          setOrdenesTrabajo(ordenesList);
+        // Handle case where it's an array of strings (e.g. ["4", "10"] or ["'[4, 10]'"])
+        if (Array.isArray(ranges) && ranges.length > 0 && typeof ranges[0] === 'string') {
+          try {
+            // If the first element looks like a JSON array, parse it (e.g. ["'[4, 10]'"])
+            if ((ranges[0] as string).trim().startsWith('[')) {
+              ranges = JSON.parse(ranges[0] as string);
+            } else {
+              // Otherwise assume it's ["4", "10"] and convert to numbers
+              ranges = (ranges as unknown as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
+            }
+          } catch (e) {
+            console.error("Error parsing ranges array:", ranges);
+            ranges = [];
+          }
         }
-      } catch (error) {
-        console.error("Error loading Gantt data:", error);
-      } finally {
-        setIsLoading(false);
+
+        return {
+          ...item,
+          rangos_permitidos: Array.isArray(ranges) ? ranges : []
+        };
+      });
+
+      setRawPlanificacion(parsedPlanData);
+
+      const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData);
+      setTasks(ganttTasks);
+
+      // Fetch Operarios
+      const opResponse = await fetch("http://localhost:8000/operarios");
+      if (opResponse.ok) {
+        const opData = await opResponse.json();
+        const rawOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
+        setRawOperarios(rawOps);
+
+        const mappedResources: Resource[] = rawOps.map((op: any) => ({
+          id: op.id.toString(),
+          name: op.nombre + " " + op.apellido,
+          type: "operario",
+          skills: [], // We use ranges for qualification now
+          ranges: op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []
+        }));
+        setResources(mappedResources);
       }
-    };
 
+      // Fetch Maquinarias (For enrichment)
+      const maqResponse = await fetch("http://localhost:8000/maquinarias");
+      if (maqResponse.ok) {
+        const maqData = await maqResponse.json();
+        const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
+        setRawMaquinarias(list);
+      }
+
+      // Fetch Ordenes (NEW)
+      const ordenesResponse = await fetch("http://localhost:8000/ordenes");
+      if (ordenesResponse.ok) {
+        const ordenesData = await ordenesResponse.json();
+        // The API returns the list directly or { data: [...] } depending on standardization. 
+        // Based on OrdenTrabajoService.listarOrdenes returning a list, ordenesData should be the array.
+        const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
+        setOrdenesTrabajo(ordenesList);
+      }
+    } catch (error) {
+      console.error("Error loading Gantt data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
 
   const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
   const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
+  const unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
 
   const handleTaskMove = async (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
-    const newStart = new Date(`${newDate}T${newStartTime}:00`);
+    const newStart = new Date(newDate + "T" + newStartTime + ":00");
     const newOperarioId = parseInt(newResourceId);
 
     const rawItem = rawPlanificacion.find(i => i.id === task.dbId);
@@ -203,7 +222,7 @@ export default function OperacionesPage() {
     setTasks(newGanttTasks);
 
     try {
-      const response = await fetch(`http://localhost:8000/planificacion/${task.dbId}`, {
+      const response = await fetch("http://localhost:8000/planificacion/" + task.dbId, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -254,7 +273,7 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch(`http://localhost:8000/planificacion/${targetTask.id}`, {
+      await fetch("http://localhost:8000/planificacion/" + targetTask.id, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_operario: opId }),
@@ -299,7 +318,7 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch(`http://localhost:8000/ordenes/${targetTask.orden_id}/procesos/${targetTask.proceso_id}/estado`, {
+      await fetch("http://localhost:8000/ordenes/" + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: idEstado }),
@@ -366,7 +385,7 @@ export default function OperacionesPage() {
 
 
     try {
-      await fetch(`http://localhost:8000/ordenes/${ordenId}/procesos/${procesoId}/estado`, {
+      await fetch("http://localhost:8000/ordenes/" + ordenId + "/procesos/" + procesoId + "/estado", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: newStatusId }),
@@ -379,8 +398,102 @@ export default function OperacionesPage() {
     }
   };
 
+  const handlePlanSelection = async (ids: number[]) => {
+    if (ids.length === 0) return;
+
+    // Set selected IDs locally so we know what to verify/save later
+    setSelectedOrderIds(ids);
+
+    // Call API for preview
+    try {
+      toast.loading("Calculando planificación...");
+      const response = await fetch("http://localhost:8000/planificar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ordenes_ids: ids,
+          preview: true
+        }),
+      });
+
+      toast.dismiss();
+
+      if (!response.ok) throw new Error("Error al calcular planificación");
+
+      const results = await response.json();
+
+      // Enrich results with Client and Article info
+      const now = new Date();
+      // Enrich results with Client, Article info, Names and Dates
+      const enrichedResults = results.map((res: any) => {
+        const order = ordenesTrabajo.find(o => o.id === res.orden_id);
+        const operario = rawOperarios.find(op => op.id === res.id_operario);
+        const maquina = rawMaquinarias.find(m => m.id === res.id_maquinaria);
+
+        // Calculate simplified dates (assuming T=0 is Now)
+        const startDate = new Date(now.getTime() + res.start_time * 60000);
+        const endDate = new Date(now.getTime() + res.end_time * 60000);
+
+        const formatDateShort = (d: Date) => {
+          return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        return {
+          ...res,
+          cliente: order?.cliente?.nombre || "N/A",
+          articulo: order?.articulo?.descripcion || "N/A",
+          codigo: order?.articulo?.cod_articulo || "",
+          operario_nombre: operario ? `${operario.nombre} ${operario.apellido}` : null,
+          maquinaria_nombre: maquina ? maquina.nombre : null,
+          fecha_inicio_texto: formatDateShort(startDate),
+          fecha_fin_texto: formatDateShort(endDate)
+        };
+      });
+
+      setPreviewResults(enrichedResults);
+
+      // Close selection modal and open preview
+      setIsSelectionModalOpen(false);
+      setIsPreviewOpen(true);
+
+    } catch (error) {
+      console.error("Error planning:", error);
+      toast.error("Error al calcular la planificación");
+    }
+  };
+
+  const handleConfirmPlan = async () => {
+    try {
+      setIsConfirmingPlan(true);
+      const response = await fetch("http://localhost:8000/planificar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ordenes_ids: selectedOrderIds,
+          preview: false
+        }),
+      });
+
+      if (!response.ok) throw new Error("Error al guardar planificación");
+
+      toast.success("Planificación guardada exitosamente");
+      setIsPreviewOpen(false);
+      setSelectedOrderIds([]);
+
+      // Refresh data
+      await fetchData();
+
+    } catch (error) {
+      console.error("Error confirming plan:", error);
+      toast.error("Error al guardar la planificación");
+    } finally {
+      setIsConfirmingPlan(false);
+    }
+  };
+
+
   return (
-    <div className={`min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out ${(isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'mr-[400px]' : 'mr-0'}`}>
+    <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'mr-[400px]' : 'mr-0')}>
       {/* Header normal (no sticky) */}
       <div className="bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
         <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
@@ -394,33 +507,36 @@ export default function OperacionesPage() {
               </h1>
               <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona la planificación de las órdenes de trabajo</p>
             </div>
-            <Button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva Orden
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setIsSelectionModalOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg"
+              >
+                <CalendarClock className="mr-2 h-4 w-4" />
+                Planificar
+              </Button>
+              <Button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Nueva Orden
+              </Button>
+            </div>
           </div>
 
           {/* Tabs Navigation */}
           <div className="flex items-center gap-1 mt-6 border-b border-gray-200">
             <button
               onClick={() => setActiveTab("lista_planificacion")}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "lista_planificacion"
-                ? "border-red-700 text-red-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "lista_planificacion" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <LayoutList size={18} />
               Planificación
             </button>
             <button
               onClick={() => setActiveTab("gantt")}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gantt"
-                ? "border-red-700 text-red-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "gantt" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <GanttChartSquare size={18} />
               Gantt
@@ -428,10 +544,7 @@ export default function OperacionesPage() {
 
             <button
               onClick={() => setActiveTab("work_orders")}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "work_orders"
-                ? "border-red-700 text-red-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <LayoutList size={18} />
               Órdenes de Trabajo
@@ -441,8 +554,8 @@ export default function OperacionesPage() {
       </div>
 
       <div className="flex-1 flex overflow-visible">
-        <div className={`flex-1 transition-all duration-300 flex flex-col ${activeTab === 'gantt' ? 'max-w-full px-2 py-4' : 'max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 w-full'}`}>
-          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : 'p-6'}`}>
+        <div className={"flex-1 transition-all duration-300 flex flex-col " + (activeTab === 'gantt' ? 'max-w-full px-2 py-4' : 'max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 w-full')}>
+          <div className={"bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col " + (activeTab === 'gantt' ? 'p-2' : 'p-6')}>
             {/* Redundant header removed */}
 
             {activeTab === "gantt" && (
@@ -467,7 +580,7 @@ export default function OperacionesPage() {
                       value="general"
                       className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
-                      General
+                      Planificadas
                     </TabsTrigger>
                     <TabsTrigger
                       value="semanal"
@@ -485,7 +598,7 @@ export default function OperacionesPage() {
                 </div>
 
                 <div className="flex-1 p-0">
-                  <TabsContent value="general" className="m-0 h-full">
+                  <TabsContent value="general" className="m-0 h-full p-4">
                     {/* General: Show all */}
                     <PlanningListTable
                       data={plannedOrdenes}
@@ -498,7 +611,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="semanal" className="m-0 h-full">
+                  <TabsContent value="semanal" className="m-0 h-full p-4">
                     {/* Weekly: Filter by current week */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -518,7 +631,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="diaria" className="m-0 h-full">
+                  <TabsContent value="diaria" className="m-0 h-full p-4">
                     {/* Daily: Filter by current day */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -545,7 +658,7 @@ export default function OperacionesPage() {
       </div>
 
       {/* Sidebar rendered as Fixed Sidebar (Full Height) */}
-      <div className={`fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] ${(isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div className={"fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'translate-x-0' : 'translate-x-full')}>
         <TaskDetailsModal
           isOpen={isDetailsPanelOpen}
           selectedItem={selectedTask}
@@ -563,8 +676,25 @@ export default function OperacionesPage() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => {
           setIsCreateModalOpen(false)
+          fetchData()
         }}
+      />
+
+      <PlanningSelectionModal
+        isOpen={isSelectionModalOpen}
+        onClose={() => setIsSelectionModalOpen(false)}
+        unplannedOrders={unplannedOrdenes}
+        onPlan={handlePlanSelection}
+      />
+
+      <PlanningPreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        onConfirm={handleConfirmPlan}
+        results={previewResults}
+        isConfirming={isConfirmingPlan}
       />
     </div>
   )
 }
+

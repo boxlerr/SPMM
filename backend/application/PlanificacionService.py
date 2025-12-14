@@ -726,7 +726,8 @@ async def planificar(
     repo_maquinaria: MaquinariaRepository,
     repo_planificacion: PlanificacionRepository,
     db,
-    ordenes_ids: list[int] | None = None
+    ordenes_ids: list[int] | None = None,
+    preview: bool = False
 ):
     
     ##ordenes = await repo_orden.find_with_procesos()
@@ -822,6 +823,9 @@ async def planificar(
         operarios,
         maquinarias
     )
+
+    if preview:
+        return resultados
 
     # Insertar resultados
     return await repo_planificacion.insertar_planificacion_lote(resultados)
