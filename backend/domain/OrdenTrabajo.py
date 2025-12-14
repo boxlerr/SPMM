@@ -13,6 +13,7 @@ class OrdenTrabajo(Base):
     id_prioridad = Column(Integer, ForeignKey("prioridad.id"), nullable=False)
     id_sector = Column(Integer, ForeignKey("sector.id"), nullable=False)
     id_articulo = Column(Integer, ForeignKey("articulo.id"), nullable=False)
+    unidades = Column(Integer, nullable=True)
     # 🔻 Eliminado: id_maquinaria (se quitó la FK a maquinaria)
 
     fecha_orden = Column(DateTime, nullable=False)

@@ -7,23 +7,35 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 
 interface PlanningListTableProps {
     data: WorkOrder[];
     isLoading: boolean;
     onRowClick: (item: WorkOrder) => void;
+    onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number) => void;
 }
 
-export function PlanningListTable({ data, isLoading, onRowClick }: PlanningListTableProps) {
+export function PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange }: PlanningListTableProps) {
     const [sortConfig, setSortConfig] = React.useState<{ key: 'unidades' | 'prioridad' | null; direction: 'asc' | 'desc' | null }>({
         key: null,
         direction: null,
     });
     const [searchTerm, setSearchTerm] = React.useState("");
-    const [expandedOrderId, setExpandedOrderId] = React.useState<number | null>(null);
+    const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
 
     const toggleRow = (orderId: number) => {
-        setExpandedOrderId(prev => prev === orderId ? null : orderId);
+        setExpandedOrderIds(prev =>
+            prev.includes(orderId)
+                ? prev.filter(id => id !== orderId)
+                : [...prev, orderId]
+        );
     };
 
     const formatDate = (dateStr?: string) => {
@@ -197,7 +209,7 @@ export function PlanningListTable({ data, isLoading, onRowClick }: PlanningListT
                                                     }}
                                                     className="p-1 hover:bg-black/10 rounded transition-colors"
                                                 >
-                                                    {expandedOrderId === item.id ? (
+                                                    {expandedOrderIds.includes(item.id) ? (
                                                         <ChevronDown className="h-4 w-4 text-gray-600" />
                                                     ) : (
                                                         <ChevronRight className="h-4 w-4 text-gray-400" />
@@ -234,7 +246,7 @@ export function PlanningListTable({ data, isLoading, onRowClick }: PlanningListT
                                                 {formatDate(item.fecha_entrega)}
                                             </td>
                                         </tr>
-                                        {expandedOrderId === item.id && (
+                                        {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
                                                 <td colSpan={10} className="px-4 py-4">
                                                     <div className="ml-8 border rounded-md overflow-hidden bg-white shadow-inner">
@@ -255,13 +267,24 @@ export function PlanningListTable({ data, isLoading, onRowClick }: PlanningListT
                                                                             <td className="px-4 py-2 font-mono text-gray-500">{proc.orden}</td>
                                                                             <td className="px-4 py-2 font-medium">{proc.proceso?.nombre || "-"}</td>
                                                                             <td className="px-4 py-2">
-                                                                                <Badge variant="secondary" className={
-                                                                                    proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 hover:bg-green-200" :
-                                                                                        proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 hover:bg-blue-200" :
-                                                                                            "bg-gray-100 text-gray-800"
-                                                                                }>
-                                                                                    {proc.estado_proceso?.descripcion || "Pendiente"}
-                                                                                </Badge>
+                                                                                <Select
+                                                                                    defaultValue={proc.estado_proceso?.id?.toString() || "1"}
+                                                                                    onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                >
+                                                                                    <SelectTrigger className={cn(
+                                                                                        "h-8 w-[140px] border-none shadow-none font-medium",
+                                                                                        (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
+                                                                                            proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
+                                                                                                "text-gray-800 bg-gray-100 hover:bg-gray-200"
+                                                                                    )}>
+                                                                                        <SelectValue placeholder="Estado" />
+                                                                                    </SelectTrigger>
+                                                                                    <SelectContent>
+                                                                                        <SelectItem value="1">Pendiente</SelectItem>
+                                                                                        <SelectItem value="2">En Proceso</SelectItem>
+                                                                                        <SelectItem value="3">Finalizado</SelectItem>
+                                                                                    </SelectContent>
+                                                                                </Select>
                                                                             </td>
                                                                             <td className="px-4 py-2 text-center text-gray-600">{proc.tiempo_proceso || "-"}</td>
                                                                             <td className="px-4 py-2 text-gray-700 text-xs font-medium">{proc.operario_nombre || "Sin Asignar"}</td>

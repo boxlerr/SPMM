@@ -14,11 +14,21 @@ async def get_db():
         yield session
 
 # 🔹 Crear orden de trabajo
+from fastapi import FastAPI, APIRouter, Depends, Form, File, UploadFile
+from typing import List
+
+# ... imports ...
+
+# 🔹 Crear orden de trabajo
 @router.post("/ordenes")
-async def crear_orden(dto: OrdenTrabajoRequestDTO, db=Depends(get_db)):
-    logger.info("API - Inicio POST /ordenes")
+async def crear_orden(
+    data: str = Form(...), 
+    files: List[UploadFile] = File([]),
+    db=Depends(get_db)
+):
+    logger.info("API - Inicio POST /ordenes (Multipart)")
     service = OrdenTrabajoService(db)
-    return await service.crearOrdenTrabajo(dto)
+    return await service.crearOrdenTrabajo(data, files)
 
 # 🔹 Listar todas las órdenes
 @router.get("/ordenes")

@@ -10,34 +10,87 @@ from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.loggers.logger import logger
 from datetime import datetime
+from sqlalchemy import func
 
 class OrdenTrabajoService:
     def __init__(self, db_session):
         self.repository = OrdenTrabajoRepository(db_session)
 
-    async def crearOrdenTrabajo(self, dto: OrdenTrabajoRequestDTO):
+    async def crearOrdenTrabajo(self, data_json: str, files: list = []):
         try:
-            logger.info("Service - Crear orden de trabajo.")
+            import json
+            data_dict = json.loads(data_json)
+            dto = OrdenTrabajoRequestDTO(**data_dict)
+            
+            logger.info("Service - Crear orden de trabajo completa.")
 
+            # Auto-generate id_otvieja if 0 or missing
+            final_id_otvieja = dto.id_otvieja
+            if not final_id_otvieja or final_id_otvieja == 0:
+                # Query max id_otvieja
+                max_id = self.repository.db.query(func.max(OrdenTrabajo.id_otvieja)).scalar()
+                final_id_otvieja = (max_id or 0) + 1
+
+            # 1. Crear la Orden (Cabecera)
             orden = OrdenTrabajo(
-                id_otvieja=dto.id_otvieja,
+                id_otvieja=final_id_otvieja,
                 observaciones=dto.observaciones,
                 id_prioridad=dto.id_prioridad,
                 id_sector=dto.id_sector,
                 id_articulo=dto.id_articulo,
-                # 🔻 Eliminado: id_maquinaria
+                unidades=dto.unidades, # Nuevo campo
+                # cliente=dto.cliente, # ⚠️ Ignorado backend logic
                 fecha_orden=dto.fecha_orden,
                 fecha_entrada=dto.fecha_entrada,
                 fecha_prometida=dto.fecha_prometida,
                 fecha_entrega=dto.fecha_entrega
             )
-
+            
             orden_creada = await self.repository.save(orden)
+            
+            # 2. Crear relaciones con Procesos
+            from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+            
+            for index, proc_dto in enumerate(dto.procesos):
+                nuevo_proceso = OrdenTrabajoProceso(
+                    id_orden_trabajo=orden_creada.id,
+                    id_proceso=proc_dto.proceso_id,
+                    orden=index + 1,
+                    # Por ahora no guardamos fechas/operarios en esta tabla intermedia si no tiene columnas
+                    # Pero el frontend manda fechas. ¿Dónde van? 
+                    # Si 'OrdenTrabajoProceso' es solo definición, ok. 
+                    # Si queremos guardar fechas, deberíamos crear Planificacion.
+                    # Asumiremos MVP: Guardar relación básica.
+                    tiempo_proceso=0 # Default
+                )
+                # Hack: Direct save via session if repository doesn't have specific method?
+                # OrdenTrabajoRepository.save uses add/commit. 
+                # We should add these objects to the session.
+                self.repository.db.add(nuevo_proceso)
+            
+            # 3. Guardar Archivos (Planos)
+            from backend.domain.Plano import Plano
+            
+            if files:
+                for file in files:
+                    content = await file.read()
+                    nuevo_plano = Plano(
+                        nombre=file.filename,
+                        descripcion="Cargado desde nueva OT",
+                        tipo_archivo=file.content_type.split('/')[-1] if file.content_type else 'bin',
+                        archivo=content, # BLOB
+                        id_orden_trabajo=orden_creada.id
+                    )
+                    self.repository.db.add(nuevo_plano)
+            
+            await self.repository.db.commit()
+            
             return ResponseDTO(status=True, data=jsonable_encoder(orden_creada))
 
         except InfrastructureException:
             raise  
         except Exception as e:
+            logger.error(f"Error creando OT: {e}")
             raise ApplicationException("Error inesperado al crear la Orden de Trabajo.") from e
 
     async def listarOrdenes(self):

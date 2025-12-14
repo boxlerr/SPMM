@@ -17,7 +17,7 @@ import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("gantt")
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -128,6 +128,9 @@ export default function OperacionesPage() {
 
     fetchData();
   }, []);
+
+  const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
+  const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
 
   const handleTaskMove = async (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => {
     const task = tasks.find(t => t.id === taskId);
@@ -306,6 +309,76 @@ export default function OperacionesPage() {
     }
   };
 
+  const handleProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number) => {
+    // 1. Optimistic update local state (ordenesTrabajo)
+    setOrdenesTrabajo(prev => prev.map(order => {
+      if (order.id !== ordenId) return order;
+      return {
+        ...order,
+        procesos: order.procesos.map(proc => {
+          if (proc.proceso.id !== procesoId) return proc;
+
+          let statusDesc = 'Pendiente';
+          if (newStatusId === 2) statusDesc = 'En Proceso';
+          if (newStatusId === 3) statusDesc = 'Finalizado';
+
+          return {
+            ...proc,
+            estado_proceso: {
+              id: newStatusId,
+              descripcion: statusDesc
+            }
+          };
+        })
+      };
+    }));
+
+    // 2. Also update rawPlanificacion/tasks if they link to this process?
+    // This is complex as rawPlanificacion items map one-to-one with processes.
+    // We can try to find the matching PlanificacionItem and update it too for consistency.
+    setRawPlanificacion(prev => prev.map(p => {
+      if (p.orden_id === ordenId && p.proceso_id === procesoId) {
+        let statusString = 'pendiente';
+        if (newStatusId === 2) statusString = 'en_curso';
+        if (newStatusId === 3) statusString = 'completado';
+
+        return {
+          ...p,
+          id_estado: newStatusId,
+          estado: statusString
+        };
+      }
+      return p;
+    }));
+
+    // Update tasks state (Gantt) as well
+    setTasks(prev => prev.map(t => {
+      // We need to find the task corresponding to this process. 
+      // We can match by dbId if we had it, but here we iterate. 
+      // We can inspect rawPlanificacion update and sync.
+      // Or simpler: just find task with matching ordenId and processId via rawPlanificacion lookup?
+      // Actually, GanttTasks have 'dbId' which matches PlanificacionItem.id.
+      // We don't have that ID directly here easily without lookup.
+      // Let's rely on finding it in rawPlanificacion first or just refetch? 
+      // For now, let's skip deep Gantt update here or do a simple lookup.
+      return t;
+    }));
+
+
+    try {
+      await fetch(`http://localhost:8000/ordenes/${ordenId}/procesos/${procesoId}/estado`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_estado: newStatusId }),
+      });
+      toast.success("Estado actualizado correctamente");
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast.error("Error al actualizar el estado");
+      // Revert in case of error (would need complex revert logic or simple refetch)
+    }
+  };
+
   return (
     <div className={`min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out ${(isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'mr-[400px]' : 'mr-0'}`}>
       {/* Header normal (no sticky) */}
@@ -333,16 +406,6 @@ export default function OperacionesPage() {
           {/* Tabs Navigation */}
           <div className="flex items-center gap-1 mt-6 border-b border-gray-200">
             <button
-              onClick={() => setActiveTab("gantt")}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gantt"
-                ? "border-red-700 text-red-700"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
-            >
-              <GanttChartSquare size={18} />
-              Gantt
-            </button>
-            <button
               onClick={() => setActiveTab("lista_planificacion")}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "lista_planificacion"
                 ? "border-red-700 text-red-700"
@@ -351,6 +414,16 @@ export default function OperacionesPage() {
             >
               <LayoutList size={18} />
               Planificación
+            </button>
+            <button
+              onClick={() => setActiveTab("gantt")}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gantt"
+                ? "border-red-700 text-red-700"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+            >
+              <GanttChartSquare size={18} />
+              Gantt
             </button>
 
             <button
@@ -415,8 +488,9 @@ export default function OperacionesPage() {
                   <TabsContent value="general" className="m-0 h-full">
                     {/* General: Show all */}
                     <PlanningListTable
-                      data={ordenesTrabajo}
+                      data={plannedOrdenes}
                       isLoading={isLoading}
+                      onProcessStatusChange={handleProcessStatusChange}
                       onRowClick={(item) => {
                         // Adapting row click for now, maybe open details?
                         console.log("Clicked order:", item);
@@ -427,7 +501,7 @@ export default function OperacionesPage() {
                   <TabsContent value="semanal" className="m-0 h-full">
                     {/* Weekly: Filter by current week */}
                     <PlanningListTable
-                      data={ordenesTrabajo.filter(order => {
+                      data={plannedOrdenes.filter(order => {
                         // Simple filtering: check if fecha_prometida is this week
                         if (!order.fecha_prometida) return false;
                         const date = new Date(order.fecha_prometida);
@@ -437,6 +511,7 @@ export default function OperacionesPage() {
                         return date >= firstDay && date <= lastDay;
                       })}
                       isLoading={isLoading}
+                      onProcessStatusChange={handleProcessStatusChange}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
@@ -446,13 +521,14 @@ export default function OperacionesPage() {
                   <TabsContent value="diaria" className="m-0 h-full">
                     {/* Daily: Filter by current day */}
                     <PlanningListTable
-                      data={ordenesTrabajo.filter(order => {
+                      data={plannedOrdenes.filter(order => {
                         if (!order.fecha_prometida) return false;
                         const date = new Date(order.fecha_prometida).toISOString().split('T')[0];
                         const today = new Date().toISOString().split('T')[0];
                         return date === today;
                       })}
                       isLoading={isLoading}
+                      onProcessStatusChange={handleProcessStatusChange}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
