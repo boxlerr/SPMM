@@ -14,7 +14,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  ClipboardList
+  ClipboardList,
+  Briefcase
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
@@ -40,6 +41,11 @@ const sidebarItems: SidebarItem[] = [
     name: "Recursos",
     href: "/recursos",
     icon: Users
+  },
+  {
+    name: "Clientes",
+    href: "/clientes",
+    icon: Briefcase
   },
   {
     name: "Configuración",

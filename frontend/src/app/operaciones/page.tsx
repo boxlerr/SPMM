@@ -39,6 +39,7 @@ export default function OperacionesPage() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]) // Used for confirmation
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [previewResults, setPreviewResults] = useState<any[]>([])
+  const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
 
   // Helper for colors
@@ -452,6 +453,58 @@ export default function OperacionesPage() {
 
       setPreviewResults(enrichedResults);
 
+      // Calculate current operator loads for the WEEK of the FIRST PLANNED ITEM
+      // Default to current week if no items, but usually we plan for "now" or specific date.
+      // We will calculate loads for the week of EACH item's start date, but for simplicity, 
+      // let's assume we want to show the load for the week where the plan is landing.
+      // Better yet: Just calculate the load for the specific week of the plan.
+
+      const loads: Record<number, { current: number, new: number }> = {};
+
+      // Helper to get week key or range
+      const getWeekKey = (date: Date) => {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - d.getDay() + 1); // Monday
+        return d.getTime();
+      };
+
+      const newPlanWeekKeys = new Set(enrichedResults.map((r: any) => getWeekKey(new Date(now.getTime() + r.start_time * 60000))));
+
+      // Calculate EXISTING load from rawPlanificacion
+      rawPlanificacion.forEach(item => {
+        if (!item.id_operario) return;
+
+        // Calculate item start date
+        // Item has inicio_min relative to creado_en (or base date).
+        // note: rawPlanificacion items might have dates string or object
+        const itemDate = item.creado_en ? new Date(item.creado_en) : new Date();
+        const start = new Date(itemDate);
+        // We need to add working minutes... this is complex if we don't have absolute dates.
+        // BUT, `convertPlanificacionToGanttTasks` does some logic. 
+        // Let's assume for valid Weekly load we need the actual scheduled dates.
+        // If we don't have them easily, we fallback to: "Total assigned minutes in DB" if we trust `inicio_min`.
+        // Actually, let's use the GANTT TASKS `tasks` state which has computed dates!
+      });
+
+      // Better approach using `tasks` (GanttTasks) which have absolute dates
+      const calculatedLoads: Record<number, number> = {};
+
+      tasks.forEach(task => {
+        const opId = parseInt(task.resourceId);
+        if (isNaN(opId)) return;
+
+        const taskDate = new Date(task.startDate);
+        const taskWeek = getWeekKey(taskDate);
+
+        // Only count if it falls in one of the relevant weeks for new plan
+        if (newPlanWeekKeys.has(taskWeek)) {
+          calculatedLoads[opId] = (calculatedLoads[opId] || 0) + (task.duration * 60); // Duration in minutes
+        }
+      });
+
+      setOperatorLoads(calculatedLoads);
+
       // Close selection modal and open preview
       setIsSelectionModalOpen(false);
       setIsPreviewOpen(true);
@@ -594,28 +647,41 @@ export default function OperacionesPage() {
                     >
                       Diaria
                     </TabsTrigger>
+                    <TabsTrigger
+                      value="finalizadas"
+                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                    >
+                      Finalizadas
+                    </TabsTrigger>
                   </TabsList>
                 </div>
 
                 <div className="flex-1 p-0">
                   <TabsContent value="general" className="m-0 h-full p-4">
-                    {/* General: Show all */}
+                    {/* General: Show all that are NOT fully finalized */}
                     <PlanningListTable
-                      data={plannedOrdenes}
+                      data={plannedOrdenes.filter(order => {
+                        // Exclude if all processes are finalized
+                        const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
+                        return !allFinalized;
+                      })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
                       onRowClick={(item) => {
-                        // Adapting row click for now, maybe open details?
                         console.log("Clicked order:", item);
                       }}
                     />
                   </TabsContent>
 
                   <TabsContent value="semanal" className="m-0 h-full p-4">
-                    {/* Weekly: Filter by current week */}
+                    {/* Weekly: Filter by current week AND NOT finalized */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
-                        // Simple filtering: check if fecha_prometida is this week
+                        // Check if finalized
+                        const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
+                        if (allFinalized) return false;
+
+                        // Date check
                         if (!order.fecha_prometida) return false;
                         const date = new Date(order.fecha_prometida);
                         const today = new Date();
@@ -632,13 +698,32 @@ export default function OperacionesPage() {
                   </TabsContent>
 
                   <TabsContent value="diaria" className="m-0 h-full p-4">
-                    {/* Daily: Filter by current day */}
+                    {/* Daily: Filter by current day AND NOT finalized */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
+                        // Check if finalized
+                        const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
+                        if (allFinalized) return false;
+
                         if (!order.fecha_prometida) return false;
                         const date = new Date(order.fecha_prometida).toISOString().split('T')[0];
                         const today = new Date().toISOString().split('T')[0];
                         return date === today;
+                      })}
+                      isLoading={isLoading}
+                      onProcessStatusChange={handleProcessStatusChange}
+                      onRowClick={(item) => {
+                        console.log("Clicked order:", item);
+                      }}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="finalizadas" className="m-0 h-full p-4">
+                    {/* Finalizadas: Filter where ALL processes are status 3 (Finalizado) */}
+                    <PlanningListTable
+                      data={plannedOrdenes.filter(order => {
+                        // Check if order has processes and ALL are status 3
+                        return order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
@@ -692,9 +777,11 @@ export default function OperacionesPage() {
         onClose={() => setIsPreviewOpen(false)}
         onConfirm={handleConfirmPlan}
         results={previewResults}
+        operatorLoads={operatorLoads}
         isConfirming={isConfirmingPlan}
       />
     </div>
   )
 }
+
 

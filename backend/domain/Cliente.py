@@ -15,3 +15,13 @@ class Cliente(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(100), nullable=False)
+    direccion = Column(String(255), nullable=True)
+    cuit = Column(String(20), nullable=True)
+    telefono = Column(String(50), nullable=True)
+    celular = Column(String(50), nullable=True)
+    localidad = Column(String(100), nullable=True)
+    mail = Column(String(100), nullable=True)
+    web = Column(String(100), nullable=True)
+    obs = Column(String(500), nullable=True)
+    fantasia = Column(String(100), nullable=True)
+    abreviatura = Column(String(20), nullable=True)

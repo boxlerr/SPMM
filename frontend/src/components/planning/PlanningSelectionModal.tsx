@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button"
 import { PlanningListTable } from "./PlanningListTable"
 import { WorkOrder } from "@/lib/types"
 
+import { toast } from "sonner"
+
 interface PlanningSelectionModalProps {
     isOpen: boolean
     onClose: () => void
@@ -24,6 +26,16 @@ export function PlanningSelectionModal({
     const [selectedIds, setSelectedIds] = useState<number[]>([])
 
     const handlePlanClick = () => {
+        // Validate that selected orders have processes
+        const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id));
+        const emptyOrders = selectedOrders.filter(o => !o.procesos || o.procesos.length === 0);
+
+        if (emptyOrders.length > 0) {
+            const orderIds = emptyOrders.map(o => `#${o.id}`).join(", ");
+            toast.error(`Las siguientes órdenes no tienen procesos asignados y no se pueden planificar: ${orderIds}. Por favor agregue procesos antes de continuar.`);
+            return;
+        }
+
         onPlan(selectedIds)
     }
 

@@ -39,3 +39,26 @@ class ClienteRepository:
         except Exception as e:
             logger.error(f"Repository - Error real en find_by_id: {e}")
             raise InfrastructureException("Error al buscar el Cliente por ID.") from e
+
+    async def update(self, cliente: Cliente):
+        try:
+            logger.info(f"Repository - Actualizar Cliente ID {cliente.id}.")
+            await self.db.merge(cliente)
+            await self.db.commit()
+            await self.db.refresh(cliente)
+            return cliente
+        except Exception as e:
+            logger.error(f"Repository - Error real en update: {e}")
+            await self.db.rollback()
+            raise InfrastructureException("Error al actualizar el Cliente.") from e
+
+    async def delete(self, cliente: Cliente):
+        try:
+            logger.info(f"Repository - Eliminar Cliente ID {cliente.id}.")
+            await self.db.delete(cliente)
+            await self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Repository - Error real en delete: {e}")
+            await self.db.rollback()
+            raise InfrastructureException("Error al eliminar el Cliente.") from e

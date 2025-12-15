@@ -33,4 +33,18 @@ async def obtener_cliente(id: int, db=Depends(get_db)):
     service = ClienteService(db)
     return await service.obtenerClientePorId(id)
 
+# 🔹 Actualizar cliente
+@router.put("/clientes/{id}")
+async def actualizar_cliente(id: int, cliente_dto: ClienteRequestDTO, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /clientes/{id}")
+    service = ClienteService(db)
+    return await service.actualizarCliente(id, cliente_dto)
+
+# 🔹 Eliminar cliente
+@router.delete("/clientes/{id}")
+async def eliminar_cliente(id: int, db=Depends(get_db)):
+    logger.info(f"API - Inicio DELETE /clientes/{id}")
+    service = ClienteService(db)
+    return await service.eliminarCliente(id)
+
 app.include_router(router)

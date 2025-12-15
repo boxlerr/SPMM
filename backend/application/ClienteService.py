@@ -24,7 +24,19 @@ class ClienteService:
             if not nombre:
                 raise BusinessException("El nombre de Cliente es obligatorio.")
 
-            cliente = Cliente(nombre=nombre)
+            cliente = Cliente(
+                nombre=nombre,
+                direccion=cliente_dto.direccion,
+                cuit=cliente_dto.cuit,
+                telefono=cliente_dto.telefono,
+                celular=cliente_dto.celular,
+                localidad=cliente_dto.localidad,
+                mail=cliente_dto.mail,
+                web=cliente_dto.web,
+                obs=cliente_dto.obs,
+                fantasia=cliente_dto.fantasia,
+                abreviatura=cliente_dto.abreviatura
+            )
             cliente_creado = await self.repository.save(cliente)
 
             return ResponseDTO(status=True, data=jsonable_encoder(cliente_creado))
@@ -52,3 +64,51 @@ class ClienteService:
             raise NotFoundException(f"No se encontró el cliente con ID {id}")
 
         return ResponseDTO(status=True, data=jsonable_encoder(cliente))
+
+    async def actualizarCliente(self, id: int, cliente_dto: ClienteRequestDTO):
+        try:
+            logger.info(f"Service - Actualizar cliente ID: {id}")
+            
+            cliente = await self.repository.find_by_id(id)
+            if not cliente:
+                raise NotFoundException(f"No se encontró el cliente con ID {id}")
+
+            nombre = (cliente_dto.nombre or "").strip()
+            if not nombre:
+                raise BusinessException("El nombre de Cliente es obligatorio.")
+
+            cliente.nombre = nombre
+            cliente.direccion = cliente_dto.direccion
+            cliente.cuit = cliente_dto.cuit
+            cliente.telefono = cliente_dto.telefono
+            cliente.celular = cliente_dto.celular
+            cliente.localidad = cliente_dto.localidad
+            cliente.mail = cliente_dto.mail
+            cliente.web = cliente_dto.web
+            cliente.obs = cliente_dto.obs
+            cliente.fantasia = cliente_dto.fantasia
+            cliente.abreviatura = cliente_dto.abreviatura
+            
+            cliente_actualizado = await self.repository.update(cliente)
+            return ResponseDTO(status=True, data=jsonable_encoder(cliente_actualizado))
+
+        except (InfrastructureException, BusinessException, NotFoundException):
+            raise
+        except Exception as e:
+            raise ApplicationException("Error inesperado al actualizar el Cliente.") from e
+
+    async def eliminarCliente(self, id: int):
+        try:
+            logger.info(f"Service - Eliminar cliente ID: {id}")
+            
+            cliente = await self.repository.find_by_id(id)
+            if not cliente:
+                raise NotFoundException(f"No se encontró el cliente con ID {id}")
+
+            await self.repository.delete(cliente)
+            return ResponseDTO(status=True, message="Cliente eliminado correctamente.")
+
+        except (InfrastructureException, NotFoundException):
+            raise
+        except Exception as e:
+            raise ApplicationException("Error inesperado al eliminar el Cliente.") from e

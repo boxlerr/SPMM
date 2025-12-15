@@ -7,7 +7,7 @@ export interface Notification {
   id: string; // Mantenemos string para compatibilidad con el frontend
   id_notificacion?: number; // ID de la base de datos
   message: string;
-  type: "operario_created" | "operario_updated" | "operario_deleted" | "usuario_created" | "usuario_updated" | "usuario_deleted";
+  type: "operario_created" | "operario_updated" | "operario_deleted" | "usuario_created" | "usuario_updated" | "usuario_deleted" | "cliente_created" | "cliente_updated" | "cliente_deleted";
   timestamp: Date;
   read: boolean;
   motivo?: string; // Motivo o detalles adicionales (solo para cambio de estado)
