@@ -116,4 +116,6 @@ export interface PlanificacionItem {
     sector?: string;
     pedido_externo?: number | string;
     cliente?: string;
+    id_planificacion_lote?: string;
+    descripcion_lote?: string;
 }

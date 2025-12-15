@@ -125,6 +125,22 @@ async def actualizar_observaciones_proceso(id_orden: int, id_proceso: int, body:
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
     service = OrdenTrabajoService(db)
     return await service.actualizarObservacionesProceso(id_orden, id_proceso, body.observaciones)
+    
+class ProcessReorderItem(BaseModel):
+    id_proceso: int
+    orden: int
+
+class ProcessReorderRequest(BaseModel):
+    ordenes: List[ProcessReorderItem]
+
+@router.put("/ordenes/{id_orden}/procesos/reorder")
+async def reorder_processes(id_orden: int, body: ProcessReorderRequest, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/reorder")
+    service = OrdenTrabajoService(db)
+    # Convert Pydantic models to dicts
+    process_orders = [item.dict() for item in body.ordenes]
+    return await service.actualizarOrdenProcesos(id_orden, process_orders)
+
 
 # 🔹 Obtener órdenes no planificadas
 @router.get("/ordenes-no-planificadas")

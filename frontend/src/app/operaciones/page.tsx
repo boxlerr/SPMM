@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -17,6 +17,13 @@ import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
 import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
 import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("lista_planificacion")
@@ -34,6 +41,9 @@ export default function OperacionesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [selectedTask, setSelectedTask] = useState<PlanificacionItem | null>(null)
 
+  // History State
+  const [selectedLoteId, setSelectedLoteId] = useState<string>("all")
+
   // Selective Planning State
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false)
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]) // Used for confirmation
@@ -41,6 +51,12 @@ export default function OperacionesPage() {
   const [previewResults, setPreviewResults] = useState<any[]>([])
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
+
+
+
+
+
+
 
   // Helper for colors
   const getProcessColor = (processName: string) => {
@@ -132,7 +148,7 @@ export default function OperacionesPage() {
       const ordenesResponse = await fetch("http://localhost:8000/ordenes");
       if (ordenesResponse.ok) {
         const ordenesData = await ordenesResponse.json();
-        // The API returns the list directly or { data: [...] } depending on standardization. 
+        // The API returns the list directly or {data: [...] } depending on standardization.
         // Based on OrdenTrabajoService.listarOrdenes returning a list, ordenesData should be the array.
         const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
         setOrdenesTrabajo(ordenesList);
@@ -148,9 +164,35 @@ export default function OperacionesPage() {
     fetchData();
   }, []);
 
-  const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
+
+  const uniqueLotes = React.useMemo(() => {
+    const lotes = new Map<string, { id: string; descripcion: string; date: string }>();
+    rawPlanificacion.forEach(item => {
+      if (item.id_planificacion_lote) {
+        if (!lotes.has(item.id_planificacion_lote)) {
+          lotes.set(item.id_planificacion_lote, {
+            id: item.id_planificacion_lote,
+            descripcion: item.descripcion_lote || "Sin descripción",
+            date: item.creado_en // Assuming date is consistent for the batch
+          });
+        }
+      }
+    });
+    // Convert to array and sort by date descending
+    return Array.from(lotes.values()).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [rawPlanificacion]);
+
+  const filteredPlanificacion = React.useMemo(() => {
+    if (selectedLoteId === "all") return rawPlanificacion;
+    return rawPlanificacion.filter(p => p.id_planificacion_lote === selectedLoteId);
+  }, [rawPlanificacion, selectedLoteId]);
+
+  // Use filteredPlanificacion for deriving planned orders to reflect the history selection
+  const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
   const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
   const unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
+
+  // ... existing code ...
 
   const handleTaskMove = async (taskId: string, newResourceId: string, newDate: string, newStartTime: string) => {
     const task = tasks.find(t => t.id === taskId);
@@ -373,7 +415,7 @@ export default function OperacionesPage() {
 
     // Update tasks state (Gantt) as well
     setTasks(prev => prev.map(t => {
-      // We need to find the task corresponding to this process. 
+      // We need to find the task corresponding to this process.
       // We can match by dbId if we had it, but here we iterate. 
       // We can inspect rawPlanificacion update and sync.
       // Or simpler: just find task with matching ordenId and processId via rawPlanificacion lookup?
@@ -396,6 +438,39 @@ export default function OperacionesPage() {
       console.error("Error updating status:", error);
       toast.error("Error al actualizar el estado");
       // Revert in case of error (would need complex revert logic or simple refetch)
+    }
+  }
+
+
+  const handleProcessReorder = async (ordenId: number, newOrderedProcesses: any[]) => {
+    // 1. Optimistic update
+    setOrdenesTrabajo(prev => prev.map(order => {
+      if (order.id !== ordenId) return order;
+      return {
+        ...order,
+        procesos: newOrderedProcesses
+      };
+    }));
+
+    try {
+      const response = await fetch(`http://localhost:8000/ordenes/${ordenId}/procesos/reorder`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ordenes: newOrderedProcesses.map(p => ({
+            id_proceso: p.proceso.id,
+            orden: p.orden
+          }))
+        })
+      });
+
+      if (!response.ok) throw new Error("Failed to reorder processes");
+      toast.success("Orden de procesos actualizado");
+    } catch (error) {
+      console.error("Error reordering:", error);
+      toast.error("Error al reordenar los procesos");
+      // Revert logic would go here (fetchData)
+      fetchData();
     }
   };
 
@@ -454,11 +529,6 @@ export default function OperacionesPage() {
       setPreviewResults(enrichedResults);
 
       // Calculate current operator loads for the WEEK of the FIRST PLANNED ITEM
-      // Default to current week if no items, but usually we plan for "now" or specific date.
-      // We will calculate loads for the week of EACH item's start date, but for simplicity, 
-      // let's assume we want to show the load for the week where the plan is landing.
-      // Better yet: Just calculate the load for the specific week of the plan.
-
       const loads: Record<number, { current: number, new: number }> = {};
 
       // Helper to get week key or range
@@ -470,22 +540,6 @@ export default function OperacionesPage() {
       };
 
       const newPlanWeekKeys = new Set(enrichedResults.map((r: any) => getWeekKey(new Date(now.getTime() + r.start_time * 60000))));
-
-      // Calculate EXISTING load from rawPlanificacion
-      rawPlanificacion.forEach(item => {
-        if (!item.id_operario) return;
-
-        // Calculate item start date
-        // Item has inicio_min relative to creado_en (or base date).
-        // note: rawPlanificacion items might have dates string or object
-        const itemDate = item.creado_en ? new Date(item.creado_en) : new Date();
-        const start = new Date(itemDate);
-        // We need to add working minutes... this is complex if we don't have absolute dates.
-        // BUT, `convertPlanificacionToGanttTasks` does some logic. 
-        // Let's assume for valid Weekly load we need the actual scheduled dates.
-        // If we don't have them easily, we fallback to: "Total assigned minutes in DB" if we trust `inicio_min`.
-        // Actually, let's use the GANTT TASKS `tasks` state which has computed dates!
-      });
 
       // Better approach using `tasks` (GanttTasks) which have absolute dates
       const calculatedLoads: Record<number, number> = {};
@@ -627,7 +681,7 @@ export default function OperacionesPage() {
             {activeTab === "work_orders" && <WorkOrdersListWrapper />}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
-                <div className="border-b px-4 bg-gray-50/50">
+                <div className="border-b px-4 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <TabsList className="bg-transparent p-0 h-auto gap-4">
                     <TabsTrigger
                       value="general"
@@ -654,6 +708,22 @@ export default function OperacionesPage() {
                       Finalizadas
                     </TabsTrigger>
                   </TabsList>
+
+                  <div className="py-2 pr-2">
+                    <Select value={selectedLoteId} onValueChange={setSelectedLoteId}>
+                      <SelectTrigger className="w-[280px] bg-white border-gray-200">
+                        <SelectValue placeholder="Filtrar por Historial / Lote" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas las Planificaciones</SelectItem>
+                        {uniqueLotes.map(lote => (
+                          <SelectItem key={lote.id} value={lote.id}>
+                            {lote.descripcion}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="flex-1 p-0">
@@ -667,6 +737,10 @@ export default function OperacionesPage() {
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
+                      onProcessReorder={handleProcessReorder}
+                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      operarios={rawOperarios}
+                      planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
@@ -691,6 +765,10 @@ export default function OperacionesPage() {
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
+                      onProcessReorder={handleProcessReorder}
+                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      operarios={rawOperarios}
+                      planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
@@ -712,6 +790,10 @@ export default function OperacionesPage() {
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
+                      onProcessReorder={handleProcessReorder}
+                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      operarios={rawOperarios}
+                      planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
@@ -727,6 +809,10 @@ export default function OperacionesPage() {
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
+                      onProcessReorder={handleProcessReorder}
+                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      operarios={rawOperarios}
+                      planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}

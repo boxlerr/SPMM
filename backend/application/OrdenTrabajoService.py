@@ -332,7 +332,21 @@ class OrdenTrabajoService:
         if not ok:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
             
+        if not ok:
+            raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
+            
         return ResponseDTO(status=True, data={"updated": True, "observaciones": observaciones})
+
+    async def actualizarOrdenProcesos(self, id_orden: int, process_orders: list[dict]):
+        logger.info(f"Service - Actualizar orden de procesos para Orden {id_orden}")
+        
+        ok = await self.repository.update_procesos_order(id_orden, process_orders)
+        
+        if not ok:
+             raise ApplicationException(f"Error al actualizar el orden de procesos para la orden {id_orden}")
+             
+        return ResponseDTO(status=True, data={"updated": True})
+
 
     async def obtenerOrdenesNoPlanificadas(self):
         """

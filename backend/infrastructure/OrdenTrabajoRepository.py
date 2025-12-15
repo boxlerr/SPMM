@@ -496,6 +496,35 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_proceso_observaciones: {e}")
             raise InfrastructureException("Error al actualizar observaciones del proceso.") from e
 
+    async def update_procesos_order(self, id_orden: int, process_orders: list[dict]):
+        """
+        Actualiza el orden de los procesos para una orden de trabajo.
+        process_orders: lista de dicts {id_proceso: int, orden: int}
+        """
+        try:
+            logger.info(f"Repository - Actualizar orden de procesos para Orden {id_orden}")
+            
+            for item in process_orders:
+                query = select(OrdenTrabajoProceso).where(
+                    OrdenTrabajoProceso.id_orden_trabajo == id_orden,
+                    OrdenTrabajoProceso.id_proceso == item['id_proceso']
+                )
+                result = await self.db.execute(query)
+                ot_proceso = result.scalar_one_or_none()
+                
+                if ot_proceso:
+                    ot_proceso.orden = item['orden']
+            
+            await self.db.commit()
+            logger.info("Repository - Orden de procesos actualizado correctamente.")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en update_procesos_order: {e}")
+            raise InfrastructureException("Error al actualizar orden de procesos.") from e
+
+
     async def find_unplanned(self):
         """
         Obtiene las órdenes de trabajo que NO están en la tabla de planificación.

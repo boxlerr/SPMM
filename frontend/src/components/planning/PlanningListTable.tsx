@@ -1,12 +1,13 @@
 "use client";
 
 import React from "react";
-import { WorkOrder } from "@/lib/types";
+import { WorkOrder, PlanificacionItem } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
+
 import {
     Select,
     SelectContent,
@@ -16,19 +17,36 @@ import {
 } from "@/components/ui/select";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { addWorkMinutes } from "@/lib/gantt-utils";
 
 interface PlanningListTableProps {
     data: WorkOrder[];
     isLoading: boolean;
     onRowClick: (item: WorkOrder) => void;
     onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number) => void;
+    onProcessReorder?: (ordenId: number, newOrder: any[]) => void;
+    onOperatorChange?: (ordenId: number, procesoId: number, operarioId: number) => void;
     selectedIds?: number[];
     onSelectionChange?: (ids: number[]) => void;
+    operarios?: any[];
+    planificacion?: PlanificacionItem[];
 }
 
 export const PlanningListTable = React.memo(_PlanningListTable);
 
-function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange, selectedIds = [], onSelectionChange }: PlanningListTableProps) {
+function _PlanningListTable({
+    data,
+    isLoading,
+    onRowClick,
+    onProcessStatusChange,
+    onProcessReorder,
+    onOperatorChange,
+    selectedIds = [],
+    onSelectionChange,
+    operarios = [],
+    planificacion = []
+}: PlanningListTableProps) {
+
     const [sortConfig, setSortConfig] = React.useState<{ key: 'unidades' | 'prioridad' | null; direction: 'asc' | 'desc' | null }>({
         key: null,
         direction: null,
@@ -74,6 +92,32 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
         } catch (e) {
             return dateStr;
         }
+    };
+
+    const toTitleCase = (str: string | null | undefined) => {
+        if (!str) return "";
+        return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    };
+
+    const getScheduledStart = (ordenId: number, procesoId: number) => {
+        if (!planificacion || planificacion.length === 0) return "-";
+        const item = planificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId);
+        if (!item) return "-";
+
+        // Logic matching convertPlanificacionToGanttTasks from page.tsx/gantt-utils
+        const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
+        const normalizedBaseDate = new Date(baseDate);
+        normalizedBaseDate.setHours(9, 0, 0, 0); // 9:00 AM start
+
+        const start = addWorkMinutes(normalizedBaseDate, item.inicio_min);
+
+        return new Intl.DateTimeFormat('es-AR', {
+            weekday: 'short',
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        }).format(start);
     };
 
     const getPriorityColor = (priorityId?: number) => {
@@ -126,9 +170,17 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
     }, [data, searchTerm]);
 
     const sortedData = React.useMemo(() => {
-        if (!sortConfig.key || !sortConfig.direction) return filteredData;
 
-        return [...filteredData].sort((a, b) => {
+        // Sort processes by 'orden' for each item to ensure correct display
+        const dataWithSortedProcesses = filteredData.map(item => ({
+            ...item,
+            procesos: [...item.procesos].sort((a, b) => a.orden - b.orden)
+        }));
+
+        if (!sortConfig.key || !sortConfig.direction) return dataWithSortedProcesses;
+
+        return [...dataWithSortedProcesses].sort((a, b) => {
+
             if (sortConfig.key === 'unidades') {
                 const valA = a.unidades || 0;
                 const valB = b.unidades || 0;
@@ -151,6 +203,29 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
                 {sortConfig.direction === 'asc' ? '↑' : '↓'}
             </span>
         );
+    };
+
+    const getOrderStatus = (order: WorkOrder) => {
+        if (!order.procesos || order.procesos.length === 0) return 'Pendiente';
+
+        const allFinalized = order.procesos.every(p => p.estado_proceso.id === 3);
+        if (allFinalized) return 'Finalizado';
+
+        const hasProgress = order.procesos.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3);
+        if (hasProgress) return 'En Proceso';
+
+        return 'Pendiente';
+    };
+
+    const renderStatusBadge = (status: string) => {
+        switch (status) {
+            case 'Finalizado':
+                return <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200">Finalizado</Badge>;
+            case 'En Proceso':
+                return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200 border-blue-200">En Proceso</Badge>;
+            default:
+                return null;
+        }
     };
 
     if (isLoading) {
@@ -212,17 +287,19 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
                                         <SortIcon column="prioridad" />
                                     </div>
                                 </th>
+                                <th className="px-4 py-3 font-bold text-gray-600 text-center">Estado</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">F. Prom.</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">F. Entrega</th>
                             </tr>
                         </thead>
                         <tbody>
                             {sortedData.length === 0 ? (
-                                <tr>
-                                    <td colSpan={11} className="px-4 py-8 text-center text-gray-500">
+                                <tr className="bg-gray-50 border-b">
+                                    <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
+
                             ) : (
                                 sortedData.map((item) => (
                                     <React.Fragment key={item.id}>
@@ -279,6 +356,9 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
                                                     {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
                                                 </Badge>
                                             </td>
+                                            <td className="px-4 py-3 text-center">
+                                                {renderStatusBadge(getOrderStatus(item))}
+                                            </td>
                                             <td className="px-4 py-3 font-medium">
                                                 {formatDate(item.fecha_prometida)}
                                             </td>
@@ -288,31 +368,41 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={11} className="px-4 py-4">
+                                                <td colSpan={12} className="px-4 py-4">
                                                     <div className="ml-8 border rounded-md overflow-hidden bg-white shadow-inner">
-                                                        <table className="w-full text-sm">
-                                                            <thead className="bg-gray-100 text-xs uppercase text-gray-600">
-                                                                <tr>
-                                                                    <th className="px-4 py-2 text-left">Orden</th>
-                                                                    <th className="px-4 py-2 text-left">Proceso</th>
-                                                                    <th className="px-4 py-2 text-left">Estado</th>
-                                                                    <th className="px-4 py-2 text-center">Tiempo (min)</th>
-                                                                    <th className="px-4 py-2 text-left">Operario</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
+                                                        <div className="w-full text-sm">
+                                                            {/* Grid Header - Updated with 'Inicio' */}
+                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_140px_120px_80px_300px] gap-4 px-4 py-2 font-bold">
+                                                                <div>#</div>
+                                                                <div>Proceso</div>
+                                                                <div>Inicio</div>
+                                                                <div>Estado</div>
+                                                                <div className="text-center">Minutos</div>
+                                                                <div>Operario</div>
+                                                            </div>
+
+                                                            {/* Processes List (No DnD) */}
+                                                            <div>
                                                                 {item.procesos && item.procesos.length > 0 ? (
                                                                     item.procesos.map((proc, idx) => (
-                                                                        <tr key={idx} className="border-t hover:bg-gray-50">
-                                                                            <td className="px-4 py-2 font-mono text-gray-500">{proc.orden}</td>
-                                                                            <td className="px-4 py-2 font-medium">{proc.proceso?.nombre || "-"}</td>
-                                                                            <td className="px-4 py-2">
+                                                                        <div
+                                                                            key={`${item.id}-${proc.proceso.id}`}
+                                                                            className="grid grid-cols-[50px_1fr_140px_120px_80px_300px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
+                                                                        >
+                                                                            <div className="flex items-center text-gray-500 font-mono">
+                                                                                {proc.orden}
+                                                                            </div>
+                                                                            <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
+                                                                            <div className="text-xs font-semibold text-blue-700">
+                                                                                {getScheduledStart(item.id, proc.proceso.id)}
+                                                                            </div>
+                                                                            <div>
                                                                                 <Select
                                                                                     defaultValue={proc.estado_proceso?.id?.toString() || "1"}
                                                                                     onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
                                                                                 >
                                                                                     <SelectTrigger className={cn(
-                                                                                        "h-8 w-[140px] border-none shadow-none font-medium",
+                                                                                        "h-8 w-full border-none shadow-none font-medium",
                                                                                         (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
                                                                                             proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
                                                                                                 "text-gray-800 bg-gray-100 hover:bg-gray-200"
@@ -325,20 +415,46 @@ function _PlanningListTable({ data, isLoading, onRowClick, onProcessStatusChange
                                                                                         <SelectItem value="3">Finalizado</SelectItem>
                                                                                     </SelectContent>
                                                                                 </Select>
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-center text-gray-600">{proc.tiempo_proceso || "-"}</td>
-                                                                            <td className="px-4 py-2 text-gray-700 text-xs font-medium">{proc.operario_nombre || "Sin Asignar"}</td>
-                                                                        </tr>
+                                                                            </div>
+                                                                            <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
+                                                                            <div>
+                                                                                {onOperatorChange && operarios.length > 0 ? (
+                                                                                    <Select
+                                                                                        value={operarios.find(op => {
+                                                                                            // Try to match exact string first (Name Surname)
+                                                                                            const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
+                                                                                            const currentName = (proc.operario_nombre || "").trim().toLowerCase();
+                                                                                            return opName === currentName;
+                                                                                        })?.id?.toString() || undefined}
+                                                                                        onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                    >
+                                                                                        <SelectTrigger className="h-8 w-full border border-gray-200">
+                                                                                            <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                                                        </SelectTrigger>
+                                                                                        <SelectContent>
+                                                                                            {operarios.map((op) => (
+                                                                                                <SelectItem key={op.id} value={op.id.toString()}>
+                                                                                                    {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                                                </SelectItem>
+                                                                                            ))}
+                                                                                        </SelectContent>
+                                                                                    </Select>
+                                                                                ) : (
+                                                                                    <span className="text-gray-700 text-xs font-medium block">
+                                                                                        {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
+                                                                                    </span>
+                                                                                )}
+
+                                                                            </div>
+                                                                        </div>
                                                                     ))
                                                                 ) : (
-                                                                    <tr>
-                                                                        <td colSpan={5} className="px-4 py-4 text-center text-gray-400 italic">
-                                                                            Sin procesos asignados
-                                                                        </td>
-                                                                    </tr>
+                                                                    <div className="px-4 py-4 text-center text-gray-400 italic">
+                                                                        Sin procesos asignados
+                                                                    </div>
                                                                 )}
-                                                            </tbody>
-                                                        </table>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </td>
                                             </tr>
