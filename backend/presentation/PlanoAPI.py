@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Response
 from backend.infrastructure.db import SessionLocal
 from backend.application.PlanoService import PlanoService
 from backend.dto.PlanoRequestDTO import PlanoRequestDTO
@@ -45,6 +45,20 @@ async def obtener_plano(id: int, db=Depends(get_db)):
     logger.info(f"API - Inicio GET /planos/{id}")
     service = PlanoService(db)
     return await service.obtenerPlanoPorId(id)
+
+
+# 🔹 Obtener contenido (archivo) del plano
+@router.get("/planos/{id}/archivo")
+async def obtener_contenido_plano(id: int, download: bool = False, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /planos/{id}/archivo")
+    service = PlanoService(db)
+    contenido, tipo_archivo, nombre_archivo = await service.obtenerContenidoPlano(id)
+    
+    # Set disposition based on download param
+    disposition = "attachment" if download else "inline"
+    headers = {"Content-Disposition": f'{disposition}; filename="{nombre_archivo}"'}
+    
+    return Response(content=contenido, media_type=tipo_archivo, headers=headers)
 
 
 # 🔹 Listar planos por Orden de Trabajo

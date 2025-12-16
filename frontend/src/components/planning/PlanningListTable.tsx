@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Search, ChevronDown, ChevronRight } from "lucide-react";
+import { OrderFiles } from "@/components/common/OrderFiles";
 
 import {
     Select,
@@ -370,9 +371,12 @@ function _PlanningListTable({
                                             <tr className="bg-gray-50 border-b">
                                                 <td colSpan={12} className="px-4 py-4">
                                                     <div className="ml-8 border rounded-md overflow-hidden bg-white shadow-inner">
+                                                        <div className="px-4 pt-4">
+                                                            <OrderFiles orderId={item.id} />
+                                                        </div>
                                                         <div className="w-full text-sm">
                                                             {/* Grid Header - Updated with 'Inicio' */}
-                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_140px_120px_80px_300px] gap-4 px-4 py-2 font-bold">
+                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_140px_120px_80px_300px] gap-4 px-4 py-2 font-bold border-t border-gray-200">
                                                                 <div>#</div>
                                                                 <div>Proceso</div>
                                                                 <div>Inicio</div>

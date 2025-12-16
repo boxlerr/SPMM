@@ -4,6 +4,7 @@ import React from "react";
 import { Card } from "@/components/ui/card";
 import { GanttTask } from "@/lib/types";
 import { toTitleCase } from "@/lib/gantt-utils";
+import { OrderFiles } from "@/components/common/OrderFiles";
 
 interface GanttWorkOrdersListProps {
     tasks: GanttTask[];
@@ -190,6 +191,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                                 </span>
                                             )}
                                             <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
+                                            <OrderFiles orderId={parseInt(otNumber)} />
                                         </div>
                                     </div>
                                 </div>

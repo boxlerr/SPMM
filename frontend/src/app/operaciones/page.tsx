@@ -5,7 +5,7 @@ import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PlanningListTable } from "@/components/planning/PlanningListTable"
-import { UnplannedWorkOrders } from "@/components/gantt/unplanned-work-orders"
+
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
@@ -716,11 +716,16 @@ export default function OperacionesPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todas las Planificaciones</SelectItem>
-                        {uniqueLotes.map(lote => (
-                          <SelectItem key={lote.id} value={lote.id}>
-                            {lote.descripcion}
-                          </SelectItem>
-                        ))}
+                        {uniqueLotes.map(lote => {
+                          const dateObj = new Date(lote.date);
+                          const dateStr = dateObj.toLocaleDateString();
+                          const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          return (
+                            <SelectItem key={lote.id} value={lote.id}>
+                              {lote.descripcion} ({dateStr} {timeStr})
+                            </SelectItem>
+                          );
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -823,7 +828,6 @@ export default function OperacionesPage() {
             )}
 
             {/* Sección de Órdenes No Planificadas */}
-            {activeTab === "gantt" && <UnplannedWorkOrders />}
           </div>
         </div>
       </div>

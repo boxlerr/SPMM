@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, Edit2, CalendarClock } from "lucide-react";
 import { WorkOrder } from "@/lib/types";
+import { OrderFiles } from "@/components/common/OrderFiles";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -89,6 +90,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit }: UnplannedWorkOrdersL
                                         {typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "Cliente Desconocido"}
                                     </h4>
                                     <p className="text-gray-600 text-sm line-clamp-1">{order.observaciones || order.detalle || "Sin detalles"}</p>
+                                    <OrderFiles orderId={order.id} />
                                 </div>
 
                                 <div className="flex items-center gap-6 text-sm text-gray-500">
