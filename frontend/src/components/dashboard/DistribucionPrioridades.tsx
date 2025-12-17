@@ -30,7 +30,7 @@ export default function DistribucionPrioridades({
     onPriorityClick,
 }: DistribucionPrioridadesProps) {
     return (
-        <section className="bg-white rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-gray-100 overflow-hidden">
+        <section className="bg-white rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-gray-100 overflow-hidden h-full">
             <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100/50">
@@ -50,7 +50,7 @@ export default function DistribucionPrioridades({
                 ) : !prioridades || prioridades.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">No hay datos</div>
                 ) : (
-                    <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                    <div className="space-y-4">
                         {prioridades.map((item) => (
                             <div
                                 key={item.prioridad}

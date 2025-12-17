@@ -44,6 +44,8 @@ class OrdenTrabajoProcesoDTO(BaseModel):
     proceso: Optional[ProcesoDTO] = None
     estado_proceso: Optional[EstadoProcesoDTO] = None
     operario_nombre: Optional[str] = None
+    inicio_real: Optional[datetime] = None
+    fin_real: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
 

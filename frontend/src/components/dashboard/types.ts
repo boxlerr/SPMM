@@ -20,19 +20,14 @@ export interface OrdenCritica {
     estado: string
 }
 
-export interface OcupacionSector {
-    sector: string
-    ordenes_activas: number
-    porcentaje: number
-}
 
 export interface TimelineItem {
     fecha: string
     ordenes: number
 }
 
-export interface ProcesoUtilizado {
-    proceso: string
+export interface TopCliente {
+    cliente: string
     cantidad: number
 }
 
@@ -67,6 +62,7 @@ export interface OrdenEstado {
     fecha_entrega: string | null
     estado: string
     sector: string
+    cliente: string
     prioridad: string
     cantidad: number
     proceso_actual?: string

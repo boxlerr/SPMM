@@ -83,6 +83,8 @@ export interface WorkOrder {
             descripcion: string;
         };
         operario_nombre?: string;
+        inicio_real?: string;
+        fin_real?: string;
     }[];
 }
 
@@ -118,4 +120,6 @@ export interface PlanificacionItem {
     cliente?: string;
     id_planificacion_lote?: string;
     descripcion_lote?: string;
+    inicio_real?: string;
+    fin_real?: string;
 }

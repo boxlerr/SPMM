@@ -456,8 +456,16 @@ class OrdenTrabajoRepository:
             if not ot_proceso:
                 logger.info("Repository - Relación Orden-Proceso no encontrada.")
                 return False
-                
+
             ot_proceso.id_estado = id_estado
+            
+            # Logic for Real Minutes Tracking
+            if id_estado == 2:  # En Proceso
+                if not ot_proceso.inicio_real:
+                    ot_proceso.inicio_real = datetime.now()
+            elif id_estado == 3:  # Finalizado
+                ot_proceso.fin_real = datetime.now()
+                
             await self.db.commit()
             await self.db.refresh(ot_proceso)
             

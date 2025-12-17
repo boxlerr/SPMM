@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback } from "react"
 import {
     EstadisticasOrdenes,
     OrdenCritica,
-    OcupacionSector,
     TimelineItem,
-    ProcesoUtilizado,
+    TopCliente,
     DistribucionPrioridad,
     TiempoPromedio,
     TopArticulo,
@@ -17,16 +16,14 @@ export function useDashboardData() {
 
     const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null)
     const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([])
-    const [ocupacionSectores, setOcupacionSectores] = useState<OcupacionSector[]>([])
     const [timelineEntregas, setTimelineEntregas] = useState<TimelineItem[]>([])
-    const [procesosMasUtilizados, setProcesosMasUtilizados] = useState<ProcesoUtilizado[]>([])
+    const [topClientes, setTopClientes] = useState<TopCliente[]>([])
     const [distribucionPrioridades, setDistribucionPrioridades] = useState<DistribucionPrioridad[]>([])
     const [tiempoPromedio, setTiempoPromedio] = useState<TiempoPromedio | null>(null)
     const [topArticulos, setTopArticulos] = useState<TopArticulo[]>([])
 
     const [loading, setLoading] = useState(true)
     const [loadingCriticas, setLoadingCriticas] = useState(true)
-    const [loadingOcupacion, setLoadingOcupacion] = useState(true)
     const [loadingTimeline, setLoadingTimeline] = useState(true)
     const [loadingExtras, setLoadingExtras] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -69,19 +66,6 @@ export function useDashboardData() {
         }
     }, [apiUrl])
 
-    const fetchOcupacionSectores = useCallback(async () => {
-        try {
-            setLoadingOcupacion(true)
-            const response = await fetch(`${apiUrl}/api/dashboard/ocupacion-sectores`)
-            if (!response.ok) throw new Error("Error al cargar ocupación de sectores")
-            const data = await response.json()
-            setOcupacionSectores(data.data || [])
-        } catch (err) {
-            console.error("Error fetching ocupacion sectores:", err)
-        } finally {
-            setLoadingOcupacion(false)
-        }
-    }, [apiUrl])
 
     const fetchTimelineEntregas = useCallback(async () => {
         try {
@@ -97,14 +81,14 @@ export function useDashboardData() {
         }
     }, [apiUrl])
 
-    const fetchProcesosMasUtilizados = useCallback(async () => {
+    const fetchTopClientes = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/procesos-mas-utilizados`)
-            if (!response.ok) throw new Error("Error al cargar procesos")
+            const response = await fetch(`${apiUrl}/api/dashboard/clientes-mayor-volumen`)
+            if (!response.ok) throw new Error("Error al cargar top clientes")
             const data = await response.json()
-            setProcesosMasUtilizados(data.data || [])
+            setTopClientes(data.data || [])
         } catch (err) {
-            console.error("Error fetching procesos:", err)
+            console.error("Error fetching top clientes:", err)
         }
     }, [apiUrl])
 
@@ -190,35 +174,32 @@ export function useDashboardData() {
     useEffect(() => {
         fetchEstadisticas()
         fetchOrdenesCriticas()
-        fetchOcupacionSectores()
         fetchTimelineEntregas()
-    }, [fetchEstadisticas, fetchOrdenesCriticas, fetchOcupacionSectores, fetchTimelineEntregas])
+    }, [fetchEstadisticas, fetchOrdenesCriticas, fetchTimelineEntregas])
 
     useEffect(() => {
         setLoadingExtras(true)
         Promise.all([
-            fetchProcesosMasUtilizados(),
+            fetchTopClientes(),
             fetchDistribucionPrioridades(),
             fetchTopArticulos(),
             fetchTiempoPromedio(),
         ]).finally(() => setLoadingExtras(false))
-    }, [fetchProcesosMasUtilizados, fetchDistribucionPrioridades, fetchTopArticulos, fetchTiempoPromedio])
+    }, [fetchTopClientes, fetchDistribucionPrioridades, fetchTopArticulos, fetchTiempoPromedio])
 
     const refreshAll = useCallback(() => {
         fetchEstadisticas()
         fetchOrdenesCriticas()
-        fetchOcupacionSectores()
         fetchTimelineEntregas()
-        fetchProcesosMasUtilizados()
+        fetchTopClientes()
         fetchDistribucionPrioridades()
         fetchTopArticulos()
         fetchTiempoPromedio()
     }, [
         fetchEstadisticas,
         fetchOrdenesCriticas,
-        fetchOcupacionSectores,
         fetchTimelineEntregas,
-        fetchProcesosMasUtilizados,
+        fetchTopClientes,
         fetchDistribucionPrioridades,
         fetchTopArticulos,
         fetchTiempoPromedio,
@@ -227,15 +208,13 @@ export function useDashboardData() {
     return {
         estadisticas,
         ordenesCriticas,
-        ocupacionSectores,
         timelineEntregas,
-        procesosMasUtilizados,
+        topClientes,
         distribucionPrioridades,
         tiempoPromedio,
         topArticulos,
         loading,
         loadingCriticas,
-        loadingOcupacion,
         loadingTimeline,
         loadingExtras,
         error,

@@ -63,7 +63,8 @@ async def obtener_planificacion(db = Depends(get_db)):
                ot.observaciones as observaciones_ot,
                ot.fecha_entrada, ot.fecha_prometida, ot.id_prioridad, ot.id_articulo,
                a.cod_articulo, a.descripcion as descripcion_articulo, ot.unidades as cantidad, 
-               s.nombre as sector, pk.nombre as cliente, ot.id_otvieja as pedido_externo
+               s.nombre as sector, pk.nombre as cliente, ot.id_otvieja as pedido_externo,
+               otp.inicio_real, otp.fin_real
         FROM planificacion p
         LEFT JOIN maquinaria m ON p.id_maquinaria = m.id
         LEFT JOIN operario o ON p.id_operario = o.id
