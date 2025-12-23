@@ -869,7 +869,7 @@ async def planificar_pendientes(
             prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
             for rel in orden.procesos:
-                # 🛑 Saltar procesos finalizados (doble seguridad)
+                # Saltar procesos finalizados (doble seguridad)
                 if rel.id_estado == 3:
                     continue
 

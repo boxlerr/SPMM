@@ -1,3 +1,4 @@
+# Importaciones de módulos
 from backend.domain.Maquinaria import Maquinaria
 from backend.dto.MaquinariaRequestDTO import MaquinariaRequestDTO
 from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
@@ -17,7 +18,7 @@ class MaquinariaService:
     def __init__(self, db_session):
         self.repository = MaquinariaRepository(db_session)
 
-    # 🔹 Crear Maquinaria
+    # Crear Maquinaria
     async def crearMaquinaria(self, maquinaria_dto: MaquinariaRequestDTO):
         try:
             if not maquinaria_dto.nombre:
@@ -45,7 +46,7 @@ class MaquinariaService:
             logger.error(f"Service - Error al crear Maquinaria: {e}")
             raise InfrastructureException("Error al guardar la Maquinaria.") from e
 
-    # 🔹 Eliminar Maquinaria
+    # Eliminar Maquinaria
     async def eliminarMaquinaria(self, id: int):
         try:
             logger.info(f"Service - Eliminando Maquinaria id={id}")
@@ -59,7 +60,7 @@ class MaquinariaService:
             logger.error(f"Service - Error al eliminar Maquinaria: {e}")
             raise InfrastructureException("Error al eliminar la Maquinaria.") from e
 
-    # 🔹 Listar Maquinarias
+    # Listar Maquinarias
     async def listarMaquinarias(self):
         try:
             logger.info("Service - Listar Maquinarias.")
@@ -82,7 +83,7 @@ class MaquinariaService:
             logger.error(f"Service - Error al listar Maquinarias: {e}")
             raise InfrastructureException("Error al listar Maquinarias.") from e
 
-    # 🔹 Obtener Maquinaria por ID
+    # Obtener Maquinaria por ID
     async def obtenerMaquinariaPorId(self, id: int):
         try:
             logger.info(f"Service - Obtener Maquinaria id={id}")
@@ -107,7 +108,7 @@ class MaquinariaService:
             logger.error(f"Service - Error al obtener Maquinaria: {e}")
             raise InfrastructureException("Error al obtener la Maquinaria.") from e
 
-    # 🔹 Modificar Maquinaria
+    # Modificar Maquinaria
     async def modificarMaquinaria(self, id: int, maquinaria_dto: MaquinariaRequestDTO):
         try:
             nueva_data = maquinaria_dto.dict(exclude_unset=True)

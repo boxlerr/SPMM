@@ -1,4 +1,3 @@
-from typing import List, Optional
 
 from backend.domain.Sector import Sector
 from backend.dto.SectorRequestDTO import SectorRequestDTO

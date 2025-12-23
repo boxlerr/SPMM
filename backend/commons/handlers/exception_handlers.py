@@ -15,7 +15,7 @@ from backend.dto.ErrorItemDTO import ErrorItemDTO
 
 #----- Handlers personalizados:
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.info("PASAPOR ACA 3")
+    logger.info("Inicio Validation Exception Handler")
     errores_limpios = []
     for err in exc.errors():
         campo = ".".join(str(x) for x in err["loc"] if x != "body")
@@ -33,7 +33,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 async def http_exception_handler(request: Request, exc: HTTPException):
-    logger.info("PASAPOR ACA 1")
+    logger.info("Inicio HTTP Exception Handler")
     detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail), "campo": "global"}
     error_item = ErrorItemDTO(**detail) if isinstance(detail, dict) else ErrorItemDTO(message=str(detail), campo="global")
     respuesta = ResponseDTO(status=False, 
@@ -119,7 +119,7 @@ async def planificacion_handler(request: Request, exc: PlanificacionException):
     )
 
 async def generic_handler(request: Request, exc: Exception):
-    logger.info("PASAPOR ACA 2")
+    logger.info("Inicio Generic Exception Handler")
     logger.exception(f"Error inesperado: {exc}")
     return JSONResponse(
         status_code=500,

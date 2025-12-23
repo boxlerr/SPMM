@@ -1,15 +1,15 @@
-from typing import List, Optional
-
 from backend.domain.Cliente import Cliente
 from backend.dto.ClienteRequestDTO import ClienteRequestDTO
 from backend.infrastructure.ClienteRepository import ClienteRepository
-from backend.commons.ResponseDTO import ResponseDTO
+from fastapi.encoders import jsonable_encoder
+
+# Excepciones, ResponseDTO y Loggers
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.NotFoundException import NotFoundException
-from fastapi.encoders import jsonable_encoder
 from backend.commons.loggers.logger import logger
+from backend.commons.ResponseDTO import ResponseDTO
 
 class ClienteService:
     def __init__(self, db_session):
