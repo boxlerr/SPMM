@@ -68,7 +68,7 @@ async def infrastructure_handler(request: Request, exc: InfrastructureException)
 
 async def application_handler(request: Request, exc: ApplicationException):
     return JSONResponse(
-        status_code=400,
+        status_code=500,
         content=ResponseDTO(
             status=False,
             data=None,

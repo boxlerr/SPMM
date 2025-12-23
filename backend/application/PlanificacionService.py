@@ -8,14 +8,18 @@ from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
 from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
-# 🔸 Función síncrona que corre OR-Tools
+
+from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.PlanificacionException import PlanificacionException
+
 from backend.commons.loggers.logger import logger
 
 from sqlalchemy import text
 import time
 import math
 
-
+##Variables:
 MIN_LABORAL_DIA = 495
 MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 2775
 
@@ -28,7 +32,8 @@ TRAMOS_LV_LAB = [
 TRAMOS_SAB_LAB = [
     (0, 300),
 ]
-
+# ------------------------------------------------------------------
+#Funcion para ventanas semanales en tiempo.
 def construir_ventanas_semanales(num_semanas: int):
     ventanas = []
 
@@ -730,6 +735,7 @@ async def planificar(
     preview: bool = False
 ):
     
+
     ##ordenes = await repo_orden.find_with_procesos()
     if ordenes_ids:
         ordenes = await repo_orden.find_with_procesos_by_ids(ordenes_ids)
