@@ -4,10 +4,9 @@ import { BarChart3, RefreshCw } from "lucide-react"
 import { useDashboardData } from "@/hooks/useDashboardData"
 import StatsCards from "@/components/dashboard/StatsCards"
 import OrdenesCriticas from "@/components/dashboard/OrdenesCriticas"
-import SectorOccupation from "@/components/dashboard/SectorOccupation"
 import TimelineEntregas from "@/components/dashboard/TimelineEntregas"
 import DistribucionPrioridades from "@/components/dashboard/DistribucionPrioridades"
-import MostUsedProcesses from "@/components/dashboard/MostUsedProcesses"
+import TopClients from "@/components/dashboard/TopClients"
 import TopArticles from "@/components/dashboard/TopArticles"
 import AverageTime from "@/components/dashboard/AverageTime"
 
@@ -18,15 +17,13 @@ export default function DashboardPage() {
   const {
     estadisticas,
     ordenesCriticas,
-    ocupacionSectores,
     timelineEntregas,
-    procesosMasUtilizados,
+    topClientes,
     distribucionPrioridades,
     tiempoPromedio,
     topArticulos,
     loading,
     loadingCriticas,
-    loadingOcupacion,
     loadingTimeline,
     loadingExtras,
     error,
@@ -64,7 +61,7 @@ export default function DashboardPage() {
     setStatusOrders([])
   }
 
-  const isRefreshing = loading || loadingCriticas || loadingOcupacion || loadingTimeline
+  const isRefreshing = loading || loadingCriticas || loadingTimeline
 
   return (
     <div className="min-h-screen bg-gray-50/50">
@@ -104,9 +101,9 @@ export default function DashboardPage() {
         <OrdenesCriticas ordenes={ordenesCriticas} loading={loadingCriticas} />
 
         {/* Grid de Métricas Secundarias */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-          {/* Ocupación por Sector */}
-          <SectorOccupation ocupacionSectores={ocupacionSectores} loading={loadingOcupacion} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+          {/* Top Clientes (Reemplaza Procesos) */}
+          <TopClients clientes={topClientes} loading={loadingExtras} />
 
           {/* Distribución de Prioridades */}
           <DistribucionPrioridades
@@ -114,9 +111,6 @@ export default function DashboardPage() {
             loading={loadingExtras}
             onPriorityClick={handlePriorityClick}
           />
-
-          {/* Procesos más Utilizados */}
-          <MostUsedProcesses procesos={procesosMasUtilizados} loading={loadingExtras} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">

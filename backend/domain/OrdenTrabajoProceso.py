@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey, PrimaryKeyConstraint, String
+from sqlalchemy import Column, Integer, ForeignKey, PrimaryKeyConstraint, String, DateTime, DateTime
 from sqlalchemy.orm import relationship
 from backend.infrastructure.db import Base
 
@@ -11,6 +11,14 @@ class OrdenTrabajoProceso(Base):
     tiempo_proceso = Column(Integer, nullable=True)
     id_estado = Column(Integer, ForeignKey("estado_proceso.id"), default=1)
     observaciones = Column(String, nullable=True)
+
+    # New fields for real time tracking
+    inicio_real = Column(DateTime, nullable=True)
+    fin_real = Column(DateTime, nullable=True)
+    
+    # New fields for real time tracking
+    inicio_real = Column(DateTime, nullable=True)
+    fin_real = Column(DateTime, nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint('id_orden_trabajo', 'id_proceso'),

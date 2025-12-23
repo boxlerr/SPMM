@@ -6,6 +6,7 @@ from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.domain.Sector import Sector
 from backend.domain.Proceso import Proceso
 from backend.domain.Articulo import Articulo
+from backend.domain.Cliente import Cliente
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Prioridad import Prioridad
 
@@ -148,36 +149,6 @@ async def get_ordenes_criticas(db=Depends(get_db)):
         print(f"Error en ordenes-criticas: {e}")
         return {"success": False, "error": str(e)}
 
-@router.get("/ocupacion-sectores")
-async def get_ocupacion_sectores(db=Depends(get_db)):
-    """Obtiene la ocupación de cada sector (Histórico + Actual)"""
-    try:
-        query = text("""
-            SELECT s.nombre as sector, COUNT(ot.id) as ordenes_activas
-            FROM orden_trabajo ot
-            JOIN sector s ON ot.id_sector = s.id
-            WHERE EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
-            GROUP BY s.nombre
-        """)
-        
-        result = await db.execute(query)
-        ocupacion = result.fetchall()
-        
-        total_ordenes = sum(row.ordenes_activas for row in ocupacion)
-        total = max(total_ordenes, 1)
-        
-        data = []
-        for row in ocupacion:
-            data.append({
-                "sector": row.sector,
-                "ordenes_activas": row.ordenes_activas,
-                "porcentaje": round((row.ordenes_activas / total) * 100, 1)
-            })
-        
-        return {"success": True, "data": data}
-    except Exception as e:
-        print(f"Error en ocupacion-sectores: {e}")
-        return {"success": False, "error": str(e)}
 
 @router.get("/timeline-entregas")
 async def get_timeline_entregas(db=Depends(get_db)):
@@ -209,34 +180,32 @@ async def get_timeline_entregas(db=Depends(get_db)):
         print(f"Error en timeline-entregas: {e}")
         return {"success": False, "error": str(e)}
 
-@router.get("/procesos-mas-utilizados")
-async def get_procesos_mas_utilizados(db=Depends(get_db)):
-    """Obtiene los procesos más utilizados"""
+@router.get("/clientes-mayor-volumen")
+async def get_clientes_mayor_volumen(db=Depends(get_db)):
+    """Obtiene los clientes con mayor volumen de órdenes activas"""
     try:
-        # Usamos orden_trabajo_proceso para contar
         query = text("""
-            SELECT TOP 5 p.nombre as proceso, COUNT(otp.id_orden_trabajo) as cantidad
-            FROM orden_trabajo_proceso otp
-            JOIN proceso p ON otp.id_proceso = p.id
-            JOIN orden_trabajo ot ON otp.id_orden_trabajo = ot.id
+            SELECT TOP 5 c.nombre as cliente, COUNT(ot.id) as cantidad
+            FROM orden_trabajo ot
+            JOIN cliente c ON ot.id_cliente = c.id
             WHERE EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
-            GROUP BY p.nombre
+            GROUP BY c.nombre
             ORDER BY cantidad DESC
         """)
         
         result = await db.execute(query)
-        procesos = result.fetchall()
+        clientes = result.fetchall()
         
         data = []
-        for row in procesos:
+        for row in clientes:
             data.append({
-                "proceso": row.proceso,
+                "cliente": row.cliente,
                 "cantidad": row.cantidad
             })
         
         return {"success": True, "data": data}
     except Exception as e:
-        print(f"Error en procesos-mas-utilizados: {e}")
+        print(f"Error en clientes-mayor-volumen: {e}")
         return {"success": False, "error": str(e)}
 
 @router.get("/distribucion-prioridades")
@@ -249,6 +218,13 @@ async def get_distribucion_prioridades(db=Depends(get_db)):
             JOIN prioridad p ON ot.id_prioridad = p.id
             WHERE EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
             GROUP BY p.descripcion
+            ORDER BY 
+                CASE 
+                    WHEN p.descripcion LIKE '%Urgente%' THEN 1 
+                    WHEN p.descripcion = 'Reclamo' THEN 2 
+                    WHEN p.descripcion = 'Normal' THEN 3 
+                    ELSE 4 
+                END ASC
         """)
         
         result = await db.execute(query)
@@ -339,11 +315,13 @@ async def get_ordenes_por_prioridad(prioridad: str, db=Depends(get_db)):
                 a.descripcion as articulo, 
                 ot.fecha_prometida, 
                 ot.fecha_entrega,
-                s.nombre as sector
+                s.nombre as sector,
+                c.nombre as cliente
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
+            LEFT JOIN cliente c ON ot.id_cliente = c.id
             WHERE p.descripcion = :prioridad
             AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
         """)
@@ -362,6 +340,7 @@ async def get_ordenes_por_prioridad(prioridad: str, db=Depends(get_db)):
                 "fecha_entrega": orden.fecha_entrega.strftime("%Y-%m-%d") if orden.fecha_entrega else (orden.fecha_prometida.strftime("%Y-%m-%d") if orden.fecha_prometida else None),
                 "estado": estado,
                 "sector": orden.sector,
+                "cliente": orden.cliente or "Sin Cliente",
                 "cantidad": 1 # Default
             })
         
@@ -421,6 +400,7 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
                 ot.fecha_prometida, 
                 ot.fecha_entrega,
                 s.nombre as sector,
+                c.nombre as cliente,
                 p.descripcion as prioridad,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id) as total_procesos,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 3) as procesos_completados,
@@ -432,6 +412,7 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
+            LEFT JOIN cliente c ON ot.id_cliente = c.id
             WHERE {where_clause}
             ORDER BY ot.fecha_prometida DESC
         """)
@@ -484,6 +465,7 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
                 "fecha_entrega": fecha_display.strftime("%Y-%m-%d") if fecha_display else None,
                 "estado": estado_display,
                 "sector": orden.sector,
+                "cliente": orden.cliente or "Sin Cliente",
                 "prioridad": orden.prioridad,
                 "cantidad": 1,  # Default
                 "proceso_actual": orden.proceso_actual,
@@ -513,6 +495,7 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
                 ot.fecha_prometida, 
                 ot.fecha_entrega,
                 s.nombre as sector,
+                c.nombre as cliente,
                 p.descripcion as prioridad,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id) as total_procesos,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 3) as procesos_completados,
@@ -524,6 +507,7 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
+            LEFT JOIN cliente c ON ot.id_cliente = c.id
             WHERE CAST(ot.fecha_prometida AS DATE) = :fecha
             AND (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
             AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
@@ -546,6 +530,7 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
                 "fecha_entrega": orden.fecha_prometida.strftime("%Y-%m-%d") if orden.fecha_prometida else None,
                 "estado": "En Proceso", # Default for timeline items
                 "sector": orden.sector,
+                "cliente": orden.cliente or "Sin Cliente",
                 "prioridad": orden.prioridad,
                 "cantidad": 1,  # Default
                 "proceso_actual": orden.proceso_actual,

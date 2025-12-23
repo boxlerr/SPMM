@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { Search, ChevronDown, ChevronRight } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, CalendarClock, Pencil } from "lucide-react";
 import { OrderFiles } from "@/components/common/OrderFiles";
 
 import {
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 
 import { Checkbox } from "@/components/ui/checkbox";
-import { addWorkMinutes } from "@/lib/gantt-utils";
+import { addWorkMinutes, calculateWorkingMinutes } from "@/lib/gantt-utils";
 
 interface PlanningListTableProps {
     data: WorkOrder[];
@@ -229,6 +229,130 @@ function _PlanningListTable({
         }
     };
 
+    const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: 'fecha_prometida' | 'fecha_entrega', value: string } | null>(null);
+    const [editingStartDate, setEditingStartDate] = React.useState<{ orderId: number, processId: number, planId: number, value: string } | null>(null);
+
+    const handleDateClick = (orderId: number, field: 'fecha_prometida' | 'fecha_entrega', currentValue: string | undefined) => {
+        // Prevent editing if it's a legacy date
+        if (currentValue?.startsWith('1950')) {
+            setEditingOrder({ id: orderId, field, value: '' }); // Clear for new date
+            return;
+        }
+        setEditingOrder({
+            id: orderId,
+            field,
+            value: currentValue ? new Date(currentValue).toISOString().split('T')[0] : ''
+        });
+    };
+
+    const handleDateSave = async () => {
+        if (!editingOrder) return;
+
+        try {
+            const response = await fetch(`http://localhost:8000/ordenes/${editingOrder.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    [editingOrder.field]: editingOrder.value ? new Date(editingOrder.value).toISOString() : null
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to update date');
+
+            // Optimistic update or refetch needed. 
+            // For now, let's just close. The parent should probably handle data refresh or we pass an onUpdate callback.
+            setEditingOrder(null);
+            // Force refresh ideally
+            window.location.reload();
+
+        } catch (error) {
+            console.error('Error saving date:', error);
+            // Optionally show error toast
+        }
+    };
+
+    const handleStartDateClick = (orderId: number, processId: number, currentValue: string) => {
+        if (!planificacion) return;
+        const item = planificacion.find(p => p.orden_id === orderId && p.proceso_id === processId);
+        if (!item) return;
+
+        // Current Value is e.g. "vie 05-12, 09:48 a. m." which is formatted.
+        // We need the raw Date.
+        // Re-calculate raw date from planificacion item
+        const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
+        const normalizedBaseDate = new Date(baseDate);
+        normalizedBaseDate.setHours(9, 0, 0, 0);
+
+        const start = addWorkMinutes(normalizedBaseDate, item.inicio_min);
+
+        // Format to datetime-local string: YYYY-MM-DDTHH:mm
+        const yyyy = start.getFullYear();
+        const mm = String(start.getMonth() + 1).padStart(2, '0');
+        const dd = String(start.getDate()).padStart(2, '0');
+        const hh = String(start.getHours()).padStart(2, '0');
+        const min = String(start.getMinutes()).padStart(2, '0');
+
+        const isoString = `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+
+        setEditingStartDate({
+            orderId,
+            processId,
+            planId: item.id,
+            value: isoString
+        });
+    };
+
+    const handleStartDateSave = async () => {
+        if (!editingStartDate) return;
+        // console.log("Saving new start date:", editingStartDate.value);
+
+        // Calculate new inicio_min
+        const item = planificacion.find(p => p.id === editingStartDate.planId);
+        if (!item) return;
+
+        const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
+        const normalizedBaseDate = new Date(baseDate);
+        normalizedBaseDate.setHours(9, 0, 0, 0);
+
+        const newDate = new Date(editingStartDate.value);
+        if (isNaN(newDate.getTime())) return; // Invalid date
+
+        const newInicioMin = calculateWorkingMinutes(normalizedBaseDate, newDate);
+        const duration = item.fin_min - item.inicio_min;
+        const newFinMin = newInicioMin + duration;
+
+        try {
+            const response = await fetch(`http://localhost:8000/planificacion/${editingStartDate.planId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    inicio_min: newInicioMin,
+                    fin_min: newFinMin
+                })
+            });
+
+            if (!response.ok) throw new Error('Failed to update start date');
+
+            setEditingStartDate(null);
+            window.location.reload();
+        } catch (error) {
+            console.error('Error saving start date:', error);
+        }
+    };
+
+    const calculateRealMinutes = (start?: string, end?: string) => {
+        if (!start) return "-";
+        if (!end) return "En curso...";
+
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+
+        const diffMs = endDate.getTime() - startDate.getTime();
+        const diffMins = Math.round(diffMs / 60000);
+
+        return `${diffMins} min`;
+    };
+
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -262,7 +386,7 @@ function _PlanningListTable({
                                         />
                                     )}
                                 </th>
-                                <th className="w-10 px-4 py-3"></th> {/* Espacio para el chevron */}
+                                <th className="w-10 px-4 py-3"></th>
                                 <th className="px-4 py-3 font-bold text-gray-600">OT</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">F. Entrada</th>
                                 <th className="px-4 py-3 font-bold text-gray-600">Cliente</th>
@@ -271,7 +395,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('unidades')}
-                                    title="Ordenar por cantidad (Click para alternar: Asc -> Desc -> Original)"
+                                    title="Ordenar por cantidad"
                                 >
                                     <div className="flex items-center justify-center">
                                         Cant.
@@ -281,7 +405,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('prioridad')}
-                                    title="Ordenar por prioridad (Click para alternar: Asc -> Desc -> Original)"
+                                    title="Ordenar por prioridad"
                                 >
                                     <div className="flex items-center justify-center">
                                         Prioridad
@@ -334,24 +458,12 @@ function _PlanningListTable({
                                                     )}
                                                 </button>
                                             </td>
-                                            <td className="px-4 py-3 font-medium">
-                                                {item.id}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {formatDate(item.fecha_entrada)}
-                                            </td>
-                                            <td className="px-4 py-3 text-gray-500 italic">
-                                                {item.cliente?.nombre || "-"}
-                                            </td>
-                                            <td className="px-4 py-3 font-mono text-xs">
-                                                {item.articulo?.cod_articulo || "-"}
-                                            </td>
-                                            <td className="px-4 py-3 font-medium text-gray-900">
-                                                {item.articulo?.descripcion || "-"}
-                                            </td>
-                                            <td className="px-4 py-3 text-center font-medium">
-                                                {item.unidades ?? "-"}
-                                            </td>
+                                            <td className="px-4 py-3 font-medium">{item.id}</td>
+                                            <td className="px-4 py-3">{formatDate(item.fecha_entrada)}</td>
+                                            <td className="px-4 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
+                                            <td className="px-4 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>
+                                            <td className="px-4 py-3 font-medium text-gray-900">{item.articulo?.descripcion || "-"}</td>
+                                            <td className="px-4 py-3 text-center font-medium">{item.unidades ?? "-"}</td>
                                             <td className="px-4 py-3 text-center">
                                                 <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                     {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
@@ -360,11 +472,39 @@ function _PlanningListTable({
                                             <td className="px-4 py-3 text-center">
                                                 {renderStatusBadge(getOrderStatus(item))}
                                             </td>
-                                            <td className="px-4 py-3 font-medium">
-                                                {formatDate(item.fecha_prometida)}
+
+                                            {/* Editable F. Prometida */}
+                                            <td className="px-4 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'fecha_prometida' ? (
+                                                    <input
+                                                        type="date"
+                                                        className="border rounded px-1 py-0.5 text-xs w-full"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    formatDate(item.fecha_prometida)
+                                                )}
                                             </td>
-                                            <td className="px-4 py-3 text-gray-500">
-                                                {formatDate(item.fecha_entrega)}
+
+                                            {/* Editable F. Entrega */}
+                                            <td className="px-4 py-3 text-gray-500 cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrega' ? (
+                                                    <input
+                                                        type="date"
+                                                        className="border rounded px-1 py-0.5 text-xs w-full"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    formatDate(item.fecha_entrega)
+                                                )}
                                             </td>
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
@@ -375,30 +515,50 @@ function _PlanningListTable({
                                                             <OrderFiles orderId={item.id} />
                                                         </div>
                                                         <div className="w-full text-sm">
-                                                            {/* Grid Header - Updated with 'Inicio' */}
-                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_140px_120px_80px_300px] gap-4 px-4 py-2 font-bold border-t border-gray-200">
+                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_180px_120px_80px_100px_300px] gap-4 px-4 py-2 font-bold border-t border-gray-200">
                                                                 <div>#</div>
                                                                 <div>Proceso</div>
-                                                                <div>Inicio</div>
+                                                                <div>Inicio Estimado</div>
                                                                 <div>Estado</div>
-                                                                <div className="text-center">Minutos</div>
+                                                                <div className="text-center">Min. Est.</div>
+                                                                <div className="text-center text-blue-700">Min. Real</div>
                                                                 <div>Operario</div>
                                                             </div>
 
-                                                            {/* Processes List (No DnD) */}
                                                             <div>
                                                                 {item.procesos && item.procesos.length > 0 ? (
                                                                     item.procesos.map((proc, idx) => (
                                                                         <div
                                                                             key={`${item.id}-${proc.proceso.id}`}
-                                                                            className="grid grid-cols-[50px_1fr_140px_120px_80px_300px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
+                                                                            className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_300px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
                                                                         >
                                                                             <div className="flex items-center text-gray-500 font-mono">
                                                                                 {proc.orden}
                                                                             </div>
                                                                             <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
-                                                                            <div className="text-xs font-semibold text-blue-700">
-                                                                                {getScheduledStart(item.id, proc.proceso.id)}
+                                                                            <div
+                                                                                className="group relative flex items-center justify-center gap-2 text-xs font-medium text-amber-900 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
+                                                                                onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
+                                                                                title="Click para editar fecha de inicio estimada"
+                                                                            >
+                                                                                <CalendarClock className="w-3.5 h-3.5 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
+                                                                                {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
+                                                                                    <input
+                                                                                        type="datetime-local"
+                                                                                        className="border rounded px-1 py-0.5 text-xs w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
+                                                                                        value={editingStartDate.value}
+                                                                                        onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
+                                                                                        onBlur={handleStartDateSave}
+                                                                                        onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
+                                                                                        autoFocus
+                                                                                        onClick={(e) => e.stopPropagation()}
+                                                                                    />
+                                                                                ) : (
+                                                                                    <span className="group-hover:text-amber-950 transition-colors">
+                                                                                        {getScheduledStart(item.id, proc.proceso.id)}
+                                                                                    </span>
+                                                                                )}
+                                                                                <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-2 transition-all duration-200" />
                                                                             </div>
                                                                             <div>
                                                                                 <Select
@@ -421,11 +581,16 @@ function _PlanningListTable({
                                                                                 </Select>
                                                                             </div>
                                                                             <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
+
+                                                                            {/* Real Minutes Column */}
+                                                                            <div className="text-center font-bold text-blue-700">
+                                                                                {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
+                                                                            </div>
+
                                                                             <div>
                                                                                 {onOperatorChange && operarios.length > 0 ? (
                                                                                     <Select
                                                                                         value={operarios.find(op => {
-                                                                                            // Try to match exact string first (Name Surname)
                                                                                             const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
                                                                                             const currentName = (proc.operario_nombre || "").trim().toLowerCase();
                                                                                             return opName === currentName;
@@ -448,7 +613,6 @@ function _PlanningListTable({
                                                                                         {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
                                                                                     </span>
                                                                                 )}
-
                                                                             </div>
                                                                         </div>
                                                                     ))

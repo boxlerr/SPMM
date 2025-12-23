@@ -126,7 +126,7 @@ export default function StatusOrdersModal({
                                         </div>
                                         <div>
                                             <p className="text-xs text-gray-500 font-semibold uppercase">Artículo</p>
-                                            <p className="text-sm text-gray-900 truncate" title={orden.articulo}>
+                                            <p className="text-sm text-gray-900" title={orden.articulo}>
                                                 {orden.articulo}
                                             </p>
                                         </div>
@@ -190,8 +190,8 @@ export default function StatusOrdersModal({
 
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3 pt-3 border-t border-gray-100">
                                         <div>
-                                            <p className="text-xs text-gray-500 font-semibold uppercase">Sector</p>
-                                            <p className="text-sm text-gray-900">{orden.sector}</p>
+                                            <p className="text-xs text-gray-500 font-semibold uppercase">Cliente</p>
+                                            <p className="text-sm text-gray-900 font-medium">{orden.cliente}</p>
                                         </div>
                                         <div>
                                             <p className="text-xs text-gray-500 font-semibold uppercase">Prioridad</p>
