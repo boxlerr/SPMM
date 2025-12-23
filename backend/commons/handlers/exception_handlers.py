@@ -7,6 +7,7 @@ from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.DomainException import DomainException
 from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.PlanificacionException import PlanificacionException
 from backend.commons.loggers.logger import logger
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.dto.ErrorItemDTO import ErrorItemDTO
@@ -100,6 +101,16 @@ async def business_handler(request: Request, exc: BusinessException):
 async def domain_handler(request: Request, exc: DomainException):
     return JSONResponse(
         status_code=400,
+        content=ResponseDTO(
+            status=False,
+            data=None,
+            errors=[ErrorItemDTO(message=exc.message, campo="global")]
+        ).model_dump()
+    )
+
+async def planificacion_handler(request: Request, exc: PlanificacionException):
+    return JSONResponse(
+        status_code=422,
         content=ResponseDTO(
             status=False,
             data=None,

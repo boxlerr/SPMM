@@ -148,7 +148,7 @@ def _crear_variables_y_dominios(
                 operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
 
         if not operarios_validos:
-            print(f"⚠️ Proceso {proc_id} sin operarios válidos; usando dummy")
+            logger.warning(f"Proceso {proc_id} sin operarios válidos; usando dummy")
             operarios_validos = [DUMMY_OP_ID]
 
         # Variable de operario
@@ -197,7 +197,7 @@ def _crear_variables_y_dominios(
             if posibles:
                 maqs_validas = posibles
             else:
-                print(f"⚠️ Proceso {proc_id} ({nombre_proc}) no encontró máquina directa; usando fallback")
+                logger.warning(f"Proceso {proc_id} ({nombre_proc}) no encontró máquina directa; usando fallback")
                 maqs_validas = REAL_MAQ_IDS[:]
 
         else:
@@ -208,7 +208,7 @@ def _crear_variables_y_dominios(
                 maqs_validas = [m_id for (m_id, rs, _n) in maquinarias if req & rs]
 
         if not maqs_validas:
-            print(f"⚠️ Proceso {proc_id} sin máquinas compatibles; usando dummy")
+            logger.warning(f"Proceso {proc_id} sin máquinas compatibles; usando dummy")
             maqs_validas = [DUMMY_MAQ_ID]
 
         maq_var = model.NewIntVarFromDomain(
@@ -470,7 +470,8 @@ def _agregar_funcion_objetivo(
                 else:
                     delta_min = int((fp_dt - now).total_seconds() // 60)
                     deadline_rel = min(max(0, delta_min), H * 10)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Error parseando fecha prometida: {e}. Usando deadline fallback.")
                 deadline_rel = H * 10
         else:
             deadline_rel = H * 10
@@ -549,7 +550,8 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
             })
     else:
-        print("❌ No se encontró solución.")
+        logger.warning("No se encontró solución.")
+        raise PlanificacionException("No se pudo generar una planificación viable con las restricciones actuales.")
 
     return resultados
 
@@ -818,7 +820,7 @@ async def planificar(
                 usa_maquina             # si usa máquina o no
             ))
 
-            print(f"PROCESO: {rel.proceso.id} {nombre_proceso} usa_maquina={usa_maquina}")
+            # print(f"PROCESO: {rel.proceso.id} {nombre_proceso} usa_maquina={usa_maquina}")
 
     # -------------------------------
     # Ejecutar el solver en otro hilo
