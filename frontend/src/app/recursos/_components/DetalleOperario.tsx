@@ -431,7 +431,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                           </div>
 
                                           <Select
-                                            value={task.id_estado.toString()}
+                                            value={(task.id_estado ?? 1).toString()}
                                             onValueChange={(val) => handleTaskStatusChange(task, val)}
                                           >
                                             <SelectTrigger className="w-[140px] h-8 text-xs bg-slate-50">

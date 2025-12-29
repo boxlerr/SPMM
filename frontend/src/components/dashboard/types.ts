@@ -67,5 +67,17 @@ export interface OrdenEstado {
     cantidad: number
     proceso_actual?: string
     procesos_totales?: number
+
     procesos_pendientes?: number
+}
+
+export interface ProcesoUtilizado {
+    proceso: string
+    cantidad: number
+}
+
+export interface OcupacionSector {
+    sector: string
+    porcentaje: number
+    ordenes_activas: number
 }

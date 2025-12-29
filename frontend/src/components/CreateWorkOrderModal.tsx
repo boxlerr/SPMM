@@ -14,11 +14,13 @@ import { cn, capitalizeName } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
+import { WorkOrder } from "@/lib/types";
 
 interface CreateWorkOrderModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSuccess?: () => void;
+    orderToEdit?: WorkOrder | null;
 }
 
 interface Option {
@@ -282,6 +284,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
         });
         setDetailsData({
             cantidad: "",
+            observaciones: "",
         });
         setProcesses([]);
         setFiles([]);

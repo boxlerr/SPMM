@@ -43,6 +43,7 @@ export interface WorkOrder {
     id: number;
     id_otvieja?: number;
     observaciones?: string;
+    detalle?: string;
     id_prioridad?: number;
     id_sector?: number;
     id_articulo?: number;
