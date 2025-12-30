@@ -37,18 +37,11 @@ from backend.commons.handlers.exception_handlers import (
 
 app = FastAPI(title="SPMM Backend", version="1.0")
 
-# Configuración CORS
-origins = [
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "https://www.metlosys.com",
-    "https://metlosys.com",
-]
-
+from backend.core.config import settings
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # o usa 'origins' si querés restringir
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

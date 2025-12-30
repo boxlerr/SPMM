@@ -30,7 +30,9 @@ class Settings:
     # CORS
     CORS_ORIGINS: list = [
         "http://localhost:3000",
-        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "https://www.metlosys.com",
+        "https://metlosys.com",
     ]
 
 # Instancia global de configuración
