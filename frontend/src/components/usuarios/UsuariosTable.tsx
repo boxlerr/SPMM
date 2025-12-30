@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { API_URL } from '@/config';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { capitalizeName } from '@/lib/utils';
-import { 
-  Search, 
-  UserPlus, 
-  Edit, 
-  Trash2, 
+import {
+  Search,
+  UserPlus,
+  Edit,
+  Trash2,
   MoreHorizontal,
   CheckCircle2,
   XCircle,
@@ -106,15 +107,15 @@ export default function UsuariosTable() {
       setLoading(true);
       // TODO: Obtener el token del localStorage o context
       const token = localStorage.getItem('access_token');
-      
-      const response = await fetch('http://localhost:8000/auth/usuarios', {
+
+      const response = await fetch(`${API_URL}/auth/usuarios`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
-      
+
       const data = await response.json();
-      
+
       if (data.status) {
         setUsuarios(data.data);
         setFilteredUsuarios(data.data);
@@ -196,8 +197,8 @@ export default function UsuariosTable() {
 
     try {
       const token = localStorage.getItem('access_token');
-      
-      const response = await fetch('http://localhost:8000/auth/usuarios', {
+
+      const response = await fetch(`${API_URL}/auth/usuarios`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -239,7 +240,7 @@ export default function UsuariosTable() {
 
     try {
       const token = localStorage.getItem('access_token');
-      
+
       // No enviar password si está vacío
       const updateData: any = {
         username: formData.username,
@@ -249,12 +250,12 @@ export default function UsuariosTable() {
         rol: formData.rol,
         activo: formData.activo
       };
-      
+
       if (formData.password) {
         updateData.password = formData.password;
       }
-      
-      const response = await fetch(`http://localhost:8000/auth/usuarios/${selectedUsuario.id_usuario}`, {
+
+      const response = await fetch(`${API_URL}/auth/usuarios/${selectedUsuario.id_usuario}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -296,8 +297,8 @@ export default function UsuariosTable() {
 
     try {
       const token = localStorage.getItem('access_token');
-      
-      const response = await fetch(`http://localhost:8000/auth/usuarios/${selectedUsuario.id_usuario}`, {
+
+      const response = await fetch(`${API_URL}/auth/usuarios/${selectedUsuario.id_usuario}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -327,7 +328,7 @@ export default function UsuariosTable() {
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Nunca';
-    
+
     const date = new Date(dateString);
     return date.toLocaleDateString('es-ES', {
       day: '2-digit',
@@ -452,7 +453,7 @@ export default function UsuariosTable() {
                             <Edit className="h-4 w-4 mr-2" />
                             Editar
                           </DropdownMenuItem>
-                          <DropdownMenuItem 
+                          <DropdownMenuItem
                             onClick={() => handleDeleteUser(usuario)}
                             className="text-red-600"
                           >
@@ -563,8 +564,8 @@ export default function UsuariosTable() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="activo">Estado</Label>
-                <Select 
-                  value={formData.activo ? 'true' : 'false'} 
+                <Select
+                  value={formData.activo ? 'true' : 'false'}
                   onValueChange={(value) => setFormData({ ...formData, activo: value === 'true' })}
                 >
                   <SelectTrigger>
@@ -678,8 +679,8 @@ export default function UsuariosTable() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-activo">Estado</Label>
-                <Select 
-                  value={formData.activo ? 'true' : 'false'} 
+                <Select
+                  value={formData.activo ? 'true' : 'false'}
                   onValueChange={(value) => setFormData({ ...formData, activo: value === 'true' })}
                 >
                   <SelectTrigger>
@@ -735,8 +736,8 @@ export default function UsuariosTable() {
             <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>
               Cancelar
             </Button>
-            <Button 
-              onClick={submitDeleteUser} 
+            <Button
+              onClick={submitDeleteUser}
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               Eliminar Usuario

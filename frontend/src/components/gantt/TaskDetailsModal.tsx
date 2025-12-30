@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isOperatorQualified } from "@/lib/gantt-utils";
+import { API_URL } from "@/config";
 
 interface Operario {
     id: number;
@@ -111,7 +112,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             // 1. Save Observations if changed
             const currentOriginalObs = selectedItem.observaciones_proceso || selectedItem.observaciones_ot || "";
             if (localObservaciones !== currentOriginalObs) {
-                const response = await fetch(`http://localhost:8000/ordenes/${selectedItem.orden_id}/procesos/${selectedItem.proceso_id}/observaciones`, {
+                const response = await fetch(`${API_URL}/ordenes/${selectedItem.orden_id}/procesos/${selectedItem.proceso_id}/observaciones`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -161,7 +162,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
             setIsLoadingDetails(true);
             try {
-                const response = await fetch(`http://localhost:8000/ordenes/${selectedItem.orden_id}`);
+                const response = await fetch(`${API_URL}/ordenes/${selectedItem.orden_id}`);
                 if (response.ok) {
                     const data = await response.json();
                     setOrdenDetails(data.data || data);

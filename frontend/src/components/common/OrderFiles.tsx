@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Eye, Download, FileText, Image as ImageIcon, Paperclip } from "lucide-react";
+import { API_URL } from "@/config";
 
 // Component to fetch and display files for an order
 export const OrderFiles = ({ orderId }: { orderId: number }) => {
@@ -13,7 +14,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
             if (!orderId) return;
             try {
                 // Add timestamp to prevent caching issues
-                const res = await fetch(`http://localhost:8000/planos/orden/${orderId}?t=${Date.now()}`);
+                const res = await fetch(`${API_URL}/planos/orden/${orderId}?t=${Date.now()}`);
                 if (res.ok) {
                     const json = await res.json();
                     setFiles(json.data || []);
@@ -76,7 +77,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 scale-95 group-hover:scale-100 bg-gray-50 rounded-lg p-1 border border-gray-100">
                             <a
-                                href={`http://localhost:8000/planos/${file.id}/archivo`}
+                                href={`${API_URL}/planos/${file.id}/archivo`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="p-1.5 hover:bg-white hover:shadow-sm rounded-md text-gray-400 hover:text-blue-600 transition-all"
@@ -85,7 +86,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
                                 <Eye className="w-4 h-4" />
                             </a>
                             <a
-                                href={`http://localhost:8000/planos/${file.id}/archivo?download=true`}
+                                href={`${API_URL}/planos/${file.id}/archivo?download=true`}
                                 download={file.nombre}
                                 className="p-1.5 hover:bg-white hover:shadow-sm rounded-md text-gray-400 hover:text-green-600 transition-all"
                                 title="Descargar"

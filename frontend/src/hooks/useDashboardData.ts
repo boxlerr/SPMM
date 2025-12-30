@@ -10,9 +10,10 @@ import {
     OrdenPrioridad,
     OrdenEstado,
 } from "@/components/dashboard/types"
+import { API_URL } from "@/config"
 
 export function useDashboardData() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const apiUrl = API_URL
 
     const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null)
     const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([])

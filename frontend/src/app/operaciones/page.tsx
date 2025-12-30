@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { API_URL } from "@/config"
 
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("lista_planificacion")
@@ -76,7 +77,7 @@ export default function OperacionesPage() {
     try {
       setIsLoading(true);
       // Fetch Planificacion
-      const planResponse = await fetch("http://localhost:8000/planificacion");
+      const planResponse = await fetch(`${API_URL}/planificacion`);
       if (!planResponse.ok) throw new Error("Error fetching planificacion");
       const planData: PlanificacionItem[] = await planResponse.json();
 
@@ -120,7 +121,7 @@ export default function OperacionesPage() {
       setTasks(ganttTasks);
 
       // Fetch Operarios
-      const opResponse = await fetch("http://localhost:8000/operarios");
+      const opResponse = await fetch(`${API_URL}/operarios`);
       if (opResponse.ok) {
         const opData = await opResponse.json();
         const rawOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
@@ -137,7 +138,7 @@ export default function OperacionesPage() {
       }
 
       // Fetch Maquinarias (For enrichment)
-      const maqResponse = await fetch("http://localhost:8000/maquinarias");
+      const maqResponse = await fetch(`${API_URL}/maquinarias`);
       if (maqResponse.ok) {
         const maqData = await maqResponse.json();
         const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
@@ -145,7 +146,7 @@ export default function OperacionesPage() {
       }
 
       // Fetch Ordenes (NEW)
-      const ordenesResponse = await fetch("http://localhost:8000/ordenes");
+      const ordenesResponse = await fetch(`${API_URL}/ordenes`);
       if (ordenesResponse.ok) {
         const ordenesData = await ordenesResponse.json();
         // The API returns the list directly or {data: [...] } depending on standardization.
@@ -265,7 +266,7 @@ export default function OperacionesPage() {
     setTasks(newGanttTasks);
 
     try {
-      const response = await fetch("http://localhost:8000/planificacion/" + task.dbId, {
+      const response = await fetch(`${API_URL}/planificacion/` + task.dbId, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -316,7 +317,7 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch("http://localhost:8000/planificacion/" + targetTask.id, {
+      await fetch(`${API_URL}/planificacion/` + targetTask.id, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_operario: opId }),
@@ -361,7 +362,7 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch("http://localhost:8000/ordenes/" + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
+      await fetch(`${API_URL}/ordenes/` + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: idEstado }),
@@ -428,7 +429,7 @@ export default function OperacionesPage() {
 
 
     try {
-      await fetch("http://localhost:8000/ordenes/" + ordenId + "/procesos/" + procesoId + "/estado", {
+      await fetch(`${API_URL}/ordenes/` + ordenId + "/procesos/" + procesoId + "/estado", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: newStatusId }),
@@ -453,7 +454,7 @@ export default function OperacionesPage() {
     }));
 
     try {
-      const response = await fetch(`http://localhost:8000/ordenes/${ordenId}/procesos/reorder`, {
+      const response = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/reorder`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -483,7 +484,7 @@ export default function OperacionesPage() {
     // Call API for preview
     try {
       toast.loading("Calculando planificación...");
-      const response = await fetch("http://localhost:8000/planificar", {
+      const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -572,7 +573,7 @@ export default function OperacionesPage() {
   const handleConfirmPlan = async () => {
     try {
       setIsConfirmingPlan(true);
-      const response = await fetch("http://localhost:8000/planificar", {
+      const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

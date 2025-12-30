@@ -11,12 +11,12 @@ import { useApi } from "@/hooks/useApi";
 import { useToast } from "@/components/ui/toast";
 import { Cliente } from "./_types";
 import ClienteForm from "./_components/ClienteForm";
+import { API_URL } from "@/config";
 
 export default function ClientesPage() {
     const { showToast } = useToast();
     const api = useApi<any>();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const cleanUrl = apiUrl.replace(/\/$/, "");
+    const cleanUrl = API_URL.replace(/\/$/, "");
 
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [busqueda, setBusqueda] = useState("");

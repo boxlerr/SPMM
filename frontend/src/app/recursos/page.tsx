@@ -19,6 +19,7 @@ import { Operario, Maquina, Proceso } from "./_types";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { PlanificacionItem } from "@/lib/types";
+import { API_URL } from "@/config";
 
 export default function RecursosPage() {
   const { addNotification } = useNotifications();
@@ -45,7 +46,7 @@ export default function RecursosPage() {
   const [tasks, setTasks] = useState<PlanificacionItem[]>([]);
   const [operatorTasks, setOperatorTasks] = useState<PlanificacionItem[]>([]);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiUrl = API_URL;
   const cleanUrl = apiUrl.replace(/\/$/, "");
   const api = useApi<any>();
 

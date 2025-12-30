@@ -13,7 +13,7 @@ export interface Notification {
   motivo?: string; // Motivo o detalles adicionales (solo para cambio de estado)
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_URL } from "@/config";
 
 interface NotificationContextType {
   notifications: Notification[];

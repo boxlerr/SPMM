@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnplannedWorkOrdersList } from "./UnplannedWorkOrdersList";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { toast } from "sonner";
+import { API_URL } from "@/config";
 
 export default function WorkOrdersListWrapper() {
     const [tasks, setTasks] = useState<GanttTask[]>([]);
@@ -43,9 +44,9 @@ export default function WorkOrdersListWrapper() {
             setLoading(true);
 
             const [planResponse, ordenesResponse, opResponse] = await Promise.all([
-                fetch("http://localhost:8000/planificacion"),
-                fetch("http://localhost:8000/ordenes"),
-                fetch("http://localhost:8000/operarios")
+                fetch(`${API_URL}/planificacion`),
+                fetch(`${API_URL}/ordenes`),
+                fetch(`${API_URL}/operarios`)
             ]);
 
             // 1. Process Planificacion
@@ -106,7 +107,7 @@ export default function WorkOrdersListWrapper() {
             return t;
         }));
         try {
-            await fetch(`http://localhost:8000/planificacion/${selectedTask.id}`, {
+            await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id_operario: opId }),
@@ -136,7 +137,7 @@ export default function WorkOrdersListWrapper() {
             return t;
         }));
         try {
-            await fetch(`http://localhost:8000/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
+            await fetch(`${API_URL}/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ id_estado: idEstado }),
@@ -168,7 +169,7 @@ export default function WorkOrdersListWrapper() {
             const item = rawPlanificacion.find(p => p.id === task.dbId);
             if (item) {
                 try {
-                    await fetch(`http://localhost:8000/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
+                    await fetch(`${API_URL}/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
                         method: "PUT",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ id_estado: idEstado }),

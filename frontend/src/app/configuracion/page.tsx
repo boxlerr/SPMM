@@ -8,6 +8,8 @@ import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, Server, 
 import { Button } from '@/components/ui/button';
 import UsuariosTable from '@/components/usuarios/UsuariosTable';
 import { formatNotificationMessage } from '@/lib/utils';
+import { API_URL } from '@/config';
+
 
 export default function ConfiguracionPage() {
   const searchParams = useSearchParams();
@@ -21,7 +23,7 @@ export default function ConfiguracionPage() {
   useEffect(() => {
     // Actualizar inmediatamente al montar
     setCurrentDateTime(new Date());
-    
+
     // Luego actualizar cada segundo
     const interval = setInterval(() => {
       setCurrentDateTime(new Date());
@@ -132,7 +134,7 @@ export default function ConfiguracionPage() {
           if (minutes < 60) return `Hace ${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`;
           if (hours < 24) return `Hace ${hours} ${hours === 1 ? 'hora' : 'horas'}`;
           if (days < 7) return `Hace ${days} ${days === 1 ? 'día' : 'días'}`;
-          
+
           return date.toLocaleDateString('es-ES', {
             day: '2-digit',
             month: '2-digit',
@@ -148,8 +150,8 @@ export default function ConfiguracionPage() {
               <div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-1">Historial de Notificaciones</h3>
                 <p className="text-sm text-gray-500">
-                  {notifications.length === 0 
-                    ? 'No hay notificaciones' 
+                  {notifications.length === 0
+                    ? 'No hay notificaciones'
                     : `${unreadCount} ${unreadCount === 1 ? 'notificación no leída' : 'notificaciones no leídas'}`
                   }
                 </p>
@@ -191,11 +193,10 @@ export default function ConfiguracionPage() {
                 {notifications.map((notification) => (
                   <div
                     key={notification.id}
-                    className={`p-4 rounded-lg border transition-all ${
-                      notification.read
-                        ? 'bg-gray-50 border-gray-200'
-                        : 'bg-white border-blue-200 shadow-sm'
-                    }`}
+                    className={`p-4 rounded-lg border transition-all ${notification.read
+                      ? 'bg-gray-50 border-gray-200'
+                      : 'bg-white border-blue-200 shadow-sm'
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-start gap-3 flex-1">
@@ -244,7 +245,7 @@ export default function ConfiguracionPage() {
         const systemInfo = {
           version: '1.0.0',
           nombre: 'SPMM - Sistema de Planificación y Mantenimiento de Maquinaria',
-          backendUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+          backendUrl: API_URL,
           frontendUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
           fechaActual: currentDateTime.toLocaleString('es-ES', {
             day: '2-digit',
@@ -363,8 +364,8 @@ export default function ConfiguracionPage() {
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Resolución de Pantalla</p>
                     <p className="text-sm font-medium text-gray-900">
-                      {typeof window !== 'undefined' 
-                        ? `${window.screen.width}x${window.screen.height}` 
+                      {typeof window !== 'undefined'
+                        ? `${window.screen.width}x${window.screen.height}`
                         : 'N/A'}
                     </p>
                   </div>
@@ -420,11 +421,10 @@ export default function ConfiguracionPage() {
               // Actualizar la URL sin recargar la página
               router.replace(`/configuracion?tab=${tab.id}`, { scroll: false });
             }}
-            className={`relative flex items-center justify-center space-x-2 px-4 py-3 rounded-lg transition-all duration-200 border w-full ${
-              activeTab === tab.id
-                ? 'bg-[#DC143C] text-white border-[#DC143C] shadow-md hover:bg-[#B01030]'
-                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
-            }`}
+            className={`relative flex items-center justify-center space-x-2 px-4 py-3 rounded-lg transition-all duration-200 border w-full ${activeTab === tab.id
+              ? 'bg-[#DC143C] text-white border-[#DC143C] shadow-md hover:bg-[#B01030]'
+              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+              }`}
           >
             <span className="text-sm sm:text-lg">{tab.icon}</span>
             <span className="font-medium text-sm truncate">{tab.label}</span>

@@ -19,6 +19,7 @@ import {
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { addWorkMinutes, calculateWorkingMinutes } from "@/lib/gantt-utils";
+import { API_URL } from "@/config";
 
 interface PlanningListTableProps {
     data: WorkOrder[];
@@ -249,7 +250,7 @@ function _PlanningListTable({
         if (!editingOrder) return;
 
         try {
-            const response = await fetch(`http://localhost:8000/ordenes/${editingOrder.id}`, {
+            const response = await fetch(`${API_URL}/ordenes/${editingOrder.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -322,7 +323,7 @@ function _PlanningListTable({
         const newFinMin = newInicioMin + duration;
 
         try {
-            const response = await fetch(`http://localhost:8000/planificacion/${editingStartDate.planId}`, {
+            const response = await fetch(`${API_URL}/planificacion/${editingStartDate.planId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

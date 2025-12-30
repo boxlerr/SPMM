@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/toast";
 import { useNotifications } from "@/contexts/NotificationContext";
 import OperarioEditForm from "./OperarioEditForm";
+import { API_URL } from "@/config";
 
 interface DetalleOperarioProps {
   operario: Operario | null;
@@ -102,8 +103,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
     const nuevoEstadoBoolean = newValue === "Activo";
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const cleanUrl = apiUrl.replace(/\/$/, "");
+      const cleanUrl = API_URL.replace(/\/$/, "");
 
       // Corrected fetch syntax
       const response = await fetch(`${cleanUrl}/operarios/${operario.id}`, {
@@ -151,8 +151,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
     ));
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const cleanUrl = apiUrl.replace(/\/$/, "");
+      const cleanUrl = API_URL.replace(/\/$/, "");
 
       // Corrected fetch syntax
       const response = await fetch(`${cleanUrl}/ordenes/${task.orden_id}/procesos/${task.proceso_id}/estado`, {
@@ -210,7 +209,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
             <div className="flex-1 flex flex-col p-6 overflow-y-auto bg-white items-center justify-center">
               <OperarioEditForm
                 data={operario}
-                cleanUrl={process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000"}
+                cleanUrl={API_URL.replace(/\/$/, "")}
                 onCancel={() => setIsEditing(false)}
                 onSuccess={() => {
                   setIsEditing(false);

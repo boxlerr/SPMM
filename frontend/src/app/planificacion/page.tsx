@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RefreshCw } from "lucide-react";
+import { API_URL } from "@/config";
 
 interface Proceso {
   id: number;
@@ -29,8 +30,7 @@ export default function PlanificacionPage() {
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const cleanUrl = apiUrl.replace(/\/$/, "");
+      const cleanUrl = API_URL.replace(/\/$/, "");
 
       const response = await fetch(`${cleanUrl}/procesos`);
 

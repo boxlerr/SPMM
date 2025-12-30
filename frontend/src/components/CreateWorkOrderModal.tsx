@@ -15,6 +15,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
 import { WorkOrder } from "@/lib/types";
+import { API_URL } from "@/config";
 
 interface CreateWorkOrderModalProps {
     isOpen: boolean;
@@ -93,12 +94,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
         setLoading(true);
         try {
             const [prioridadesRes, procesosRes, operariosRes, maquinariasRes, articulosRes, clientesRes] = await Promise.all([
-                fetch("http://localhost:8000/prioridades"),
-                fetch("http://localhost:8000/procesos"),
-                fetch("http://localhost:8000/operarios"),
-                fetch("http://localhost:8000/maquinarias"),
-                fetch("http://localhost:8000/articulos"),
-                fetch("http://localhost:8000/clientes") // Fetch clients
+                fetch(`${API_URL}/prioridades`),
+                fetch(`${API_URL}/procesos`),
+                fetch(`${API_URL}/operarios`),
+                fetch(`${API_URL}/maquinarias`),
+                fetch(`${API_URL}/articulos`),
+                fetch(`${API_URL}/clientes`) // Fetch clients
             ]);
 
             if (prioridadesRes.ok) {
@@ -233,7 +234,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                 formData.append('files', file);
             });
 
-            const response = await fetch("http://localhost:8000/ordenes", {
+            const response = await fetch(`${API_URL}/ordenes`, {
                 method: "POST",
                 body: formData,
             });

@@ -9,6 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useApi } from "@/hooks/useApi";
 import { useToast } from "@/components/ui/toast";
 import { Cliente } from "../_types";
+import { API_URL } from "@/config";
 
 const formSchema = z.object({
     nombre: z.string().min(1, "El nombre es obligatorio").max(100, "El nombre no puede exceder los 100 caracteres"),
@@ -87,8 +88,7 @@ export default function ClienteForm({ open, onClose, onSuccess, cliente }: Clien
 
     const onSubmit = async (values: z.infer<typeof formSchema>) => {
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-            const cleanUrl = apiUrl.replace(/\/$/, "");
+            const cleanUrl = API_URL.replace(/\/$/, "");
 
             const url = cliente
                 ? `${cleanUrl}/clientes/${cliente.id}`

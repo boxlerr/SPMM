@@ -7,6 +7,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { API_URL } from "@/config";
 
 interface Operario {
     id: number;
@@ -67,7 +68,7 @@ const SidebarPanel: React.FC<SidebarPanelProps> = ({
 
             setIsLoadingDetails(true);
             try {
-                const response = await fetch(`http://localhost:8000/ordenes/${selectedItem.orden_id}`);
+                const response = await fetch(`${API_URL}/ordenes/${selectedItem.orden_id}`);
                 if (response.ok) {
                     const data = await response.json();
                     setOrdenDetails(data.data || data);
