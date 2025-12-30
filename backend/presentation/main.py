@@ -41,7 +41,10 @@ app = FastAPI(title="SPMM Backend", version="1.0")
 origins = [
     "http://localhost:3000",
     "http://localhost:8000",
+    "https://www.metlosys.com",
+    "https://metlosys.com",
 ]
+
 
 app.add_middleware(
     CORSMiddleware,
