@@ -68,7 +68,7 @@ async def obtener_planos_por_orden(id_orden: int, db=Depends(get_db)):
     service = PlanoService(db)
     return await service.obtenerPlanosPorOrdenTrabajo(id_orden)
 
-
+#intento 
 # 🔹 Modificar plano (incluye reemplazar archivo)
 @router.put("/planos/{id}")
 async def modificar_plano(
