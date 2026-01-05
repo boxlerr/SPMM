@@ -21,6 +21,15 @@ export default function ClientesPage() {
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [busqueda, setBusqueda] = useState("");
 
+    // Pagination
+    const ITEMS_PER_PAGE = 20;
+    const [currentPage, setCurrentPage] = useState(1);
+
+    // Reset page when search changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [busqueda]);
+
     // States for modals
     const [mostrarCrearEditar, setMostrarCrearEditar] = useState(false);
     const [mostrarEliminar, setMostrarEliminar] = useState(false);
@@ -66,6 +75,20 @@ export default function ClientesPage() {
     const clientesFiltrados = clientes.filter(c =>
         c.nombre.toLowerCase().includes(busqueda.toLowerCase())
     );
+
+    const totalPages = Math.ceil(clientesFiltrados.length / ITEMS_PER_PAGE);
+    const paginatedClientes = clientesFiltrados.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
+
+    const handlePrevious = () => {
+        if (currentPage > 1) setCurrentPage(p => p - 1);
+    };
+
+    const handleNext = () => {
+        if (currentPage < totalPages) setCurrentPage(p => p + 1);
+    };
 
     return (
         <div className="min-h-screen bg-background p-4 md:p-6">
@@ -144,8 +167,9 @@ export default function ClientesPage() {
                                     <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                                 </tr>
                             </thead>
+
                             <tbody className="divide-y">
-                                {clientesFiltrados.map((cliente) => (
+                                {paginatedClientes.map((cliente) => (
                                     <tr key={cliente.id} className="hover:bg-muted/50 transition-colors group">
                                         <td className="px-6 py-4 text-sm font-medium">
                                             <div className="flex flex-col">
@@ -242,6 +266,36 @@ export default function ClientesPage() {
                     </div>
                 )}
             </div>
+
+            {/* Pagination Controls */}
+            {
+                !api.loading && totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-4 mt-6">
+                        <Button
+                            onClick={handlePrevious}
+                            disabled={currentPage === 1}
+                            variant="outline"
+                            size="icon"
+                            className="h-10 w-10 rounded-full border-gray-300 hover:text-red-600 hover:border-red-300 disabled:opacity-50"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="m15 18-6-6 6-6" /></svg>
+                        </Button>
+                        <span className="text-sm font-medium text-gray-600">
+                            Página {currentPage} de {totalPages}
+                        </span>
+                        <Button
+                            onClick={handleNext}
+                            disabled={currentPage === totalPages}
+                            variant="outline"
+                            size="icon"
+                            className="h-10 w-10 rounded-full border-gray-300 hover:text-red-600 hover:border-red-300 disabled:opacity-50"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="m9 18 6-6-6-6" /></svg>
+                        </Button>
+                    </div>
+                )
+            }
+
 
             {/* Modal Crear/Editar */}
             <ClienteForm

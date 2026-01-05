@@ -17,6 +17,14 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
     const [isSelectionMode, setIsSelectionMode] = React.useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
 
+    const ITEMS_PER_PAGE = 30;
+    const [currentPage, setCurrentPage] = React.useState(1);
+
+    // Reset page when search changes
+    React.useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm]);
+
     const filteredTasks = tasks.filter(task => {
         const term = searchTerm.toLowerCase();
         return (
@@ -52,6 +60,20 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
     };
 
     const sortedOTs = Object.keys(tasksByOT).sort((a, b) => parseInt(a) - parseInt(b));
+
+    const totalPages = Math.ceil(sortedOTs.length / ITEMS_PER_PAGE);
+    const paginatedOTs = sortedOTs.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
+
+    const handlePrevious = () => {
+        if (currentPage > 1) setCurrentPage(p => p - 1);
+    };
+
+    const handleNext = () => {
+        if (currentPage < totalPages) setCurrentPage(p => p + 1);
+    };
 
     const toggleSelectionMode = () => {
         setIsSelectionMode(!isSelectionMode);
@@ -147,7 +169,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
             </div>
 
             <div className="space-y-6 pb-20">
-                {sortedOTs.map((otNumber, index) => {
+                {paginatedOTs.map((otNumber, index) => {
                     const otTasks = tasksByOT[otNumber];
                     const totalTasks = otTasks.length;
                     const completedTasks = otTasks.filter(t => t.status === 'finalizado_total').length;
@@ -321,6 +343,29 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                     </div>
                 )}
             </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 mb-8">
+                    <button
+                        onClick={handlePrevious}
+                        disabled={currentPage === 1}
+                        className="h-10 w-10 rounded-full border border-gray-300 flex items-center justify-center hover:text-red-600 hover:border-red-300 disabled:opacity-50 disabled:hover:text-gray-400 disabled:hover:border-gray-300 transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="m15 18-6-6 6-6" /></svg>
+                    </button>
+                    <span className="text-sm font-medium text-gray-600">
+                        Página {currentPage} de {totalPages}
+                    </span>
+                    <button
+                        onClick={handleNext}
+                        disabled={currentPage === totalPages}
+                        className="h-10 w-10 rounded-full border border-gray-300 flex items-center justify-center hover:text-red-600 hover:border-red-300 disabled:opacity-50 disabled:hover:text-gray-400 disabled:hover:border-gray-300 transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="m9 18 6-6-6-6" /></svg>
+                    </button>
+                </div>
+            )}
 
             {/* Floating Action Bar */}
             {isSelectionMode && selectedTaskIds.size > 0 && (
