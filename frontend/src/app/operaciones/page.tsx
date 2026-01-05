@@ -507,9 +507,13 @@ export default function OperacionesPage() {
         const operario = rawOperarios.find(op => op.id === res.id_operario);
         const maquina = rawMaquinarias.find(m => m.id === res.id_maquinaria);
 
-        // Calculate simplified dates (assuming T=0 is Now)
-        const startDate = new Date(now.getTime() + res.start_time * 60000);
-        const endDate = new Date(now.getTime() + res.end_time * 60000);
+        // Calculate simplified dates (assuming T=0 is Now, and API returns 'inicio_min'/'fin_min')
+        // We use 'inicio_min' from result if available, otherwise fallback to check if 'start_time' exists (legacy?)
+        const startMin = res.inicio_min !== undefined ? res.inicio_min : (res.start_time || 0);
+        const endMin = res.fin_min !== undefined ? res.fin_min : (res.end_time || 0);
+
+        const startDate = new Date(now.getTime() + startMin * 60000);
+        const endDate = new Date(now.getTime() + endMin * 60000);
 
         const formatDateShort = (d: Date) => {
           return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -540,7 +544,10 @@ export default function OperacionesPage() {
         return d.getTime();
       };
 
-      const newPlanWeekKeys = new Set(enrichedResults.map((r: any) => getWeekKey(new Date(now.getTime() + r.start_time * 60000))));
+      const newPlanWeekKeys = new Set(enrichedResults.map((r: any) => {
+        const startMin = r.inicio_min !== undefined ? r.inicio_min : (r.start_time || 0);
+        return getWeekKey(new Date(now.getTime() + startMin * 60000));
+      }));
 
       // Better approach using `tasks` (GanttTasks) which have absolute dates
       const calculatedLoads: Record<number, number> = {};
