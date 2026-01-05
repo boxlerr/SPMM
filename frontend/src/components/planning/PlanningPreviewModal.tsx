@@ -24,6 +24,9 @@ interface PlanificacionResult {
     fecha_prometida?: string | null;
     sin_asignar: boolean;
     sin_maquinaria: boolean;
+    secuencia?: number; // Added
+    fecha_inicio_estimada?: string; // Added
+    fecha_fin_estimada?: string; // Added
     // Enriched fields
     cliente?: string;
     articulo?: string;
@@ -138,13 +141,24 @@ export function PlanningPreviewModal({
         // If we want to be precise, we should assume T0 is roughly "Now" when modal opened.
         // Let's assume T0 = StartTime - Minutes.
 
-        // Wait, 'fecha_inicio_texto' is "dd/MM/yyyy, HH:mm" - hard to parse back.
-        // But we have 'inicio_min'.
-        // Let's rely on the user passing 'baseDate' or just assume the parent refreshes 'now'.
-        // Actually, let's assume T0 = Date.now(). Modifications will be relative to THIS moment.
-        // That might drift if 'now' changes, but acceptable for minutes resolution.
+        // BETTER APPROACH: Use the backend provided Estimated Date to infer T0 if available.
+        // But for edits relative to "Now", simpler logic might suffice if we assume T0 is "Now".
+        // HOWEVER, the backend now returns `fecha_inicio_estimada`. 
+        // If we edit it, we should update `fecha_inicio_estimada` for display AND `inicio_min` for persistence.
+
+        // Let's assume the user is planning relative to "Now" in the backend's mind (or start of shift).
+        // A simple relative calc is: newMin = (newDate - now) / 60000. 
+        // But if backend projected start is tomorrow 8am (min 600), and now is today 5pm.
+        // Date.now() + 600*60000 might != Tomorrow 8am depending on logic.
+
+        // Let's try to preserve the offset.
+        // But actually, `inicio_min` is what the backend optimizes.
+        // If we change the date, we probably just want to FORCE that date.
+        // The backend `planificar_pendientes` doesn't really accept fixed dates easily unless we lock them.
+        // But for this UI, we just update the min.
 
         const nowMs = Date.now();
+        // Fallback: estimate minutes from now.
         const newMin = Math.round((newDate.getTime() - nowMs) / 60000);
 
         const key = `${original.orden_id}-${original.proceso_id}`;
@@ -157,7 +171,8 @@ export function PlanningPreviewModal({
             ...current,
             inicio_min: newMin,
             fin_min: newMin + duration,
-            fecha_inicio_texto: formattedStart
+            fecha_inicio_texto: formattedStart,
+            fecha_inicio_estimada: newDateStr // Ensure the input reflects the new value immediately
         };
         setEditedResults(prev => ({ ...prev, [key]: updated }));
     };
@@ -209,6 +224,12 @@ export function PlanningPreviewModal({
             }
             grouped[res.orden_id].push(res);
         });
+
+        // Sort items by secuencia if available
+        Object.keys(grouped).forEach(key => {
+            grouped[parseInt(key)].sort((a, b) => (a.secuencia || 0) - (b.secuencia || 0));
+        });
+
         return grouped;
     }, [results]);
 
@@ -380,7 +401,7 @@ export function PlanningPreviewModal({
                                                                     <Input
                                                                         type="datetime-local"
                                                                         className="h-9 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200 font-medium"
-                                                                        value={getDateFromMin(effectiveItem.inicio_min)}
+                                                                        value={effectiveItem.fecha_inicio_estimada ? effectiveItem.fecha_inicio_estimada.slice(0, 16) : getDateFromMin(effectiveItem.inicio_min)}
                                                                         onChange={(e) => handleDateChange(item, e.target.value)}
                                                                     />
                                                                 </div>

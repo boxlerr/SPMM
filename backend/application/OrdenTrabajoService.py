@@ -316,9 +316,9 @@ class OrdenTrabajoService:
     async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, id_estado: int):
         logger.info(f"Service - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso} -> ID Estado {id_estado}")
         
-        ok = await self.repository.update_proceso_status(id_orden, id_proceso, id_estado)
+        ot_proceso = await self.repository.update_proceso_status(id_orden, id_proceso, id_estado)
         
-        if not ok:
+        if not ot_proceso:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
 
         # Verificar SIEMPRE si la orden está completa o no
@@ -333,7 +333,12 @@ class OrdenTrabajoService:
             print(f"DEBUG: Marking order {id_orden} as incomplete")
             await self.repository.mark_as_incomplete(id_orden)
             
-        return ResponseDTO(status=True, data={"updated": True, "id_estado": id_estado})
+        return ResponseDTO(status=True, data={
+            "updated": True, 
+            "id_estado": id_estado, 
+            "inicio_real": ot_proceso.inicio_real,
+            "fin_real": ot_proceso.fin_real
+        })
 
     async def actualizarObservacionesProceso(self, id_orden: int, id_proceso: int, observaciones: str):
         logger.info(f"Service - Actualizar observaciones proceso: Orden {id_orden}, Proceso {id_proceso}")

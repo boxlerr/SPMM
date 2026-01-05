@@ -517,6 +517,67 @@ def _agregar_funcion_objetivo(
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
 
+def _convertir_minutos_a_fecha(minutos_acumulados: int):
+    """
+    Convierte minutos de trabajo (desde 'ahora') a una fecha real,
+    ntentando respetar horarios laborales simples (7:00 a 17:00, L-V).
+    Esto es una aproximación para que la UI no muestre horarios de madrugada.
+    """
+    from datetime import timedelta
+    
+    ahora = datetime.now()
+    
+    # Ajustar inicio al próximo horario laboral si es "ahora"
+    # Si es antes de las 7, empieza a las 7.
+    # Si es despues de las 17, pasa a mañana a las 7.
+    inicio_base = ahora
+    if inicio_base.hour < 7:
+        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    elif inicio_base.hour >= 17:
+        inicio_base = inicio_base + timedelta(days=1)
+        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    
+    # Avanzar dias si cae finde
+    while inicio_base.weekday() >= 5: # 5=Sab, 6=Dom
+        inicio_base += timedelta(days=1)
+        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+
+    # Simulación paso a paso (simplificada)
+    tiempo_actual = inicio_base
+    minutos_restantes = minutos_acumulados
+
+    # Minutos por dia laboral (7 a 17 = 10 horas = 600 min)
+    while minutos_restantes > 0:
+        # Espacio libre hoy hasta las 17:00
+        fin_jornada = tiempo_actual.replace(hour=17, minute=0, second=0, microsecond=0)
+        
+        # Si por alguna razon ya pasamos las 17 (bug), avanzamos al dia sig
+        if tiempo_actual >= fin_jornada:
+            tiempo_actual += timedelta(days=1)
+            tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+            while tiempo_actual.weekday() >= 5:
+                tiempo_actual += timedelta(days=1)
+                tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+            continue
+
+        minutos_disponibles_hoy = (fin_jornada - tiempo_actual).total_seconds() / 60
+        
+        if minutos_restantes <= minutos_disponibles_hoy:
+            tiempo_actual += timedelta(minutes=minutos_restantes)
+            minutos_restantes = 0
+        else:
+            tiempo_actual += timedelta(minutes=minutos_disponibles_hoy)
+            minutos_restantes -= minutos_disponibles_hoy
+            # Avanzar al proximo dia laboral
+            tiempo_actual += timedelta(days=1)
+            tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+            while tiempo_actual.weekday() >= 5:
+                tiempo_actual += timedelta(days=1)
+                tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+    
+    return tiempo_actual.isoformat()
+
+
 def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID,):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
@@ -529,12 +590,16 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
             op_id  = solver.Value(operario_vars[(orden_id, proc_id)])
             maq_id = solver.Value(maq_vars[(orden_id, proc_id)])
 
+            inicio_m = solver.Value(inicio_vars[(orden_id, proc_id)])
+            fin_m = solver.Value(fin_vars[(orden_id, proc_id)])
+
             resultados.append({
                 "orden_id": orden_id,
                 "proceso_id": proc_id,
+                "secuencia": secuencia,
                 "nombre_proceso": nombre_proceso,
-                "inicio_min": solver.Value(inicio_vars[(orden_id, proc_id)]),
-                "fin_min": solver.Value(fin_vars[(orden_id, proc_id)]),
+                "inicio_min": inicio_m,
+                "fin_min": fin_m,
                 "duracion_min": dur,
                 "prioridad_peso": peso_prioridad,
                 "id_operario": op_id if op_id != DUMMY_OP_ID else None,
@@ -548,6 +613,9 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 ),
                 "sin_asignar": (op_id == DUMMY_OP_ID),
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
+                # Fechas estimadas reales
+                "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m),
+                "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m),
             })
     else:
         logger.warning("No se encontró solución.")

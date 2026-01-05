@@ -485,7 +485,7 @@ class OrdenTrabajoRepository:
             await self.db.refresh(ot_proceso)
             
             logger.info("Repository - Estado actualizado correctamente.")
-            return True
+            return ot_proceso
             
         except Exception as e:
             await self.db.rollback()

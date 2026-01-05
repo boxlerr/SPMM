@@ -28,9 +28,11 @@ interface PlanningListTableProps {
     onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number) => void;
     onProcessReorder?: (ordenId: number, newOrder: any[]) => void;
     onOperatorChange?: (ordenId: number, procesoId: number, operarioId: number) => void;
+    onMachineryChange?: (ordenId: number, procesoId: number, maquinariaId: number) => void; // Added
     selectedIds?: number[];
     onSelectionChange?: (ids: number[]) => void;
     operarios?: any[];
+    maquinarias?: any[]; // Added
     planificacion?: PlanificacionItem[];
 }
 
@@ -43,9 +45,11 @@ function _PlanningListTable({
     onProcessStatusChange,
     onProcessReorder,
     onOperatorChange,
+    onMachineryChange, // Added
     selectedIds = [],
     onSelectionChange,
     operarios = [],
+    maquinarias = [], // Added
     planificacion = []
 }: PlanningListTableProps) {
 
@@ -516,7 +520,7 @@ function _PlanningListTable({
                                                             <OrderFiles orderId={item.id} />
                                                         </div>
                                                         <div className="w-full text-sm">
-                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_180px_120px_80px_100px_300px] gap-4 px-4 py-2 font-bold border-t border-gray-200">
+                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 px-4 py-2 font-bold border-t border-gray-200">
                                                                 <div>#</div>
                                                                 <div>Proceso</div>
                                                                 <div>Inicio Estimado</div>
@@ -524,99 +528,131 @@ function _PlanningListTable({
                                                                 <div className="text-center">Min. Est.</div>
                                                                 <div className="text-center text-blue-700">Min. Real</div>
                                                                 <div>Operario</div>
+                                                                <div>Maquinaria</div>
                                                             </div>
 
                                                             <div>
                                                                 {item.procesos && item.procesos.length > 0 ? (
-                                                                    item.procesos.map((proc, idx) => (
-                                                                        <div
-                                                                            key={`${item.id}-${proc.proceso.id}`}
-                                                                            className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_300px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
-                                                                        >
-                                                                            <div className="flex items-center text-gray-500 font-mono">
-                                                                                {proc.orden}
-                                                                            </div>
-                                                                            <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
+                                                                    item.procesos.map((proc, idx) => {
+                                                                        const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
+                                                                        const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Maquinaria no asignada");
+
+                                                                        return (
                                                                             <div
-                                                                                className="group relative flex items-center justify-center gap-2 text-xs font-medium text-amber-900 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
-                                                                                onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
-                                                                                title="Click para editar fecha de inicio estimada"
+                                                                                key={`${item.id}-${proc.proceso.id}`}
+                                                                                className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
                                                                             >
-                                                                                <CalendarClock className="w-3.5 h-3.5 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
-                                                                                {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
-                                                                                    <input
-                                                                                        type="datetime-local"
-                                                                                        className="border rounded px-1 py-0.5 text-xs w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                                                                                        value={editingStartDate.value}
-                                                                                        onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
-                                                                                        onBlur={handleStartDateSave}
-                                                                                        onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
-                                                                                        autoFocus
-                                                                                        onClick={(e) => e.stopPropagation()}
-                                                                                    />
-                                                                                ) : (
-                                                                                    <span className="group-hover:text-amber-950 transition-colors">
-                                                                                        {getScheduledStart(item.id, proc.proceso.id)}
-                                                                                    </span>
-                                                                                )}
-                                                                                <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-2 transition-all duration-200" />
-                                                                            </div>
-                                                                            <div>
-                                                                                <Select
-                                                                                    defaultValue={proc.estado_proceso?.id?.toString() || "1"}
-                                                                                    onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                <div className="flex items-center text-gray-500 font-mono">
+                                                                                    {proc.orden}
+                                                                                </div>
+                                                                                <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
+                                                                                <div
+                                                                                    className="group relative flex items-center justify-center gap-2 text-xs font-medium text-amber-900 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
+                                                                                    onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
+                                                                                    title="Click para editar fecha de inicio estimada"
                                                                                 >
-                                                                                    <SelectTrigger className={cn(
-                                                                                        "h-8 w-full border-none shadow-none font-medium",
-                                                                                        (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
-                                                                                            proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
-                                                                                                "text-gray-800 bg-gray-100 hover:bg-gray-200"
-                                                                                    )}>
-                                                                                        <SelectValue placeholder="Estado" />
-                                                                                    </SelectTrigger>
-                                                                                    <SelectContent>
-                                                                                        <SelectItem value="1">Pendiente</SelectItem>
-                                                                                        <SelectItem value="2">En Proceso</SelectItem>
-                                                                                        <SelectItem value="3">Finalizado</SelectItem>
-                                                                                    </SelectContent>
-                                                                                </Select>
-                                                                            </div>
-                                                                            <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
-
-                                                                            {/* Real Minutes Column */}
-                                                                            <div className="text-center font-bold text-blue-700">
-                                                                                {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
-                                                                            </div>
-
-                                                                            <div>
-                                                                                {onOperatorChange && operarios.length > 0 ? (
+                                                                                    <CalendarClock className="w-3.5 h-3.5 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
+                                                                                    {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
+                                                                                        <input
+                                                                                            type="datetime-local"
+                                                                                            className="border rounded px-1 py-0.5 text-xs w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
+                                                                                            value={editingStartDate.value}
+                                                                                            onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
+                                                                                            onBlur={handleStartDateSave}
+                                                                                            onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
+                                                                                            autoFocus
+                                                                                            onClick={(e) => e.stopPropagation()}
+                                                                                        />
+                                                                                    ) : (
+                                                                                        <span className="group-hover:text-amber-950 transition-colors">
+                                                                                            {getScheduledStart(item.id, proc.proceso.id)}
+                                                                                        </span>
+                                                                                    )}
+                                                                                    <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-2 transition-all duration-200" />
+                                                                                </div>
+                                                                                <div>
                                                                                     <Select
-                                                                                        value={operarios.find(op => {
-                                                                                            const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
-                                                                                            const currentName = (proc.operario_nombre || "").trim().toLowerCase();
-                                                                                            return opName === currentName;
-                                                                                        })?.id?.toString() || undefined}
-                                                                                        onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                        defaultValue={proc.estado_proceso?.id?.toString() || "1"}
+                                                                                        onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
                                                                                     >
-                                                                                        <SelectTrigger className="h-8 w-full border border-gray-200">
-                                                                                            <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                                                        <SelectTrigger className={cn(
+                                                                                            "h-8 w-full border-none shadow-none font-medium",
+                                                                                            (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
+                                                                                                proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
+                                                                                                    "text-gray-800 bg-gray-100 hover:bg-gray-200"
+                                                                                        )}>
+                                                                                            <SelectValue placeholder="Estado" />
                                                                                         </SelectTrigger>
                                                                                         <SelectContent>
-                                                                                            {operarios.map((op) => (
-                                                                                                <SelectItem key={op.id} value={op.id.toString()}>
-                                                                                                    {toTitleCase(`${op.nombre} ${op.apellido}`)}
-                                                                                                </SelectItem>
-                                                                                            ))}
+                                                                                            <SelectItem value="1">Pendiente</SelectItem>
+                                                                                            <SelectItem value="2">En Proceso</SelectItem>
+                                                                                            <SelectItem value="3">Finalizado</SelectItem>
                                                                                         </SelectContent>
                                                                                     </Select>
-                                                                                ) : (
-                                                                                    <span className="text-gray-700 text-xs font-medium block">
-                                                                                        {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
-                                                                                    </span>
-                                                                                )}
+                                                                                </div>
+                                                                                <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
+
+                                                                                {/* Real Minutes Column */}
+                                                                                <div className="text-center font-bold text-blue-700">
+                                                                                    {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
+                                                                                </div>
+
+                                                                                <div>
+                                                                                    {onOperatorChange && operarios.length > 0 ? (
+                                                                                        <Select
+                                                                                            value={operarios.find(op => {
+                                                                                                const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
+                                                                                                const currentName = (proc.operario_nombre || "").trim().toLowerCase();
+                                                                                                return opName === currentName;
+                                                                                            })?.id?.toString() || undefined}
+                                                                                            onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                        >
+                                                                                            <SelectTrigger className="h-8 w-full border border-gray-200">
+                                                                                                <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent>
+                                                                                                {operarios.map((op) => (
+                                                                                                    <SelectItem key={op.id} value={op.id.toString()}>
+                                                                                                        {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                                                    </SelectItem>
+                                                                                                ))}
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                    ) : (
+                                                                                        <span className="text-gray-700 text-xs font-medium block">
+                                                                                            {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
+                                                                                        </span>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* Maquinaria Column */}
+                                                                                <div>
+                                                                                    {onMachineryChange && maquinarias.length > 0 ? (
+                                                                                        <Select
+                                                                                            value={plannedItem?.id_maquinaria?.toString() || "0"}
+                                                                                            onValueChange={(val) => onMachineryChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                        >
+                                                                                            <SelectTrigger className="h-8 w-full border border-gray-200">
+                                                                                                <SelectValue placeholder={machineName} />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent>
+                                                                                                <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
+                                                                                                {maquinarias.map((m) => (
+                                                                                                    <SelectItem key={m.id} value={m.id.toString()}>
+                                                                                                        {m.nombre}
+                                                                                                    </SelectItem>
+                                                                                                ))}
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                    ) : (
+                                                                                        <div className="text-gray-600 text-xs font-medium">
+                                                                                            {machineName}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
-                                                                        </div>
-                                                                    ))
+                                                                        );
+                                                                    })
                                                                 ) : (
                                                                     <div className="px-4 py-4 text-center text-gray-400 italic">
                                                                         Sin procesos asignados

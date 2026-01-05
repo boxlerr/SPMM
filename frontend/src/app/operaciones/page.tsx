@@ -374,6 +374,47 @@ export default function OperacionesPage() {
     } catch (error) {
       console.error("Error updating status:", error);
     }
+
+  }
+
+  const handleMachineryChange = async (ordenId: number, procesoId: number, maquinariaId: number) => {
+    // Find the planificacion item
+    const planItem = rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId);
+    if (!planItem) return;
+
+    // Optimistic update
+    const updatedItem = { ...planItem, id_maquinaria: maquinariaId };
+
+    // Update rawPlanificacion
+    setRawPlanificacion(prev => prev.map(p => p.id === planItem.id ? updatedItem : p));
+
+    // Update Gantt tasks if necessary (GanttTasks don't currently show machine ID but might use it for filtering)
+    // For now we just update rawPlanificacion which is the source of truth for the list
+
+    try {
+      const response = await fetch(`${API_URL}/planificacion/${planItem.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_maquinaria: maquinariaId })
+      });
+
+      if (!response.ok) throw new Error("Failed to update machinery");
+
+      // Update local machinery name/id in rawPlanificacion for display
+      // We might need to refetch or manually update the name if we want to be perfect without refetch
+      // but the Select uses ID so it should be fine.
+      // If we display name, we need to look it up.
+      const machine = rawMaquinarias.find(m => m.id === maquinariaId);
+      if (machine) {
+        setRawPlanificacion(prev => prev.map(p => p.id === planItem.id ? { ...p, nombre_maquinaria: machine.nombre } : p));
+      }
+
+    } catch (error) {
+      console.error("Error updating machinery:", error);
+      toast.error("Error al actualizar maquinaria");
+      // Revert
+      fetchData();
+    }
   };
 
   const handleProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number) => {
@@ -433,11 +474,35 @@ export default function OperacionesPage() {
 
 
     try {
-      await fetch(`${API_URL}/ordenes/` + ordenId + "/procesos/" + procesoId + "/estado", {
+      const response = await fetch(`${API_URL}/ordenes/` + ordenId + "/procesos/" + procesoId + "/estado", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: newStatusId }),
       });
+
+      if (!response.ok) throw new Error("Failed to update status");
+
+      const json = await response.json();
+
+      // Update with real server timestamps if available
+      if (json.status && json.data) {
+        const { inicio_real, fin_real } = json.data;
+
+        setOrdenesTrabajo(prev => prev.map(order => {
+          if (order.id !== ordenId) return order;
+          return {
+            ...order,
+            procesos: order.procesos.map(proc => {
+              if (proc.proceso.id !== procesoId) return proc;
+              return {
+                ...proc,
+                inicio_real: inicio_real,
+                fin_real: fin_real
+              };
+            })
+          };
+        }));
+      }
       toast.success("Estado actualizado correctamente");
     } catch (error) {
       console.error("Error updating status:", error);
@@ -757,7 +822,9 @@ export default function OperacionesPage() {
                       onProcessStatusChange={handleProcessStatusChange}
                       onProcessReorder={handleProcessReorder}
                       onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      onMachineryChange={handleMachineryChange}
                       operarios={rawOperarios}
+                      maquinarias={rawMaquinarias}
                       planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
@@ -785,7 +852,9 @@ export default function OperacionesPage() {
                       onProcessStatusChange={handleProcessStatusChange}
                       onProcessReorder={handleProcessReorder}
                       onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      onMachineryChange={handleMachineryChange}
                       operarios={rawOperarios}
+                      maquinarias={rawMaquinarias}
                       planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
