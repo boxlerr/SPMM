@@ -128,8 +128,7 @@ export default function OperacionesPage() {
       if (opResponse.ok) {
         const opData = await opResponse.json();
         const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
-        // Filter out 'PRUEBAS' sector
-        const rawOps = allOps.filter((op: any) => op.sector?.toUpperCase() !== 'PRUEBAS');
+        const rawOps = allOps;
         setRawOperarios(rawOps);
 
         const mappedResources: Resource[] = rawOps.map((op: any) => ({

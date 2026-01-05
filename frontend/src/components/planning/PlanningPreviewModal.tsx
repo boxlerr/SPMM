@@ -270,15 +270,15 @@ export function PlanningPreviewModal({
                                         </div>
                                     </div>
 
-                                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                         {items.map((item, idx) => {
-                                            const opId = item.id_operario;
+                                            // Use effective item to show edits
+                                            const effectiveItem = getEffectiveItem(item);
+                                            const opId = effectiveItem.id_operario;
                                             const currentLoad = opId ? (operatorLoads[opId] || 0) : 0;
-                                            const addedLoad = item.duracion_min || 0;
-                                            const totalWeekLoad = currentLoad + addedLoad; // Note: this is strictly current item + pre-existing, not accounting for other items in this batch for the SAME operator, but good enough for item context.
+                                            const addedLoad = effectiveItem.duracion_min || 0;
+                                            const totalWeekLoad = currentLoad + addedLoad;
 
-                                            // Actually, to show TOTAL projected load, we should sum current + ALL new items for this operator.
-                                            // Let's keep it simple: Current Pre-existing + This Batch Total.
                                             const batchTotalForOp = opId ? (newLoads[opId] || 0) : 0;
                                             const projectedTotal = currentLoad + batchTotalForOp;
                                             const itemKey = `${item.orden_id}-${item.proceso_id}`;
@@ -288,8 +288,8 @@ export function PlanningPreviewModal({
                                                 <div key={idx} className={`flex flex-col p-0 bg-white rounded-lg border transition-all hover:shadow-sm group ring-1 ring-gray-100 ring-offset-0 ${isEdited ? 'border-amber-400 bg-amber-50/10' : 'border-gray-100 hover:border-blue-300'}`}>
 
                                                     <div className="p-3 border-b border-gray-50 flex items-start justify-between bg-gradient-to-br from-white to-gray-50/30">
-                                                        <span className="font-semibold text-gray-800 line-clamp-1" title={item.nombre_proceso}>
-                                                            {capitalize(item.nombre_proceso)}
+                                                        <span className="font-semibold text-gray-800 line-clamp-1" title={effectiveItem.nombre_proceso}>
+                                                            {capitalize(effectiveItem.nombre_proceso)}
                                                         </span>
                                                         <div className="flex items-center gap-2">
                                                             {isEdited && (
@@ -298,7 +298,7 @@ export function PlanningPreviewModal({
                                                                 </Badge>
                                                             )}
                                                             <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">
-                                                                {item.duracion_min}m
+                                                                {effectiveItem.duracion_min}m
                                                             </Badge>
                                                         </div>
                                                     </div>
@@ -310,7 +310,7 @@ export function PlanningPreviewModal({
                                                                 <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Operario</Label>
                                                             </div>
                                                             <Select
-                                                                value={item.id_operario?.toString() || "0"}
+                                                                value={effectiveItem.id_operario?.toString() || "0"}
                                                                 onValueChange={(val) => handleUpdate(item, 'id_operario', val === "0" ? null : parseInt(val))}
                                                             >
                                                                 <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200">
@@ -320,23 +320,26 @@ export function PlanningPreviewModal({
                                                                     </div>
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin Asignar</SelectItem>
-                                                                    {availableOperators.map(op => (
-                                                                        <SelectItem
-                                                                            key={op.id}
-                                                                            value={op.id.toString()}
-                                                                            disabled={!op.disponible}
-                                                                            className={!op.disponible ? "text-gray-400 italic" : ""}
-                                                                        >
-                                                                            {op.nombre} {op.apellido} {!op.disponible && "(Ausente)"}
-                                                                        </SelectItem>
-                                                                    ))}
+                                                                    <SelectItem value="0" className="text-gray-400 italic">Operario no asignado</SelectItem>
+                                                                    {availableOperators.map(op => {
+                                                                        const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
+                                                                        return (
+                                                                            <SelectItem
+                                                                                key={op.id}
+                                                                                value={op.id.toString()}
+                                                                                disabled={!op.disponible && !isPruebas}
+                                                                                className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : (isPruebas ? "text-amber-600 font-medium" : "")}
+                                                                            >
+                                                                                {isPruebas ? "Operario no asignado" : `${op.nombre} ${op.apellido}`} {(!op.disponible && !isPruebas) && "(Ausente)"}
+                                                                            </SelectItem>
+                                                                        );
+                                                                    })}
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>
 
                                                         {/* Load Stats Bar (Only if Op assigned) */}
-                                                        {item.id_operario && (
+                                                        {effectiveItem.id_operario && (
                                                             <div className="py-1">
                                                                 <div className="w-full bg-gray-100 rounded-full h-1 overflow-hidden flex">
                                                                     <div className="bg-blue-400 h-full" style={{ width: `${Math.min((currentLoad / 2400) * 100, 100)}%` }} />
@@ -345,22 +348,22 @@ export function PlanningPreviewModal({
                                                             </div>
                                                         )}
 
-                                                        <div className="grid grid-cols-2 gap-2">
+                                                        <div className="grid grid-cols-1 gap-2">
                                                             {/* Machine (Editable) */}
                                                             <div className="space-y-1">
                                                                 <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Maquinaria</Label>
                                                                 <Select
-                                                                    value={item.id_maquinaria?.toString() || "0"}
+                                                                    value={effectiveItem.id_maquinaria?.toString() || "0"}
                                                                     onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
                                                                 >
                                                                     <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200">
                                                                         <div className="flex items-center gap-2 truncate">
                                                                             <Cog className="w-3 h-3 text-gray-400" />
-                                                                            <SelectValue placeholder="--" />
+                                                                            <SelectValue placeholder="Toque para asignar..." />
                                                                         </div>
                                                                     </SelectTrigger>
                                                                     <SelectContent>
-                                                                        <SelectItem value="0" className="text-gray-400 italic">Nada</SelectItem>
+                                                                        <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
                                                                         {availableMachines.map(m => (
                                                                             <SelectItem key={m.id} value={m.id.toString()}>
                                                                                 {m.nombre}
@@ -376,8 +379,8 @@ export function PlanningPreviewModal({
                                                                 <div className="relative">
                                                                     <Input
                                                                         type="datetime-local"
-                                                                        className="h-8 text-[10px] px-1 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200"
-                                                                        value={getDateFromMin(item.inicio_min)}
+                                                                        className="h-9 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200 font-medium"
+                                                                        value={getDateFromMin(effectiveItem.inicio_min)}
                                                                         onChange={(e) => handleDateChange(item, e.target.value)}
                                                                     />
                                                                 </div>
