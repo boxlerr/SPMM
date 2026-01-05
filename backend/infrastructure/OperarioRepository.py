@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import joinedload
 
 from backend.domain.Operario import Operario
@@ -78,6 +78,9 @@ class OperarioRepository:
             if not operario:
                 logger.info("Repository - Operario no encontrado.")
                 return False
+
+            # Eliminar relaciones en operario_rango previamente
+            await self.db.execute(delete(OperarioRango).where(OperarioRango.id_operario == id))
 
             await self.db.delete(operario)
             await self.db.commit()
