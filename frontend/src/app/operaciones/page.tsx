@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useMemo } from "react"
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -417,7 +418,39 @@ export default function OperacionesPage() {
     }
   };
 
+
+  const [isStatusConfirmOpen, setIsStatusConfirmOpen] = useState(false);
+  const [pendingStatusUpdate, setPendingStatusUpdate] = useState<{ ordenId: number, procesoId: number, newStatusId: number } | null>(null);
+
+  const confirmStatusChange = () => {
+    if (pendingStatusUpdate) {
+      executeProcessStatusChange(pendingStatusUpdate.ordenId, pendingStatusUpdate.procesoId, pendingStatusUpdate.newStatusId);
+      setPendingStatusUpdate(null);
+    }
+    setIsStatusConfirmOpen(false);
+  };
+
   const handleProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number) => {
+    // Find current status
+    const order = ordenesTrabajo.find(o => o.id === ordenId);
+    if (!order) return;
+    const process = order.procesos.find(p => p.proceso.id === procesoId);
+    if (!process) return;
+
+    const currentStatusId = process.estado_proceso.id;
+
+    // Check if reverting from Finalizado (3) to Pendiente (1)
+    if (currentStatusId === 3 && newStatusId === 1) {
+      setPendingStatusUpdate({ ordenId, procesoId, newStatusId });
+      setIsStatusConfirmOpen(true);
+      return;
+    }
+
+    // Otherwise proceed directly
+    executeProcessStatusChange(ordenId, procesoId, newStatusId);
+  };
+
+  const executeProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number) => {
     // 1. Optimistic update local state (ordenesTrabajo)
     setOrdenesTrabajo(prev => prev.map(order => {
       if (order.id !== ordenId) return order;
@@ -833,20 +866,49 @@ export default function OperacionesPage() {
                   </TabsContent>
 
                   <TabsContent value="semanal" className="m-0 h-full p-4">
-                    {/* Weekly: Filter by current week AND NOT finalized */}
+                    {/* Weekly: Filter by reference week based on selected Lote */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
-                        // Check if finalized
+                        // 1. Check if fully finalized (exclude)
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
                         if (allFinalized) return false;
 
-                        // Date check
-                        if (!order.fecha_prometida) return false;
-                        const date = new Date(order.fecha_prometida);
-                        const today = new Date();
-                        const firstDay = new Date(today.setDate(today.getDate() - today.getDay()));
-                        const lastDay = new Date(today.setDate(today.getDate() - today.getDay() + 6));
-                        return date >= firstDay && date <= lastDay;
+                        // 2. Determine Reference Date
+                        let referenceDate = new Date();
+                        if (selectedLoteId !== "all") {
+                          const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+                          if (lote) referenceDate = new Date(lote.date);
+                        }
+
+                        // 3. Calculate Week Range (Monday to Sunday)
+                        const getWeekRange = (d: Date) => {
+                          const date = new Date(d);
+                          const day = date.getDay(); // 0 (Sun) to 6 (Sat)
+                          const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+                          const monday = new Date(date.setDate(diff));
+                          monday.setHours(0, 0, 0, 0);
+
+                          const sunday = new Date(monday);
+                          sunday.setDate(monday.getDate() + 6);
+                          sunday.setHours(23, 59, 59, 999);
+
+                          return { start: monday, end: sunday };
+                        };
+
+                        const { start, end } = getWeekRange(referenceDate);
+
+                        // 4. Check if any process in this order is scheduled for this week
+                        // We must check 'filteredPlanificacion' to coincide with selected history
+                        const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
+
+                        // If no processes for this order in this filter, skip
+                        if (orderProcesses.length === 0) return false;
+
+                        return orderProcesses.some(p => {
+                          if (!p.fecha_inicio_estimada) return false;
+                          const pDate = new Date(p.fecha_inicio_estimada);
+                          return pDate >= start && pDate <= end;
+                        });
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
@@ -855,7 +917,7 @@ export default function OperacionesPage() {
                       onMachineryChange={handleMachineryChange}
                       operarios={rawOperarios}
                       maquinarias={rawMaquinarias}
-                      planificacion={rawPlanificacion}
+                      planificacion={rawPlanificacion} // Pass full planificacion for lookup
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
@@ -863,23 +925,56 @@ export default function OperacionesPage() {
                   </TabsContent>
 
                   <TabsContent value="diaria" className="m-0 h-full p-4">
-                    {/* Daily: Filter by current day AND NOT finalized */}
+                    {/* Daily: Filter by reference DAY based on selected Lote */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
-                        // Check if finalized
+                        // 1. Check if fully finalized (exclude)
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
                         if (allFinalized) return false;
 
-                        if (!order.fecha_prometida) return false;
-                        const date = new Date(order.fecha_prometida).toISOString().split('T')[0];
-                        const today = new Date().toISOString().split('T')[0];
-                        return date === today;
+                        // 2. Determine Reference Date
+                        let referenceDate = new Date();
+                        if (selectedLoteId !== "all") {
+                          const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+                          if (lote) referenceDate = new Date(lote.date);
+                        }
+
+                        // Normalize to YYYY-MM-DD for string comparison
+                        // (using local time to match likely user expectation vs server UTC)
+                        // Actually, 'fecha_inicio_estimada' comes as ISO string or YYYY-MM-DD from backend.
+                        // Let's use simple string slice YYYY-MM-DD if possible or proper date comparison.
+
+                        // Helper to get YYYY-MM-DD in local time
+                        const toISODate = (d: Date) => {
+                          const offset = d.getTimezoneOffset() * 60000;
+                          return new Date(d.getTime() - offset).toISOString().split('T')[0];
+                        };
+
+                        // If selectedLoteId is 'all', we use actual TODAY. 
+                        // If Lote is selected, we use that Lote's date.
+                        // Note: uniqueLotes dates are likely strings or Dates. Let's ensure string comparison matches.
+
+                        const refDateStr = toISODate(referenceDate);
+
+                        // 3. Check if any process in this order is scheduled for this DAY
+                        const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
+
+                        if (orderProcesses.length === 0) return false;
+
+                        return orderProcesses.some(p => {
+                          if (!p.fecha_inicio_estimada) return false;
+                          // p.fecha_inicio_estimada is ISO string from backend (calculated in Python)
+                          // We just need to check if it starts with the same YYYY-MM-DD
+                          return p.fecha_inicio_estimada.startsWith(refDateStr);
+                        });
                       })}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
                       onProcessReorder={handleProcessReorder}
                       onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      onMachineryChange={handleMachineryChange}
                       operarios={rawOperarios}
+                      maquinarias={rawMaquinarias}
                       planificacion={rawPlanificacion}
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
@@ -955,6 +1050,18 @@ export default function OperacionesPage() {
         availableOperators={rawOperarios}
         availableMachines={rawMaquinarias}
       />
+      {activeTab === "lista_planificacion" && (
+        <ConfirmationDialog
+          isOpen={isStatusConfirmOpen}
+          onClose={() => setIsStatusConfirmOpen(false)}
+          onConfirm={confirmStatusChange}
+          title="¿Revertir proceso finalizado?"
+          description="El proceso ya está finalizado. Si lo vuelve a pendiente, se perderá la fecha de finalización. ¿Está seguro?"
+          confirmText="Sí, revertir"
+          cancelText="Cancelar"
+          variant="destructive"
+        />
+      )}
     </div>
   )
 }

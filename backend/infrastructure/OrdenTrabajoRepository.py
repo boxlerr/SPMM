@@ -475,9 +475,15 @@ class OrdenTrabajoRepository:
             ot_proceso.id_estado = id_estado
             
             # Logic for Real Minutes Tracking
-            if id_estado == 2:  # En Proceso
+            # Logic for Real Minutes Tracking
+            if id_estado == 1: # Pendiente (Reset)
+                ot_proceso.inicio_real = None
+                ot_proceso.fin_real = None
+            elif id_estado == 2:  # En Proceso
                 if not ot_proceso.inicio_real:
                     ot_proceso.inicio_real = datetime.now()
+                # If reverting from finalized to in-process, clear finish time
+                ot_proceso.fin_real = None
             elif id_estado == 3:  # Finalizado
                 ot_proceso.fin_real = datetime.now()
                 

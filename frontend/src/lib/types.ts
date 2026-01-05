@@ -123,4 +123,7 @@ export interface PlanificacionItem {
     descripcion_lote?: string;
     inicio_real?: string;
     fin_real?: string;
+    fecha_inicio_estimada?: string;
+    fecha_fin_estimada?: string;
+    secuencia?: number;
 }
