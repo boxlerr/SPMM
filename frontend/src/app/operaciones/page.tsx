@@ -31,6 +31,9 @@ export default function OperacionesPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
+  // Refresh Trigger for Children
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
   // Gantt State
   const [tasks, setTasks] = useState<GanttTask[]>([])
   const [resources, setResources] = useState<Resource[]>([])
@@ -689,7 +692,7 @@ export default function OperacionesPage() {
               />
             )}
 
-            {activeTab === "work_orders" && <WorkOrdersListWrapper />}
+            {activeTab === "work_orders" && <WorkOrdersListWrapper refreshTrigger={refreshTrigger} />}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
                 <div className="border-b px-4 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -863,6 +866,7 @@ export default function OperacionesPage() {
         onSuccess={() => {
           setIsCreateModalOpen(false)
           fetchData()
+          setRefreshTrigger(prev => prev + 1)
         }}
       />
 

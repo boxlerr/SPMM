@@ -3,16 +3,17 @@
 import React from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Edit2, CalendarClock } from "lucide-react";
+import { AlertCircle, Edit2, CalendarClock, Trash2 } from "lucide-react";
 import { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "@/components/common/OrderFiles";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
     onEdit: (order: WorkOrder) => void;
+    onDelete: (id: number) => void;
 }
 
-export function UnplannedWorkOrdersList({ orders, onEdit }: UnplannedWorkOrdersListProps) {
+export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = React.useState("");
 
     const filteredOrders = orders.filter(order => {
@@ -98,6 +99,16 @@ export function UnplannedWorkOrdersList({ orders, onEdit }: UnplannedWorkOrdersL
                                         <div className="text-xs uppercase tracking-wider font-bold text-gray-400">Fecha Prometida</div>
                                         <div className="font-semibold text-gray-700">{formatDate(order.fecha_prometida)}</div>
                                     </div>
+
+                                    <Button
+                                        onClick={() => onDelete(order.id)}
+                                        variant="destructive"
+                                        size="icon"
+                                        className="h-10 w-10 shadow-sm"
+                                        title="Eliminar Orden"
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </Button>
 
                                     <Button
                                         onClick={() => onEdit(order)}

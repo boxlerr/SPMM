@@ -7,9 +7,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnplannedWorkOrdersList } from "./UnplannedWorkOrdersList";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { toast } from "sonner";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { API_URL } from "@/config";
 
-export default function WorkOrdersListWrapper() {
+interface WorkOrdersListWrapperProps {
+    refreshTrigger?: number;
+}
+
+export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrdersListWrapperProps) {
     const [tasks, setTasks] = useState<GanttTask[]>([]);
     const [loading, setLoading] = useState(true);
     // rawPlanificacion is mainly for task details mapping
@@ -24,6 +29,9 @@ export default function WorkOrdersListWrapper() {
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [orderToEdit, setOrderToEdit] = useState<WorkOrder | null>(null);
+
+    // Delete Confirmation State
+    const [deleteOrderId, setDeleteOrderId] = useState<number | null>(null);
 
 
     // Helper for colors
@@ -83,7 +91,7 @@ export default function WorkOrdersListWrapper() {
 
     useEffect(() => {
         fetchData();
-    }, []);
+    }, [refreshTrigger]);
 
     const handleTaskClick = (task: GanttTask) => {
         const originalItem = rawPlanificacion.find(p => p.id === task.dbId);
@@ -197,6 +205,30 @@ export default function WorkOrdersListWrapper() {
         fetchData(); // Refresh all data
     };
 
+    const handleDeleteOrder = (id: number) => {
+        setDeleteOrderId(id);
+    };
+
+    const confirmDelete = async () => {
+        if (!deleteOrderId) return;
+
+        try {
+            const response = await fetch(`${API_URL}/ordenes/${deleteOrderId}`, {
+                method: "DELETE"
+            });
+
+            if (!response.ok) throw new Error("Error al eliminar");
+
+            toast.success("Orden eliminada correctamente");
+            fetchData();
+        } catch (error) {
+            console.error("Error deleting order:", error);
+            toast.error("Error al eliminar la orden");
+        } finally {
+            setDeleteOrderId(null);
+        }
+    };
+
     if (loading) {
         return <div className="p-8 text-center text-gray-500">Cargando órdenes de trabajo...</div>;
     }
@@ -225,6 +257,7 @@ export default function WorkOrdersListWrapper() {
                     <UnplannedWorkOrdersList
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
+                        onDelete={handleDeleteOrder}
                     />
                 </TabsContent>
             </Tabs>
@@ -247,6 +280,16 @@ export default function WorkOrdersListWrapper() {
                 }}
                 onSuccess={handleEditSuccess}
                 orderToEdit={orderToEdit}
+            />
+            <ConfirmationDialog
+                isOpen={!!deleteOrderId}
+                onClose={() => setDeleteOrderId(null)}
+                onConfirm={confirmDelete}
+                title="Eliminar Orden de Trabajo"
+                description="¿Estás seguro de que deseas eliminar esta orden? Esta acción eliminará permanentemente la orden, sus procesos, archivos y planificaciones asociadas. Esta acción no se puede deshacer."
+                confirmText="Eliminar"
+                cancelText="Cancelar"
+                variant="destructive"
             />
         </div>
     );

@@ -94,7 +94,22 @@ class OrdenTrabajoRepository:
                 logger.info(f"Repository - Orden de trabajo {id} no encontrada para eliminar.")
                 return False
 
+            # Delete related records explicitly to avoid FK constraints
+            from sqlalchemy import text
+            
+            # 1. Delete from Planificacion (if exists)
+            # Using raw SQL to avoid circular dependency issues if Planificacion model is not easily accessible
+            await self.db.execute(text("DELETE FROM planificacion WHERE orden_id = :id"), {"id": id})
+            
+            # 2. Delete from OrdenTrabajoProceso
+            await self.db.execute(text("DELETE FROM orden_trabajo_proceso WHERE id_orden_trabajo = :id"), {"id": id})
+            
+            # 3. Delete from Plano
+            await self.db.execute(text("DELETE FROM plano WHERE id_orden_trabajo = :id"), {"id": id})
+
+            # 4. Finally delete the Order
             await self.db.delete(orden)
+            
             await self.db.commit()
             logger.info(f"Repository - Orden de trabajo {id} eliminada correctamente.")
             return True
