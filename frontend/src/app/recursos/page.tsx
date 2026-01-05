@@ -62,7 +62,8 @@ export default function RecursosPage() {
 
   const fetchOperarios = async () => {
     const data = await api.fetchData(`${cleanUrl}/operarios`);
-    setOperarios(data);
+    const filtered = data.filter((op: Operario) => op.sector?.toUpperCase() !== "PRUEBAS");
+    setOperarios(filtered);
   };
 
   const fetchMaquinas = async () => {

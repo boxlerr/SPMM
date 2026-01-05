@@ -124,7 +124,9 @@ export default function OperacionesPage() {
       const opResponse = await fetch(`${API_URL}/operarios`);
       if (opResponse.ok) {
         const opData = await opResponse.json();
-        const rawOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
+        const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
+        // Filter out 'PRUEBAS' sector
+        const rawOps = allOps.filter((op: any) => op.sector?.toUpperCase() !== 'PRUEBAS');
         setRawOperarios(rawOps);
 
         const mappedResources: Resource[] = rawOps.map((op: any) => ({
@@ -650,13 +652,13 @@ export default function OperacionesPage() {
               <LayoutList size={18} />
               Planificación
             </button>
-            <button
+            {/* <button
               onClick={() => setActiveTab("gantt")}
               className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "gantt" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <GanttChartSquare size={18} />
               Gantt
-            </button>
+            </button> */}
 
             <button
               onClick={() => setActiveTab("work_orders")}
