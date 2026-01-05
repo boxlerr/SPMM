@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, Server, Database, Clock, User, Shield } from 'lucide-react';
+import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UsuariosTable from '@/components/usuarios/UsuariosTable';
 import { formatNotificationMessage } from '@/lib/utils';
@@ -245,8 +245,6 @@ export default function ConfiguracionPage() {
         const systemInfo = {
           version: '1.0.0',
           nombre: 'SPMM - Sistema de Planificación y Mantenimiento de Maquinaria',
-          backendUrl: API_URL,
-          frontendUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
           fechaActual: currentDateTime.toLocaleString('es-ES', {
             day: '2-digit',
             month: '2-digit',
@@ -255,8 +253,6 @@ export default function ConfiguracionPage() {
             minute: '2-digit',
             second: '2-digit'
           }),
-          navegador: typeof window !== 'undefined' ? navigator.userAgent : 'N/A',
-          idioma: typeof window !== 'undefined' ? navigator.language : 'es-ES',
         };
 
         return (
@@ -323,76 +319,6 @@ export default function ConfiguracionPage() {
                   ) : (
                     <p className="text-sm text-gray-500">No hay sesión activa</p>
                   )}
-                </div>
-              </div>
-
-              {/* Configuración del Servidor */}
-              <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
-                <div className="flex items-center gap-3 mb-4">
-                  <Server className="h-5 w-5 text-purple-600" />
-                  <h4 className="text-lg font-semibold text-gray-900">Servidor Backend</h4>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">URL del API</p>
-                    <p className="text-sm font-medium text-gray-900 break-all">{systemInfo.backendUrl}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">URL del Frontend</p>
-                    <p className="text-sm font-medium text-gray-900 break-all">{systemInfo.frontendUrl}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Información del Cliente */}
-              <div className="bg-gray-50 rounded-lg p-5 border border-gray-200">
-                <div className="flex items-center gap-3 mb-4">
-                  <Database className="h-5 w-5 text-orange-600" />
-                  <h4 className="text-lg font-semibold text-gray-900">Información del Cliente</h4>
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Idioma</p>
-                    <p className="text-sm font-medium text-gray-900">{systemInfo.idioma}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Zona Horaria</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Resolución de Pantalla</p>
-                    <p className="text-sm font-medium text-gray-900">
-                      {typeof window !== 'undefined'
-                        ? `${window.screen.width}x${window.screen.height}`
-                        : 'N/A'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Estadísticas Rápidas */}
-            <div className="bg-blue-50 rounded-lg p-5 border border-blue-200">
-              <div className="flex items-center gap-3 mb-4">
-                <Clock className="h-5 w-5 text-blue-600" />
-                <h4 className="text-lg font-semibold text-gray-900">Estadísticas del Sistema</h4>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-blue-600">{notifications.length}</p>
-                  <p className="text-xs text-gray-600 mt-1">Total de Notificaciones</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-green-600">{unreadCount}</p>
-                  <p className="text-xs text-gray-600 mt-1">Notificaciones No Leídas</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-purple-600">
-                    {typeof window !== 'undefined' ? 'Online' : 'N/A'}
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1">Estado de Conexión</p>
                 </div>
               </div>
             </div>

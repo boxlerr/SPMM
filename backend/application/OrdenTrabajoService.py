@@ -188,10 +188,21 @@ class OrdenTrabajoService:
         logger.info(f"Service - Modificar orden de trabajo ID: {id}")
         
         nueva_data = dto.model_dump(exclude_unset=True)
+        
+        # Extract processes to handle separately
+        procesos_data = nueva_data.pop('procesos', [])
+        
+        # Update base order
         orden_actualizada = await self.repository.update(id, nueva_data)
 
         if not orden_actualizada:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
+
+        # Update processes intelligently
+        if procesos_data:
+             await self.repository.update_processes_full(id, procesos_data)
+             # Reload to return full object including new processes
+             orden_actualizada = await self.repository.find_by_id(id)
 
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 

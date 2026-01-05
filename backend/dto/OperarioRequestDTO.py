@@ -8,9 +8,9 @@ class OperarioRequestDTO(BaseModel):
     """
     nombre: str = Field(..., max_length=100)
     apellido: str = Field(..., max_length=100)
-    fecha_nacimiento: date = Field(...)  # ❌ QUITAR Optional
-    fecha_ingreso: date = Field(...)      # ❌ QUITAR Optional
-    sector: str = Field(..., max_length=100)
+    fecha_nacimiento: Optional[date] = None
+    fecha_ingreso: Optional[date] = None
+    sector: Optional[str] = None
     categoria: str = Field(..., max_length=100)
     disponible: Optional[bool] = True
     

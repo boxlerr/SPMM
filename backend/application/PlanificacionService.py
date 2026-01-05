@@ -734,9 +734,14 @@ async def planificar(
     repo_planificacion: PlanificacionRepository,
     db,
     ordenes_ids: list[int] | None = None,
-    preview: bool = False
+    preview: bool = False,
+    plan: list[dict] | None = None,
 ):
     
+    # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
+    if not preview and plan:
+        logger.info(f"Service - Guardando plan manual ({len(plan)} items)")
+        return await repo_planificacion.insertar_planificacion_lote(plan)
 
     ##ordenes = await repo_orden.find_with_procesos()
     if ordenes_ids:

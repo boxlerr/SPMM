@@ -678,3 +678,61 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error obteniendo planificaciones (Raw): {e}")
             return []
 
+    async def update_processes_full(self, id_orden: int, new_processes_data: list[dict]):
+        """
+        Actualiza la lista completa de procesos de una orden, preservando estados de los existentes.
+        """
+        try:
+            logger.info(f"Repository - Actualización inteligente de procesos para Orden {id_orden}")
+            
+            # 1. Obtener procesos actuales
+            stmt = select(OrdenTrabajoProceso).where(OrdenTrabajoProceso.id_orden_trabajo == id_orden)
+            result = await self.db.execute(stmt)
+            current_processes = result.scalars().all()
+            
+            current_map = {p.id_proceso: p for p in current_processes}
+            
+            # 2. Procesar la nueva lista
+            # new_processes_data es lista de dicts con keys: proceso_id, orden, (opcional: fecha_inicio, fecha_fin)
+            
+            incoming_ids = set()
+            
+            for index, item in enumerate(new_processes_data):
+                pid = item.get('proceso_id')
+                if not pid: continue
+                
+                incoming_ids.add(pid)
+                
+                # Update fields based on new DTO structure (no dates, just minutes)
+                minutes = item.get('tiempo_proceso')
+                
+                if pid in current_map:
+                    # UPDATE existing
+                    existing_proc = current_map[pid]
+                    existing_proc.orden = index + 1
+                    if minutes is not None:
+                        existing_proc.tiempo_proceso = minutes
+                else:
+                    # CREATE new
+                    new_proc = OrdenTrabajoProceso(
+                        id_orden_trabajo=id_orden,
+                        id_proceso=pid,
+                        orden=index + 1,
+                        id_estado=1, # Default Nuevo
+                        tiempo_proceso=minutes or 0
+                    )
+                    self.db.add(new_proc)
+            
+            # 3. Eliminar los que ya no están
+            for pid, proc in current_map.items():
+                if pid not in incoming_ids:
+                    await self.db.delete(proc)
+            
+            await self.db.commit()
+            logger.info("Repository - Procesos actualizados correctamente.")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en update_processes_full: {e}")
+            raise InfrastructureException("Error al actualizar lista de procesos.") from e

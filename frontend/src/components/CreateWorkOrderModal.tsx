@@ -37,10 +37,7 @@ interface Maquina {
 interface ProcessItem {
     id: string; // Temporary ID for UI
     proceso_id: string;
-    // operario_id: string; // Removed per user request
-    // maquinaria_id: string; // Removed per user request
-    fecha_inicio: string;
-    fecha_fin: string;
+    tiempo_proceso: string;
 }
 
 interface Articulo {
@@ -49,7 +46,7 @@ interface Articulo {
     descripcion: string;
 }
 
-export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: CreateWorkOrderModalProps) {
+export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [activeTab, setActiveTab] = useState("general");
@@ -75,6 +72,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
 
     const [processes, setProcesses] = useState<ProcessItem[]>([]);
     const [files, setFiles] = useState<File[]>([]);
+    const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
+    const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
+
+    interface ExistingFile {
+        id: number;
+        nombre: string;
+        tipo_archivo: string;
+    }
 
     // Data options
     const [prioridades, setPrioridades] = useState<Option[]>([]);
@@ -87,8 +92,58 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
     useEffect(() => {
         if (isOpen) {
             fetchData();
+            if (activeTab !== "general") setActiveTab("general");
+
+            if (isOpen && orderToEdit) {
+                // Populate form with existing data
+                console.log("Populating form with:", orderToEdit);
+                // Helper to get ID string safely
+                const getSafeId = (obj: any) => obj?.id?.toString() || "";
+
+                setGeneralData({
+                    cliente: orderToEdit.cliente ? (typeof orderToEdit.cliente === 'object' ? orderToEdit.cliente.nombre : orderToEdit.cliente) || "" : "",
+                    cliente_id: getSafeId(orderToEdit.cliente),
+                    descripcion: orderToEdit.detalle || orderToEdit.observaciones || "",
+                    prioridad_id: getSafeId(orderToEdit.prioridad) || orderToEdit.id_prioridad?.toString() || "1",
+                    articulo_id: getSafeId(orderToEdit.articulo) || orderToEdit.id_articulo?.toString() || "",
+                    fecha_prometida: orderToEdit.fecha_prometida || "",
+                });
+
+                setDetailsData({
+                    cantidad: orderToEdit.unidades ? orderToEdit.unidades.toString() : "",
+                    observaciones: "",
+                });
+
+                // Populate processes if they exist
+                if (orderToEdit.procesos && orderToEdit.procesos.length > 0) {
+                    const mappedProcesses: ProcessItem[] = orderToEdit.procesos.map(p => ({
+                        id: Math.random().toString(36).substr(2, 9), // Temp UI ID
+                        proceso_id: p.proceso.id.toString(),
+                        tiempo_proceso: p.tiempo_proceso ? p.tiempo_proceso.toString() : "",
+                    }));
+                    setProcesses(mappedProcesses);
+                } else {
+                    setProcesses([]);
+                }
+
+                // Fetch existing files
+                fetch(`${API_URL}/planos/orden/${orderToEdit.id}`)
+                    .then(async (res) => {
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data.status && Array.isArray(data.data)) {
+                                setExistingFiles(data.data);
+                            }
+                        }
+                    })
+                    .catch(err => console.error("Error fetching files:", err));
+
+            } else {
+                // Reset if new
+                resetForm();
+            }
         }
-    }, [isOpen]);
+    }, [isOpen, orderToEdit]);
 
     const fetchData = async () => {
         setLoading(true);
@@ -139,8 +194,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
         const newProcess: ProcessItem = {
             id: Math.random().toString(36).substr(2, 9),
             proceso_id: "",
-            fecha_inicio: "",
-            fecha_fin: "",
+            tiempo_proceso: "",
         };
         setProcesses([...processes, newProcess]);
     };
@@ -170,8 +224,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
         }
 
         for (const p of processes) {
-            if (!p.proceso_id || !p.fecha_inicio || !p.fecha_fin) {
-                toast.error("Por favor completa la información de todos los procesos");
+            if (!p.proceso_id || !p.tiempo_proceso) {
+                toast.error("Por favor completa la información de todos los procesos (incluyendo minutos)");
                 setActiveTab("procesos");
                 return false;
             }
@@ -219,25 +273,35 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
 
             procesos: processes.map(p => ({
                 proceso_id: parseInt(p.proceso_id),
-                operario_id: null,
-                maquinaria_id: null,
-                fecha_inicio: new Date(p.fecha_inicio).toISOString(),
-                fecha_fin: new Date(p.fecha_fin).toISOString()
+                tiempo_proceso: parseInt(p.tiempo_proceso) || 0,
             }))
         };
 
         try {
-            const formData = new FormData();
-            formData.append('data', JSON.stringify(fullData));
+            let response;
 
-            files.forEach(file => {
-                formData.append('files', file);
-            });
+            if (orderToEdit) {
+                // UPDATE (PUT) - Expects JSON
+                response = await fetch(`${API_URL}/ordenes/${orderToEdit.id}`, {
+                    method: "PUT",
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(fullData),
+                });
+            } else {
+                // CREATE (POST) - Expects Multipart/Form-Data
+                const formData = new FormData();
+                formData.append('data', JSON.stringify(fullData));
+                files.forEach(file => {
+                    formData.append('files', file);
+                });
 
-            const response = await fetch(`${API_URL}/ordenes`, {
-                method: "POST",
-                body: formData,
-            });
+                response = await fetch(`${API_URL}/ordenes`, {
+                    method: "POST",
+                    body: formData,
+                });
+            }
 
             if (!response.ok) {
                 const errorData = await response.json();
@@ -262,12 +326,38 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                 throw new Error(errorMessage);
             }
 
-            toast.success("Orden de Trabajo creada correctamente");
+            // Handle file updates for EDIT mode
+            if (orderToEdit) {
+                // 1. Delete removed files
+                if (deletedFileIds.length > 0) {
+                    await Promise.all(deletedFileIds.map(id =>
+                        fetch(`${API_URL}/planos/${id}`, { method: 'DELETE' })
+                    ));
+                }
+
+                // 2. Upload new files
+                if (files.length > 0) {
+                    for (const file of files) {
+                        const fileData = new FormData();
+                        fileData.append('nombre', file.name);
+                        fileData.append('tipo_archivo', file.type);
+                        fileData.append('id_orden_trabajo', orderToEdit.id.toString());
+                        fileData.append('archivo', file);
+
+                        await fetch(`${API_URL}/planos`, {
+                            method: "POST",
+                            body: fileData
+                        });
+                    }
+                }
+            }
+
+            toast.success(orderToEdit ? "Orden de Trabajo actualizada correctamente" : "Orden de Trabajo creada correctamente");
             onSuccess?.();
             onClose();
             resetForm();
         } catch (error) {
-            console.error("Error creating order:", error);
+            console.error("Error creating/updating order:", error);
             toast.error(error instanceof Error ? error.message : "Error desconocido al crear la orden");
         } finally {
             setSubmitting(false);
@@ -289,6 +379,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
         });
         setProcesses([]);
         setFiles([]);
+        setExistingFiles([]);
+        setDeletedFileIds([]);
         setActiveTab("general");
     };
 
@@ -340,8 +432,10 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                                 <CalendarIcon className="h-6 w-6 text-white" />
                             </div>
                             <div className="flex flex-col">
-                                <span>Nueva Orden de Trabajo</span>
-                                <span className="text-sm font-normal text-gray-500 mt-0.5">Completa la información para crear una nueva OT</span>
+                                <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
+                                <span className="text-sm font-normal text-gray-500 mt-0.5">
+                                    {orderToEdit ? "Modifica la información de la OT existente" : "Completa la información para crear una nueva OT"}
+                                </span>
                             </div>
                         </DialogTitle>
                     </DialogHeader>
@@ -448,7 +542,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                                         <Label className="text-sm font-semibold text-gray-700">
                                             Archivos Adjuntos (Planos, Especificaciones)
                                         </Label>
-                                        <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 transition-all hover:border-blue-400 hover:bg-blue-50/30 group text-center cursor-pointer relative">
+                                        {/* Dynamic Upload Box */}
+                                        <div
+                                            className={cn(
+                                                "border-2 border-dashed border-gray-200 rounded-xl transition-all hover:border-blue-400 hover:bg-blue-50/30 group cursor-pointer relative",
+                                                (existingFiles.length > 0 || files.length > 0)
+                                                    ? "p-3 flex items-center justify-between gap-4"
+                                                    : "p-6 text-center"
+                                            )}
+                                        >
                                             <input
                                                 type="file"
                                                 multiple
@@ -461,19 +563,76 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                                                     }
                                                 }}
                                             />
-                                            <div className="flex flex-col items-center gap-2 pointer-events-none">
-                                                <div className="p-3 bg-blue-50 text-blue-600 rounded-full group-hover:scale-110 transition-transform">
-                                                    <UploadCloud className="w-6 h-6" />
+
+                                            {(existingFiles.length > 0 || files.length > 0) ? (
+                                                <>
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="p-2 bg-blue-50 text-blue-600 rounded-full group-hover:scale-105 transition-transform">
+                                                            <UploadCloud className="w-5 h-5" />
+                                                        </div>
+                                                        <div className="text-sm text-gray-600 text-left">
+                                                            <span className="font-semibold text-blue-600">Agregar más archivos</span>
+                                                            <p className="text-xs text-gray-400">PDF, PNG, JPG</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="pr-2">
+                                                        <Plus className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="flex flex-col items-center gap-2 pointer-events-none">
+                                                    <div className="p-3 bg-blue-50 text-blue-600 rounded-full group-hover:scale-110 transition-transform">
+                                                        <UploadCloud className="w-6 h-6" />
+                                                    </div>
+                                                    <div className="text-sm text-gray-600">
+                                                        <span className="font-semibold text-blue-600">Haz clic para subir</span> o arrastra y suelta
+                                                    </div>
+                                                    <p className="text-xs text-gray-400">PDF, PNG, JPG (máx. 10MB)</p>
                                                 </div>
-                                                <div className="text-sm text-gray-600">
-                                                    <span className="font-semibold text-blue-600">Haz clic para subir</span> o arrastra y suelta
-                                                </div>
-                                                <p className="text-xs text-gray-400">PDF, PNG, JPG (máx. 10MB)</p>
-                                            </div>
+                                            )}
                                         </div>
 
-                                        {files.length > 0 && (
+                                        {(existingFiles.length > 0 || files.length > 0) && (
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                                                {/* Existing Files */}
+                                                {existingFiles.map((file) => (
+                                                    <div key={`existing-${file.id}`} className="flex items-center justify-between p-3 bg-blue-50/50 border border-blue-100 rounded-lg group hover:border-blue-300 transition-all">
+                                                        <div className="flex items-center gap-3 overflow-hidden">
+                                                            <div className="p-2 bg-white rounded-md border border-gray-100 text-gray-500">
+                                                                {file.tipo_archivo.includes('pdf') || file.nombre.endsWith('.pdf') ? (
+                                                                    <FileText className="w-4 h-4 text-red-500" />
+                                                                ) : (
+                                                                    <ImageIcon className="w-4 h-4 text-blue-500" />
+                                                                )}
+                                                            </div>
+                                                            <div className="flex flex-col min-w-0">
+                                                                <a
+                                                                    href={`${API_URL}/planos/${file.id}/archivo?download=true`}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="text-sm font-medium text-gray-700 truncate hover:text-blue-600 hover:underline"
+                                                                >
+                                                                    {file.nombre}
+                                                                </a>
+                                                                <span className="text-xs text-gray-400">Existente</span>
+                                                            </div>
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            onClick={() => {
+                                                                setDeletedFileIds(prev => [...prev, file.id]);
+                                                                setExistingFiles(prev => prev.filter(f => f.id !== file.id));
+                                                            }}
+                                                            className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </Button>
+                                                    </div>
+                                                ))}
+
+                                                {/* New Files */}
                                                 {files.map((file, index) => (
                                                     <div key={index} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-lg group hover:border-blue-200 transition-all">
                                                         <div className="flex items-center gap-3 overflow-hidden">
@@ -554,7 +713,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                                                         </div>
 
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                                            <div className="space-y-1.5 md:col-span-2">
+                                                            <div className="space-y-1.5 md:col-span-1">
                                                                 <Label className="text-xs font-medium text-gray-500">Tipo de Proceso *</Label>
                                                                 <SearchableSelect
                                                                     options={procesosOptions.map(p => ({ value: p.id.toString(), label: p.nombre }))}
@@ -563,25 +722,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess }: Cre
                                                                     placeholder="Seleccionar..."
                                                                 />
                                                             </div>
-                                                        </div>
-
-                                                        <div className="grid grid-cols-2 gap-4">
-                                                            <div className="space-y-1.5">
-                                                                <Label className="text-xs font-medium text-gray-500">Inicio Estimado *</Label>
+                                                            <div className="space-y-1.5 md:col-span-1">
+                                                                <Label className="text-xs font-medium text-gray-500">Tiempo (Minutos) *</Label>
                                                                 <Input
-                                                                    type="date"
-                                                                    value={process.fecha_inicio.split('T')[0]} // Show only date part
-                                                                    onChange={(e) => handleProcessChange(process.id, "fecha_inicio", e.target.value)}
-                                                                    className="h-9"
-                                                                />
-                                                            </div>
-                                                            <div className="space-y-1.5">
-                                                                <Label className="text-xs font-medium text-gray-500">Fin Estimado *</Label>
-                                                                <Input
-                                                                    type="date"
-                                                                    value={process.fecha_fin.split('T')[0]} // Show only date part
-                                                                    onChange={(e) => handleProcessChange(process.id, "fecha_fin", e.target.value)}
-                                                                    className="h-9"
+                                                                    type="number"
+                                                                    placeholder="Ej: 60"
+                                                                    value={process.tiempo_proceso}
+                                                                    onChange={(e) => handleProcessChange(process.id, "tiempo_proceso", e.target.value)}
+                                                                    min={0}
+                                                                    className="h-9 bg-white border-gray-200"
                                                                 />
                                                             </div>
                                                         </div>

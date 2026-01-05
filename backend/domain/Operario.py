@@ -16,9 +16,9 @@ class Operario(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     nombre = Column(String(100), nullable=False)
     apellido = Column(String(100), nullable=False)
-    fecha_nacimiento = Column(Date, nullable=False)
-    fecha_ingreso = Column(Date, nullable=False)
-    sector = Column(String(100), nullable=False)  # texto simple por ahora
+    fecha_nacimiento = Column(Date, nullable=True)
+    fecha_ingreso = Column(Date, nullable=True)
+    sector = Column(String(100), nullable=True)  # texto simple por ahora
     categoria = Column(String(100), nullable=False)
     disponible = Column(Boolean, nullable=False, default=True)
     telefono = Column(String(50), nullable=True)

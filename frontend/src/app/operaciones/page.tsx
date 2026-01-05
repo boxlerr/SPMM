@@ -577,7 +577,7 @@ export default function OperacionesPage() {
     }
   };
 
-  const handleConfirmPlan = async () => {
+  const handleConfirmPlan = async (manualPlan?: any[]) => {
     try {
       setIsConfirmingPlan(true);
       const response = await fetch(`${API_URL}/planificar`, {
@@ -585,7 +585,8 @@ export default function OperacionesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ordenes_ids: selectedOrderIds,
-          preview: false
+          preview: false,
+          plan: manualPlan || undefined
         }),
       });
 
@@ -877,6 +878,8 @@ export default function OperacionesPage() {
         results={previewResults}
         operatorLoads={operatorLoads}
         isConfirming={isConfirmingPlan}
+        availableOperators={rawOperarios}
+        availableMachines={rawMaquinarias}
       />
     </div>
   )

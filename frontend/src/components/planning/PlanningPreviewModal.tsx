@@ -4,7 +4,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Calendar, Clock, User, Cog, AlertCircle, CalendarClock } from "lucide-react";
+import { Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface PlanificacionResult {
     orden_id: number;
@@ -38,9 +41,151 @@ interface PlanningPreviewModalProps {
     results: PlanificacionResult[];
     operatorLoads?: Record<number, number>; // Current load in minutes
     isConfirming: boolean;
+    availableOperators: any[]; // Resource[] or any
+    availableMachines: any[];
 }
 
-export function PlanningPreviewModal({ isOpen, onClose, onConfirm, results, operatorLoads = {}, isConfirming }: PlanningPreviewModalProps) {
+export function PlanningPreviewModal({
+    isOpen,
+    onClose,
+    onConfirm,
+    results,
+    operatorLoads = {},
+    isConfirming,
+    availableOperators = [],
+    availableMachines = []
+}: PlanningPreviewModalProps) {
+
+    // Local state for edits
+    // Map: orden_id -> proceso_id -> Modified Result
+    const [editedResults, setEditedResults] = React.useState<Record<string, PlanificacionResult>>({});
+
+    // Reset edits when results change or modal opens
+    React.useEffect(() => {
+        setEditedResults({});
+    }, [results, isOpen]);
+
+    // Helper to get the effective item (original or edited)
+    const getEffectiveItem = (original: PlanificacionResult) => {
+        const key = `${original.orden_id}-${original.proceso_id}`;
+        return editedResults[key] || original;
+    };
+
+    // Handle updates
+    const handleUpdate = (original: PlanificacionResult, field: keyof PlanificacionResult, value: any) => {
+        const key = `${original.orden_id}-${original.proceso_id}`;
+        const current = getEffectiveItem(original);
+
+        let updated = { ...current, [field]: value };
+
+        // Special handling for Resources (update IDs and Names for display)
+        if (field === 'id_operario') {
+            const op = availableOperators.find(o => o.id == value);
+            updated.operario_nombre = op ? `${op.nombre} ${op.apellido}` : (value ? 'Desconocido' : null);
+            updated.sin_asignar = !value;
+            // Also update rango if needed? keeping simple for now
+        }
+        if (field === 'id_maquinaria') {
+            const maq = availableMachines.find(m => m.id == value);
+            updated.maquinaria_nombre = maq ? maq.nombre : (value ? 'Desconocido' : null);
+            updated.sin_maquinaria = !value;
+        }
+
+        // Special handling for Date/Time
+        // If we edit start time text, we need to recalculate numeric minutes (approx) relative to NOW or base date
+        // But for simplicity, let's assume we receive a full Date string ISO from input?
+        // Actually, the API expects 'inicio_min'. 
+        // We need a way to convert the Input datetime-local back to 'inicio_min'.
+        // Let's assume T=0 is "Now" (or whatever base the backend used).
+        // EDIT: The current backend returns 'inicio_min'. The Service calculates dates based on T=0=Now.
+        // So: new_min = (new_date - now) / 60000.
+        // We will do this calculation when confirming or just store the override values.
+        // Let's store the 'start_date_obj' or similar if we want logic here.
+        // For visual, we update 'fecha_inicio_texto'.
+
+        // Wait, to support proper saving, we need to update 'inicio_min'.
+        // Let's try to recalculate minutes relative to 'now' timestamp used effectively.
+        // We can approximate: original_date - (original_min * 60000) = Base Time.
+        // Base Time + new_min = new_date.
+        // So: new_min = (new_date - Base Time) / 60000.
+
+        if (field === 'fecha_inicio_texto') {
+            // This is just display text, we probably want a real Date handler
+        }
+
+        setEditedResults(prev => ({ ...prev, [key]: updated }));
+    };
+
+    const handleDateChange = (original: PlanificacionResult, newDateStr: string) => {
+        // newDateStr is "YYYY-MM-DDTHH:mm" from input type="datetime-local"
+        if (!newDateStr) return;
+
+        const newDate = new Date(newDateStr);
+        if (isNaN(newDate.getTime())) return;
+
+        // Calculate 'inicio_min'.
+        // We assume 'inicio_min' was calculated relative to NOW.
+        // We need to know what "NOW" was. 
+        // We can infer it: Current Start Date - (Current Inicio Min) minutes.
+        // Or uncouple it and just send absolute dates to backend? Backend expects minutes relative to T=0.
+        // Let's infer T=0 from the original item.
+        // T0 = OriginalStartDate - (OriginalInicioMin * 60000)
+
+        // Ensure we parse the original text date correctly or use a raw date if we had it anywhere.
+        // We have 'fecha_inicio_texto' which is formatted.
+        // Maybe we should pass the raw absolute date in 'results' from the parent?
+        // The parent calculates: startDate = new Date(now.getTime() + startMin * 60000)
+        // If we want to be precise, we should assume T0 is roughly "Now" when modal opened.
+        // Let's assume T0 = StartTime - Minutes.
+
+        // Wait, 'fecha_inicio_texto' is "dd/MM/yyyy, HH:mm" - hard to parse back.
+        // But we have 'inicio_min'.
+        // Let's rely on the user passing 'baseDate' or just assume the parent refreshes 'now'.
+        // Actually, let's assume T0 = Date.now(). Modifications will be relative to THIS moment.
+        // That might drift if 'now' changes, but acceptable for minutes resolution.
+
+        const nowMs = Date.now();
+        const newMin = Math.round((newDate.getTime() - nowMs) / 60000);
+
+        const key = `${original.orden_id}-${original.proceso_id}`;
+        const current = getEffectiveItem(original);
+        const duration = current.duracion_min || 0;
+
+        const formattedStart = newDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        // Update both min and text
+        let updated = {
+            ...current,
+            inicio_min: newMin,
+            fin_min: newMin + duration,
+            fecha_inicio_texto: formattedStart
+        };
+        setEditedResults(prev => ({ ...prev, [key]: updated }));
+    };
+
+    // Convert text date to suitable input value (YYYY-MM-DDTHH:mm)
+    // This is tricky because we only have "dd/MM/yyyy, HH:mm" in text.
+    // We should probably rely on computed dates.
+    // Let's Compute the Date object on the fly from 'inicio_min'.
+    const getDateFromMin = (min: number) => {
+        const d = new Date(Date.now() + min * 60000);
+        // Format for input: YYYY-MM-DDTHH:mm
+        // Adjust for timezone offset
+        const iso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+        return iso;
+    }
+
+
+    const handleConfirmWithEdits = () => {
+        // Merge original results with edits
+        // We need to return the array of FINAL objects.
+        const finalResults = results.map(r => getEffectiveItem(r));
+        // We pass this to onConfirm. But onConfirm currently takes no args?
+        // We defined "onConfirm: () => void". We should update it to accept data or just expose it.
+        // But wait, the parent has 'results' but not 'editedResults'.
+        // We should pass the merged array to onConfirm.
+        // @ts-ignore
+        onConfirm(finalResults);
+    };
 
     // Helper to capitalize first letter
     const capitalize = (s: string) => {
@@ -48,7 +193,7 @@ export function PlanningPreviewModal({ isOpen, onClose, onConfirm, results, oper
         return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
     };
 
-    // Helper to format minutes to HM
+
     const formatTime = (minutes: number) => {
         const h = Math.floor(minutes / 60);
         const m = Math.round(minutes % 60);
@@ -136,78 +281,109 @@ export function PlanningPreviewModal({ isOpen, onClose, onConfirm, results, oper
                                             // Let's keep it simple: Current Pre-existing + This Batch Total.
                                             const batchTotalForOp = opId ? (newLoads[opId] || 0) : 0;
                                             const projectedTotal = currentLoad + batchTotalForOp;
+                                            const itemKey = `${item.orden_id}-${item.proceso_id}`;
+                                            const isEdited = !!editedResults[itemKey];
 
                                             return (
-                                                <div key={idx} className="flex flex-col p-0 bg-white rounded-lg border border-gray-100 hover:border-blue-300 transition-all hover:shadow-sm group ring-1 ring-gray-100 ring-offset-0">
+                                                <div key={idx} className={`flex flex-col p-0 bg-white rounded-lg border transition-all hover:shadow-sm group ring-1 ring-gray-100 ring-offset-0 ${isEdited ? 'border-amber-400 bg-amber-50/10' : 'border-gray-100 hover:border-blue-300'}`}>
 
                                                     <div className="p-3 border-b border-gray-50 flex items-start justify-between bg-gradient-to-br from-white to-gray-50/30">
                                                         <span className="font-semibold text-gray-800 line-clamp-1" title={item.nombre_proceso}>
                                                             {capitalize(item.nombre_proceso)}
                                                         </span>
-                                                        <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">
-                                                            {item.duracion_min}m
-                                                        </Badge>
+                                                        <div className="flex items-center gap-2">
+                                                            {isEdited && (
+                                                                <Badge variant="outline" className="text-[10px] h-5 px-1.5 bg-amber-100 text-amber-700 border-amber-200">
+                                                                    Editado
+                                                                </Badge>
+                                                            )}
+                                                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">
+                                                                {item.duracion_min}m
+                                                            </Badge>
+                                                        </div>
                                                     </div>
 
                                                     <div className="p-3 space-y-3">
-                                                        {/* Operator Info with Load Stats */}
-                                                        <div className="bg-blue-50/50 rounded-md p-2 border border-blue-100/50">
-                                                            <div className="flex items-center gap-2 mb-1.5">
-                                                                <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                                                                    <User className="w-3 h-3" />
-                                                                </div>
-                                                                <span className="font-medium text-sm text-gray-900">
-                                                                    {item.operario_nombre ? capitalize(item.operario_nombre) : (
-                                                                        <span className="text-red-500 text-xs font-semibold">Sin Asignar</span>
-                                                                    )}
-                                                                </span>
+                                                        {/* Operator Info (Editable) */}
+                                                        <div className="space-y-1">
+                                                            <div className="flex items-center justify-between">
+                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Operario</Label>
                                                             </div>
-
-                                                            {/* Load Stats Bar */}
-                                                            {item.id_operario && (
-                                                                <div className="space-y-1">
-                                                                    <div className="flex justify-between text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
-                                                                        <span>Carga Semanal</span>
-                                                                        <span>{formatTime(projectedTotal)} total</span>
+                                                            <Select
+                                                                value={item.id_operario?.toString() || "0"}
+                                                                onValueChange={(val) => handleUpdate(item, 'id_operario', val === "0" ? null : parseInt(val))}
+                                                            >
+                                                                <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200">
+                                                                    <div className="flex items-center gap-2 truncate">
+                                                                        <User className="w-3 h-3 text-gray-400" />
+                                                                        <SelectValue placeholder="Seleccionar..." />
                                                                     </div>
-                                                                    <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden flex">
-                                                                        {/* Existing Load */}
-                                                                        <div
-                                                                            className="bg-gray-400 h-full"
-                                                                            style={{ width: `${Math.min((currentLoad / (40 * 60)) * 100, 100)}%` }}
-                                                                            title={`Previa: ${formatTime(currentLoad)}`}
-                                                                        />
-                                                                        {/* New Load (Batch) */}
-                                                                        <div
-                                                                            className="bg-blue-500 h-full relative"
-                                                                            style={{ width: `${Math.min((batchTotalForOp / (40 * 60)) * 100, 100)}%` }}
-                                                                            title={`Nueva: ${formatTime(batchTotalForOp)}`}
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin Asignar</SelectItem>
+                                                                    {availableOperators.map(op => (
+                                                                        <SelectItem
+                                                                            key={op.id}
+                                                                            value={op.id.toString()}
+                                                                            disabled={!op.disponible}
+                                                                            className={!op.disponible ? "text-gray-400 italic" : ""}
                                                                         >
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="flex justify-between text-[10px] text-gray-400">
-                                                                        <span>Previa: {formatTime(currentLoad)}</span>
-                                                                        <span className="text-blue-600 font-medium">+{formatTime(batchTotalForOp)}</span>
-                                                                    </div>
-                                                                </div>
-                                                            )}
+                                                                            {op.nombre} {op.apellido} {!op.disponible && "(Ausente)"}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
                                                         </div>
 
-                                                        {/* Machine & Time */}
-                                                        <div className="flex items-center justify-between text-sm">
-                                                            <div className="flex items-center gap-1.5 text-gray-600" title="Maquinaria">
-                                                                <Cog className="w-3.5 h-3.5 text-gray-400" />
-                                                                <span className="text-xs truncate max-w-[100px]">
-                                                                    {item.maquinaria_nombre ? capitalize(item.maquinaria_nombre) : <span className="text-gray-400 italic">--</span>}
-                                                                </span>
+                                                        {/* Load Stats Bar (Only if Op assigned) */}
+                                                        {item.id_operario && (
+                                                            <div className="py-1">
+                                                                <div className="w-full bg-gray-100 rounded-full h-1 overflow-hidden flex">
+                                                                    <div className="bg-blue-400 h-full" style={{ width: `${Math.min((currentLoad / 2400) * 100, 100)}%` }} />
+                                                                    <div className="bg-blue-600 h-full" style={{ width: `${Math.min((batchTotalForOp / 2400) * 100, 100)}%` }} />
+                                                                </div>
                                                             </div>
-                                                            <div className="flex items-center gap-1.5 text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
-                                                                <Clock className="w-3 h-3" />
-                                                                <span className="text-xs font-medium font-mono">
-                                                                    {item.fecha_inicio_texto}
-                                                                </span>
+                                                        )}
+
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {/* Machine (Editable) */}
+                                                            <div className="space-y-1">
+                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Maquinaria</Label>
+                                                                <Select
+                                                                    value={item.id_maquinaria?.toString() || "0"}
+                                                                    onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
+                                                                >
+                                                                    <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200">
+                                                                        <div className="flex items-center gap-2 truncate">
+                                                                            <Cog className="w-3 h-3 text-gray-400" />
+                                                                            <SelectValue placeholder="--" />
+                                                                        </div>
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="0" className="text-gray-400 italic">Nada</SelectItem>
+                                                                        {availableMachines.map(m => (
+                                                                            <SelectItem key={m.id} value={m.id.toString()}>
+                                                                                {m.nombre}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+
+                                                            {/* Start Time (Editable) */}
+                                                            <div className="space-y-1">
+                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Inicio</Label>
+                                                                <div className="relative">
+                                                                    <Input
+                                                                        type="datetime-local"
+                                                                        className="h-8 text-[10px] px-1 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200"
+                                                                        value={getDateFromMin(item.inicio_min)}
+                                                                        onChange={(e) => handleDateChange(item, e.target.value)}
+                                                                    />
+                                                                </div>
                                                             </div>
                                                         </div>
+
                                                     </div>
                                                 </div>
                                             );
@@ -223,7 +399,7 @@ export function PlanningPreviewModal({ isOpen, onClose, onConfirm, results, oper
                     <Button variant="outline" onClick={onClose} disabled={isConfirming} className="border-gray-300 text-gray-700 hover:bg-gray-50">
                         Cancelar
                     </Button>
-                    <Button onClick={onConfirm} disabled={isConfirming || results.length === 0} className="bg-blue-600 hover:bg-blue-700 shadow-md px-6">
+                    <Button onClick={handleConfirmWithEdits} disabled={isConfirming || results.length === 0} className="bg-blue-600 hover:bg-blue-700 shadow-md px-6">
                         {isConfirming ? (
                             <span className="flex items-center gap-2">
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

@@ -120,10 +120,10 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     const newErrors: Record<string, string> = {};
     if (!formData.nombre.trim()) newErrors.nombre = "Requerido";
     if (!formData.apellido.trim()) newErrors.apellido = "Requerido";
-    if (!formData.sector.trim()) newErrors.sector = "Requerido";
     if (!formData.categoria.trim()) newErrors.categoria = "Requerido";
-    if (!isValidDate(formData.fecha_nacimiento)) newErrors.fecha_nacimiento = "Fecha inválida";
-    if (!isValidDate(formData.fecha_ingreso)) newErrors.fecha_ingreso = "Fecha inválida";
+    // Check dates only if present
+    if (formData.fecha_nacimiento && !isValidDate(formData.fecha_nacimiento)) newErrors.fecha_nacimiento = "Fecha inválida";
+    if (formData.fecha_ingreso && !isValidDate(formData.fecha_ingreso)) newErrors.fecha_ingreso = "Fecha inválida";
     const cuil = onlyDigits(formData.dni);
     if (cuil && (cuil.length < 7 || cuil.length > 11)) newErrors.dni = "Debe tener entre 7 y 11 dígitos";
     if (!isValidEmail(formData.email)) newErrors.email = "Email inválido";
@@ -135,6 +135,9 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     if (!validate()) return;
     const payload = {
       ...formData,
+      sector: formData.sector || null,
+      fecha_nacimiento: formData.fecha_nacimiento || null,
+      fecha_ingreso: formData.fecha_ingreso || null,
       // Enviar sólo dígitos en teléfonos y CUIL/CUIT (usando campo 'dni' para compatibilidad backend)
       telefono: formData.telefono ? onlyDigits(formData.telefono) : null,
       celular: formData.celular ? onlyDigits(formData.celular) : null,
@@ -197,7 +200,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     onSuccess();
   };
 
-  const disabled = !formData.nombre || !formData.apellido || !formData.sector || !formData.categoria || !formData.fecha_nacimiento || !formData.fecha_ingreso;
+  const disabled = !formData.nombre || !formData.apellido || !formData.categoria;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -226,8 +229,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
                 {errors.dni && <p className="text-xs text-destructive">{errors.dni}</p>}
               </div>
               <div className="space-y-2">
-                <Label>Fecha de Nacimiento *</Label>
-                <Input type="date" value={formData.fecha_nacimiento} onChange={(e) => setFormData({ ...formData, fecha_nacimiento: e.target.value })} required />
+                <Label>Fecha de Nacimiento</Label>
+                <Input type="date" value={formData.fecha_nacimiento} onChange={(e) => setFormData({ ...formData, fecha_nacimiento: e.target.value })} />
                 {errors.fecha_nacimiento && <p className="text-xs text-destructive">{errors.fecha_nacimiento}</p>}
               </div>
             </div>
@@ -237,7 +240,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
             <h3 className="text-sm font-semibold">Información Laboral</h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Sector *</Label>
+                <Label>Sector</Label>
                 <Select value={formData.sector} onValueChange={(v) => setFormData({ ...formData, sector: v })}>
                   <SelectTrigger>
                     <SelectValue placeholder={sectores.length > 0 ? "Selecciona un sector" : "No hay sectores disponibles"} />
@@ -274,8 +277,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Fecha de Ingreso *</Label>
-              <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} required />
+              <Label>Fecha de Ingreso</Label>
+              <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} />
               {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
             </div>
           </div>

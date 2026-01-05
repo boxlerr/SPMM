@@ -29,8 +29,18 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     repo_planificacion = PlanificacionRepository(db)
     ordenes_ids = body.ordenes_ids if body else None
     preview_mode = body.preview if body else False
+    manual_plan = body.plan if body else None
 
-    resultados = await planificar(repo_orden,repo_operario,repo_maquinaria,repo_planificacion,db,ordenes_ids, preview=preview_mode)
+    resultados = await planificar(
+        repo_orden,
+        repo_operario,
+        repo_maquinaria,
+        repo_planificacion,
+        db,
+        ordenes_ids, 
+        preview=preview_mode,
+        plan=manual_plan
+    )
     return resultados
     
     

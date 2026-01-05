@@ -1,5 +1,5 @@
 from sqlalchemy import select, delete
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from backend.domain.Operario import Operario
 from backend.domain.OperarioRango import OperarioRango
@@ -28,7 +28,7 @@ class OperarioRepository:
         try:
             logger.info("Repository - Obtener todos los operarios desde la base de datos.")
             result = await self.db.execute(
-                select(Operario).options(joinedload(Operario.rangos))
+                select(Operario).options(selectinload(Operario.rangos))
             )
             data = result.scalars().unique().all()
             logger.info(f"Repository - Resultado OK ({len(data)} registros)")

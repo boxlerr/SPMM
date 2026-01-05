@@ -22,8 +22,7 @@ class OperarioService:
         try:
             if not operario_dto.nombre or not operario_dto.apellido:
                 raise BusinessException("Nombre y Apellido son obligatorios.")
-            if not operario_dto.fecha_nacimiento or not operario_dto.fecha_ingreso:
-                raise BusinessException("Fecha de nacimiento y fecha de ingreso son obligatorias.")
+
 
             operario = Operario(
                 nombre=operario_dto.nombre,
