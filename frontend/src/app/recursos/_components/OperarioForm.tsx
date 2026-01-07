@@ -9,7 +9,13 @@ import { Operario } from "../_types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
-import { capitalizeName } from "@/lib/utils";
+import { capitalizeName } from "@/lib/utils"
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};;
 
 interface OperarioFormProps {
   open: boolean;
@@ -75,7 +81,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     const loadOptions = async () => {
       // Cargar sectores
       try {
-        const sectRes = await fetch(`${cleanUrl}/sectores`);
+        const sectRes = await fetch(`${cleanUrl}/sectores`, { headers: getAuthHeaders() });
         if (sectRes.ok) {
           const payload = await sectRes.json();
           // El backend retorna ResponseDTO: {status: true, data: [...]}
@@ -94,7 +100,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
       // Cargar categorías desde operarios existentes
       try {
-        const opRes = await fetch(`${cleanUrl}/operarios`);
+        const opRes = await fetch(`${cleanUrl}/operarios`, { headers: getAuthHeaders() });
         if (opRes.ok) {
           const payload = await opRes.json();
           // El backend retorna ResponseDTO: {status: true, data: [...]}
@@ -166,7 +172,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
       const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           ...payload,
           disponible: data.disponible ?? true,
@@ -183,7 +189,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     } else {
       const response = await fetch(`${cleanUrl}/operarios`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           ...payload,
           disponible: true,

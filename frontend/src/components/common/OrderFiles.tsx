@@ -5,6 +5,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
+const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 // Component to fetch and display files for an order
 export const OrderFiles = ({ orderId }: { orderId: number }) => {
     const [files, setFiles] = React.useState<any[]>([]);
@@ -16,7 +22,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
         if (!orderId) return;
         try {
             // Add timestamp to prevent caching issues
-            const res = await fetch(`${API_URL}/planos/orden/${orderId}?t=${Date.now()}`);
+            const res = await fetch(`${API_URL}/planos/orden/${orderId}?t=${Date.now()}`, { headers: getAuthHeaders() });
             if (res.ok) {
                 const json = await res.json();
                 setFiles(json.data || []);
@@ -51,6 +57,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
 
                 const res = await fetch(`${API_URL}/planos`, {
                     method: "POST",
+                    headers: getAuthHeaders(),
                     body: formData
                 });
 
@@ -82,7 +89,8 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
 
         try {
             const res = await fetch(`${API_URL}/planos/${fileToDelete.id}`, {
-                method: "DELETE"
+                method: "DELETE",
+                headers: getAuthHeaders()
             });
 
             if (res.ok) {

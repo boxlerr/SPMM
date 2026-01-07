@@ -12,7 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RefreshCw } from "lucide-react";
-import { API_URL } from "@/config";
+import { API_URL } from "@/config"
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};;
 
 interface Proceso {
   id: number;
@@ -32,7 +38,7 @@ export default function PlanificacionPage() {
     try {
       const cleanUrl = API_URL.replace(/\/$/, "");
 
-      const response = await fetch(`${cleanUrl}/procesos`);
+      const response = await fetch(`${cleanUrl}/procesos`, { headers: getAuthHeaders() });
 
       if (!response.ok) {
         throw new Error(`Error: ${response.status} ${response.statusText}`);

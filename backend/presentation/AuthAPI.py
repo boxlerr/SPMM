@@ -13,7 +13,7 @@ from backend.dto.UsuarioRequestDTO import (
     ResetPasswordDTO,
     UsuarioChangePasswordDTO
 )
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, require_admin
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -229,7 +229,7 @@ async def logout(current_user: dict = Depends(get_current_user)):
 @router.get("/usuarios", response_model=ResponseDTO)
 async def listar_usuarios(
     db=Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Lista todos los usuarios del sistema
@@ -329,7 +329,7 @@ from backend.dto.UsuarioRequestDTO import UsuarioCreateDTO, UsuarioUpdateDTO
 async def crear_usuario(
     usuario_dto: UsuarioCreateDTO,
     db=Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Crea un nuevo usuario
@@ -419,7 +419,7 @@ async def actualizar_usuario(
     id_usuario: int,
     usuario_dto: UsuarioUpdateDTO,
     db=Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Actualiza un usuario existente
@@ -518,7 +518,7 @@ async def actualizar_usuario(
 async def eliminar_usuario(
     id_usuario: int,
     db=Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Elimina un usuario

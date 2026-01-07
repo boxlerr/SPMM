@@ -3,9 +3,13 @@ from backend.application.ClienteService import ClienteService
 from backend.dto.ClienteRequestDTO import ClienteRequestDTO
 from backend.infrastructure.db import SessionLocal
 from backend.commons.loggers.logger import logger
+from backend.core.security import get_current_user
+
 
 app = FastAPI()
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(get_current_user)]
+)
 
 # 🔹 Dependencia para obtener sesión async
 async def get_db():

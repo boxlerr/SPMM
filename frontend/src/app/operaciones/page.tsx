@@ -27,6 +27,12 @@ import {
 } from "@/components/ui/select"
 import { API_URL } from "@/config"
 
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -81,7 +87,7 @@ export default function OperacionesPage() {
     try {
       setIsLoading(true);
       // Fetch Planificacion
-      const planResponse = await fetch(`${API_URL}/planificacion`);
+      const planResponse = await fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() });
       if (!planResponse.ok) throw new Error("Error fetching planificacion");
       const planData: PlanificacionItem[] = await planResponse.json();
 
@@ -125,7 +131,7 @@ export default function OperacionesPage() {
       setTasks(ganttTasks);
 
       // Fetch Operarios
-      const opResponse = await fetch(`${API_URL}/operarios`);
+      const opResponse = await fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() });
       if (opResponse.ok) {
         const opData = await opResponse.json();
         const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
@@ -143,7 +149,7 @@ export default function OperacionesPage() {
       }
 
       // Fetch Maquinarias (For enrichment)
-      const maqResponse = await fetch(`${API_URL}/maquinarias`);
+      const maqResponse = await fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() });
       if (maqResponse.ok) {
         const maqData = await maqResponse.json();
         const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
@@ -151,7 +157,7 @@ export default function OperacionesPage() {
       }
 
       // Fetch Ordenes (NEW)
-      const ordenesResponse = await fetch(`${API_URL}/ordenes`);
+      const ordenesResponse = await fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() });
       if (ordenesResponse.ok) {
         const ordenesData = await ordenesResponse.json();
         // The API returns the list directly or {data: [...] } depending on standardization.
@@ -273,7 +279,7 @@ export default function OperacionesPage() {
     try {
       const response = await fetch(`${API_URL}/planificacion/` + task.dbId, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           inicio_min: newInicioMin,
           fin_min: newFinMin,
@@ -324,7 +330,7 @@ export default function OperacionesPage() {
     try {
       await fetch(`${API_URL}/planificacion/` + targetTask.id, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_operario: opId }),
       });
     } catch (error) {
@@ -369,7 +375,7 @@ export default function OperacionesPage() {
     try {
       await fetch(`${API_URL}/ordenes/` + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: idEstado }),
       });
     } catch (error) {
@@ -395,7 +401,7 @@ export default function OperacionesPage() {
     try {
       const response = await fetch(`${API_URL}/planificacion/${planItem.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_maquinaria: maquinariaId })
       });
 
@@ -509,7 +515,7 @@ export default function OperacionesPage() {
     try {
       const response = await fetch(`${API_URL}/ordenes/` + ordenId + "/procesos/" + procesoId + "/estado", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: newStatusId }),
       });
 
@@ -558,7 +564,7 @@ export default function OperacionesPage() {
     try {
       const response = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/reorder`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           ordenes: newOrderedProcesses.map(p => ({
             id_proceso: p.proceso.id,
@@ -588,7 +594,7 @@ export default function OperacionesPage() {
       toast.loading("Calculando planificación...");
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           ordenes_ids: ids,
           preview: true
@@ -684,7 +690,7 @@ export default function OperacionesPage() {
       setIsConfirmingPlan(true);
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           ordenes_ids: selectedOrderIds,
           preview: false,

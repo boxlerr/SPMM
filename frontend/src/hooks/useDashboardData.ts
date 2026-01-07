@@ -12,6 +12,11 @@ import {
 } from "@/components/dashboard/types"
 import { API_URL } from "@/config"
 
+const getAuthHeaders = (): HeadersInit => {
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 export function useDashboardData() {
     const apiUrl = API_URL
 
@@ -41,7 +46,7 @@ export function useDashboardData() {
         try {
             setLoading(true)
             setError(null)
-            const response = await fetch(`${apiUrl}/api/dashboard/estadisticas`)
+            const response = await fetch(`${apiUrl}/api/dashboard/estadisticas`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar estadísticas")
             const data = await response.json()
             setEstadisticas(data.data || null)
@@ -56,7 +61,7 @@ export function useDashboardData() {
     const fetchOrdenesCriticas = useCallback(async () => {
         try {
             setLoadingCriticas(true)
-            const response = await fetch(`${apiUrl}/api/dashboard/ordenes-criticas`)
+            const response = await fetch(`${apiUrl}/api/dashboard/ordenes-criticas`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar órdenes críticas")
             const data = await response.json()
             setOrdenesCriticas(data.data || [])
@@ -71,7 +76,7 @@ export function useDashboardData() {
     const fetchTimelineEntregas = useCallback(async () => {
         try {
             setLoadingTimeline(true)
-            const response = await fetch(`${apiUrl}/api/dashboard/timeline-entregas`)
+            const response = await fetch(`${apiUrl}/api/dashboard/timeline-entregas`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar timeline")
             const data = await response.json()
             setTimelineEntregas(data.data || [])
@@ -84,7 +89,7 @@ export function useDashboardData() {
 
     const fetchTopClientes = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/clientes-mayor-volumen`)
+            const response = await fetch(`${apiUrl}/api/dashboard/clientes-mayor-volumen`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar top clientes")
             const data = await response.json()
             setTopClientes(data.data || [])
@@ -95,7 +100,7 @@ export function useDashboardData() {
 
     const fetchDistribucionPrioridades = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/distribucion-prioridades`)
+            const response = await fetch(`${apiUrl}/api/dashboard/distribucion-prioridades`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar prioridades")
             const data = await response.json()
             setDistribucionPrioridades(data.data || [])
@@ -106,7 +111,7 @@ export function useDashboardData() {
 
     const fetchTopArticulos = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/top-articulos`)
+            const response = await fetch(`${apiUrl}/api/dashboard/top-articulos`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar artículos")
             const data = await response.json()
             setTopArticulos(data.data || [])
@@ -117,7 +122,7 @@ export function useDashboardData() {
 
     const fetchTiempoPromedio = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/tiempo-promedio`)
+            const response = await fetch(`${apiUrl}/api/dashboard/tiempo-promedio`, { headers: getAuthHeaders() })
             if (!response.ok) throw new Error("Error al cargar tiempo promedio")
             const data = await response.json()
             setTiempoPromedio(data.data || null)
@@ -135,7 +140,7 @@ export function useDashboardData() {
                 const url = `${apiUrl}/api/dashboard/ordenes-por-prioridad/${encodeURIComponent(prioridad)}`
                 console.log("Fetch URL:", url)
 
-                const response = await fetch(url)
+                const response = await fetch(url, { headers: getAuthHeaders() })
                 if (!response.ok) throw new Error("Error al cargar órdenes por prioridad")
                 const data = await response.json()
                 console.log("Priority orders response:", data)
@@ -158,7 +163,7 @@ export function useDashboardData() {
                 const url = `${apiUrl}/api/dashboard/ordenes-por-estado/${encodeURIComponent(estado)}`
                 console.log("Fetch URL:", url)
 
-                const response = await fetch(url)
+                const response = await fetch(url, { headers: getAuthHeaders() })
                 if (!response.ok) throw new Error("Error al cargar órdenes por estado")
                 const data = await response.json()
                 console.log("Status orders response:", data)

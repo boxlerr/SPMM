@@ -11,6 +11,12 @@ import { useToast } from "@/components/ui/toast";
 import { capitalizeName } from "@/lib/utils";
 import { User, Briefcase, Phone } from "lucide-react";
 
+const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 interface OperarioEditFormProps {
     data: Operario | null;
     onCancel: () => void;
@@ -72,7 +78,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     useEffect(() => {
         const loadOptions = async () => {
             try {
-                const sectRes = await fetch(`${cleanUrl}/sectores`);
+                const sectRes = await fetch(`${cleanUrl}/sectores`, { headers: getAuthHeaders() });
                 if (sectRes.ok) {
                     const payload = await sectRes.json();
                     const data = payload?.data || [];
@@ -86,7 +92,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             }
 
             try {
-                const opRes = await fetch(`${cleanUrl}/operarios`);
+                const opRes = await fetch(`${cleanUrl}/operarios`, { headers: getAuthHeaders() });
                 if (opRes.ok) {
                     const payload = await opRes.json();
                     const data = payload?.data || [];
@@ -146,7 +152,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ...payload,
                     disponible: data.disponible ?? true,
@@ -163,7 +169,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         } else {
             const response = await fetch(`${cleanUrl}/operarios`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ...payload,
                     disponible: true,
