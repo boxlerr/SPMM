@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function useApi<T>() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { logout } = useAuth(); // Get logout function from context
 
   const fetchData = async (url: string): Promise<T[]> => {
     setLoading(true);
@@ -18,6 +20,12 @@ export function useApi<T>() {
       }
 
       const response = await fetch(url, { headers });
+
+      if (response.status === 401) {
+        console.warn("[useApi] 401 Unauthorized detected. Logging out...");
+        logout();
+        return [];
+      }
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
@@ -72,6 +80,12 @@ export function useApi<T>() {
         headers,
         body: body ? JSON.stringify(body) : undefined,
       });
+
+      if (response.status === 401) {
+        console.warn("[useApi] 401 Unauthorized detected during operation. Logging out...");
+        logout();
+        return false;
+      }
 
       if (!response.ok) {
         throw new Error(`Error: ${response.status} ${response.statusText}`);

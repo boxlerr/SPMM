@@ -11,6 +11,7 @@ import {
     OrdenEstado,
 } from "@/components/dashboard/types"
 import { API_URL } from "@/config"
+import { useAuth } from "@/contexts/AuthContext"
 
 const getAuthHeaders = (): HeadersInit => {
     const token = localStorage.getItem('access_token');
@@ -19,6 +20,7 @@ const getAuthHeaders = (): HeadersInit => {
 
 export function useDashboardData() {
     const apiUrl = API_URL
+    const { logout } = useAuth()
 
     const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null)
     const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([])
@@ -42,26 +44,42 @@ export function useDashboardData() {
     const [statusOrders, setStatusOrders] = useState<OrdenEstado[]>([])
     const [loadingStatusOrders, setLoadingStatusOrders] = useState(false)
 
+    // Helper to handle fetch with auth check
+    const fetchWithAuth = useCallback(async (endpoint: string) => {
+        const response = await fetch(`${apiUrl}${endpoint}`, { headers: getAuthHeaders() })
+
+        if (response.status === 401) {
+            console.warn(`[useDashboardData] 401 Unauthorized at ${endpoint}. Logging out...`)
+            logout()
+            throw new Error("Sesión expirada")
+        }
+
+        return response
+    }, [apiUrl, logout])
+
     const fetchEstadisticas = useCallback(async () => {
         try {
             setLoading(true)
             setError(null)
-            const response = await fetch(`${apiUrl}/api/dashboard/estadisticas`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/estadisticas")
             if (!response.ok) throw new Error("Error al cargar estadísticas")
             const data = await response.json()
             setEstadisticas(data.data || null)
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Error desconocido")
-            console.error("Error fetching estadisticas:", err)
+            const msg = err instanceof Error ? err.message : "Error desconocido"
+            if (msg !== "Sesión expirada") {
+                setError(msg)
+                console.error("Error fetching estadisticas:", err)
+            }
         } finally {
             setLoading(false)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
     const fetchOrdenesCriticas = useCallback(async () => {
         try {
             setLoadingCriticas(true)
-            const response = await fetch(`${apiUrl}/api/dashboard/ordenes-criticas`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/ordenes-criticas")
             if (!response.ok) throw new Error("Error al cargar órdenes críticas")
             const data = await response.json()
             setOrdenesCriticas(data.data || [])
@@ -70,13 +88,13 @@ export function useDashboardData() {
         } finally {
             setLoadingCriticas(false)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
 
     const fetchTimelineEntregas = useCallback(async () => {
         try {
             setLoadingTimeline(true)
-            const response = await fetch(`${apiUrl}/api/dashboard/timeline-entregas`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/timeline-entregas")
             if (!response.ok) throw new Error("Error al cargar timeline")
             const data = await response.json()
             setTimelineEntregas(data.data || [])
@@ -85,51 +103,51 @@ export function useDashboardData() {
         } finally {
             setLoadingTimeline(false)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
     const fetchTopClientes = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/clientes-mayor-volumen`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/clientes-mayor-volumen")
             if (!response.ok) throw new Error("Error al cargar top clientes")
             const data = await response.json()
             setTopClientes(data.data || [])
         } catch (err) {
             console.error("Error fetching top clientes:", err)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
     const fetchDistribucionPrioridades = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/distribucion-prioridades`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/distribucion-prioridades")
             if (!response.ok) throw new Error("Error al cargar prioridades")
             const data = await response.json()
             setDistribucionPrioridades(data.data || [])
         } catch (err) {
             console.error("Error fetching prioridades:", err)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
     const fetchTopArticulos = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/top-articulos`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/top-articulos")
             if (!response.ok) throw new Error("Error al cargar artículos")
             const data = await response.json()
             setTopArticulos(data.data || [])
         } catch (err) {
             console.error("Error fetching articulos:", err)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
     const fetchTiempoPromedio = useCallback(async () => {
         try {
-            const response = await fetch(`${apiUrl}/api/dashboard/tiempo-promedio`, { headers: getAuthHeaders() })
+            const response = await fetchWithAuth("/api/dashboard/tiempo-promedio")
             if (!response.ok) throw new Error("Error al cargar tiempo promedio")
             const data = await response.json()
             setTiempoPromedio(data.data || null)
         } catch (err) {
             console.error("Error fetching tiempo promedio:", err)
         }
-    }, [apiUrl])
+    }, [fetchWithAuth])
 
     const fetchOrdenesPorPrioridad = useCallback(
         async (prioridad: string) => {
@@ -137,10 +155,10 @@ export function useDashboardData() {
                 console.log("Fetching orders for priority:", prioridad)
                 setLoadingPriorityOrders(true)
                 setSelectedPriority(prioridad)
-                const url = `${apiUrl}/api/dashboard/ordenes-por-prioridad/${encodeURIComponent(prioridad)}`
-                console.log("Fetch URL:", url)
+                const endpoint = `/api/dashboard/ordenes-por-prioridad/${encodeURIComponent(prioridad)}`
+                console.log("Fetch URL:", endpoint)
 
-                const response = await fetch(url, { headers: getAuthHeaders() })
+                const response = await fetchWithAuth(endpoint)
                 if (!response.ok) throw new Error("Error al cargar órdenes por prioridad")
                 const data = await response.json()
                 console.log("Priority orders response:", data)
@@ -151,7 +169,7 @@ export function useDashboardData() {
                 setLoadingPriorityOrders(false)
             }
         },
-        [apiUrl]
+        [fetchWithAuth]
     )
 
     const fetchOrdenesPorEstado = useCallback(
@@ -160,10 +178,10 @@ export function useDashboardData() {
                 console.log("Fetching orders for status:", estado)
                 setLoadingStatusOrders(true)
                 setSelectedStatus(estado)
-                const url = `${apiUrl}/api/dashboard/ordenes-por-estado/${encodeURIComponent(estado)}`
-                console.log("Fetch URL:", url)
+                const endpoint = `/api/dashboard/ordenes-por-estado/${encodeURIComponent(estado)}`
+                console.log("Fetch URL:", endpoint)
 
-                const response = await fetch(url, { headers: getAuthHeaders() })
+                const response = await fetchWithAuth(endpoint)
                 if (!response.ok) throw new Error("Error al cargar órdenes por estado")
                 const data = await response.json()
                 console.log("Status orders response:", data)
@@ -174,7 +192,7 @@ export function useDashboardData() {
                 setLoadingStatusOrders(false)
             }
         },
-        [apiUrl]
+        [fetchWithAuth]
     )
 
     useEffect(() => {
