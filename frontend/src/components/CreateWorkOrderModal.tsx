@@ -17,6 +17,12 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
 
+const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 interface CreateWorkOrderModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -127,7 +133,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 }
 
                 // Fetch existing files
-                fetch(`${API_URL}/planos/orden/${orderToEdit.id}`)
+                fetch(`${API_URL}/planos/orden/${orderToEdit.id}`, { headers: getAuthHeaders() })
                     .then(async (res) => {
                         if (res.ok) {
                             const data = await res.json();
@@ -149,12 +155,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         setLoading(true);
         try {
             const [prioridadesRes, procesosRes, operariosRes, maquinariasRes, articulosRes, clientesRes] = await Promise.all([
-                fetch(`${API_URL}/prioridades`),
-                fetch(`${API_URL}/procesos`),
-                fetch(`${API_URL}/operarios`),
-                fetch(`${API_URL}/maquinarias`),
-                fetch(`${API_URL}/articulos`),
-                fetch(`${API_URL}/clientes`) // Fetch clients
+                fetch(`${API_URL}/prioridades`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/articulos`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/clientes`, { headers: getAuthHeaders() }) // Fetch clients
             ]);
 
             if (prioridadesRes.ok) {
@@ -285,6 +291,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 response = await fetch(`${API_URL}/ordenes/${orderToEdit.id}`, {
                     method: "PUT",
                     headers: {
+                        ...getAuthHeaders() as Record<string, string>,
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(fullData),
@@ -299,6 +306,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                 response = await fetch(`${API_URL}/ordenes`, {
                     method: "POST",
+                    headers: getAuthHeaders(),
                     body: formData,
                 });
             }
@@ -331,7 +339,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 // 1. Delete removed files
                 if (deletedFileIds.length > 0) {
                     await Promise.all(deletedFileIds.map(id =>
-                        fetch(`${API_URL}/planos/${id}`, { method: 'DELETE' })
+                        fetch(`${API_URL}/planos/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
                     ));
                 }
 
@@ -346,6 +354,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                         await fetch(`${API_URL}/planos`, {
                             method: "POST",
+                            headers: getAuthHeaders(),
                             body: fileData
                         });
                     }

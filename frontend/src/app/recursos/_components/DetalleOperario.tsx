@@ -11,7 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/toast";
 import { useNotifications } from "@/contexts/NotificationContext";
 import OperarioEditForm from "./OperarioEditForm";
-import { API_URL } from "@/config";
+import { API_URL } from "@/config"
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};;
 
 interface DetalleOperarioProps {
   operario: Operario | null;
@@ -108,7 +114,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
       // Corrected fetch syntax
       const response = await fetch(`${cleanUrl}/operarios/${operario.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           nombre: operario.nombre,
           apellido: operario.apellido,
@@ -156,7 +162,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
       // Corrected fetch syntax
       const response = await fetch(`${cleanUrl}/ordenes/${task.orden_id}/procesos/${task.proceso_id}/estado`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: newStatusId }),
       });
 

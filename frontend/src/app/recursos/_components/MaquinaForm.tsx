@@ -6,7 +6,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Maquina } from "../_types";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/toast"
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};;
 
 interface MaquinaFormProps {
   open: boolean;
@@ -59,7 +65,7 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
     if (editing && data) {
       const response = await fetch(`${cleanUrl}/maquinarias/${data.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (response.ok) {
@@ -68,7 +74,7 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
     } else {
       const response = await fetch(`${cleanUrl}/maquinarias`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (response.ok) {

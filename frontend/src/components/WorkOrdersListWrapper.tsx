@@ -10,6 +10,12 @@ import { toast } from "sonner";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { API_URL } from "@/config";
 
+const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
 interface WorkOrdersListWrapperProps {
     refreshTrigger?: number;
 }
@@ -52,9 +58,9 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
             setLoading(true);
 
             const [planResponse, ordenesResponse, opResponse] = await Promise.all([
-                fetch(`${API_URL}/planificacion`),
-                fetch(`${API_URL}/ordenes`),
-                fetch(`${API_URL}/operarios`)
+                fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() })
             ]);
 
             // 1. Process Planificacion
@@ -117,7 +123,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
         try {
             await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({ id_operario: opId }),
             });
         } catch (error) {
@@ -147,7 +153,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
         try {
             await fetch(`${API_URL}/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({ id_estado: idEstado }),
             });
         } catch (error) {
@@ -179,7 +185,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                 try {
                     await fetch(`${API_URL}/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
                         method: "PUT",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                         body: JSON.stringify({ id_estado: idEstado }),
                     });
                 } catch (error) {
@@ -214,7 +220,8 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
 
         try {
             const response = await fetch(`${API_URL}/ordenes/${deleteOrderId}`, {
-                method: "DELETE"
+                method: "DELETE",
+                headers: getAuthHeaders()
             });
 
             if (!response.ok) throw new Error("Error al eliminar");

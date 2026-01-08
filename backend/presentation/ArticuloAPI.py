@@ -3,6 +3,7 @@ from backend.infrastructure.db import SessionLocal
 from backend.dto.ArticuloRequestDTO import ArticuloRequestDTO
 from backend.application.ArticuloService import ArticuloService
 from backend.commons.loggers.logger import logger
+from backend.core.security import require_admin
 
 #El request de afuera entra aca.
 app = FastAPI()
@@ -23,7 +24,7 @@ async def crear_articulo(articulo_dto: ArticuloRequestDTO, db=Depends(get_db)):
     return result
 
 
-@router.delete("/articulos/{id}")
+@router.delete("/articulos/{id}", dependencies=[Depends(require_admin)])
 async def eliminar_articulo(id: int, db=Depends(get_db)):
     logger.info(f"API - Inicio DELETE /articulos/{id}")
     service = ArticuloService(db)

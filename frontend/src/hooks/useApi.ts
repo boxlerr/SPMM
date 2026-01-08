@@ -10,15 +10,22 @@ export function useApi<T>() {
 
     try {
       console.log(`[useApi] Fetching data from: ${url}`);
-      const response = await fetch(url);
-      
+
+      const token = localStorage.getItem('access_token');
+      const headers: HeadersInit = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(url, { headers });
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         throw new Error(`Error HTTP ${response.status}: ${response.statusText}. ${errorText}`);
       }
 
       const responseData = await response.json();
-      
+
       if (responseData.status && responseData.data) {
         const data = Array.isArray(responseData.data) ? responseData.data : [];
         console.log(`[useApi] Successfully fetched ${data.length} items`);
@@ -28,13 +35,13 @@ export function useApi<T>() {
       }
     } catch (err) {
       let message = "Error desconocido";
-      
+
       if (err instanceof TypeError && err.message.includes("fetch")) {
         message = `No se pudo conectar con el backend. Verifica que el servidor esté corriendo en ${url}`;
       } else if (err instanceof Error) {
         message = err.message;
       }
-      
+
       setError(message);
       console.error("[useApi] Error fetching:", err);
       return [];
@@ -52,9 +59,17 @@ export function useApi<T>() {
     setError(null);
 
     try {
+      const token = localStorage.getItem('access_token');
+      const headers: HeadersInit = {
+        "Content-Type": "application/json"
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
 

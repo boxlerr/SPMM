@@ -19,7 +19,13 @@ import { Operario, Maquina, Proceso } from "./_types";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { PlanificacionItem } from "@/lib/types";
-import { API_URL } from "@/config";
+import { API_URL } from "@/config"
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};;
 
 export default function RecursosPage() {
   const { addNotification } = useNotifications();
@@ -96,7 +102,7 @@ export default function RecursosPage() {
       }
 
       // 1. Fetch Operario Details
-      const response = await fetch(`${cleanUrl}/operarios/${operario.id}`);
+      const response = await fetch(`${cleanUrl}/operarios/${operario.id}`, { headers: getAuthHeaders() });
       if (response.ok) {
         const data = await response.json();
         setOperarioSeleccionado(data.data || operario);
@@ -105,7 +111,7 @@ export default function RecursosPage() {
       }
 
       // 2. Fetch Assigned Tasks (Background refresh)
-      const planResponse = await fetch(`${cleanUrl}/planificacion`);
+      const planResponse = await fetch(`${cleanUrl}/planificacion`, { headers: getAuthHeaders() });
       if (planResponse.ok) {
         const planData: PlanificacionItem[] = await planResponse.json();
         setTasks(planData);
@@ -122,7 +128,7 @@ export default function RecursosPage() {
 
   const handleVerMaquina = async (maquina: Maquina) => {
     try {
-      const response = await fetch(`${cleanUrl}/maquinarias/${maquina.id}`);
+      const response = await fetch(`${cleanUrl}/maquinarias/${maquina.id}`, { headers: getAuthHeaders() });
       if (response.ok) {
         const data = await response.json();
         setMaquinaSeleccionada(data.data || maquina);

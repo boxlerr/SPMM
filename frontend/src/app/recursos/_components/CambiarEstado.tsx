@@ -9,7 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Operario } from "../_types";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
-import { capitalizeName } from "@/lib/utils";
+import { capitalizeName } from "@/lib/utils"
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};;
 
 interface CambiarEstadoProps {
   operario: Operario | null;
@@ -42,7 +48,7 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
     try {
       const response = await fetch(`${cleanUrl}/operarios/${operario.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           nombre: operario.nombre,
           apellido: operario.apellido,

@@ -1,4 +1,4 @@
-from fastapi import FastAPI,HTTPException
+from fastapi import FastAPI,HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 # Routers de presentación
@@ -23,6 +23,7 @@ from backend.commons.exceptions.InfrastructureException import InfrastructureExc
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.DomainException import DomainException
+from backend.core.security import get_current_user
 
 
 from backend.commons.handlers.exception_handlers import (
@@ -49,20 +50,24 @@ app.add_middleware(
 )
 
 # 🔹 Registrar todos los routers
-app.include_router(auth_router)  # Autenticación
-app.include_router(articulo_router, tags=["articulos"])
-app.include_router(proceso_router, tags=["procesos"])
-app.include_router(operario_router, tags=["operarios"])
-app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"])
-app.include_router(sector_router, tags=["sectores"])
-app.include_router(plan_router,tags=["planificacion"])
-app.include_router(prioridad_router,tags=["prioridades"])
-app.include_router(maquinaria_router,tags=["maquinarias"])
-app.include_router(notificacion_router, tags=["notificaciones"])
-app.include_router(dashboard_router, tags=["dashboard"])
-app.include_router(plano_router, tags=["planos"])
-app.include_router(cliente_router, tags=["clientes"])
-app.include_router(config_router)
+# Auth queda público (sus endpoints protegidos lo manejan internamente)
+app.include_router(auth_router)
+
+# El resto se protege globalmente
+protected_deps = [Depends(get_current_user)]
+
+app.include_router(articulo_router, tags=["articulos"], dependencies=protected_deps)
+app.include_router(proceso_router, tags=["procesos"], dependencies=protected_deps)
+app.include_router(operario_router, tags=["operarios"], dependencies=protected_deps)
+app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"], dependencies=protected_deps)
+app.include_router(sector_router, tags=["sectores"], dependencies=protected_deps)
+app.include_router(plan_router,tags=["planificacion"], dependencies=protected_deps)
+app.include_router(prioridad_router,tags=["prioridades"], dependencies=protected_deps)
+app.include_router(maquinaria_router,tags=["maquinarias"], dependencies=protected_deps)
+app.include_router(notificacion_router, tags=["notificaciones"], dependencies=protected_deps)
+app.include_router(dashboard_router, tags=["dashboard"], dependencies=protected_deps)
+app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
+app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)
