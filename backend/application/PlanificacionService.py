@@ -8,6 +8,8 @@ from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
 from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
+from backend.infrastructure.ConfigRepository import ConfigRepository
+from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.BusinessException import BusinessException
@@ -34,23 +36,164 @@ TRAMOS_SAB_LAB = [
 ]
 # ------------------------------------------------------------------
 #Funcion para ventanas semanales en tiempo.
-def construir_ventanas_semanales(num_semanas: int):
+def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str]):
     ventanas = []
-
-    for semana in range(num_semanas):
-        base_semana = semana * MIN_LABORAL_SEMANA
-
-        # Lun–Vie
-        for dia in range(5):
-            base_dia = base_semana + dia * MIN_LABORAL_DIA
-            for ini, fin in TRAMOS_LV_LAB:
-                ventanas.append((base_dia + ini, base_dia + fin))
-
-        # Sábado
-        base_sab = base_semana + 5 * MIN_LABORAL_DIA
-        for ini, fin in TRAMOS_SAB_LAB:
-            ventanas.append((base_sab + ini, base_sab + fin))
-
+    
+    current_date = start_date
+    # Find next Monday to align with generic week structure if needed? 
+    # Actually, the logic below 'semana * MIN_LABORAL_SEMANA' assumes generic weeks starting Mon.
+    # BUT, the solver starts at T=0.
+    # If T=0 is Wednesday, then day 0 is Wednesday.
+    # But the loop below `for dia in range(5)` implies structure: 5 days work, 1 day sat.
+    # If we want to align with real calendar, we must iterate DAY BY DAY from T=0 up to Horizon.
+    # Re-writing to be day-based instead of generic week based is safer for specific dates.
+    
+    # Calculate total days needed roughly
+    total_days = num_semanas * 7
+    
+    accumulated_minutes = 0
+    
+    # Check what T=0 implies. T=0 is the start of the first window?
+    # No, T=0 is "Now" (or projected start).
+    # If "Now" is Wed 10am, and we add a window (0, 120), that means Wed 10am-12pm.
+    
+    # We need to act carefully to not break existing relative timeline.
+    # EXISTING LOGIC:
+    # 5 days of TRAMOS_LV_LAB (495 mins each)
+    # 1 day of TRAMOS_SAB_LAB (300 mins)
+    # Total 2775 mins/week.
+    
+    # We will iterate days. If a day is blocked, we simply DO NOT add its windows to the list.
+    # But we must continue incrementing 'base_time' (accumulated minutes)?
+    # NO. If a day is blocked, it adds ZERO capacity.
+    # BUT, T=0 and T=100 are relative minutes of *utilized* time? 
+    # Or absolute clock time?
+    # OptionalIntervalVar uses Size (duration). 
+    # Windows constrain Start time.
+    # If I skip a day, the 'clock' (relative time) shouldn't skip?
+    # In CP-SAT for scheduling, usually the timeline is continuous.
+    # If I say "Window 1: 0-495", "Window 2: 1000-1495". 
+    # Gaps are non-working time.
+    # So if Tuesday is blocked, I create a larger gap between Mon and Wed.
+    
+    # We need to map [0, H] timeline to Calendar Days.
+    # Let's assume T=0 aligns with `start_date` at 7:00 AM (or whatever start hour).
+    
+    # Correct iteration:
+    current_iter_date = start_date
+    current_base_minutes = 0
+    
+    # We iterate enough days to cover the horizon
+    # 5 weeks ~ 35 days.
+    
+    for _ in range(total_days): # Iterate calendar days
+        day_str = current_iter_date.strftime("%Y-%m-%d")
+        weekday = current_iter_date.weekday() # 0=Mon, 6=Sun
+        
+        # Determine schedule for this day
+        tramos = []
+        if weekday < 5: # Mon-Fri
+            tramos = TRAMOS_LV_LAB # [(0, 120), ...] relative to day start
+            day_capacity = MIN_LABORAL_DIA
+        elif weekday == 5: # Sat
+            tramos = TRAMOS_SAB_LAB
+            day_capacity = 300 # Approx
+        else:
+            tramos = [] # Sun
+            day_capacity = 0
+            
+        # CHECK BLOCKING
+        if day_str in blocked_dates:
+            logger.info(f"DIA BLOQUEADO: {day_str} (skipped)")
+            tramos = [] # Blocked!
+            # We still advance the "clock" if the clock was absolute?
+            # The solver's variable 'start' is an integer.
+            # If we want 'start' to represent working minutes, it's one thing.
+            # If 'start' represents ABSOLUTE minutes from T=0, it's another.
+            # _convertir_minutos_a_fecha's logic suggests 'start' is WORKING minutes?
+            # "minutos_acumulados".
+            # If 'start' is working minutes, we don't need windows?
+            # Wait, `_agregar_no_solape_operarios` uses `dur_map` (duration in working minutes).
+            # `opt_interval = model.NewOptionalIntervalVar(start, dur, end, pres, ...)`
+            # If `start` and `end` are working minutes (compressed time), then we don't need gaps.
+            # BUT `_agregar_ventanas_horarias` constrains `start`.
+            # If we use windows, `start` is usually REAL TIME (absolute).
+            # Let's check `construir_ventanas_semanales` original output.
+            # It returns `(base_dia + ini, base_dia + fin)`. 
+            # base_dia increases by MIN_LABORAL_DIA (495).
+            # This implies the timeline is COMPRESSED into working minutes.
+            # i.e. Minute 495 is End of Mon, Minute 496 is Start of Tue.
+            # THERE ARE NO GAPS FOR NIGHTS in the variable domain explicitly?
+            # `ventanas` checks: `start >= v_ini` and `start < v_fin`.
+            # If `v_fin` of Day 1 is 495, and `v_ini` of Day 2 is 495.
+            # Then they are contiguous.
+            
+            # CONCLUSION: The solver works in "Working Minutes" space (Continuous).
+            # 0 = Start Mon. 495 = End Mon/Start Tue.
+            # Nights/Weekends don't exist in the timeline integers.
+            
+            # SO, to "Block" a day (Friday):
+            # We must NOT generate capacity for it.
+            # Real calendar time: Mon, Tue, Wed, Thu, Fri(Blocked), Sat, Sun, Mon.
+            # Working timeline: [MonChunk][TueChunk][WedChunk][ThuChunk][SatChunk][MonChunk]...
+            # The "FridayChunk" is simply missing from the sequence.
+            # And `start_date` logic in `_convertir_minutos_a_fecha` must know this to map back correctly?
+            # YES.
+            # If we skip Fri in the solver, the solver sees [Thu][Sat].
+            # But `_convertir_minutos_a_fecha` blindly skips weekends but doesn't know about custom blocks.
+            # Crucial: We must also update `_convertir_minutos_a_fecha` (or equivalent) to respect blocked dates!
+            # AND `construir_ventanas_semanales` defines the constraint structure.
+            
+            # WAIT.
+            # If `start` is working minutes.
+            # `model.Add(sum(en_ventana) == 1)` forces task to fall into a specific 'bucket'.
+            # Trams LV: (0, 120), (120, 285)...
+            # These buckets partition the continuous working timeline.
+            # If we want to skip Friday:
+            # We simply DO NOT create constraints for Friday?
+            # No. The working timeline is just a sequence of minutes.
+            # If we skip Friday, the minutes that WOULD have assigned to Friday should just belong to Saturday.
+            # i.e. Minute X corresponds to Thu 16:00. Minute X+60 corresponds to Sat 07:00 (since Fri is skipped).
+            # This mapping is done by `_convertir_minutos_a_fecha`.
+            # The Solver doesn't care about "Friday". It creates a sequence of tasks.
+            # The 'Ventanas' constraints seem to enforce "Breaks" within a day?
+            # Original: (0, 120) ... (285, 495). 
+            # These are contiguous! (0-120, 120-285, 285-495).
+            # So the constraint basically forces the task to be within a sub-block?
+            # Maybe to align with breaks (Lunch)?
+            # If we skip a day, we just don't contribute its "chunks" to the `_convertir_minutos_a_fecha` mapping.
+            
+            # PROBLEM: `construir_ventanas_semanales` is used to build constraints.
+            # `_convertir_minutos_a_fecha` is used to display result.
+            # They must be in sync.
+            
+            # STRATEGY:
+            # 1. We keep the solver logic mostly as is (working minutes).
+            # 2. We need to tell `_convertir_minutos_a_fecha` about blocked dates so it skips them when projecting minutes -> date.
+            # 3. Does `construir_ventanas_semanales` actually affect *which* day it is?
+            # It builds `ventanas`.
+            # (0, 120), (120, 285)...
+            # It just segments the timeline.
+            # If we have 5 days, we have 5 * 3 = 15 segments.
+            # If Friday is blocked, do we have 4 days?
+            # Yes. The timeline is shorter (or represents different days).
+            # But the 'Weeks' structure in `construir_ventanas_semanales` logic (lines 40-54) hardcodes "5 days + 1 Sat".
+            # I must change this to dynamic iteration logic.
+            
+            pass 
+            
+        else:
+             # Add segments for this day
+             for ini, fin in tramos:
+                 ventanas.append((current_base_minutes + ini, current_base_minutes + fin))
+             
+             # Advance base minutes
+             day_duration = MIN_LABORAL_DIA if weekday < 5 else 300
+             current_base_minutes += day_duration
+        
+        # Advance calendar
+        current_iter_date += timedelta(days=1)
+        
     return ventanas
 
 # ------------------------------------------------------------
@@ -520,44 +663,74 @@ def _agregar_funcion_objetivo(
 def _convertir_minutos_a_fecha(minutos_acumulados: int):
     """
     Convierte minutos de trabajo (desde 'ahora') a una fecha real,
-    ntentando respetar horarios laborales simples (7:00 a 17:00, L-V).
-    Esto es una aproximación para que la UI no muestre horarios de madrugada.
+    respetando la capacidad diaria definida (MIN_LABORAL_DIA) y calendario.
+    Sábados son laborables (300 min), Domingos no.
     """
     from datetime import timedelta
     
+    # Load blocked dates first
+    config_repo = ConfigRepository()
+    blocked_dates = set(config_repo.get_blocked_dates())
+
     ahora = datetime.now()
-    
-    # Ajustar inicio al próximo horario laboral si es "ahora"
-    # Si es antes de las 7, empieza a las 7.
-    # Si es despues de las 17, pasa a mañana a las 7.
     inicio_base = ahora
+    
+    # 1. Ajustar inicio si cae fuera de horario (antes de 7 o despues de 17)
     if inicio_base.hour < 7:
         inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
     elif inicio_base.hour >= 17:
         inicio_base = inicio_base + timedelta(days=1)
         inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
     
-    # Avanzar dias si cae finde
-    while inicio_base.weekday() >= 5: # 5=Sab, 6=Dom
-        inicio_base += timedelta(days=1)
-        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    # Helper para avanzar a un día válido (CHECK BLOCKED HERE)
+    def avanzar_a_dia_valido(fecha):
+        while True:
+            wd = fecha.weekday()
+            is_blocked = fecha.strftime("%Y-%m-%d") in blocked_dates
+            # Domingo (6) O Bloqueado -> Saltar
+            if wd == 6 or is_blocked: 
+                fecha += timedelta(days=1)
+                fecha = fecha.replace(hour=7, minute=0, second=0, microsecond=0)
+            else:
+                break
+        return fecha
 
-    # Simulación paso a paso (simplificada)
-    tiempo_actual = inicio_base
+    # 2. Asegurar que el día de inicio es válido
+    tiempo_actual = avanzar_a_dia_valido(inicio_base)
     minutos_restantes = minutos_acumulados
 
     # Minutos por dia laboral (7 a 17 = 10 horas = 600 min)
     while minutos_restantes > 0:
-        # Espacio libre hoy hasta las 17:00
-        fin_jornada = tiempo_actual.replace(hour=17, minute=0, second=0, microsecond=0)
+        wd = tiempo_actual.weekday()
         
-        # Si por alguna razon ya pasamos las 17 (bug), avanzamos al dia sig
+        # Determinar capacidad máxima de hoy
+        if wd < 5: # Lun-Vie
+            capacidad_hoy = MIN_LABORAL_DIA # 495
+        elif wd == 5: # Sab
+            capacidad_hoy = 300
+        else:
+            capacidad_hoy = 0 # No debería pasar
+            
+        # Hora fin jornada basado en capacidad?
+        # El visualizador usaba 17:00 fijo. Esto es aproximado.
+        # Si capacity=495, fin es 15:15.
+        # Si visualizamos hasta las 17:00, distorsionamos la linea de tiempo del solver.
+        # Probemos alinear con 17:00 (600m) para Lun-Vie y ajustar?
+        # Mejor usar capacidad real para descontar minutos.
+        
+        # Definir inicio jornada hoy
+        hora_inicio_jornada = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+        
+        if tiempo_actual < hora_inicio_jornada:
+             tiempo_actual = hora_inicio_jornada
+
+        # Fin de jornada
+        fin_jornada = hora_inicio_jornada + timedelta(minutes=capacidad_hoy)
+        
         if tiempo_actual >= fin_jornada:
             tiempo_actual += timedelta(days=1)
             tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
-            while tiempo_actual.weekday() >= 5:
-                tiempo_actual += timedelta(days=1)
-                tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+            tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             continue
 
         minutos_disponibles_hoy = (fin_jornada - tiempo_actual).total_seconds() / 60
@@ -571,9 +744,7 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int):
             # Avanzar al proximo dia laboral
             tiempo_actual += timedelta(days=1)
             tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
-            while tiempo_actual.weekday() >= 5:
-                tiempo_actual += timedelta(days=1)
-                tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+            tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
     
     return tiempo_actual.isoformat()
 
@@ -655,6 +826,28 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas)
 
 def _resolver_planificacion(procesos, operarios, maquinarias):
     model = cp_model.CpModel()
+    
+    # Init Config
+    config_repo = ConfigRepository()
+    blocked_dates = config_repo.get_blocked_dates()
+    logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
+    
+    # Determine start date (Logic similar to conversion)
+    ahora = datetime.now()
+    inicio_base = ahora
+    if inicio_base.hour < 7:
+        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    elif inicio_base.hour >= 17:
+        inicio_base = inicio_base + timedelta(days=1)
+        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    
+    # Skip weekends for start
+    while inicio_base.weekday() >= 5: 
+        inicio_base += timedelta(days=1)
+        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+        
+    start_date = inicio_base.date()
+
 
     # ---- Parámetros ----
     prioridad_pesos = {"urgente": 1, "urgente 1": 1, "urgente 2": 2, "normal": 3, "baja": 4}
@@ -712,7 +905,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,DUMMY_OP_ID,DUMMY_MAQ_ID)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
-    ventanas = construir_ventanas_semanales(num_semanas)
+    ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates)
     #ventanas = construir_ventanas_semanales()
 
     # ---- Restricciones de ventanas horarias ----

@@ -35,11 +35,13 @@ interface PlanificacionResult {
     maquinaria_nombre?: string | null;
     fecha_inicio_texto?: string;
     fecha_fin_texto?: string;
+    unidades?: number;
 }
 
 interface PlanningPreviewModalProps {
     isOpen: boolean;
     onClose: () => void;
+    onBack?: () => void;
     onConfirm: () => void;
     results: PlanificacionResult[];
     operatorLoads?: Record<number, number>; // Current load in minutes
@@ -51,6 +53,7 @@ interface PlanningPreviewModalProps {
 export function PlanningPreviewModal({
     isOpen,
     onClose,
+    onBack,
     onConfirm,
     results,
     operatorLoads = {},
@@ -244,20 +247,60 @@ export function PlanningPreviewModal({
         return loads;
     }, [results]);
 
+    // Calculate Conflicts
+    const conflicts = React.useMemo(() => {
+        let count = 0;
+        const details: { ordenId: number, days: number }[] = [];
+
+        results.forEach(res => {
+            const effective = getEffectiveItem(res);
+            if (!effective.fecha_fin_estimada || !effective.fecha_prometida) return;
+
+            const estimatedEnd = new Date(effective.fecha_fin_estimada);
+            const promised = new Date(effective.fecha_prometida);
+
+            // Simple check: is estimated > promised?
+            // promised usually is end of day? let's assume direct comparison
+            if (estimatedEnd > promised) {
+                const diffTime = Math.abs(estimatedEnd.getTime() - promised.getTime());
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                if (diffDays > 0) {
+                    count++;
+                    details.push({ ordenId: res.orden_id, days: diffDays });
+                }
+            }
+        });
+        return { count, details };
+    }, [results, editedResults]);
+
+
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="max-w-4xl sm:max-w-[90vw] w-[90vw] max-h-[85vh] h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl">
                 <DialogHeader className="p-6 pb-4 border-b bg-white z-10">
-                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                        <div className="p-1.5 bg-blue-100 rounded-lg">
-                            <CalendarClock className="w-6 h-6 text-blue-600" />
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+                                <div className="p-1.5 bg-blue-100 rounded-lg">
+                                    <CalendarClock className="w-6 h-6 text-blue-600" />
+                                </div>
+                                Vista Previa de Planificación
+                            </DialogTitle>
+                            <DialogDescription className="text-base text-gray-500 mt-1">
+                                Revise la planificación propuesta antes de confirmar.
+                                Se planificarán <span className="font-semibold text-gray-900">{results.length} procesos</span> correspondientes a <span className="font-semibold text-gray-900">{Object.keys(groupedResults).length} órdenes de trabajo</span>.
+                            </DialogDescription>
                         </div>
-                        Vista Previa de Planificación
-                    </DialogTitle>
-                    <DialogDescription className="text-base text-gray-500">
-                        Revise la planificación propuesta antes de confirmar.
-                        Se planificarán <span className="font-semibold text-gray-900">{results.length} procesos</span> correspondientes a <span className="font-semibold text-gray-900">{Object.keys(groupedResults).length} órdenes de trabajo</span>.
-                    </DialogDescription>
+                        {conflicts.count > 0 && (
+                            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg ml-4 animate-in fade-in slide-in-from-top-2">
+                                <AlertCircle className="w-5 h-5 shrink-0" />
+                                <div className="flex flex-col">
+                                    <span className="font-bold text-sm">⚠️ {conflicts.count} Conflictos Detectados</span>
+                                    <span className="text-xs text-red-600/80">Algunas órdenes exceden su fecha prometida</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </DialogHeader>
 
                 <ScrollArea className="flex-1 bg-gray-50/50 p-6">
@@ -285,8 +328,15 @@ export function PlanningPreviewModal({
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="text-right flex flex-col">
-                                            {items[0].codigo && <span className="font-mono text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 mb-1 inline-block text-center self-end">{items[0].codigo}</span>}
+                                        <div className="text-right flex flex-col items-end">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                {items[0].unidades !== undefined && (
+                                                    <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200">
+                                                        {items[0].unidades} u.
+                                                    </Badge>
+                                                )}
+                                                {items[0].codigo && <span className="font-mono text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 inline-block text-center">{items[0].codigo}</span>}
+                                            </div>
                                             {items[0].articulo && <span className="text-sm font-medium text-gray-700">{capitalize(items[0].articulo)}</span>}
                                         </div>
                                     </div>
@@ -305,14 +355,33 @@ export function PlanningPreviewModal({
                                             const itemKey = `${item.orden_id}-${item.proceso_id}`;
                                             const isEdited = !!editedResults[itemKey];
 
-                                            return (
-                                                <div key={idx} className={`flex flex-col p-0 bg-white rounded-lg border transition-all hover:shadow-sm group ring-1 ring-gray-100 ring-offset-0 ${isEdited ? 'border-amber-400 bg-amber-50/10' : 'border-gray-100 hover:border-blue-300'}`}>
+                                            // Calculate lateness locally for card
+                                            let isLate = false;
+                                            let delayDays = 0;
+                                            if (effectiveItem.fecha_fin_estimada && effectiveItem.fecha_prometida) {
+                                                const estEnd = new Date(effectiveItem.fecha_fin_estimada);
+                                                const prom = new Date(effectiveItem.fecha_prometida);
+                                                if (estEnd > prom) {
+                                                    isLate = true;
+                                                    delayDays = Math.ceil((estEnd.getTime() - prom.getTime()) / (1000 * 60 * 60 * 24));
+                                                }
+                                            }
 
-                                                    <div className="p-3 border-b border-gray-50 flex items-start justify-between bg-gradient-to-br from-white to-gray-50/30">
-                                                        <span className="font-semibold text-gray-800 line-clamp-1" title={effectiveItem.nombre_proceso}>
-                                                            {capitalize(effectiveItem.nombre_proceso)}
-                                                        </span>
-                                                        <div className="flex items-center gap-2">
+                                            return (
+                                                <div key={idx} className={`flex flex-col p-0 bg-white rounded-lg border transition-all hover:shadow-sm group ring-1 ring-gray-100 ring-offset-0 ${isEdited ? 'border-amber-400 bg-amber-50/10' : (isLate ? 'border-red-200 ring-red-100' : 'border-gray-100 hover:border-blue-300')}`}>
+
+                                                    <div className={`p-3 border-b flex items-start justify-between ${isLate ? 'bg-red-50/50 border-red-100' : 'border-gray-50 bg-gradient-to-br from-white to-gray-50/30'}`}>
+                                                        <div className="flex flex-col min-w-0 mr-2">
+                                                            <span className="font-semibold text-gray-800 line-clamp-1" title={effectiveItem.nombre_proceso}>
+                                                                {capitalize(effectiveItem.nombre_proceso)}
+                                                            </span>
+                                                            {isLate && (
+                                                                <span className="text-[10px] font-bold text-red-600 flex items-center gap-1">
+                                                                    ⚠️ +{delayDays} días tarde
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-1 shrink-0">
                                                             {isEdited && (
                                                                 <Badge variant="outline" className="text-[10px] h-5 px-1.5 bg-amber-100 text-amber-700 border-amber-200">
                                                                     Editado
@@ -420,8 +489,8 @@ export function PlanningPreviewModal({
                 </ScrollArea>
 
                 <DialogFooter className="p-4 bg-white border-t mt-auto gap-3">
-                    <Button variant="outline" onClick={onClose} disabled={isConfirming} className="border-gray-300 text-gray-700 hover:bg-gray-50">
-                        Cancelar
+                    <Button variant="outline" onClick={onBack} disabled={isConfirming} className="border-gray-300 text-gray-700 hover:bg-gray-50">
+                        Volver
                     </Button>
                     <Button onClick={handleConfirmWithEdits} disabled={isConfirming || results.length === 0} className="bg-blue-600 hover:bg-blue-700 shadow-md px-6">
                         {isConfirming ? (

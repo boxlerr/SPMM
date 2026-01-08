@@ -15,6 +15,7 @@ from backend.presentation.NotificacionAPI import router as notificacion_router
 from backend.presentation.DashboardAPI import router as dashboard_router
 from backend.presentation.PlanoAPI import router as plano_router
 from backend.presentation.ClienteAPI import router as cliente_router
+from backend.presentation.ConfigAPI import router as config_router
 
 import logging
 
@@ -61,6 +62,7 @@ app.include_router(notificacion_router, tags=["notificaciones"])
 app.include_router(dashboard_router, tags=["dashboard"])
 app.include_router(plano_router, tags=["planos"])
 app.include_router(cliente_router, tags=["clientes"])
+app.include_router(config_router)
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)

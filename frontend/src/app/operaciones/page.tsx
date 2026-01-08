@@ -17,6 +17,7 @@ import { toast } from "sonner"
 import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib/gantt-utils"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
 import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
+import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
 import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
 import {
   Select,
@@ -34,6 +35,7 @@ export default function OperacionesPage() {
 
   // Refresh Trigger for Children
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [isAvailabilityModalOpen, setIsAvailabilityModalOpen] = useState(false);
 
   // Gantt State
   const [tasks, setTasks] = useState<GanttTask[]>([])
@@ -629,7 +631,9 @@ export default function OperacionesPage() {
           operario_nombre: operario ? `${operario.nombre} ${operario.apellido}` : null,
           maquinaria_nombre: maquina ? maquina.nombre : null,
           fecha_inicio_texto: formatDateShort(startDate),
-          fecha_fin_texto: formatDateShort(endDate)
+          fecha_fin_texto: formatDateShort(endDate),
+          fecha_prometida: order?.fecha_prometida || null,
+          unidades: order?.unidades || 0
         };
       });
 
@@ -726,6 +730,15 @@ export default function OperacionesPage() {
               <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona la planificación de las órdenes de trabajo</p>
             </div>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setIsAvailabilityModalOpen(true)}
+                className="bg-white hover:bg-gray-50 text-gray-700 border-gray-300 shadow-sm"
+                title="Configurar feriados y días no laborales"
+              >
+                <CalendarClock className="h-4 w-4 mr-2" />
+                Disponibilidad
+              </Button>
               <Button
                 onClick={() => setIsSelectionModalOpen(true)}
                 className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg"
@@ -1040,9 +1053,18 @@ export default function OperacionesPage() {
         onPlan={handlePlanSelection}
       />
 
+      <AvailabilityConfigModal
+        isOpen={isAvailabilityModalOpen}
+        onClose={() => setIsAvailabilityModalOpen(false)}
+      />
+
       <PlanningPreviewModal
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
+        onBack={() => {
+          setIsPreviewOpen(false);
+          setIsSelectionModalOpen(true);
+        }}
         onConfirm={handleConfirmPlan}
         results={previewResults}
         operatorLoads={operatorLoads}
