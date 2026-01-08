@@ -76,7 +76,10 @@ function _PlanningListTable({
     onDataChange // Added
 }: PlanningListTableProps) {
 
-    const [sortConfig, setSortConfig] = React.useState<{ key: 'unidades' | 'prioridad' | null; direction: 'asc' | 'desc' | null }>({
+    const [sortConfig, setSortConfig] = React.useState<{
+        key: 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega' | null;
+        direction: 'asc' | 'desc' | null
+    }>({
         key: null,
         direction: null,
     });
@@ -172,7 +175,7 @@ function _PlanningListTable({
         }
     };
 
-    const handleSort = (key: 'unidades' | 'prioridad') => {
+    const handleSort = (key: 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega') => {
         let direction: 'asc' | 'desc' | null = 'asc'; // 1st click: asc (default)
 
         if (sortConfig.key === key) {
@@ -209,23 +212,54 @@ function _PlanningListTable({
         if (!sortConfig.key || !sortConfig.direction) return dataWithSortedProcesses;
 
         return [...dataWithSortedProcesses].sort((a, b) => {
-
-            if (sortConfig.key === 'unidades') {
-                const valA = a.unidades || 0;
-                const valB = b.unidades || 0;
-                return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
+            switch (sortConfig.key) {
+                case 'id':
+                    return sortConfig.direction === 'asc' ? a.id - b.id : b.id - a.id;
+                case 'fecha_entrada':
+                    return sortConfig.direction === 'asc'
+                        ? new Date(a.fecha_entrada || 0).getTime() - new Date(b.fecha_entrada || 0).getTime()
+                        : new Date(b.fecha_entrada || 0).getTime() - new Date(a.fecha_entrada || 0).getTime();
+                case 'cliente':
+                    return sortConfig.direction === 'asc'
+                        ? (a.cliente?.nombre || "").localeCompare(b.cliente?.nombre || "")
+                        : (b.cliente?.nombre || "").localeCompare(a.cliente?.nombre || "");
+                case 'codigo':
+                    return sortConfig.direction === 'asc'
+                        ? (a.articulo?.cod_articulo || "").localeCompare(b.articulo?.cod_articulo || "")
+                        : (b.articulo?.cod_articulo || "").localeCompare(a.articulo?.cod_articulo || "");
+                case 'descripcion':
+                    return sortConfig.direction === 'asc'
+                        ? (a.articulo?.descripcion || "").localeCompare(b.articulo?.descripcion || "")
+                        : (b.articulo?.descripcion || "").localeCompare(a.articulo?.descripcion || "");
+                case 'unidades':
+                    const valA = a.unidades || 0;
+                    const valB = b.unidades || 0;
+                    return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
+                case 'prioridad':
+                    const prioA = a.id_prioridad || 0;
+                    const prioB = b.id_prioridad || 0;
+                    return sortConfig.direction === 'asc' ? prioA - prioB : prioB - prioA;
+                case 'estado':
+                    const statusA = getOrderStatus(a);
+                    const statusB = getOrderStatus(b);
+                    return sortConfig.direction === 'asc' ? statusA.localeCompare(statusB) : statusB.localeCompare(statusA);
+                case 'fecha_prometida':
+                    return sortConfig.direction === 'asc'
+                        ? new Date(a.fecha_prometida || '2100-01-01').getTime() - new Date(b.fecha_prometida || '2100-01-01').getTime()
+                        : new Date(b.fecha_prometida || '1970-01-01').getTime() - new Date(a.fecha_prometida || '1970-01-01').getTime();
+                case 'fecha_entrega':
+                    return sortConfig.direction === 'asc'
+                        ? new Date(a.fecha_entrega || '2100-01-01').getTime() - new Date(b.fecha_entrega || '2100-01-01').getTime()
+                        : new Date(b.fecha_entrega || '1970-01-01').getTime() - new Date(a.fecha_entrega || '1970-01-01').getTime();
+                default:
+                    return 0;
             }
-            if (sortConfig.key === 'prioridad') {
-                // Priority ID: 3 (Critical) > 2 (Urgente) > 1 (Normal)
-                const valA = a.id_prioridad || 0;
-                const valB = b.id_prioridad || 0;
-                return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
-            }
-            return 0;
         });
     }, [filteredData, sortConfig]);
 
-    const SortIcon = ({ column }: { column: 'unidades' | 'prioridad' }) => {
+    type SortColumn = 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega';
+
+    const SortIcon = ({ column }: { column: SortColumn }) => {
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
         return (
             <span className="ml-1 text-red-600 font-bold">
@@ -415,11 +449,51 @@ function _PlanningListTable({
                                     )}
                                 </th>
                                 <th className="w-10 px-4 py-3"></th>
-                                <th className="px-4 py-3 font-bold text-gray-600">OT</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">F. Entrada</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">Cliente</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">Código</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">Descripción</th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('id')}
+                                >
+                                    <div className="flex items-center">
+                                        OT
+                                        <SortIcon column="id" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('fecha_entrada')}
+                                >
+                                    <div className="flex items-center">
+                                        F. Entrada
+                                        <SortIcon column="fecha_entrada" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('cliente')}
+                                >
+                                    <div className="flex items-center">
+                                        Cliente
+                                        <SortIcon column="cliente" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('codigo')}
+                                >
+                                    <div className="flex items-center">
+                                        Código
+                                        <SortIcon column="codigo" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('descripcion')}
+                                >
+                                    <div className="flex items-center">
+                                        Descripción
+                                        <SortIcon column="descripcion" />
+                                    </div>
+                                </th>
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('unidades')}
@@ -440,9 +514,33 @@ function _PlanningListTable({
                                         <SortIcon column="prioridad" />
                                     </div>
                                 </th>
-                                <th className="px-4 py-3 font-bold text-gray-600 text-center">Estado</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">F. Prom.</th>
-                                <th className="px-4 py-3 font-bold text-gray-600">F. Entrega</th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('estado')}
+                                >
+                                    <div className="flex items-center justify-center">
+                                        Estado
+                                        <SortIcon column="estado" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('fecha_prometida')}
+                                >
+                                    <div className="flex items-center">
+                                        F. Prom.
+                                        <SortIcon column="fecha_prometida" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('fecha_entrega')}
+                                >
+                                    <div className="flex items-center">
+                                        F. Entrega
+                                        <SortIcon column="fecha_entrega" />
+                                    </div>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>

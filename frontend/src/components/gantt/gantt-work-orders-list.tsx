@@ -213,7 +213,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                                 </span>
                                             )}
                                             <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
-                                            <OrderFiles orderId={parseInt(otNumber)} />
+
                                         </div>
                                     </div>
                                 </div>
@@ -226,6 +226,9 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                         />
                                     </div>
                                 </div>
+                            </div>
+                            <div className="w-full px-1">
+                                <OrderFiles orderId={parseInt(otNumber)} />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
