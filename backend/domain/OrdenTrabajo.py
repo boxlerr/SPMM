@@ -10,6 +10,7 @@ class OrdenTrabajo(Base):
     id_otvieja = Column(Integer)  # el número viejo, no clave
     observaciones = Column(String(255), nullable=True)
     detalle = Column(String(500), nullable=True) # 🔹 Nuevo campo detalle
+    reclamo = Column(Integer, default=0) # 0 = No, 1 = Si
 
     id_prioridad = Column(Integer, ForeignKey("prioridad.id"), nullable=False)
     id_sector = Column(Integer, ForeignKey("sector.id"), nullable=False)

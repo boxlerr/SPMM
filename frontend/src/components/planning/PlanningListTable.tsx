@@ -6,8 +6,21 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { Search, ChevronDown, ChevronRight, CalendarClock, Pencil } from "lucide-react";
+import {
+    Search, ChevronDown, ChevronRight, CalendarClock,
+    Pencil,
+    LayoutDashboard,
+    Save,
+    X,
+    PlusCircle,
+    Plus,
+    GripVertical,
+    AlertCircle,
+    Check
+} from "lucide-react";
+import { toast } from "sonner";
 import { OrderFiles } from "@/components/common/OrderFiles";
+import { Button } from "@/components/ui/button";
 
 import {
     Select,
@@ -15,7 +28,9 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { addWorkMinutes, calculateWorkingMinutes } from "@/lib/gantt-utils";
@@ -40,6 +55,7 @@ interface PlanningListTableProps {
     operarios?: any[];
     maquinarias?: any[]; // Added
     planificacion?: PlanificacionItem[];
+    onDataChange?: () => void; // Added for refreshing data without reload
 }
 
 export const PlanningListTable = React.memo(_PlanningListTable);
@@ -56,7 +72,8 @@ function _PlanningListTable({
     onSelectionChange,
     operarios = [],
     maquinarias = [], // Added
-    planificacion = []
+    planificacion = [],
+    onDataChange // Added
 }: PlanningListTableProps) {
 
     const [sortConfig, setSortConfig] = React.useState<{ key: 'unidades' | 'prioridad' | null; direction: 'asc' | 'desc' | null }>({
@@ -199,7 +216,7 @@ function _PlanningListTable({
                 return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
             }
             if (sortConfig.key === 'prioridad') {
-                // Priority ID: 3 (Critical) > 2 (Urgent) > 1 (Normal)
+                // Priority ID: 3 (Critical) > 2 (Urgente) > 1 (Normal)
                 const valA = a.id_prioridad || 0;
                 const valB = b.id_prioridad || 0;
                 return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
@@ -539,129 +556,152 @@ function _PlanningListTable({
 
                                                             <div>
                                                                 {item.procesos && item.procesos.length > 0 ? (
-                                                                    item.procesos.map((proc, idx) => {
-                                                                        const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
-                                                                        const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Maquinaria no asignada");
+                                                                    <>
+                                                                        {item.procesos.map((proc, idx) => {
+                                                                            const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
+                                                                            const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Maquinaria no asignada");
 
-                                                                        return (
-                                                                            <div
-                                                                                key={`${item.id}-${proc.proceso.id}`}
-                                                                                className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
-                                                                            >
-                                                                                <div className="flex items-center text-gray-500 font-mono">
-                                                                                    {proc.orden}
-                                                                                </div>
-                                                                                <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
+                                                                            return (
                                                                                 <div
-                                                                                    className="group relative flex items-center justify-center gap-2 text-xs font-medium text-amber-900 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
-                                                                                    onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
-                                                                                    title="Click para editar fecha de inicio estimada"
+                                                                                    key={`${item.id}-${proc.proceso.id}`}
+                                                                                    // ... existing code ...
+                                                                                    className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
                                                                                 >
-                                                                                    <CalendarClock className="w-3.5 h-3.5 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
-                                                                                    {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
-                                                                                        <input
-                                                                                            type="datetime-local"
-                                                                                            className="border rounded px-1 py-0.5 text-xs w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                                                                                            value={editingStartDate.value}
-                                                                                            onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
-                                                                                            onBlur={handleStartDateSave}
-                                                                                            onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
-                                                                                            autoFocus
-                                                                                            onClick={(e) => e.stopPropagation()}
-                                                                                        />
-                                                                                    ) : (
-                                                                                        <span className="group-hover:text-amber-950 transition-colors">
-                                                                                            {getScheduledStart(item.id, proc.proceso.id)}
-                                                                                        </span>
-                                                                                    )}
-                                                                                    <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-2 transition-all duration-200" />
-                                                                                </div>
-                                                                                <div>
-                                                                                    <Select
-                                                                                        defaultValue={proc.estado_proceso?.id?.toString() || "1"}
-                                                                                        onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                    {/* ... existing cells ... */}
+                                                                                    <div className="flex items-center text-gray-500 font-mono">
+                                                                                        {proc.orden}
+                                                                                    </div>
+                                                                                    <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
+                                                                                    <div
+                                                                                        className="group relative flex items-center justify-center gap-2 text-xs font-medium text-amber-900 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
+                                                                                        onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
+                                                                                        title="Click para editar fecha de inicio estimada"
                                                                                     >
-                                                                                        <SelectTrigger className={cn(
-                                                                                            "h-8 w-full border-none shadow-none font-medium",
-                                                                                            (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
-                                                                                                proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
-                                                                                                    "text-gray-800 bg-gray-100 hover:bg-gray-200"
-                                                                                        )}>
-                                                                                            <SelectValue placeholder="Estado" />
-                                                                                        </SelectTrigger>
-                                                                                        <SelectContent>
-                                                                                            <SelectItem value="1">Pendiente</SelectItem>
-                                                                                            <SelectItem value="2">En Proceso</SelectItem>
-                                                                                            <SelectItem value="3">Finalizado</SelectItem>
-                                                                                        </SelectContent>
-                                                                                    </Select>
-                                                                                </div>
-                                                                                <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
-
-                                                                                {/* Real Minutes Column */}
-                                                                                <div className="text-center font-bold text-blue-700">
-                                                                                    {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
-                                                                                </div>
-
-                                                                                <div>
-                                                                                    {onOperatorChange && operarios.length > 0 ? (
+                                                                                        <CalendarClock className="w-3.5 h-3.5 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
+                                                                                        {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
+                                                                                            <input
+                                                                                                type="datetime-local"
+                                                                                                className="border rounded px-1 py-0.5 text-xs w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
+                                                                                                value={editingStartDate.value}
+                                                                                                onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
+                                                                                                onBlur={handleStartDateSave}
+                                                                                                onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
+                                                                                                autoFocus
+                                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                            />
+                                                                                        ) : (
+                                                                                            <span className="group-hover:text-amber-950 transition-colors">
+                                                                                                {getScheduledStart(item.id, proc.proceso.id)}
+                                                                                            </span>
+                                                                                        )}
+                                                                                        <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-2 transition-all duration-200" />
+                                                                                    </div>
+                                                                                    <div>
                                                                                         <Select
-                                                                                            value={operarios.find(op => {
-                                                                                                const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
-                                                                                                const currentName = (proc.operario_nombre || "").trim().toLowerCase();
-                                                                                                return opName === currentName;
-                                                                                            })?.id?.toString() || undefined}
-                                                                                            onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                            defaultValue={proc.estado_proceso?.id?.toString() || "1"}
+                                                                                            onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
                                                                                         >
-                                                                                            <SelectTrigger className="h-8 w-full border border-gray-200">
-                                                                                                <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                                                            <SelectTrigger className={cn(
+                                                                                                "h-8 w-full border-none shadow-none font-medium",
+                                                                                                (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
+                                                                                                    proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
+                                                                                                        "text-gray-800 bg-gray-100 hover:bg-gray-200"
+                                                                                            )}>
+                                                                                                <SelectValue placeholder="Estado" />
                                                                                             </SelectTrigger>
                                                                                             <SelectContent>
-                                                                                                {operarios.map((op) => (
-                                                                                                    <SelectItem key={op.id} value={op.id.toString()}>
-                                                                                                        {toTitleCase(`${op.nombre} ${op.apellido}`)}
-                                                                                                    </SelectItem>
-                                                                                                ))}
+                                                                                                <SelectItem value="1">Pendiente</SelectItem>
+                                                                                                <SelectItem value="2">En Proceso</SelectItem>
+                                                                                                <SelectItem value="3">Finalizado</SelectItem>
                                                                                             </SelectContent>
                                                                                         </Select>
-                                                                                    ) : (
-                                                                                        <span className="text-gray-700 text-xs font-medium block">
-                                                                                            {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
-                                                                                        </span>
-                                                                                    )}
-                                                                                </div>
+                                                                                    </div>
+                                                                                    <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
 
-                                                                                {/* Maquinaria Column */}
-                                                                                <div>
-                                                                                    {onMachineryChange && maquinarias.length > 0 ? (
-                                                                                        <Select
-                                                                                            value={plannedItem?.id_maquinaria?.toString() || "0"}
-                                                                                            onValueChange={(val) => onMachineryChange(item.id, proc.proceso.id, parseInt(val))}
-                                                                                        >
-                                                                                            <SelectTrigger className="h-8 w-full border border-gray-200">
-                                                                                                <SelectValue placeholder={machineName} />
-                                                                                            </SelectTrigger>
-                                                                                            <SelectContent>
-                                                                                                <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
-                                                                                                {maquinarias.map((m) => (
-                                                                                                    <SelectItem key={m.id} value={m.id.toString()}>
-                                                                                                        {m.nombre}
-                                                                                                    </SelectItem>
-                                                                                                ))}
-                                                                                            </SelectContent>
-                                                                                        </Select>
-                                                                                    ) : (
-                                                                                        <div className="text-gray-600 text-xs font-medium">
-                                                                                            {machineName}
-                                                                                        </div>
-                                                                                    )}
+                                                                                    {/* Real Minutes Column */}
+                                                                                    <div className="text-center font-bold text-blue-700">
+                                                                                        {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
+                                                                                    </div>
+
+                                                                                    <div>
+                                                                                        {onOperatorChange && operarios.length > 0 ? (
+                                                                                            <Select
+                                                                                                value={operarios.find(op => {
+                                                                                                    const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
+                                                                                                    const currentName = (proc.operario_nombre || "").trim().toLowerCase();
+                                                                                                    return opName === currentName;
+                                                                                                })?.id?.toString() || undefined}
+                                                                                                onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                            >
+                                                                                                <SelectTrigger className="h-8 w-full border border-gray-200">
+                                                                                                    <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                                                                </SelectTrigger>
+                                                                                                <SelectContent>
+                                                                                                    {operarios.map((op) => (
+                                                                                                        <SelectItem key={op.id} value={op.id.toString()}>
+                                                                                                            {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                                                        </SelectItem>
+                                                                                                    ))}
+                                                                                                </SelectContent>
+                                                                                            </Select>
+                                                                                        ) : (
+                                                                                            <span className="text-gray-700 text-xs font-medium block">
+                                                                                                {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
+
+                                                                                    {/* Maquinaria Column */}
+                                                                                    <div>
+                                                                                        {onMachineryChange && maquinarias.length > 0 ? (
+                                                                                            <Select
+                                                                                                value={plannedItem?.id_maquinaria?.toString() || "0"}
+                                                                                                onValueChange={(val) => onMachineryChange(item.id, proc.proceso.id, parseInt(val))}
+                                                                                            >
+                                                                                                <SelectTrigger className="h-8 w-full border border-gray-200">
+                                                                                                    <SelectValue placeholder={machineName} />
+                                                                                                </SelectTrigger>
+                                                                                                <SelectContent>
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
+                                                                                                    {maquinarias.map((m) => (
+                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>
+                                                                                                            {m.nombre}
+                                                                                                        </SelectItem>
+                                                                                                    ))}
+                                                                                                </SelectContent>
+                                                                                            </Select>
+                                                                                        ) : (
+                                                                                            <div className="text-gray-600 text-xs font-medium">
+                                                                                                {machineName}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </div>
-                                                                            </div>
-                                                                        );
-                                                                    })
+                                                                            );
+                                                                        })}
+
+                                                                        {/* Add Process Button at the bottom of the list when items exist */}
+                                                                        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+                                                                            <AddProcessRow
+                                                                                orderId={item.id}
+                                                                                onProcessAdded={() => {
+                                                                                    if (onDataChange) onDataChange();
+                                                                                }}
+                                                                            />
+                                                                        </div>
+                                                                    </>
                                                                 ) : (
-                                                                    <div className="px-4 py-4 text-center text-gray-400 italic">
-                                                                        Sin procesos asignados
+                                                                    /* Empty State with integrated Add Process Button */
+                                                                    <div className="px-4 py-4 bg-gray-50 border-t border-gray-100">
+                                                                        <div className="w-full">
+                                                                            <AddProcessRow
+                                                                                orderId={item.id}
+                                                                                onProcessAdded={() => {
+                                                                                    if (onDataChange) onDataChange();
+                                                                                }}
+                                                                                isCentered={true}
+                                                                            />
+                                                                        </div>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -679,4 +719,261 @@ function _PlanningListTable({
             </Card>
         </div>
     );
+}
+
+function AddProcessRow({ orderId, onProcessAdded, isCentered = false }: { orderId: number, onProcessAdded: () => void, isCentered?: boolean }) {
+    const [isAdding, setIsAdding] = React.useState(false);
+    const [loading, setLoading] = React.useState(false);
+    const [procesos, setProcesos] = React.useState<any[]>([]);
+
+    // List of editable items
+    const [editableItems, setEditableItems] = React.useState<{ id: string, procesoId: string, tiempo: string }[]>([]);
+
+    const fetchProcesos = async () => {
+        try {
+            const res = await fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.data && Array.isArray(data.data)) {
+                    setProcesos(data.data);
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const handleAddEmptyRow = () => {
+        setEditableItems(prev => [...prev, { id: Math.random().toString(), procesoId: "", tiempo: "" }]);
+    };
+
+    const handleUpdateItem = (id: string, field: 'procesoId' | 'tiempo', value: string) => {
+        setEditableItems(prev => prev.map(item =>
+            item.id === id ? { ...item, [field]: value } : item
+        ));
+    };
+
+    const handleRemoveItem = (id: string) => {
+        setEditableItems(prev => prev.filter(item => item.id !== id));
+    };
+
+    const handleBatchSave = async () => {
+        const validItems = editableItems.filter(i => i.procesoId && i.tiempo);
+        if (validItems.length === 0) return;
+
+        setLoading(true);
+        try {
+            const promises = validItems.map(item =>
+                fetch(`${API_URL}/ordenes/${orderId}/procesos`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        id_proceso: parseInt(item.procesoId),
+                        tiempo_estimado: parseInt(item.tiempo) || 0,
+                        orden: 99
+                    })
+                })
+            );
+
+            const results = await Promise.all(promises);
+            const allSuccess = results.every(res => res.ok);
+
+            if (allSuccess) {
+                setEditableItems([]);
+                onProcessAdded();
+                setIsAdding(false);
+                toast.success("Procesos guardados correctamente");
+            } else {
+                toast.error("Error al guardar uno o más procesos");
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Error al guardar los procesos");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!isAdding) {
+        return (
+            <button
+                onClick={() => {
+                    setIsAdding(true);
+                    fetchProcesos();
+                    // Start with one empty row
+                    setEditableItems([{ id: Math.random().toString(), procesoId: "", tiempo: "" }]);
+                }}
+                className={cn(
+                    "flex items-center gap-2 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors w-full px-4 py-2 hover:bg-gray-100",
+                    isCentered ? "justify-center" : ""
+                )}
+            >
+                <PlusCircle className="w-4 h-4" />
+                {isCentered ? "Agregar primer proceso" : "Agregar Proceso"}
+            </button>
+        );
+    }
+
+    return (
+        <div className="flex flex-col w-full animate-in fade-in slide-in-from-top-1 bg-blue-50/30 border-t border-blue-100 p-2 gap-2">
+            <div className="flex justify-between items-center px-2">
+                <span className="text-xs font-medium text-blue-800">Nuevos Procesos</span>
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 w-6 p-0 text-gray-500 hover:text-red-600"
+                    onClick={() => setIsAdding(false)}
+                >
+                    <X className="w-4 h-4" />
+                </Button>
+            </div>
+
+            {editableItems.map((item, idx) => (
+                <div key={item.id} className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 items-center">
+                    <div className="text-right pr-2 text-xs text-gray-400">#{idx + 1}</div>
+
+                    {/* Process Selection */}
+                    <div className="flex flex-col gap-1 w-full">
+                        <ProcessSelector
+                            value={item.procesoId}
+                            onChange={(val) => handleUpdateItem(item.id, 'procesoId', val)}
+                            procesos={procesos}
+                        />
+                    </div>
+
+                    <div></div>
+                    <div></div>
+
+                    {/* Time Input */}
+                    <div className="flex flex-col gap-1">
+                        <Input
+                            type="number"
+                            className="h-8 text-xs bg-white text-center"
+                            value={item.tiempo}
+                            onChange={e => handleUpdateItem(item.id, 'tiempo', e.target.value)}
+                            placeholder="Min."
+                        />
+                    </div>
+
+                    <div></div>
+                    <div></div>
+
+                    <div className="flex items-center">
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
+                            onClick={() => handleRemoveItem(item.id)}
+                            disabled={editableItems.length === 1}
+                        >
+                            <X className="w-4 h-4" />
+                        </Button>
+                    </div>
+                </div>
+            ))}
+
+            <div className="flex items-center gap-2 mt-2 px-2">
+                <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1"
+                    onClick={handleAddEmptyRow}
+                >
+                    <Plus className="w-3.5 h-3.5" />
+                    Agregar otra fila
+                </Button>
+
+                <div className="flex-1"></div>
+
+                <Button
+                    size="sm"
+                    className="h-8 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1"
+                    onClick={handleBatchSave}
+                    disabled={loading || editableItems.filter(i => i.procesoId && i.tiempo).length === 0}
+                >
+                    {loading ? "..." : (
+                        <>
+                            <Save className="w-3.5 h-3.5" />
+                            Guardar Todo ({editableItems.filter(i => i.procesoId && i.tiempo).length})
+                        </>
+                    )}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function ProcessSelector({ value, onChange, procesos }: { value: string, onChange: (val: string) => void, procesos: any[] }) {
+    const [open, setOpen] = React.useState(false)
+    const [searchTerm, setSearchTerm] = React.useState("")
+
+    // Safety check for processes
+    const safeProcesos = Array.isArray(procesos) ? procesos : [];
+
+    const selectedProcess = safeProcesos.find(p => p.id.toString() === value)
+
+    const filteredProcesos = safeProcesos.filter(p =>
+        p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className="h-8 w-full justify-between text-xs font-normal bg-white"
+                >
+                    <span className="truncate">
+                        {selectedProcess ? selectedProcess.nombre : "Seleccionar Proceso..."}
+                    </span>
+                    <ChevronDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[300px] p-0" align="start">
+                <div className="flex flex-col w-full bg-white rounded-md">
+                    <div className="flex items-center border-b px-3 py-2">
+                        <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                        <input
+                            className="flex h-9 w-full rounded-md bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                            placeholder="Buscar proceso..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            autoFocus
+                        />
+                    </div>
+                    <div className="max-h-[300px] overflow-auto p-1">
+                        {filteredProcesos.length === 0 && (
+                            <div className="py-6 text-center text-sm text-muted-foreground">
+                                No se encontró el proceso.
+                            </div>
+                        )}
+                        {filteredProcesos.map((proceso) => (
+                            <div
+                                key={proceso.id}
+                                className={cn(
+                                    "relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-slate-100",
+                                    value === proceso.id.toString() && "bg-slate-100"
+                                )}
+                                onClick={() => {
+                                    onChange(proceso.id.toString())
+                                    setOpen(false)
+                                    setSearchTerm("")
+                                }}
+                            >
+                                <Check
+                                    className={cn(
+                                        "mr-2 h-4 w-4",
+                                        value === proceso.id.toString() ? "opacity-100" : "opacity-0"
+                                    )}
+                                />
+                                {proceso.nombre}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </PopoverContent>
+        </Popover>
+    )
 }

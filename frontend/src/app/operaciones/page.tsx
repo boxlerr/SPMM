@@ -90,7 +90,14 @@ export default function OperacionesPage() {
       setIsLoading(true);
       // Fetch Planificacion
       const planResponse = await fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() });
-      if (!planResponse.ok) throw new Error("Error fetching planificacion");
+      if (planResponse.status === 401) {
+        if (typeof window !== 'undefined') window.location.href = '/login';
+        return;
+      }
+      if (!planResponse.ok) {
+        const errText = await planResponse.text().catch(() => "Unknown error");
+        throw new Error(`Error fetching planificacion (${planResponse.status}): ${errText}`);
+      }
       const planData: PlanificacionItem[] = await planResponse.json();
 
       // Parse rangos_permitidos if it comes as a string or array of strings
@@ -134,6 +141,7 @@ export default function OperacionesPage() {
 
       // Fetch Operarios
       const opResponse = await fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() });
+      if (opResponse.status === 401) { if (typeof window !== 'undefined') window.location.href = '/login'; return; }
       if (opResponse.ok) {
         const opData = await opResponse.json();
         const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
@@ -148,10 +156,13 @@ export default function OperacionesPage() {
           ranges: op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []
         }));
         setResources(mappedResources);
+      } else {
+        console.error("Error fetching operarios:", opResponse.status);
       }
 
       // Fetch Maquinarias (For enrichment)
       const maqResponse = await fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() });
+      if (maqResponse.status === 401) { if (typeof window !== 'undefined') window.location.href = '/login'; return; }
       if (maqResponse.ok) {
         const maqData = await maqResponse.json();
         const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
@@ -160,6 +171,7 @@ export default function OperacionesPage() {
 
       // Fetch Ordenes (NEW)
       const ordenesResponse = await fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() });
+      if (ordenesResponse.status === 401) { if (typeof window !== 'undefined') window.location.href = '/login'; return; }
       if (ordenesResponse.ok) {
         const ordenesData = await ordenesResponse.json();
         // The API returns the list directly or {data: [...] } depending on standardization.
@@ -1057,9 +1069,9 @@ export default function OperacionesPage() {
         onClose={() => setIsSelectionModalOpen(false)}
         unplannedOrders={unplannedOrdenes}
         onPlan={handlePlanSelection}
-      />
-
-      <AvailabilityConfigModal
+        isLoading={false}
+        onDataRefresh={fetchData}
+      /><AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}
         onClose={() => setIsAvailabilityModalOpen(false)}
       />

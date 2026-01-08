@@ -52,6 +52,7 @@ export interface WorkOrder {
     fecha_entrada?: string;
     fecha_prometida?: string;
     fecha_entrega?: string;
+    reclamo?: number;
 
     prioridad?: {
         id?: number;
