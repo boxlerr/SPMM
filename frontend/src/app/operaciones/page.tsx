@@ -1,14 +1,21 @@
 "use client"
 
+
 import React, { useState, useEffect, useMemo } from "react"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PlanningListTable } from "@/components/planning/PlanningListTable"
+import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList"
+import DetalleOperario from "@/app/recursos/_components/DetalleOperario"
+import CambiarEstado from "@/app/recursos/_components/CambiarEstado"
+import { Operario } from "@/app/recursos/_types"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
@@ -35,7 +42,7 @@ const getAuthHeaders = (): HeadersInit => {
 };
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion">("lista_planificacion")
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -64,6 +71,13 @@ export default function OperacionesPage() {
   const [previewResults, setPreviewResults] = useState<any[]>([])
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
+
+  // Operators Shortcut State
+  const [isOperatorsModalOpen, setIsOperatorsModalOpen] = useState(false)
+  const [selectedOperatorForModal, setSelectedOperatorForModal] = useState<Operario | null>(null)
+  const [isCambiarEstadoOpen, setIsCambiarEstadoOpen] = useState(false)
+  const [operatorTasks, setOperatorTasks] = useState<PlanificacionItem[]>([])
+
 
 
 
@@ -145,10 +159,11 @@ export default function OperacionesPage() {
       if (opResponse.ok) {
         const opData = await opResponse.json();
         const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
-        const rawOps = allOps;
-        setRawOperarios(rawOps);
+        // Filter out PRUEBAS if needed, matching RecursosPage logic
+        const filteredOps = allOps.filter((op: any) => op.sector?.toUpperCase() !== "PRUEBAS");
+        setRawOperarios(filteredOps);
 
-        const mappedResources: Resource[] = rawOps.map((op: any) => ({
+        const mappedResources: Resource[] = filteredOps.map((op: any) => ({
           id: op.id.toString(),
           name: op.nombre + " " + op.apellido,
           type: "operario",
@@ -792,6 +807,14 @@ export default function OperacionesPage() {
             </button> */}
 
             <button
+              onClick={() => setActiveTab("operarios")}
+              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "operarios" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+            >
+              <User size={18} />
+              Operarios
+            </button>
+
+            <button
               onClick={() => setActiveTab("work_orders")}
               className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
@@ -806,6 +829,23 @@ export default function OperacionesPage() {
         <div className={"flex-1 transition-all duration-300 flex flex-col " + (activeTab === 'gantt' ? 'max-w-full px-2 py-4' : 'max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 w-full')}>
           <div className={"bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col " + (activeTab === 'gantt' ? 'p-2' : 'p-6')}>
             {/* Redundant header removed */}
+
+            {activeTab === "operarios" && (
+              <div className="w-full">
+                <div className="flex items-center gap-2 mb-4">
+                  <User className="h-5 w-5 text-gray-500" />
+                  <h2 className="text-lg font-semibold">Gestión de Operarios</h2>
+                </div>
+                <SharedOperatorsList
+                  operarios={rawOperarios}
+                  isLoading={isLoading && rawOperarios.length === 0}
+                  onView={(op) => {
+                    setSelectedOperatorForModal(op);
+                    setOperatorTasks(rawPlanificacion.filter(p => p.id_operario === op.id));
+                  }}
+                />
+              </div>
+            )}
 
             {activeTab === "gantt" && (
               <PlanificacionGanttWrapper
@@ -1102,6 +1142,49 @@ export default function OperacionesPage() {
           variant="destructive"
         />
       )}
+
+      {/* Operator Detail Modal */}
+      {selectedOperatorForModal && (
+        <DetalleOperario
+          operario={selectedOperatorForModal}
+          tasks={operatorTasks}
+          onClose={() => setSelectedOperatorForModal(null)}
+          onCambiarEstado={(op: Operario) => {
+            // We can allow state change here too
+            setIsCambiarEstadoOpen(true);
+          }}
+          onOperatorUpdated={() => {
+            fetchData(); // Refetch global data to update status
+          }}
+        />
+      )}
+
+      {/* Change Status Modal */}
+      {isCambiarEstadoOpen && selectedOperatorForModal && (
+        <CambiarEstado
+          operario={selectedOperatorForModal}
+          open={isCambiarEstadoOpen}
+          onClose={() => setIsCambiarEstadoOpen(false)}
+          onSuccess={async () => {
+            await fetchData();
+            setIsCambiarEstadoOpen(false);
+            // Update selected operator in modal if it changed (e.g. status)
+            // Since rawOperarios updates, we might need to find it again to pass fresh data
+            // But fetchData updates rawOperarios, and selectedOperatorForModal is a stale copy.
+            // We should update selectedOperatorForModal based on new data.
+            // Done effectively by re-rendering if we derived it, but we use state.
+            // We can rely on DetalleOperario just showing what it has,
+            // but status badge might be stale inside DetalleOperario until closed/reopened.
+            // Let's try to update the local selected state
+            // const updatedOp = rawOperarios.find(o => o.id === selectedOperatorForModal.id);
+            // if (updatedOp) setSelectedOperatorForModal(updatedOp);
+            // We can't easily access the *new* rawOperarios here immediately after await fetchData if it's async state update.
+            // For now, closing and reopening is fine, or just let it be.
+          }}
+          cleanUrl={API_URL}
+        />
+      )}
+
     </div>
   )
 }

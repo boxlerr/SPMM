@@ -20,6 +20,7 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { PlanificacionItem } from "@/lib/types";
 import { API_URL } from "@/config"
+import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -290,137 +291,15 @@ export default function RecursosPage() {
             <p className="text-sm text-muted-foreground mt-1">Gestión de personal operativo</p>
           </div>
 
-          {api.loading && (
-            <div className="flex items-center justify-center py-12">
-              <Spinner className="h-8 w-8" />
-              <span className="ml-3 text-muted-foreground">Cargando operarios...</span>
-            </div>
-          )}
-
-          {!api.loading && operarios.length === 0 && (
-            <div className="py-12 text-center text-muted-foreground">
-              <p className="text-lg">No hay operarios disponibles</p>
-            </div>
-          )}
-
-          {!api.loading && operarios.length > 0 && (
-            <>
-              {/* Vista Desktop - Tabla */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                  <thead className="border-b bg-muted/50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Rango</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Sector</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Teléfono</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Estado</th>
-                      <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {operarios.map((operario) => (
-                      <tr
-                        key={operario.id}
-                        className="hover:bg-muted/50 transition-colors cursor-pointer"
-                        onClick={() => handleVerOperario(operario)}
-                      >
-                        <td className="px-6 py-4 text-sm font-medium">
-                          {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
-                        </td>
-                        <td className="px-6 py-4">
-                          <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
-                        </td>
-                        <td className="px-6 py-4">
-                          <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
-                        </td>
-                        <td className="px-6 py-4 text-sm">{formatPhone(operario.celular) || formatPhone(operario.telefono) || "-"}</td>
-                        <td className="px-6 py-4">
-                          <Badge className={getEstadoColor(operario.disponible)}>
-                            {operario.disponible ? "Activo" : "Ausente"}
-                          </Badge>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                            <Button variant="ghost" size="icon" onClick={() => handleVerOperario(operario)} className="h-8 w-8">
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}` });
-                                setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                              }}
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Vista Mobile - Tarjetas */}
-              <div className="md:hidden divide-y">
-                {operarios.map((operario) => (
-                  <div
-                    key={operario.id}
-                    className="p-4 hover:bg-muted/50 transition-colors cursor-pointer"
-                    onClick={() => handleVerOperario(operario)}
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-base mb-1">
-                          {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
-                        </h3>
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
-                          <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
-                        </div>
-                      </div>
-                      <Badge className={`${getEstadoColor(operario.disponible)} ml-2`}>
-                        {operario.disponible ? "Activo" : "Ausente"}
-                      </Badge>
-                    </div>
-
-                    {(operario.celular || operario.telefono) && (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
-                        <Phone className="h-4 w-4" />
-                        <span>{formatPhone(operario.celular) || formatPhone(operario.telefono)}</span>
-                      </div>
-                    )}
-
-                    <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleVerOperario(operario)}
-                        className="flex-1"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        Ver
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setItemAEliminar({ tipo: "operario", id: operario.id, nombre: `${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}` });
-                          setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                        }}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+          <SharedOperatorsList
+            operarios={operarios}
+            isLoading={api.loading}
+            onView={handleVerOperario}
+            onDelete={(op) => {
+              setItemAEliminar({ tipo: "operario", id: op.id, nombre: `${op.nombre} ${op.apellido}` });
+              setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+            }}
+          />
         </div>
       )}
 
