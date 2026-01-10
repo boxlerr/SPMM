@@ -72,7 +72,7 @@ async def obtener_planificacion(db = Depends(get_db)):
                otp.id_estado, ep.descripcion as estado, otp.observaciones as observaciones_proceso,
                ot.observaciones as observaciones_ot,
                ot.fecha_entrada, ot.fecha_prometida, ot.id_prioridad, ot.id_articulo,
-               a.cod_articulo, a.descripcion as descripcion_articulo, ot.unidades as cantidad,
+               a.cod_articulo, a.descripcion as descripcion_articulo, ot.unidades as cantidad, ot.cantidad_entregada,
                s.nombre as sector, pk.nombre as cliente, ot.id_otvieja as pedido_externo,
                otp.inicio_real, otp.fin_real,
                otp.orden as secuencia

@@ -16,7 +16,8 @@ class OrdenTrabajoRequestDTO(BaseModel):
     cliente: Optional[str] = None # Campo visual, no se guarda en BD por ahora
     id_cliente: Optional[int] = None # 🔹 Nuevo campo para asociar cliente real
     unidades: Optional[int] = None
-    unidades: Optional[int] = None
+    cantidad_entregada: Optional[int] = 0
+
 
     id_prioridad: int
     id_sector: int

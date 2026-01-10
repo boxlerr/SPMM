@@ -21,6 +21,9 @@ import {
 import { toast } from "sonner";
 import { OrderFiles } from "@/components/common/OrderFiles";
 import { Button } from "@/components/ui/button";
+import { DeliveryProgress } from "@/components/common/DeliveryProgress";
+import { RegisterDeliveryDialog } from "@/components/planning/RegisterDeliveryDialog";
+
 
 import {
     Select,
@@ -293,6 +296,7 @@ function _PlanningListTable({
 
     const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: 'fecha_prometida' | 'fecha_entrega', value: string } | null>(null);
     const [editingStartDate, setEditingStartDate] = React.useState<{ orderId: number, processId: number, planId: number, value: string } | null>(null);
+    const [deliveryOrder, setDeliveryOrder] = React.useState<{ id: number, total: number, delivered: number } | null>(null);
 
     const handleDateClick = (orderId: number, field: 'fecha_prometida' | 'fecha_entrega', currentValue: string | undefined) => {
         // Prevent editing if it's a legacy date
@@ -523,8 +527,12 @@ function _PlanningListTable({
                                         <SortIcon column="estado" />
                                     </div>
                                 </th>
+                                <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
+                                    Entrega
+                                </th>
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+
                                     onClick={() => handleSort('fecha_prometida')}
                                 >
                                     <div className="flex items-center">
@@ -598,6 +606,26 @@ function _PlanningListTable({
                                             <td className="px-4 py-3 text-center">
                                                 {renderStatusBadge(getOrderStatus(item))}
                                             </td>
+                                            <td className="px-4 py-3">
+                                                <div
+                                                    className="cursor-pointer hover:opacity-70 transition-opacity"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDeliveryOrder({
+                                                            id: item.id,
+                                                            total: item.unidades || 0,
+                                                            delivered: item.cantidad_entregada || 0
+                                                        });
+                                                    }}
+                                                    title="Click para registrar entrega"
+                                                >
+                                                    <DeliveryProgress
+                                                        total={item.unidades}
+                                                        delivered={item.cantidad_entregada}
+                                                        compact={true}
+                                                    />
+                                                </div>
+                                            </td>
 
                                             {/* Editable F. Prometida */}
                                             <td className="px-4 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }}>
@@ -637,7 +665,25 @@ function _PlanningListTable({
                                             <tr className="bg-gray-50 border-b">
                                                 <td colSpan={12} className="px-4 py-4">
                                                     <div className="ml-8 border rounded-md overflow-hidden bg-white shadow-inner">
-                                                        <div className="px-4 pt-4">
+                                                        <div className="px-4 pt-4 mb-4">
+                                                            <div
+                                                                className="cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setDeliveryOrder({
+                                                                        id: item.id,
+                                                                        total: item.unidades || 0,
+                                                                        delivered: item.cantidad_entregada || 0
+                                                                    });
+                                                                }}
+                                                            >
+                                                                <DeliveryProgress
+                                                                    total={item.unidades}
+                                                                    delivered={item.cantidad_entregada}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="px-4 pt-0">
                                                             <OrderFiles orderId={item.id} />
                                                         </div>
                                                         <div className="w-full text-sm">
@@ -779,6 +825,15 @@ function _PlanningListTable({
                                                                         })}
 
                                                                         {/* Add Process Button at the bottom of the list when items exist */}
+
+                                                                        <RegisterDeliveryDialog
+                                                                            open={!!deliveryOrder}
+                                                                            onOpenChange={(open) => !open && setDeliveryOrder(null)}
+                                                                            currentOrder={deliveryOrder}
+                                                                            onSuccess={() => {
+                                                                                window.location.reload();
+                                                                            }}
+                                                                        />
                                                                         <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
                                                                             <AddProcessRow
                                                                                 orderId={item.id}

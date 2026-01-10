@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { GanttTask } from "@/lib/types";
 import { toTitleCase } from "@/lib/gantt-utils";
 import { OrderFiles } from "@/components/common/OrderFiles";
+import { DeliveryProgress } from "@/components/common/DeliveryProgress";
 
 interface GanttWorkOrdersListProps {
     tasks: GanttTask[];
@@ -213,6 +214,14 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                                 </span>
                                             )}
                                             <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
+                                            <div className="mt-1">
+                                                <DeliveryProgress
+                                                    total={otTasks[0].quantity}
+                                                    delivered={otTasks[0].cantidad_entregada}
+
+                                                    compact={true}
+                                                />
+                                            </div>
 
                                         </div>
                                     </div>

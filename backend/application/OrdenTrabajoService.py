@@ -377,3 +377,24 @@ class OrdenTrabajoService:
             raise
         except Exception as e:
             raise ApplicationException("Error al obtener órdenes no planificadas.") from e
+
+    
+    async def registrarEntrega(self, id_orden: int, cantidad_agregar: int):
+        logger.info(f"Service - Registrar entrega para Orden {id_orden}: Agregar {cantidad_agregar}")
+        
+        # 1. Obtener orden actual
+        orden = await self.repository.find_by_id(id_orden)
+        if not orden:
+             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id_orden}")
+             
+        # 2. Calcular nueva cantidad
+        cantidad_actual = orden.cantidad_entregada or 0
+        nueva_cantidad = cantidad_actual + cantidad_agregar
+        
+        if nueva_cantidad < 0:
+            nueva_cantidad = 0
+            
+        # 3. Actualizar
+        orden_actualizada = await self.repository.update_cantidad_entregada(id_orden, nueva_cantidad, orden.unidades)
+        
+        return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))

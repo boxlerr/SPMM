@@ -30,6 +30,14 @@ async def crear_orden(
     service = OrdenTrabajoService(db)
     return await service.crearOrdenTrabajo(data, files)
 
+from backend.dto.RegistrarEntregaDTO import RegistrarEntregaDTO
+
+@router.put("/ordenes/{id}/entrega")
+async def registrar_entrega(id: int, dto: RegistrarEntregaDTO, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /ordenes/{id}/entrega")
+    service = OrdenTrabajoService(db)
+    return await service.registrarEntrega(id, dto.cantidad_agregar)
+
 # 🔹 Listar todas las órdenes
 @router.get("/ordenes")
 async def listar_ordenes(db=Depends(get_db)):

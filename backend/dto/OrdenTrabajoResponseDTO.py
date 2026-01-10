@@ -58,6 +58,7 @@ class OrdenTrabajoResponseDTO(BaseModel):
     id_cliente: Optional[int] = None
     id_articulo: Optional[int] = None
     unidades: Optional[int] = None
+    cantidad_entregada: Optional[int] = 0
     reclamo: Optional[int] = 0
     
     fecha_orden: Optional[datetime] = None

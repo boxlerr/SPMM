@@ -172,7 +172,9 @@ export function convertPlanificacionToGanttTasks(
       workOrderId: item.orden_id,
       workOrderNumber: item.orden_id.toString(),
       quantity: item.cantidad,
+      cantidad_entregada: item.cantidad_entregada,
       resourceId: (() => {
+
         const rid = item.id_operario ? item.id_operario.toString() : "unassigned";
         return rid;
       })(),

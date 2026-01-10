@@ -21,6 +21,9 @@ from sqlalchemy import text
 import time
 import math
 
+import re
+import unicodedata
+
 ##Variables:
 MIN_LABORAL_DIA = 495
 MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 2775
@@ -216,7 +219,7 @@ def _normalizar_procesos(procesos, prioridad_pesos):
         prioridad_desc,
         dur_min,
         rangos_validos,
-        nombre_proceso,usa_maquina) in procesos:
+        nombre_proceso,usa_maquina,familia_req) in procesos:
 
         dur = int(dur_min) if dur_min is not None else 1
         if dur <= 0:
@@ -226,7 +229,7 @@ def _normalizar_procesos(procesos, prioridad_pesos):
         rangos_proc = list(rangos_validos or [])
         procesos_norm.append(
             (orden_id, proc_id, secuencia, fecha_prometida,
-            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina)
+            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,familia_req)
         )
 
     # Horizonte en minutos laborales:
@@ -258,16 +261,23 @@ def _crear_variables_y_dominios(
     REAL_OP_IDS = [op_id for (op_id, _) in operarios]
     DUMMY_OP_ID = 999999
 
-    REAL_MAQ_IDS = [m_id for (m_id, _rs, _n) in maquinarias]
+    #REAL_MAQ_IDS = [m_id for (m_id, _rs, _n) in maquinarias]
+    #DUMMY_MAQ_ID = 999998
+
+    #maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n) in maquinarias}
+    REAL_MAQ_IDS = [m_id for (m_id, _rs, _n, _cod) in maquinarias]
     DUMMY_MAQ_ID = 999998
 
-    maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n) in maquinarias}
+    maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n, _cod) in maquinarias}
+
+    # NUEVO: familia/tipo de cada máquina según cod_maquina
+    maq_to_familia = {m_id: familia_from_cod_maquina(_cod) for (m_id, _rs, _n, _cod) in maquinarias}
 
     op_domain_vals = {}
     maq_domain_vals = {}
 
     for (orden_id, proc_id, secuencia, _fp,
-        _peso_prioridad, dur, rangos_proc, nombre_proc, usa_maquina) in procesos_norm:
+        _peso_prioridad, dur, rangos_proc, nombre_proc, usa_maquina,familia_req) in procesos_norm:
 
         # Intervalo base
         start = model.NewIntVar(0, H, f"start_{orden_id}_{proc_id}")
@@ -332,10 +342,15 @@ def _crear_variables_y_dominios(
                 .strip()
             )
 
+            #posibles = [ cambio esto
+            #    m_id for (m_id, _rs, nombre_m) in maquinarias
+            #    if base and base in (nombre_m or "").upper()
+            #]
             posibles = [
-                m_id for (m_id, _rs, nombre_m) in maquinarias
+                m_id for (m_id, _rs, nombre_m, _cod) in maquinarias
                 if base and base in (nombre_m or "").upper()
             ]
+
 
             if posibles:
                 maqs_validas = posibles
@@ -348,7 +363,13 @@ def _crear_variables_y_dominios(
                 maqs_validas = REAL_MAQ_IDS[:]
             else:
                 req = set(rangos_proc)
-                maqs_validas = [m_id for (m_id, rs, _n) in maquinarias if req & rs]
+                #maqs_validas = [m_id for (m_id, rs, _n) in maquinarias if req & rs]
+                maqs_validas = [m_id for (m_id, rs, _n, _cod) in maquinarias if req & rs]
+
+        # NUEVO: filtrar por familia requerida del proceso
+        if familia_req:
+            maqs_validas = [m for m in maqs_validas if maq_to_familia.get(m) == familia_req]
+
 
         if not maqs_validas:
             logger.warning(f"Proceso {proc_id} sin máquinas compatibles; usando dummy")
@@ -375,6 +396,7 @@ def _crear_variables_y_dominios(
         REAL_MAQ_IDS,
         DUMMY_MAQ_ID,
         maq_to_rangos,
+        maq_to_familia,
         op_domain_vals,
         maq_domain_vals,
     )
@@ -441,7 +463,7 @@ def _agregar_no_solape_maquinas(
     """
     for m_id in REAL_MAQ_IDS:
         pres_intervals = []
-        for (orden_id, proc_id, _seq, _fp, _pp, _dur, _rangos, _nombre, usa_maquina) in procesos_norm:
+        for (orden_id, proc_id, _seq, _fp, _pp, _dur, _rangos, _nombre, usa_maquina,_familia_req) in procesos_norm:
 
             # ❌ Proceso manual → no genera intervalos de maquinaria
             if not usa_maquina:
@@ -475,6 +497,7 @@ def _agregar_compatibilidad_op_maq(
     maq_domain_vals,
     op_to_rango,
     maq_to_rangos,
+    maq_to_familia,
     DUMMY_OP_ID,
     DUMMY_MAQ_ID,
 ):
@@ -483,7 +506,7 @@ def _agregar_compatibilidad_op_maq(
     mediante AddAllowedAssignments.
     """
     for (orden_id, proc_id, _seq, _fp,
-        _pp, _dur, rangos_proc, _nombre_proc, usa_maquina) in procesos_norm:
+        _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req) in procesos_norm:
 
         op_var = operario_vars[(orden_id, proc_id)]
         maq_var = maq_vars[(orden_id, proc_id)]
@@ -517,6 +540,10 @@ def _agregar_compatibilidad_op_maq(
                     allowed_pairs.append([op_id, DUMMY_MAQ_ID])
                     continue
 
+                if familia_req:
+                    if maq_to_familia.get(m_id) != familia_req:
+                        continue
+                    
                 mrangos = maq_to_rangos.get(m_id, set())
                 if rango_op in mrangos and (not needs or (needs & mrangos)):
                     allowed_pairs.append([op_id, m_id])
@@ -560,7 +587,7 @@ def _agregar_funcion_objetivo(
     now = datetime.now()
 
     for (orden_id, proc_id, secuencia, fecha_prometida,
-        peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina) in procesos_norm:
+        peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,_familia_req) in procesos_norm:
 
         op_var  = operario_vars[(orden_id, proc_id)]
         maq_var = maq_vars[(orden_id, proc_id)]
@@ -756,7 +783,7 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         for (orden_id, proc_id, secuencia, fecha_prometida,
-            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria) in procesos_norm:
+            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria,_familia_req) in procesos_norm:
 
             op_id  = solver.Value(operario_vars[(orden_id, proc_id)])
             maq_id = solver.Value(maq_vars[(orden_id, proc_id)])
@@ -887,6 +914,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         REAL_MAQ_IDS,
         DUMMY_MAQ_ID,
         maq_to_rangos,
+        maq_to_familia,
         op_domain_vals,
         maq_domain_vals,
     ) = _crear_variables_y_dominios(
@@ -902,7 +930,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars)
     _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars)
-    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,DUMMY_OP_ID,DUMMY_MAQ_ID)
+    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
     ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates)
@@ -962,6 +990,51 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
 
     return resultados
 
+import re
+import unicodedata
+
+def _norm(s: str) -> str:
+    s = (s or "").upper().strip()
+    s = "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn")
+    return re.sub(r"\s+", " ", s)
+
+def familia_from_cod_maquina(cod: str) -> str:
+    c = _norm(cod)
+    if c.startswith("TORNO"): return "TORNO"
+    if c.startswith("FRESADORA"): return "FRESADORA"
+    if c.startswith("LIMADORA"): return "LIMADORA"
+    if c.startswith("GUILLOTINA"): return "GUILLOTINA"
+    if c.startswith("PLEGADORA"): return "PLEGADORA"
+    if c.startswith("AGUJEREADORA"): return "AGUJEREADORA"
+    if c.startswith("SIERRA CIRCULAR"): return "SIERRA_CIRCULAR"
+    return ""
+
+def familia_requerida_from_proceso(nombre_proc: str) -> str:
+    n = _norm(nombre_proc)
+
+    # Menciones explícitas primero (muy importante)
+    if "EN FRESADORA" in n or "FRESADORA" in n:
+        return "FRESADORA"
+    if "AGUJEREADORA" in n or "RADIAL" in n or "TALADR" in n:
+        return "AGUJEREADORA"
+    if "TORNO" in n:
+        return "TORNO"
+    if "LIMADORA" in n:
+        return "LIMADORA"
+    if "GUILLOTINA" in n:
+        return "GUILLOTINA"
+    if "PLEGADORA" in n:
+        return "PLEGADORA"
+    if "SIERRA" in n:
+        return "SIERRA_CIRCULAR"
+
+    # Opcional (si te sirve):
+    if "AVELLANAD" in n:
+        return "AGUJEREADORA"
+
+    return ""
+
+
 def proceso_usa_maquina(nombre_proceso: str) -> bool:
     """
     Devuelve True si el proceso requiere maquinaria.
@@ -1017,7 +1090,9 @@ async def planificar(
     maquinarias = []
     for m in maquinarias_orm:
         rangos_ok = {rm.id_rango for rm in (m.rango_maquinarias or [])}
-        maquinarias.append((m.id, rangos_ok, m.nombre))
+        #maquinarias.append((m.id, rangos_ok, m.nombre)) esto funciona
+        maquinarias.append((m.id, rangos_ok, m.nombre, m.cod_maquina))
+
 
     procesos_para_solver = []
 
@@ -1041,7 +1116,9 @@ async def planificar(
 
             # Clasificar si usa máquina
             usa_maquina = proceso_usa_maquina(nombre_proceso)
-
+            #esto funciona
+            familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
+            
             # Rangos válidos del proceso
             rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
 
@@ -1054,7 +1131,7 @@ async def planificar(
             # SOLO si no hay rangos válidos
             # -------------------------------
             if not rangos_validos and nombre_proceso:
-                for _, rangos_maquina, nombre_maquina in maquinarias:
+                for _, rangos_maquina, nombre_maquina, _cod in maquinarias:
 
                     if not rangos_maquina:
                         continue
@@ -1083,7 +1160,8 @@ async def planificar(
                 dur_min,                # duración
                 rangos_validos,         # rangos permitidos
                 nombre_proceso,         # nombre
-                usa_maquina             # si usa máquina o no
+                usa_maquina,            # si usa máquina o no
+                familia_req
             ))
 
             # print(f"PROCESO: {rel.proceso.id} {nombre_proceso} usa_maquina={usa_maquina}")
@@ -1124,10 +1202,15 @@ async def planificar_pendientes(
         operarios = await repo_operario.find_with_rangos()
 
         maquinarias_orm = await repo_maquinaria.find_with_rangos()
+        #maquinarias = [
+        #    (m.id, {rm.id_rango for rm in (m.rango_maquinarias or [])}, m.nombre)
+        #    for m in maquinarias_orm
+        #]
         maquinarias = [
-            (m.id, {rm.id_rango for rm in (m.rango_maquinarias or [])}, m.nombre)
+            (m.id, {rm.id_rango for rm in (m.rango_maquinarias or [])}, m.nombre, m.cod_maquina)
             for m in maquinarias_orm
         ]
+
 
         procesos_para_solver = []
 
@@ -1143,7 +1226,8 @@ async def planificar_pendientes(
                 nombre_proceso = rel.proceso.nombre.lower() if rel.proceso else ""
                 usa_maquina = proceso_usa_maquina(nombre_proceso)
                 rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
-
+                familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
+                #agregue familia req
                 procesos_para_solver.append((
                     orden.id,
                     rel.proceso.id,
@@ -1153,7 +1237,8 @@ async def planificar_pendientes(
                     dur_min,
                     rangos_validos,
                     nombre_proceso,
-                    usa_maquina
+                    usa_maquina,
+                    familia_req
                 ))
 
         resultados = await asyncio.to_thread(

@@ -21,7 +21,9 @@ export interface GanttTask {
     sector?: string;
     subsector?: string;
     quantity?: number;
+    cantidad_entregada?: number;
     materials?: string[];
+
     notes?: string;
     isDelayed: boolean;
     // Original fields for reference/updates
@@ -48,6 +50,8 @@ export interface WorkOrder {
     id_sector?: number;
     id_articulo?: number;
     unidades?: number;
+    cantidad_entregada?: number;
+
     fecha_orden?: string;
     fecha_entrada?: string;
     fecha_prometida?: string;
@@ -117,7 +121,9 @@ export interface PlanificacionItem {
     id_prioridad?: number;
     id_articulo?: number;
     cantidad?: number;
+    cantidad_entregada?: number;
     sector?: string;
+
     pedido_externo?: number | string;
     cliente?: string;
     id_planificacion_lote?: string;

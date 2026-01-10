@@ -757,3 +757,45 @@ class OrdenTrabajoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error en update_processes_full: {e}")
             raise InfrastructureException("Error al actualizar lista de procesos.") from e
+
+    
+    async def update_cantidad_entregada(self, id_orden: int, nueva_cantidad: int, total_unidades: int | None):
+        try:
+            logger.info(f"Repository - Actualizar entrega Orden {id_orden}: {nueva_cantidad}")
+            
+            query = select(OrdenTrabajo).where(OrdenTrabajo.id == id_orden)
+            result = await self.db.execute(query)
+            orden = result.scalar_one_or_none()
+            
+            if not orden:
+                return None
+                
+            orden.cantidad_entregada = nueva_cantidad
+            
+            # Logic to auto-complete if delivered >= total?
+            # User might want manual control, but commonly full delivery = complete.
+            # However, "Complete" status is based on Processes in this system (check_all_processes_completed).
+            # But the user screenshot shows "ENTREGA COMPLETA" text.
+            # Let's just update the quantity. The status badge is derived from processes usually.
+            # Wait, check `get_estadisticas_estados` in Repository:
+            # "completadas: fecha_entrega > 1950-01-01"
+            # So if we deliver everything, should we set `fecha_entrega` to NOW?
+            # YES, if nueva_cantidad >= total_unidades, assuming total is set.
+            
+            if total_unidades and nueva_cantidad >= total_unidades:
+                if not orden.fecha_entrega or orden.fecha_entrega.year == 1950:
+                    orden.fecha_entrega = datetime.now()
+            elif total_unidades and nueva_cantidad < total_unidades:
+                # If reverting (e.g. subtracted), maybe clear completion date?
+                # Only if it was previously auto-completed. Safer to leave it if manual?
+                # Let's enforce: if incomplete delivery, fecha_entrega = 1950 (open)
+                orden.fecha_entrega = datetime(1950, 1, 1)
+
+            await self.db.commit()
+            await self.db.refresh(orden)
+            return orden
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en update_cantidad_entregada: {e}")
+            raise InfrastructureException("Error al actualizar cantidad entregada.") from e
