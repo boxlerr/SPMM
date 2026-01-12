@@ -12,10 +12,11 @@ import DetalleOperario from "@/app/recursos/_components/DetalleOperario"
 import CambiarEstado from "@/app/recursos/_components/CambiarEstado"
 import { Operario } from "@/app/recursos/_types"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import MateriaPrimaTab from "./_components/MateriaPrimaTab"
 
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box } from "lucide-react"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
@@ -42,7 +43,7 @@ const getAuthHeaders = (): HeadersInit => {
 };
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios">("lista_planificacion")
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -815,6 +816,14 @@ export default function OperacionesPage() {
             </button>
 
             <button
+              onClick={() => setActiveTab("materia_prima")}
+              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "materia_prima" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+            >
+              <Box size={18} />
+              Materia Prima
+            </button>
+
+            <button
               onClick={() => setActiveTab("work_orders")}
               className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
@@ -845,6 +854,10 @@ export default function OperacionesPage() {
                   }}
                 />
               </div>
+            )}
+
+            {activeTab === "materia_prima" && (
+              <MateriaPrimaTab />
             )}
 
             {activeTab === "gantt" && (

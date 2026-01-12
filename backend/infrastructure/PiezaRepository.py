@@ -39,16 +39,41 @@ class PiezaRepository:
             logger.error(f"Repository - Error real en delete: {e}")
             raise InfrastructureException("Error al eliminar la Pieza.") from e
 
-    async def find_all(self):
+    async def find_all(self, page: int = 1, size: int = 50, search: str = ""):
         try:
-            logger.info("Repository - Obtener todas las piezas.")
-            result = await self.db.execute(select(Pieza))
+            logger.info(f"Repository - Obtener piezas paginadas: page={page}, size={size}, search='{search}'")
+            
+            # Base query
+            query = select(Pieza)
+            
+            # Filter if search term provided
+            if search:
+                search_filter = (Pieza.descripcion.ilike(f"%{search}%")) | (Pieza.cod_pieza.ilike(f"%{search}%"))
+                query = query.where(search_filter)
+            
+            # Count total API call
+            # We need a separate count query or use func.count()
+            # Efficient way for simple count:
+            from sqlalchemy import func
+            count_query = select(func.count()).select_from(query.subquery())
+            total_result = await self.db.execute(count_query)
+            total = total_result.scalar()
+            
+            # Pagination
+            # MSSQL requires ORDER BY for OFFSET/LIMIT
+            query = query.order_by(Pieza.id.asc())
+            offset = (page - 1) * size
+            query = query.offset(offset).limit(size)
+            
+            result = await self.db.execute(query)
             data = result.scalars().all()
-            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
-            return data
+            
+            logger.info(f"Repository - Resultado OK ({len(data)} registros de {total}).")
+            return data, total
         except Exception as e:
             logger.error(f"Repository - Error real en find_all: {e}")
             raise InfrastructureException("Error al listar Piezas.") from e
+
 
     async def find_by_id(self, id: int):
         try:

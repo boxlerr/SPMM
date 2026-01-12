@@ -33,10 +33,10 @@ async def eliminar_pieza(id: int, db=Depends(get_db)):
 
 
 @router.get("/piezas")
-async def listar_piezas(db=Depends(get_db)):
-    logger.info("API - Inicio GET /piezas")
+async def listar_piezas(page: int = 1, size: int = 50, search: str = "", db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /piezas page={page} search='{search}'")
     service = PiezaService(db)
-    return await service.listarPiezas()
+    return await service.listarPiezas(page, size, search)
 
 
 @router.get("/piezas/{id}")
