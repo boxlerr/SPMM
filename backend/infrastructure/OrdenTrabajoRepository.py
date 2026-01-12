@@ -798,6 +798,35 @@ class OrdenTrabajoRepository:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Repository - Error en update_cantidad_entregada: {e}")
+            raise InfrastructureException("Error al actualizar la cantidad entregada.") from e
+
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int):
+        try:
+            logger.info(f"Repository - Agregar proceso {id_proceso} a Orden {id_orden}")
+            
+            # Check if exists (should not happen usually with this flow, but good practice)
+            # Actually, `orden` is part of PK? No, PK is (id_orden, id_proceso).
+            # So duplicates by ID are forbidden.
+            
+            nuevo_proceso = OrdenTrabajoProceso(
+                id_orden_trabajo=id_orden,
+                id_proceso=id_proceso,
+                orden=orden,
+                tiempo_proceso=tiempo_estimado,
+                id_estado=1  # Default: Pendiente
+            )
+            
+            self.db.add(nuevo_proceso)
+            await self.db.commit()
+            await self.db.refresh(nuevo_proceso)
+            
+            logger.info("Repository - Proceso agregado correctamente.")
+            return nuevo_proceso
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en agregarProceso: {e}")
+            raise InfrastructureException("Error al agregar proceso a la orden.") from e
             raise InfrastructureException("Error al actualizar cantidad entregada.") from e
 
     async def get_ids_with_missing_stock(self, orden_ids: list[int]) -> set[int]:

@@ -416,3 +416,17 @@ class OrdenTrabajoService:
         orden_actualizada = await self.repository.update_cantidad_entregada(id_orden, nueva_cantidad, orden.unidades)
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
+        
+        return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
+
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int):
+        logger.info(f"Service - Agregar proceso {id_proceso} a Orden {id_orden}")
+        
+        # Verify order exists
+        exists = await self.repository.find_by_id(id_orden)
+        if not exists:
+             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id_orden}")
+             
+        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden)
+        
+        return ResponseDTO(status=True, data=jsonable_encoder(nuevo))

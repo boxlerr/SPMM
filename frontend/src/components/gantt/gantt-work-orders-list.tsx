@@ -6,17 +6,24 @@ import { GanttTask } from "@/lib/types";
 import { toTitleCase } from "@/lib/gantt-utils";
 import { OrderFiles } from "@/components/common/OrderFiles";
 import { DeliveryProgress } from "@/components/common/DeliveryProgress";
+import { RegisterDeliveryDialog } from "@/components/planning/RegisterDeliveryDialog";
+import { AddProcessRow } from "@/components/planning/AddProcessRow";
 
 interface GanttWorkOrdersListProps {
     tasks: GanttTask[];
     onTaskClick?: (task: GanttTask) => void;
     onBulkStatusChange?: (taskIds: string[], newStatus: string) => void;
+    onDataRefresh?: () => void;
 }
 
-export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: GanttWorkOrdersListProps) {
+export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, onDataRefresh }: GanttWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = React.useState("");
     const [isSelectionMode, setIsSelectionMode] = React.useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
+
+    // Delivery Dialog State
+    const [deliveryDialogOpen, setDeliveryDialogOpen] = React.useState(false);
+    const [selectedOrderForDelivery, setSelectedOrderForDelivery] = React.useState<{ id: number, total: number, delivered: number } | null>(null);
 
     const ITEMS_PER_PAGE = 30;
     const [currentPage, setCurrentPage] = React.useState(1);
@@ -214,11 +221,21 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                                 </span>
                                             )}
                                             <span className="text-xs text-gray-500 font-medium">{totalTasks} procesos asignados</span>
-                                            <div className="mt-1">
+                                            <div
+                                                className="mt-1 cursor-pointer hover:opacity-80 transition-opacity"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedOrderForDelivery({
+                                                        id: parseInt(otNumber),
+                                                        total: otTasks[0].quantity || 0,
+                                                        delivered: otTasks[0].cantidad_entregada || 0
+                                                    });
+                                                    setDeliveryDialogOpen(true);
+                                                }}
+                                            >
                                                 <DeliveryProgress
                                                     total={otTasks[0].quantity}
                                                     delivered={otTasks[0].cantidad_entregada}
-
                                                     compact={true}
                                                 />
                                             </div>
@@ -337,6 +354,19 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                                         )}
                                     </div>
                                 ))}
+                                <div className="bg-white border border-dashed border-gray-300 rounded-xl p-4 flex items-center justify-center hover:border-blue-400 hover:shadow-md transition-all min-h-[150px]">
+                                    <div className="w-full">
+                                        <AddProcessRow
+                                            orderId={parseInt(otNumber)}
+                                            onProcessAdded={() => {
+                                                if (onDataRefresh) onDataRefresh();
+                                            }}
+                                            isCentered={true}
+                                            variant="card"
+                                            label="Agregar Proceso"
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     );
@@ -412,6 +442,14 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange }: 
                     </div>
                 </div>
             )}
+            <RegisterDeliveryDialog
+                open={deliveryDialogOpen}
+                onOpenChange={setDeliveryDialogOpen}
+                currentOrder={selectedOrderForDelivery}
+                onSuccess={() => {
+                    if (onDataRefresh) onDataRefresh();
+                }}
+            />
         </Card>
     );
 }

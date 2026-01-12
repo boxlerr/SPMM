@@ -161,3 +161,14 @@ async def obtener_ordenes_no_planificadas(db=Depends(get_db)):
 
 
 
+
+class AgregarProcesoRequest(BaseModel):
+    id_proceso: int
+    tiempo_estimado: int
+    orden: int
+
+@router.post("/ordenes/{id_orden}/procesos")
+async def agregar_proceso_orden(id_orden: int, body: AgregarProcesoRequest, db=Depends(get_db)):
+    logger.info(f"API - Inicio POST /ordenes/{id_orden}/procesos")
+    service = OrdenTrabajoService(db)
+    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden)

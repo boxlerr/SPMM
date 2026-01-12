@@ -257,6 +257,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                         tasks={tasks}
                         onTaskClick={handleTaskClick}
                         onBulkStatusChange={handleBulkStatusChange}
+                        onDataRefresh={fetchData}
                     />
                 </TabsContent>
 
