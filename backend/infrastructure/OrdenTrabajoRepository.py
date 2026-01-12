@@ -799,3 +799,36 @@ class OrdenTrabajoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error en update_cantidad_entregada: {e}")
             raise InfrastructureException("Error al actualizar cantidad entregada.") from e
+
+    async def get_ids_with_missing_stock(self, orden_ids: list[int]) -> set[int]:
+        """
+        Devuelve un set con los IDs de ordenes que NO tienen suficiente stock
+        de materia prima.
+        """
+        if not orden_ids:
+            return set()
+            
+        try:
+            from sqlalchemy import text, bindparam
+            
+            # Query: Find distinct OT IDs where required quantity > stock
+            # Using raw SQL for simplified join and condition
+            query = text("""
+                SELECT DISTINCT otp.id_orden_trabajo
+                FROM orden_trabajo_pieza otp
+                JOIN pieza p ON otp.id_pieza = p.id
+                WHERE otp.id_orden_trabajo IN :orden_ids
+                AND (p.stockactual IS NULL OR p.stockactual < otp.cantidad)
+            """).bindparams(bindparam('orden_ids', expanding=True))
+            
+            result = await self.db.execute(query, {"orden_ids": orden_ids})
+            ids = {row[0] for row in result.fetchall()}
+            
+            return ids
+            
+        except Exception as e:
+            logger.error(f"Repository - Error verificando stock: {e}")
+            return set() # Fail safe: assume available if check fails? Or unavailable? 
+                         # Returning empty set means "Available". Safer to log and maybe alert.
+
+

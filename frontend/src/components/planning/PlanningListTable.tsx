@@ -16,7 +16,9 @@ import {
     Plus,
     GripVertical,
     AlertCircle,
-    Check
+    AlertTriangle,
+    Check,
+    CheckCircle2
 } from "lucide-react";
 import { toast } from "sonner";
 import { OrderFiles } from "@/components/common/OrderFiles";
@@ -518,6 +520,9 @@ function _PlanningListTable({
                                         <SortIcon column="prioridad" />
                                     </div>
                                 </th>
+                                <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
+                                    Material
+                                </th>
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('estado')}
@@ -602,6 +607,17 @@ function _PlanningListTable({
                                                 <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                     {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
                                                 </Badge>
+                                            </td>
+                                            <td className="px-4 py-3 text-center">
+                                                {item.material_disponible === false ? (
+                                                    <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                        <AlertTriangle className="h-3 w-3" /> Sin Stock
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge variant="outline" className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                        <CheckCircle2 className="h-3 w-3" /> OK
+                                                    </Badge>
+                                                )}
                                             </td>
                                             <td className="px-4 py-3 text-center">
                                                 {renderStatusBadge(getOrderStatus(item))}

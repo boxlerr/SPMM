@@ -60,6 +60,7 @@ class OrdenTrabajoResponseDTO(BaseModel):
     unidades: Optional[int] = None
     cantidad_entregada: Optional[int] = 0
     reclamo: Optional[int] = 0
+    material_disponible: Optional[bool] = True
     
     fecha_orden: Optional[datetime] = None
     fecha_entrada: Optional[datetime] = None

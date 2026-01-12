@@ -371,8 +371,26 @@ class OrdenTrabajoService:
         try:
             logger.info("Service - Obtener órdenes no planificadas.")
             ordenes = await self.repository.find_unplanned()
+            
+            if not ordenes:
+                return ResponseDTO(status=True, data=[])
+
+            # Check material availability
+            orden_ids = [o.id for o in ordenes]
+            missing_stock_ids = await self.repository.get_ids_with_missing_stock(orden_ids)
+            
+            # Serialize and inject status
+            # We can't modify the ORM objects directly if we want to follow DTO pattern strictly,
+            # but we can serialize first then update dicts
+            data = jsonable_encoder(ordenes)
+            
+            for item in data:
+                oid = item.get('id')
+                # If ID is in missing set, then material_disponible = False
+                item['material_disponible'] = oid not in missing_stock_ids
+                
             logger.info(f"Service - Órdenes no planificadas obtenidas: {len(ordenes)}")
-            return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
+            return ResponseDTO(status=True, data=data)
         except InfrastructureException:
             raise
         except Exception as e:
