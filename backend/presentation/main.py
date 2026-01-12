@@ -15,7 +15,11 @@ from backend.presentation.NotificacionAPI import router as notificacion_router
 from backend.presentation.DashboardAPI import router as dashboard_router
 from backend.presentation.PlanoAPI import router as plano_router
 from backend.presentation.ClienteAPI import router as cliente_router
+
+
 from backend.presentation.ConfigAPI import router as config_router
+from backend.presentation.PiezaAPI import router as pieza_router
+from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
 
 import logging
 
@@ -67,7 +71,11 @@ app.include_router(maquinaria_router,tags=["maquinarias"], dependencies=protecte
 app.include_router(notificacion_router, tags=["notificaciones"], dependencies=protected_deps)
 app.include_router(dashboard_router, tags=["dashboard"], dependencies=protected_deps)
 app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
+
 app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)
+
+app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
+app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)
