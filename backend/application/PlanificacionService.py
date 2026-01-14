@@ -333,47 +333,66 @@ def _crear_variables_y_dominios(
 
         # ----------------- Maquinarias válidas -----------------
         nombre_upper = (nombre_proc or "").upper()
+        tipo_proc = _get_tipo_proceso(nombre_proc)
 
-        if "PREPARACION" in nombre_upper:
+        maqs_validas = []
+
+        if tipo_proc == "SETUP":
+            # Lógica SETUP: Buscar coincidencia de nombre de máquina
+            # Ej: PREPARACION DE TORNO -> busca "TORNO" en nombres de máquinas
             base = (
                 nombre_upper
                 .replace("PREPARACION DE", "")
                 .replace("PREPARACION", "")
+                .replace("CAMBIO DE", "")
                 .strip()
             )
 
-            #posibles = [ cambio esto
-            #    m_id for (m_id, _rs, nombre_m) in maquinarias
-            #    if base and base in (nombre_m or "").upper()
-            #]
+            # Buscamos máquinas cuyo nombre contenga la base
+            # Esto es un filtro simple como pidió el usuario
             posibles = [
                 m_id for (m_id, _rs, nombre_m, _cod) in maquinarias
                 if base and base in (nombre_m or "").upper()
             ]
 
-
             if posibles:
                 maqs_validas = posibles
             else:
-                logger.warning(f"Proceso {proc_id} ({nombre_proc}) no encontró máquina directa; usando fallback")
-                maqs_validas = REAL_MAQ_IDS[:]
+                # ❌ ANTES: Fallback abierto (REAL_MAQ_IDS)
+                # ✅ AHORA: Dummy si no encuentra match
+                logger.warning(f"SETUP {proc_id} ({nombre_proc}) no encontró máquina para '{base}'; asignando DUMMY.")
+                maqs_validas = [DUMMY_MAQ_ID]
 
-        else:
-            if not rangos_proc:
-                maqs_validas = REAL_MAQ_IDS[:]
-            else:
+        elif tipo_proc == "PRODUCCION_MAQUINA":
+            # Lógica PRODUCCION
+            # 1. Filtrar por familia requerida si existe
+            candidates = REAL_MAQ_IDS[:]
+            
+            if familia_req:
+                candidates = [m for m in candidates if maq_to_familia.get(m) == familia_req]
+            
+            # 2. Filtrar por rangos si existen
+            if rangos_proc:
                 req = set(rangos_proc)
-                #maqs_validas = [m_id for (m_id, rs, _n) in maquinarias if req & rs]
-                maqs_validas = [m_id for (m_id, rs, _n, _cod) in maquinarias if req & rs]
+                candidates = [m for m in candidates if (req & maq_to_rangos.get(m, set()))]
 
-        # NUEVO: filtrar por familia requerida del proceso
-        if familia_req:
-            maqs_validas = [m for m in maqs_validas if maq_to_familia.get(m) == familia_req]
+            # 3. Resultado
+            if candidates:
+                maqs_validas = candidates
+            else:
+                # ❌ ANTES: Fallback abierto si no habia rangos
+                # ✅ AHORA: Dummy si no hay candidatos válidos (familia incorrecta o sin rangos compatibles)
+                # logger.warning(f"PROCESO {proc_id} ({nombre_proc}) familia={familia_req} sin máquinas compatibles; asignando DUMMY.")
+                maqs_validas = [DUMMY_MAQ_ID]
+        
+        else:
+            # MANUAL o ADMIN -> Siempre dummy
+            maqs_validas = [DUMMY_MAQ_ID]
 
 
         if not maqs_validas:
-            logger.warning(f"Proceso {proc_id} sin máquinas compatibles; usando dummy")
-            maqs_validas = [DUMMY_MAQ_ID]
+             # Safety net
+             maqs_validas = [DUMMY_MAQ_ID]
 
         maq_var = model.NewIntVarFromDomain(
             cp_model.Domain.FromValues(maqs_validas),
@@ -1007,58 +1026,99 @@ def familia_from_cod_maquina(cod: str) -> str:
     if c.startswith("PLEGADORA"): return "PLEGADORA"
     if c.startswith("AGUJEREADORA"): return "AGUJEREADORA"
     if c.startswith("SIERRA CIRCULAR"): return "SIERRA_CIRCULAR"
+    # Nuevas agregadas para consistencia
+    if c.startswith("PRENSA"): return "PRENSA"
+    if c.startswith("RECTIFICADORA"): return "RECTIFICADORA"
+    if c.startswith("OXICORTE") or c.startswith("SOPLETE"): return "OXICORTE"
     return ""
 
 def familia_requerida_from_proceso(nombre_proc: str) -> str:
     n = _norm(nombre_proc)
 
-    # Menciones explícitas primero (muy importante)
-    if "EN FRESADORA" in n or "FRESADORA" in n:
+    # Detección explícita de familias
+    if "EN FRESADORA" in n or "FRESADORA" in n or "TALLADO" in n or "AGUJEREADO EN FRESADORA" in n:
         return "FRESADORA"
-    if "AGUJEREADORA" in n or "RADIAL" in n or "TALADR" in n:
+    
+    if "AGUJEREADORA" in n or "RADIAL" in n or "TALADR" in n or "AVELLANAD" in n:
         return "AGUJEREADORA"
-    if "TORNO" in n:
+    
+    if "TORNO" in n or "CILINDRADO" in n or "ROSCADO" in n or "REPUJADO" in n:
         return "TORNO"
+    
     if "LIMADORA" in n:
         return "LIMADORA"
+    
     if "GUILLOTINA" in n:
         return "GUILLOTINA"
-    if "PLEGADORA" in n:
+    
+    if "PRENSA" in n or "PUNZONADO" in n or "PRENSADO" in n or "CONFORMAD" in n:
+        # CONFORMADORA suele ser prensa o plegadora, asumimos Prensa si no se especifica otra
+        return "PRENSA"
+
+    if "PLEGADO" in n or "PLEGADORA" in n or "DOBLADO" in n or "DOBLADORA" in n:
         return "PLEGADORA"
-    if "SIERRA" in n:
+
+    if "SIERRA" in n or "SENSITIVA" in n:
         return "SIERRA_CIRCULAR"
 
-    # Opcional (si te sirve):
-    if "AVELLANAD" in n:
-        return "AGUJEREADORA"
+    if "RECTIFICAD" in n:
+        return "RECTIFICADORA"
+    
+    if "OXICORTE" in n or "SOPLETE" in n:
+        return "OXICORTE"
 
+    # Caso especial: Soldadura? Por defecto soldadura a veces no tiene máquina especifica en BD,
+    # pero si hay máquinas de soldar, se deberia agregar aqui. 
+    # Por ahora no se pidió explícitamente Soldadura como familia de máquina crítica, 
+    # pero el usuario pasó lista.
+    
     return ""
+
+
+def _get_tipo_proceso(nombre_proceso: str) -> str:
+    """
+    Clasifica el proceso en:
+    - PRODUCCION_MAQUINA: Requiere máquina específica
+    - MANUAL: No requiere máquina
+    - SETUP: Preparación o cambio
+    - ADMIN: Administrativo / Tercerizado (sin máquina en solver interno)
+    """
+    n = _norm(nombre_proceso)
+    
+    # 1. SETUP / PREPARACION
+    if n.startswith("PREPARACION") or n.startswith("CAMBIO DE") or "SETUP" in n:
+        # Excepciones que podrían ser manuales? Por ahora asumimos que SETUP implica tocar máquina
+        # salvo que sea algo muy obvio. Pero el usuario pidió: 'PREPARACION...' -> SETUP.
+        return "SETUP"
+
+    # 2. PROCESOS MANUALES (Lista explicita fuerte)
+    # Palabras clave que indican proceso MANUAL
+    keywords_manual = [
+        "EMBALAD", "DESARM", "ENSAMBL", "LAVADO", "LIMPIEZA",
+        "REBABA", "REBARB", "AMOLAD", "PROGRAM", "BICELAD", "BISELAD", 
+        "ENDEREZ", "PINTU", "ARMADO", "AJUSTE", "CONTROL", "REVISION",
+        "DISENO", "PLANIFICACION", "CUBICACION", "CONSULTAR",
+        "SOLICITAR", "TRABAJO DE FORMA", "MANUAL"
+    ]
+    
+    if any(k in n for k in keywords_manual):
+        return "MANUAL"
+
+    # 3. ADMIN / EXTERNO
+    if "TERCERIZ" in n or "EXTERNO" in n:
+        return "ADMIN"
+
+    # 4. DEFAULT: PRODUCCION (Asumimos que si no es manual ni setup, busca máquina)
+    return "PRODUCCION_MAQUINA"
 
 
 def proceso_usa_maquina(nombre_proceso: str) -> bool:
     """
-    Devuelve True si el proceso requiere maquinaria.
-    Devuelve False si es una tarea manual realizada por operario.
+    Devuelve True si el proceso requiere maquinaria (PRODUCCION o SETUP).
+    Devuelve False si es MANUAL o ADMIN.
     """
-    nombre = nombre_proceso.lower()
-
-    # Procesos claramente manuales:
-    procesos_sin_maquina = [
-        "embal",       # embalado
-        "desarm",      # desarmado
-        "ensambl",     # ensamblaje
-        "lavado",      # lavado pieza
-        "limpieza",    # limpieza
-        "rebab",       # rebabado
-        "rebar",       # rebarbado / rebarbar
-        "amol",        # amolado / amoladora
-        "program",     # programación (torno cnc)
-        "bice",        # bicelado / biselado
-        "enderez",     # enderezado
-        "pintu" #pintura
-    ]
-
-    return not any(p in nombre for p in procesos_sin_maquina)
+    tipo = _get_tipo_proceso(nombre_proceso)
+    return tipo in ("PRODUCCION_MAQUINA", "SETUP")
 
 # 🔸 Función async que envuelve al solver
 async def planificar(
