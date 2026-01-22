@@ -196,7 +196,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                     <Button
                         size="sm"
                         variant="outline"
-                        className={cn("h-8 text-xs gap-1 border-dashed", variant === 'card' ? "w-full justify-center" : "")}
+                        className="h-8 text-xs gap-1 border-dashed"
                         onClick={handleAddEmptyRow}
                     >
                         <Plus className="w-3.5 h-3.5" />
