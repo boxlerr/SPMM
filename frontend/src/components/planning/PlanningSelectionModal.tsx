@@ -451,13 +451,30 @@ export function PlanningSelectionModal({
                     <Button
                         onClick={() => {
                             const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id));
-                            const emptyOrders = selectedOrders.filter(o => !o.procesos || o.procesos.length === 0);
 
+                            // 1. Check for empty processes
+                            const emptyOrders = selectedOrders.filter(o => !o.procesos || o.procesos.length === 0);
                             if (emptyOrders.length > 0) {
                                 const orderIds = emptyOrders.map(o => `#${o.id}`).join(", ");
                                 toast.error(`Las órdenes ${orderIds} no tienen procesos. Agregue procesos antes de planificar.`);
                                 return;
                             }
+
+                            // 2. Check for missing stock
+                            const noStockOrders = selectedOrders.filter(o => {
+                                const estado = o.estado_material || 'sin_datos';
+                                return estado === 'sin_stock' || estado === 'sin_datos';
+                            });
+
+                            if (noStockOrders.length > 0) {
+                                const orderIds = noStockOrders.map(o => `#${o.id}`).join(", ");
+                                toast.error(`Las órdenes ${orderIds} no tienen stock disponible. Resuelva el stock antes de planificar.`, {
+                                    duration: 5000,
+                                    description: "Verifique la columna Material en la lista."
+                                });
+                                return;
+                            }
+
                             onPlan(selectedIds)
                         }}
                         disabled={selectedIds.length === 0 || isLoading}

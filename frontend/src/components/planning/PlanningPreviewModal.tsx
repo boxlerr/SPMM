@@ -372,7 +372,7 @@ export function PlanningPreviewModal({
 
                                                     <div className={`p-3 border-b flex items-start justify-between ${isLate ? 'bg-red-50/50 border-red-100' : 'border-gray-50 bg-gradient-to-br from-white to-gray-50/30'}`}>
                                                         <div className="flex flex-col min-w-0 mr-2">
-                                                            <span className="font-semibold text-gray-800 line-clamp-1" title={effectiveItem.nombre_proceso}>
+                                                            <span className="font-semibold text-gray-800" title={effectiveItem.nombre_proceso}>
                                                                 {capitalize(effectiveItem.nombre_proceso)}
                                                             </span>
                                                             {isLate && (
