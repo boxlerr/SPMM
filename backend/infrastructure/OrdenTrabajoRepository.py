@@ -829,35 +829,58 @@ class OrdenTrabajoRepository:
             raise InfrastructureException("Error al agregar proceso a la orden.") from e
             raise InfrastructureException("Error al actualizar cantidad entregada.") from e
 
-    async def get_ids_with_missing_stock(self, orden_ids: list[int]) -> set[int]:
+    async def get_material_status(self, orden_ids: list[int]) -> dict[int, str]:
         """
-        Devuelve un set con los IDs de ordenes que NO tienen suficiente stock
-        de materia prima.
+        Devuelve un dict con el estado del material para cada orden:
+        - 'ok': disponible = 1 para todas las piezas
+        - 'pedido': disponible = 0 pero pedido = 1 para alguna/s piezas
+        - 'sin_stock': disponible = 0 y pedido = 0 para alguna pieza
+        - 'sin_datos': no tiene piezas asociadas (sin información)
         """
         if not orden_ids:
-            return set()
+            return {}
             
         try:
             from sqlalchemy import text, bindparam
             
-            # Query: Find distinct OT IDs where required quantity > stock
-            # Using raw SQL for simplified join and condition
+            # Query: Get material status for each order
+            # We aggregate: if ANY piece is not available and not ordered = sin_stock
+            # If ANY piece is not available but ordered = pedido
+            # If ALL pieces are available = ok
             query = text("""
-                SELECT DISTINCT otp.id_orden_trabajo
+                SELECT 
+                    otp.id_orden_trabajo,
+                    MIN(CASE 
+                        WHEN COALESCE(otp.disponible, 0) = 0 AND COALESCE(otp.pedido, 0) = 0 THEN 1  -- sin_stock = priority 1
+                        WHEN COALESCE(otp.disponible, 0) = 0 AND COALESCE(otp.pedido, 0) = 1 THEN 2  -- pedido = priority 2
+                        ELSE 3  -- ok = priority 3
+                    END) as status_priority
                 FROM orden_trabajo_pieza otp
-                JOIN pieza p ON otp.id_pieza = p.id
                 WHERE otp.id_orden_trabajo IN :orden_ids
-                AND (p.stockactual IS NULL OR p.stockactual < otp.cantidad)
+                GROUP BY otp.id_orden_trabajo
             """).bindparams(bindparam('orden_ids', expanding=True))
             
             result = await self.db.execute(query, {"orden_ids": orden_ids})
-            ids = {row[0] for row in result.fetchall()}
+            rows = result.fetchall()
             
-            return ids
+            # Map priority to status string
+            status_map = {1: 'sin_stock', 2: 'pedido', 3: 'ok'}
+            material_status = {}
+            
+            for row in rows:
+                oid = row[0]
+                priority = row[1]
+                material_status[oid] = status_map.get(priority, 'sin_datos')
+            
+            # Orders not in result have no pieces = sin_datos
+            for oid in orden_ids:
+                if oid not in material_status:
+                    material_status[oid] = 'sin_datos'
+            
+            return material_status
             
         except Exception as e:
-            logger.error(f"Repository - Error verificando stock: {e}")
-            return set() # Fail safe: assume available if check fails? Or unavailable? 
-                         # Returning empty set means "Available". Safer to log and maybe alert.
+            logger.error(f"Repository - Error verificando material: {e}")
+            return {oid: 'sin_datos' for oid in orden_ids}
 
 

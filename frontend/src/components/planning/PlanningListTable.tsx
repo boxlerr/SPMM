@@ -610,13 +610,38 @@ function _PlanningListTable({
                                                 </Badge>
                                             </td>
                                             <td className="px-4 py-3 text-center">
-                                                {item.material_disponible === false ? (
-                                                    <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                {item.estado_material === 'sin_stock' ? (
+                                                    <Badge
+                                                        variant="destructive"
+                                                        className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
+                                                        title="Material no disponible y no pedido al proveedor"
+                                                    >
                                                         <AlertTriangle className="h-3 w-3" /> Sin Stock
                                                     </Badge>
-                                                ) : (
-                                                    <Badge variant="outline" className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                ) : item.estado_material === 'pedido' ? (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
+                                                        title="Material pedido al proveedor, esperando entrega"
+                                                    >
+                                                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                                        Pedido
+                                                    </Badge>
+                                                ) : item.estado_material === 'ok' ? (
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
+                                                        title="Material disponible para producción"
+                                                    >
                                                         <CheckCircle2 className="h-3 w-3" /> OK
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge
+                                                        variant="destructive"
+                                                        className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
+                                                        title="No hay datos de materiales cargados - Verificar disponibilidad"
+                                                    >
+                                                        <AlertTriangle className="h-3 w-3" /> Sin Stock
                                                     </Badge>
                                                 )}
                                             </td>

@@ -141,6 +141,9 @@ class OrdenTrabajoService:
             if plan_map:
                 logger.info(f"Service - Ejemplo clave mapa: {list(plan_map.keys())[0]}")
 
+            # 4. Fetch material status for all orders
+            material_statuses = await self.repository.get_material_status(orden_ids)
+
             for o in ordenes:
                 try:
                     # Validate basic structure
@@ -148,7 +151,7 @@ class OrdenTrabajoService:
                          logger.info(f"debug - Checking order {o.id}: id_cliente={o.id_cliente} cliente={o.cliente}")
                     dto = OrdenTrabajoResponseDTO.model_validate(o)
                     
-                    # 4. Inject operario_nombre into processes
+                    # 5. Inject operario_nombre into processes
                     if dto.procesos:
                         for proc in dto.procesos:
                             # proc is OrdenTrabajoProcesoDTO. It has id_proceso etc.
@@ -165,7 +168,10 @@ class OrdenTrabajoService:
                                 
                                 if key in plan_map:
                                     proc.operario_nombre = plan_map[key]
-                                
+                    
+                    # 6. Inject material status
+                    dto.estado_material = material_statuses.get(o.id, 'sin_datos')
+                    
                     valid_ordenes.append(jsonable_encoder(dto))
                 except ValidationError as e:
                     logger.error(f"Service - Error validando orden ID {o.id}: {e}")
@@ -375,19 +381,17 @@ class OrdenTrabajoService:
             if not ordenes:
                 return ResponseDTO(status=True, data=[])
 
-            # Check material availability
+            # Check material availability - now returns status string per order
             orden_ids = [o.id for o in ordenes]
-            missing_stock_ids = await self.repository.get_ids_with_missing_stock(orden_ids)
+            material_statuses = await self.repository.get_material_status(orden_ids)
             
             # Serialize and inject status
-            # We can't modify the ORM objects directly if we want to follow DTO pattern strictly,
-            # but we can serialize first then update dicts
             data = jsonable_encoder(ordenes)
             
             for item in data:
                 oid = item.get('id')
-                # If ID is in missing set, then material_disponible = False
-                item['material_disponible'] = oid not in missing_stock_ids
+                # Set estado_material: 'ok', 'pedido', 'sin_stock', or 'sin_datos'
+                item['estado_material'] = material_statuses.get(oid, 'sin_datos')
                 
             logger.info(f"Service - Órdenes no planificadas obtenidas: {len(ordenes)}")
             return ResponseDTO(status=True, data=data)

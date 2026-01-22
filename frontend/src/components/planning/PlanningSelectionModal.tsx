@@ -41,7 +41,12 @@ export function PlanningSelectionModal({
     const [dateSort, setDateSort] = useState<'DEFAULT' | 'OLDEST_FIRST' | 'NEWEST_FIRST'>('DEFAULT')
     const [clientFilter, setClientFilter] = useState<string[]>([])
     const [sectorFilter, setSectorFilter] = useState<string>('ALL')
+    const [materialFilter, setMaterialFilter] = useState<string>('ALL')
+    const [promisedDateFilter, setPromisedDateFilter] = useState<string>('ALL')
+    const [batchSizeFilter, setBatchSizeFilter] = useState<string>('ALL')
     const [showClaimsOnly, setShowClaimsOnly] = useState<boolean>(false)
+    const [showDelayedOnly, setShowDelayedOnly] = useState<boolean>(false)
+    const [showWithProcessesOnly, setShowWithProcessesOnly] = useState<boolean>(false)
     const [clientSearchTerm, setClientSearchTerm] = useState('')
 
 
@@ -92,6 +97,67 @@ export function PlanningSelectionModal({
                 if (!order.reclamo || order.reclamo === 0) return false
             }
 
+            // Material Status Filter
+            if (materialFilter !== 'ALL') {
+                const estado = order.estado_material || 'sin_datos'
+                if (materialFilter === 'OK' && estado !== 'ok') return false
+                if (materialFilter === 'PEDIDO' && estado !== 'pedido') return false
+                if (materialFilter === 'SIN_STOCK' && estado !== 'sin_stock' && estado !== 'sin_datos') return false
+            }
+
+            // Promised Date Filter
+            if (promisedDateFilter !== 'ALL') {
+                const promisedDate = order.fecha_prometida ? new Date(order.fecha_prometida) : null
+                if (!promisedDate) return false
+
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+
+                // End of this week (Sunday)
+                const endOfWeek = new Date(today)
+                endOfWeek.setDate(today.getDate() + (7 - today.getDay()))
+
+                // End of month
+                const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+
+                // Next 2 weeks
+                const nextWeekEnd = new Date(today)
+                nextWeekEnd.setDate(today.getDate() + 14)
+
+                // Filter: date must be >= today AND <= end of period
+                if (promisedDateFilter === 'THIS_WEEK') {
+                    if (promisedDate < today || promisedDate > endOfWeek) return false
+                }
+                if (promisedDateFilter === 'THIS_MONTH') {
+                    if (promisedDate < today || promisedDate > endOfMonth) return false
+                }
+                if (promisedDateFilter === 'NEXT_2_WEEKS') {
+                    if (promisedDate < today || promisedDate > nextWeekEnd) return false
+                }
+            }
+
+            // Delayed Orders Filter
+            if (showDelayedOnly) {
+                const promisedDate = order.fecha_prometida ? new Date(order.fecha_prometida) : null
+                if (!promisedDate) return false
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+                if (promisedDate >= today) return false
+            }
+
+            // Has Processes Filter
+            if (showWithProcessesOnly) {
+                if (!order.procesos || order.procesos.length === 0) return false
+            }
+
+            // Batch Size Filter
+            if (batchSizeFilter !== 'ALL') {
+                const units = order.unidades || 0
+                if (batchSizeFilter === 'SMALL' && units > 10) return false
+                if (batchSizeFilter === 'MEDIUM' && (units <= 10 || units > 50)) return false
+                if (batchSizeFilter === 'LARGE' && units <= 50) return false
+            }
+
             return true
         })
         .sort((a, b) => {
@@ -107,7 +173,7 @@ export function PlanningSelectionModal({
     useEffect(() => {
         const ids = filteredOrders.map(o => o.id)
         setSelectedIds(ids)
-    }, [priorityFilter, dateSort, clientFilter, sectorFilter, showClaimsOnly])
+    }, [priorityFilter, dateSort, clientFilter, sectorFilter, materialFilter, promisedDateFilter, batchSizeFilter, showClaimsOnly, showDelayedOnly, showWithProcessesOnly])
 
     // Calculate estimated workload
     const calculateEstimatedTime = () => {
@@ -172,22 +238,19 @@ export function PlanningSelectionModal({
                     </div>
                 </DialogHeader>
 
-                {/* Filter Toolbar Section */}
-                <div className="px-6 py-4 border-b bg-slate-50/50 space-y-4 shrink-0">
-                    <div className="flex flex-col gap-4">
+                {/* Filter Toolbar Section - Symmetric & Compact */}
+                <div className="px-6 py-2.5 border-b bg-slate-50/80 space-y-2.5 shrink-0">
 
-                        {/* Primary Row: Priority & Claims */}
-                        <div className="flex flex-col sm:flex-row gap-4 justify-between">
-                            {/* Priority Group */}
-                            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Prioridad:</span>
+                    {/* Row 1: Unified Priority & Status Toggles */}
+                    <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Prioridad:</span>
+                            <div className="flex bg-slate-200/50 p-0.5 rounded-lg border border-slate-200">
                                 <button
                                     onClick={() => setPriorityFilter([])}
                                     className={cn(
-                                        "whitespace-nowrap px-3 py-1 text-xs font-medium rounded-full transition-all border",
-                                        priorityFilter.length === 0
-                                            ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                                            : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                        "px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
+                                        priorityFilter.length === 0 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                                     )}
                                 >
                                     Todas
@@ -197,141 +260,169 @@ export function PlanningSelectionModal({
                                         key={option}
                                         onClick={() => togglePriority(option)}
                                         className={cn(
-                                            "whitespace-nowrap px-3 py-1 text-xs font-medium rounded-full transition-all border",
-                                            priorityFilter.includes(option)
-                                                ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                            "px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
+                                            priorityFilter.includes(option) ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                                         )}
                                     >
-                                        {option}
+                                        {option === 'URGENTE' ? 'URG' : option}
                                     </button>
                                 ))}
                             </div>
+                        </div>
 
-                            <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
-                                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Sólo reclamos:</span>
-                                <div
-                                    className={cn(
-                                        "w-10 h-5 rounded-full p-0.5 cursor-pointer transition-colors duration-200 ease-in-out",
-                                        showClaimsOnly ? "bg-red-500" : "bg-slate-200"
-                                    )}
-                                    onClick={() => setShowClaimsOnly(!showClaimsOnly)}
-                                >
+                        <div className="h-5 w-px bg-slate-300" />
+
+                        <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setShowWithProcessesOnly(!showWithProcessesOnly)}>
+                                <div className={cn(
+                                    "w-7 h-3.5 rounded-full p-0.5 transition-colors",
+                                    showWithProcessesOnly ? "bg-green-500" : "bg-slate-300"
+                                )}>
                                     <div className={cn(
-                                        "w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-200 ease-in-out flex items-center justify-center",
-                                        showClaimsOnly ? "translate-x-5" : "translate-x-0"
-                                    )}>
-                                        {showClaimsOnly && <AlertCircle className="w-2.5 h-2.5 text-red-500" />}
-                                    </div>
+                                        "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
+                                        showWithProcessesOnly ? "translate-x-3" : "translate-x-0"
+                                    )} />
                                 </div>
-                            </div>
+                                <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Procesos</span>
+                            </label>
+
+                            <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setShowDelayedOnly(!showDelayedOnly)}>
+                                <div className={cn(
+                                    "w-7 h-3.5 rounded-full p-0.5 transition-colors",
+                                    showDelayedOnly ? "bg-red-500" : "bg-slate-300"
+                                )}>
+                                    <div className={cn(
+                                        "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
+                                        showDelayedOnly ? "translate-x-3" : "translate-x-0"
+                                    )} />
+                                </div>
+                                <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Retrasadas</span>
+                            </label>
+
+                            <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setShowClaimsOnly(!showClaimsOnly)}>
+                                <div className={cn(
+                                    "w-7 h-3.5 rounded-full p-0.5 transition-colors",
+                                    showClaimsOnly ? "bg-orange-500" : "bg-slate-300"
+                                )}>
+                                    <div className={cn(
+                                        "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
+                                        showClaimsOnly ? "translate-x-3" : "translate-x-0"
+                                    )} />
+                                </div>
+                                <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Reclamos</span>
+                            </label>
                         </div>
                     </div>
 
-                    {/* Secondary Row: Filters & Sort */}
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-                        {/* Filters */}
-                        <div className="sm:col-span-9 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        role="combobox"
-                                        className="justify-between bg-white w-full"
-                                    >
-                                        <span className="truncate">
-                                            {clientFilter.length === 0
-                                                ? "Todos los clientes"
-                                                : clientFilter.length === 1
-                                                    ? clientFilter[0]
-                                                    : `${clientFilter.length} clientes seleccionados`
-                                            }
-                                        </span>
-                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-[300px] p-0" align="start">
-                                    <div className="flex flex-col w-full bg-white rounded-md">
-                                        <div className="flex items-center border-b px-3 py-2">
-                                            <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                                            <input
-                                                className="flex h-9 w-full rounded-md bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                                placeholder="Buscar cliente..."
-                                                value={clientSearchTerm}
-                                                onChange={(e) => setClientSearchTerm(e.target.value)}
-                                            />
+                    {/* Row 2: Symmetric Grid of All Selectors */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                        {/* Client Selector */}
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant="outline" className="justify-between bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                                    <span className="truncate">
+                                        {clientFilter.length === 0 ? "Cliente: Todos" : clientFilter.length === 1 ? clientFilter[0] : `${clientFilter.length} Selecc.`}
+                                    </span>
+                                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-40" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[280px] p-0 shadow-xl border-slate-200" align="start">
+                                <div className="flex flex-col w-full bg-white rounded-md">
+                                    <div className="flex items-center border-b px-2.5 py-2 bg-slate-50/50">
+                                        <Search className="mr-2 h-3.5 w-3.5 shrink-0 opacity-40" />
+                                        <input
+                                            className="flex h-7 w-full rounded-md bg-transparent text-sm outline-none placeholder:text-slate-400"
+                                            placeholder="Filtrar clientes..."
+                                            value={clientSearchTerm}
+                                            onChange={(e) => setClientSearchTerm(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="max-h-[250px] overflow-auto p-1.5 space-y-0.5">
+                                        <div
+                                            className="relative flex cursor-pointer select-none items-center rounded-md px-2 py-1.5 text-xs hover:bg-slate-100 transition-colors"
+                                            onClick={() => setClientFilter([])}
+                                        >
+                                            <div className={cn(
+                                                "mr-2.5 flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-slate-300",
+                                                clientFilter.length === 0 ? "bg-slate-900 border-slate-900 text-white" : "text-transparent"
+                                            )}>
+                                                <Check className="h-3 w-3" />
+                                            </div>
+                                            Todos los clientes
                                         </div>
-                                        <div className="max-h-[300px] overflow-auto p-1">
+                                        {filteredClients.map((client) => (
                                             <div
-                                                className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-slate-100"
-                                                onClick={() => setClientFilter([])}
+                                                key={client}
+                                                className="relative flex cursor-pointer select-none items-center rounded-md px-2 py-1.5 text-xs hover:bg-slate-100 transition-colors"
+                                                onClick={() => setClientFilter(prev => prev.includes(client) ? prev.filter(c => c !== client) : [...prev, client])}
                                             >
                                                 <div className={cn(
-                                                    "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
-                                                    clientFilter.length === 0 ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible"
+                                                    "mr-2.5 flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-slate-300",
+                                                    clientFilter.includes(client) ? "bg-slate-900 border-slate-900 text-white" : "text-transparent"
                                                 )}>
-                                                    <Check className={cn("h-4 w-4")} />
+                                                    <Check className="h-3 w-3" />
                                                 </div>
-                                                Todos los clientes
+                                                <span className="truncate">{client}</span>
                                             </div>
-
-                                            {filteredClients.map((client) => (
-                                                <div
-                                                    key={client}
-                                                    className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-slate-100"
-                                                    onClick={() => {
-                                                        setClientFilter(prev =>
-                                                            prev.includes(client)
-                                                                ? prev.filter(c => c !== client)
-                                                                : [...prev, client]
-                                                        );
-                                                    }}
-                                                >
-                                                    <div className={cn(
-                                                        "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
-                                                        clientFilter.includes(client) ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible"
-                                                    )}>
-                                                        <Check className={cn("h-4 w-4")} />
-                                                    </div>
-                                                    {client}
-                                                </div>
-                                            ))}
-                                            {filteredClients.length === 0 && (
-                                                <div className="py-6 text-center text-sm text-muted-foreground">
-                                                    No se encontró el cliente.
-                                                </div>
-                                            )}
-                                        </div>
+                                        ))}
                                     </div>
-                                </PopoverContent>
-                            </Popover>
+                                </div>
+                            </PopoverContent>
+                        </Popover>
 
-                            <Select value={sectorFilter} onValueChange={setSectorFilter}>
-                                <SelectTrigger className="bg-white">
-                                    <SelectValue placeholder="Todos los sectores" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">Todos los sectores</SelectItem>
-                                    {uniqueSectors.map(s => (
-                                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        <Select value={sectorFilter} onValueChange={setSectorFilter}>
+                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                                <SelectValue placeholder="Sector" />
+                            </SelectTrigger>
+                            <SelectContent><SelectItem value="ALL" className="text-xs">Sector: Todos</SelectItem>{uniqueSectors.map(s => (<SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>))}</SelectContent>
+                        </Select>
 
-                        {/* Sort */}
-                        <div className="sm:col-span-3">
-                            <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>
-                                <SelectTrigger className="bg-white">
-                                    <SelectValue placeholder="Ordenar por" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="DEFAULT">Orden por defecto</SelectItem>
-                                    <SelectItem value="OLDEST_FIRST">Más antiguos primero</SelectItem>
-                                    <SelectItem value="NEWEST_FIRST">Más recientes primero</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        <Select value={materialFilter} onValueChange={setMaterialFilter}>
+                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                                <SelectValue placeholder="Material" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL" className="text-xs">Material: Todos</SelectItem>
+                                <SelectItem value="OK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-500" />Disponible</div></SelectItem>
+                                <SelectItem value="PEDIDO" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" />Pedido</div></SelectItem>
+                                <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />Sin Stock</div></SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={promisedDateFilter} onValueChange={setPromisedDateFilter}>
+                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                                <SelectValue placeholder="Entrega" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL" className="text-xs">Entrega: Todas</SelectItem>
+                                <SelectItem value="THIS_WEEK" className="text-xs">Esta semana</SelectItem>
+                                <SelectItem value="NEXT_2_WEEKS" className="text-xs">Próx. 2 semanas</SelectItem>
+                                <SelectItem value="THIS_MONTH" className="text-xs">Este mes</SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={batchSizeFilter} onValueChange={setBatchSizeFilter}>
+                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                                <SelectValue placeholder="Unidades" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL" className="text-xs">Lote: Todos</SelectItem>
+                                <SelectItem value="SMALL" className="text-xs">Pequeño (≤10)</SelectItem>
+                                <SelectItem value="MEDIUM" className="text-xs">Mediano (11-50)</SelectItem>
+                                <SelectItem value="LARGE" className="text-xs">Grande ({">"}50)</SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>
+                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                                <SelectValue placeholder="Ordenar" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="DEFAULT" className="text-xs">Orden: Defecto</SelectItem>
+                                <SelectItem value="OLDEST_FIRST" className="text-xs">Más antiguos</SelectItem>
+                                <SelectItem value="NEWEST_FIRST" className="text-xs">Más recientes</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                 </div>
 
