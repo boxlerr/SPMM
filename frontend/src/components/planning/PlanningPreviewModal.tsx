@@ -1,13 +1,13 @@
-
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw } from "lucide-react";
+import { Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 interface PlanificacionResult {
     orden_id: number;
@@ -24,9 +24,9 @@ interface PlanificacionResult {
     fecha_prometida?: string | null;
     sin_asignar: boolean;
     sin_maquinaria: boolean;
-    secuencia?: number; // Added
-    fecha_inicio_estimada?: string; // Added
-    fecha_fin_estimada?: string; // Added
+    secuencia?: number;
+    fecha_inicio_estimada?: string;
+    fecha_fin_estimada?: string;
     // Enriched fields
     cliente?: string;
     articulo?: string;
@@ -36,6 +36,8 @@ interface PlanificacionResult {
     fecha_inicio_texto?: string;
     fecha_fin_texto?: string;
     unidades?: number;
+    id_prioridad?: number;
+    prioridad_descripcion?: string;
 }
 
 interface PlanningPreviewModalProps {
@@ -63,13 +65,28 @@ export function PlanningPreviewModal({
 }: PlanningPreviewModalProps) {
 
     // Local state for edits
-    // Map: orden_id -> proceso_id -> Modified Result
     const [editedResults, setEditedResults] = React.useState<Record<string, PlanificacionResult>>({});
+    const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
 
-    // Reset edits when results change or modal opens
+    // Reset when results change or modal opens
     React.useEffect(() => {
         setEditedResults({});
+        // Default expand all if reasonable, or none. Let's start with none or all? 
+        // Maybe expand all by default for visibility since it's a preview?
+        // Current logic: Cards showed everything. So tables should probably expand all or allow easy check.
+        // Let's start expanded to mimic the "Preview" nature, otherwise it's just a list of OTs.
+        // Actually, let's expand all by default.
+        const allIds = Array.from(new Set(results.map(r => r.orden_id)));
+        setExpandedOrderIds(allIds);
     }, [results, isOpen]);
+
+    const toggleRow = (orderId: number) => {
+        setExpandedOrderIds(prev =>
+            prev.includes(orderId)
+                ? prev.filter(id => id !== orderId)
+                : [...prev, orderId]
+        );
+    };
 
     // Helper to get the effective item (original or edited)
     const getEffectiveItem = (original: PlanificacionResult) => {
@@ -89,7 +106,6 @@ export function PlanningPreviewModal({
             const op = availableOperators.find(o => o.id == value);
             updated.operario_nombre = op ? `${op.nombre} ${op.apellido}` : (value ? 'Desconocido' : null);
             updated.sin_asignar = !value;
-            // Also update rango if needed? keeping simple for now
         }
         if (field === 'id_maquinaria') {
             const maq = availableMachines.find(m => m.id == value);
@@ -97,71 +113,16 @@ export function PlanningPreviewModal({
             updated.sin_maquinaria = !value;
         }
 
-        // Special handling for Date/Time
-        // If we edit start time text, we need to recalculate numeric minutes (approx) relative to NOW or base date
-        // But for simplicity, let's assume we receive a full Date string ISO from input?
-        // Actually, the API expects 'inicio_min'. 
-        // We need a way to convert the Input datetime-local back to 'inicio_min'.
-        // Let's assume T=0 is "Now" (or whatever base the backend used).
-        // EDIT: The current backend returns 'inicio_min'. The Service calculates dates based on T=0=Now.
-        // So: new_min = (new_date - now) / 60000.
-        // We will do this calculation when confirming or just store the override values.
-        // Let's store the 'start_date_obj' or similar if we want logic here.
-        // For visual, we update 'fecha_inicio_texto'.
-
-        // Wait, to support proper saving, we need to update 'inicio_min'.
-        // Let's try to recalculate minutes relative to 'now' timestamp used effectively.
-        // We can approximate: original_date - (original_min * 60000) = Base Time.
-        // Base Time + new_min = new_date.
-        // So: new_min = (new_date - Base Time) / 60000.
-
-        if (field === 'fecha_inicio_texto') {
-            // This is just display text, we probably want a real Date handler
-        }
-
         setEditedResults(prev => ({ ...prev, [key]: updated }));
     };
 
     const handleDateChange = (original: PlanificacionResult, newDateStr: string) => {
-        // newDateStr is "YYYY-MM-DDTHH:mm" from input type="datetime-local"
         if (!newDateStr) return;
-
         const newDate = new Date(newDateStr);
         if (isNaN(newDate.getTime())) return;
 
-        // Calculate 'inicio_min'.
-        // We assume 'inicio_min' was calculated relative to NOW.
-        // We need to know what "NOW" was. 
-        // We can infer it: Current Start Date - (Current Inicio Min) minutes.
-        // Or uncouple it and just send absolute dates to backend? Backend expects minutes relative to T=0.
-        // Let's infer T=0 from the original item.
-        // T0 = OriginalStartDate - (OriginalInicioMin * 60000)
-
-        // Ensure we parse the original text date correctly or use a raw date if we had it anywhere.
-        // We have 'fecha_inicio_texto' which is formatted.
-        // Maybe we should pass the raw absolute date in 'results' from the parent?
-        // The parent calculates: startDate = new Date(now.getTime() + startMin * 60000)
-        // If we want to be precise, we should assume T0 is roughly "Now" when modal opened.
-        // Let's assume T0 = StartTime - Minutes.
-
-        // BETTER APPROACH: Use the backend provided Estimated Date to infer T0 if available.
-        // But for edits relative to "Now", simpler logic might suffice if we assume T0 is "Now".
-        // HOWEVER, the backend now returns `fecha_inicio_estimada`. 
-        // If we edit it, we should update `fecha_inicio_estimada` for display AND `inicio_min` for persistence.
-
-        // Let's assume the user is planning relative to "Now" in the backend's mind (or start of shift).
-        // A simple relative calc is: newMin = (newDate - now) / 60000. 
-        // But if backend projected start is tomorrow 8am (min 600), and now is today 5pm.
-        // Date.now() + 600*60000 might != Tomorrow 8am depending on logic.
-
-        // Let's try to preserve the offset.
-        // But actually, `inicio_min` is what the backend optimizes.
-        // If we change the date, we probably just want to FORCE that date.
-        // The backend `planificar_pendientes` doesn't really accept fixed dates easily unless we lock them.
-        // But for this UI, we just update the min.
-
+        // Approximate min calculation relative to now to maintain sort/logic consistency if needed
         const nowMs = Date.now();
-        // Fallback: estimate minutes from now.
         const newMin = Math.round((newDate.getTime() - nowMs) / 60000);
 
         const key = `${original.orden_id}-${original.proceso_id}`;
@@ -169,56 +130,59 @@ export function PlanningPreviewModal({
         const duration = current.duracion_min || 0;
 
         const formattedStart = newDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-        // Update both min and text
+
         let updated = {
             ...current,
             inicio_min: newMin,
             fin_min: newMin + duration,
             fecha_inicio_texto: formattedStart,
-            fecha_inicio_estimada: newDateStr // Ensure the input reflects the new value immediately
+            fecha_inicio_estimada: newDateStr
         };
         setEditedResults(prev => ({ ...prev, [key]: updated }));
     };
 
     // Convert text date to suitable input value (YYYY-MM-DDTHH:mm)
-    // This is tricky because we only have "dd/MM/yyyy, HH:mm" in text.
-    // We should probably rely on computed dates.
-    // Let's Compute the Date object on the fly from 'inicio_min'.
     const getDateFromMin = (min: number) => {
         const d = new Date(Date.now() + min * 60000);
-        // Format for input: YYYY-MM-DDTHH:mm
-        // Adjust for timezone offset
         const iso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
         return iso;
     }
 
-
     const handleConfirmWithEdits = () => {
-        // Merge original results with edits
-        // We need to return the array of FINAL objects.
         const finalResults = results.map(r => getEffectiveItem(r));
-        // We pass this to onConfirm. But onConfirm currently takes no args?
-        // We defined "onConfirm: () => void". We should update it to accept data or just expose it.
-        // But wait, the parent has 'results' but not 'editedResults'.
-        // We should pass the merged array to onConfirm.
         // @ts-ignore
         onConfirm(finalResults);
     };
 
-    // Helper to capitalize first letter
     const capitalize = (s: string) => {
         if (!s) return "";
         return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
     };
 
-
-    const formatTime = (minutes: number) => {
-        const h = Math.floor(minutes / 60);
-        const m = Math.round(minutes % 60);
-        return `${h}h ${m}m`;
+    const getPriorityColor = (priorityId?: number) => {
+        switch (priorityId) {
+            case 3: // Critica
+                return "bg-red-200 hover:bg-red-300 text-red-900";
+            case 2: // Urgente
+                return "bg-orange-200 hover:bg-orange-300 text-orange-900";
+            case 1: // Normal
+                return "bg-blue-100 hover:bg-blue-200 text-blue-900";
+            default:
+                return "bg-white hover:bg-gray-50";
+        }
     };
 
-    // Group results by Order ID for better visualization
+    const getPriorityLabel = (priorityId?: number, descripcion?: string) => {
+        if (descripcion) return descripcion;
+        switch (priorityId) {
+            case 3: return "Crítica";
+            case 2: return "Urgente";
+            case 1: return "Normal";
+            default: return "Normal";
+        }
+    };
+
+    // Group results by Order ID
     const groupedResults = React.useMemo(() => {
         const grouped: Record<number, PlanificacionResult[]> = {};
         results.forEach(res => {
@@ -227,40 +191,22 @@ export function PlanningPreviewModal({
             }
             grouped[res.orden_id].push(res);
         });
-
         // Sort items by secuencia if available
         Object.keys(grouped).forEach(key => {
             grouped[parseInt(key)].sort((a, b) => (a.secuencia || 0) - (b.secuencia || 0));
         });
-
         return grouped;
-    }, [results]);
-
-    // Calculate NEW load per operator from this batch
-    const newLoads = React.useMemo(() => {
-        const loads: Record<number, number> = {};
-        results.forEach(res => {
-            if (res.id_operario && res.duracion_min) {
-                loads[res.id_operario] = (loads[res.id_operario] || 0) + res.duracion_min;
-            }
-        });
-        return loads;
     }, [results]);
 
     // Calculate Conflicts
     const conflicts = React.useMemo(() => {
         let count = 0;
         const details: { ordenId: number, days: number }[] = [];
-
         results.forEach(res => {
             const effective = getEffectiveItem(res);
             if (!effective.fecha_fin_estimada || !effective.fecha_prometida) return;
-
             const estimatedEnd = new Date(effective.fecha_fin_estimada);
             const promised = new Date(effective.fecha_prometida);
-
-            // Simple check: is estimated > promised?
-            // promised usually is end of day? let's assume direct comparison
             if (estimatedEnd > promised) {
                 const diffTime = Math.abs(estimatedEnd.getTime() - promised.getTime());
                 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -276,7 +222,7 @@ export function PlanningPreviewModal({
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-4xl sm:max-w-[90vw] w-[90vw] max-h-[85vh] h-[85vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl">
+            <DialogContent className="max-w-6xl sm:max-w-[95vw] w-[95vw] max-h-[90vh] h-[90vh] flex flex-col p-0 gap-0 overflow-hidden rounded-xl">
                 <DialogHeader className="p-6 pb-4 border-b bg-white z-10">
                     <div className="flex justify-between items-start">
                         <div>
@@ -288,202 +234,193 @@ export function PlanningPreviewModal({
                             </DialogTitle>
                             <DialogDescription className="text-base text-gray-500 mt-1">
                                 Revise la planificación propuesta antes de confirmar.
-                                Se planificarán <span className="font-semibold text-gray-900">{results.length} procesos</span> correspondientes a <span className="font-semibold text-gray-900">{Object.keys(groupedResults).length} órdenes de trabajo</span>.
                             </DialogDescription>
                         </div>
                         {conflicts.count > 0 && (
-                            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg ml-4 animate-in fade-in slide-in-from-top-2">
+                            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg ml-4">
                                 <AlertCircle className="w-5 h-5 shrink-0" />
                                 <div className="flex flex-col">
                                     <span className="font-bold text-sm">⚠️ {conflicts.count} Conflictos Detectados</span>
-                                    <span className="text-xs text-red-600/80">Algunas órdenes exceden su fecha prometida</span>
                                 </div>
                             </div>
                         )}
                     </div>
                 </DialogHeader>
 
-                <ScrollArea className="flex-1 bg-gray-50/50 p-6">
+                <ScrollArea className="flex-1 bg-white p-6">
                     {Object.keys(groupedResults).length === 0 ? (
                         <div className="text-center py-20 flex flex-col items-center gap-3">
                             <div className="p-4 bg-gray-100 rounded-full">
                                 <AlertCircle className="w-8 h-8 text-gray-400" />
                             </div>
                             <p className="text-gray-500 font-medium text-lg">No hay resultados para mostrar.</p>
-                            <p className="text-sm text-gray-400">Intente seleccionar otras órdenes o parámetros.</p>
                         </div>
                     ) : (
-                        <div className="space-y-6 max-w-5xl mx-auto">
-                            {Object.entries(groupedResults).map(([ordenId, items]) => (
-                                <div key={ordenId} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden transition-all hover:shadow-md">
-                                    <div className="bg-gray-50/80 px-4 py-3 border-b flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <Badge variant="outline" className="bg-white px-2.5 py-1 text-sm font-medium border-gray-300 text-gray-700 shadow-sm">
-                                                OT #{ordenId}
-                                            </Badge>
-                                            {items[0].cliente && (
-                                                <div className="flex items-center gap-1.5 text-blue-700 font-semibold">
-                                                    <User className="w-4 h-4" />
-                                                    {capitalize(items[0].cliente)}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="text-right flex flex-col items-end">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                {items[0].unidades !== undefined && (
-                                                    <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200">
-                                                        {items[0].unidades} u.
-                                                    </Badge>
-                                                )}
-                                                {items[0].codigo && <span className="font-mono text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 inline-block text-center">{items[0].codigo}</span>}
-                                            </div>
-                                            {items[0].articulo && <span className="text-sm font-medium text-gray-700">{capitalize(items[0].articulo)}</span>}
-                                        </div>
-                                    </div>
+                        <div className="border rounded-lg overflow-hidden shadow-sm">
+                            <table className="w-full text-sm text-left">
+                                <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
+                                    <tr>
+                                        <th className="w-10 px-4 py-3"></th>
+                                        <th className="px-4 py-3 font-bold text-gray-600">OT</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600">Cliente</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600">Código</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600">Descripción</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Cant.</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Alertas</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                    {Object.entries(groupedResults).map(([ordenIdStr, items]) => {
+                                        const ordenId = parseInt(ordenIdStr);
+                                        const firstItem = items[0];
+                                        const isExpanded = expandedOrderIds.includes(ordenId);
 
-                                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                        {items.map((item, idx) => {
-                                            // Use effective item to show edits
-                                            const effectiveItem = getEffectiveItem(item);
-                                            const opId = effectiveItem.id_operario;
-                                            const currentLoad = opId ? (operatorLoads[opId] || 0) : 0;
-                                            const addedLoad = effectiveItem.duracion_min || 0;
-                                            const totalWeekLoad = currentLoad + addedLoad;
+                                        // Specific helper for this row
+                                        const rowConflicts = conflicts.details.filter(d => d.ordenId === ordenId);
+                                        const hasConflict = rowConflicts.length > 0;
+                                        const maxDelay = hasConflict ? Math.max(...rowConflicts.map(d => d.days)) : 0;
 
-                                            const batchTotalForOp = opId ? (newLoads[opId] || 0) : 0;
-                                            const projectedTotal = currentLoad + batchTotalForOp;
-                                            const itemKey = `${item.orden_id}-${item.proceso_id}`;
-                                            const isEdited = !!editedResults[itemKey];
-
-                                            // Calculate lateness locally for card
-                                            let isLate = false;
-                                            let delayDays = 0;
-                                            if (effectiveItem.fecha_fin_estimada && effectiveItem.fecha_prometida) {
-                                                const estEnd = new Date(effectiveItem.fecha_fin_estimada);
-                                                const prom = new Date(effectiveItem.fecha_prometida);
-                                                if (estEnd > prom) {
-                                                    isLate = true;
-                                                    delayDays = Math.ceil((estEnd.getTime() - prom.getTime()) / (1000 * 60 * 60 * 24));
-                                                }
-                                            }
-
-                                            return (
-                                                <div key={idx} className={`flex flex-col p-0 bg-white rounded-lg border transition-all hover:shadow-sm group ring-1 ring-gray-100 ring-offset-0 ${isEdited ? 'border-amber-400 bg-amber-50/10' : (isLate ? 'border-red-200 ring-red-100' : 'border-gray-100 hover:border-blue-300')}`}>
-
-                                                    <div className={`p-3 border-b flex items-start justify-between ${isLate ? 'bg-red-50/50 border-red-100' : 'border-gray-50 bg-gradient-to-br from-white to-gray-50/30'}`}>
-                                                        <div className="flex flex-col min-w-0 mr-2">
-                                                            <span className="font-semibold text-gray-800" title={effectiveItem.nombre_proceso}>
-                                                                {capitalize(effectiveItem.nombre_proceso)}
+                                        return (
+                                            <React.Fragment key={ordenId}>
+                                                <tr
+                                                    className={`transition-colors cursor-pointer group ${getPriorityColor(firstItem.id_prioridad)}`}
+                                                    onClick={() => toggleRow(ordenId)}
+                                                >
+                                                    <td className="px-4 py-3">
+                                                        <button className="p-1 hover:bg-black/10 rounded transition-colors text-inherit opacity-70 hover:opacity-100">
+                                                            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                                        </button>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-medium text-inherit">#{ordenId}</td>
+                                                    <td className="px-4 py-3 text-inherit opacity-90">{firstItem.cliente ? capitalize(firstItem.cliente) : "-"}</td>
+                                                    <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>
+                                                    <td className="px-4 py-3 text-inherit">{firstItem.articulo ? capitalize(firstItem.articulo) : "-"}</td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {firstItem.unidades ? <Badge variant="secondary" className="bg-white/50 text-inherit border-current/20">{firstItem.unidades}</Badge> : "-"}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        {hasConflict ? (
+                                                            <div className="flex items-center justify-center gap-1 text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200 text-xs font-bold animate-pulse">
+                                                                <AlertTriangle className="w-3 h-3" />
+                                                                +{maxDelay}d
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-[10px] uppercase font-bold tracking-wider opacity-60">
+                                                                {getPriorityLabel(firstItem.id_prioridad, firstItem.prioridad_descripcion)}
                                                             </span>
-                                                            {isLate && (
-                                                                <span className="text-[10px] font-bold text-red-600 flex items-center gap-1">
-                                                                    ⚠️ +{delayDays} días tarde
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex items-center gap-1 shrink-0">
-                                                            {isEdited && (
-                                                                <Badge variant="outline" className="text-[10px] h-5 px-1.5 bg-amber-100 text-amber-700 border-amber-200">
-                                                                    Editado
-                                                                </Badge>
-                                                            )}
-                                                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 bg-gray-100 text-gray-500">
-                                                                {effectiveItem.duracion_min}m
-                                                            </Badge>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="p-3 space-y-3">
-                                                        {/* Operator Info (Editable) */}
-                                                        <div className="space-y-1">
-                                                            <div className="flex items-center justify-between">
-                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Operario</Label>
-                                                            </div>
-                                                            <Select
-                                                                value={effectiveItem.id_operario?.toString() || "0"}
-                                                                onValueChange={(val) => handleUpdate(item, 'id_operario', val === "0" ? null : parseInt(val))}
-                                                            >
-                                                                <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200">
-                                                                    <div className="flex items-center gap-2 truncate">
-                                                                        <User className="w-3 h-3 text-gray-400" />
-                                                                        <SelectValue placeholder="Seleccionar..." />
-                                                                    </div>
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="0" className="text-gray-400 italic">Operario no asignado</SelectItem>
-                                                                    {availableOperators.map(op => {
-                                                                        const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
-                                                                        return (
-                                                                            <SelectItem
-                                                                                key={op.id}
-                                                                                value={op.id.toString()}
-                                                                                disabled={!op.disponible && !isPruebas}
-                                                                                className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : (isPruebas ? "text-amber-600 font-medium" : "")}
-                                                                            >
-                                                                                {isPruebas ? "Operario no asignado" : `${op.nombre} ${op.apellido}`} {(!op.disponible && !isPruebas) && "(Ausente)"}
-                                                                            </SelectItem>
-                                                                        );
-                                                                    })}
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-
-                                                        {/* Load Stats Bar (Only if Op assigned) */}
-                                                        {effectiveItem.id_operario && (
-                                                            <div className="py-1">
-                                                                <div className="w-full bg-gray-100 rounded-full h-1 overflow-hidden flex">
-                                                                    <div className="bg-blue-400 h-full" style={{ width: `${Math.min((currentLoad / 2400) * 100, 100)}%` }} />
-                                                                    <div className="bg-blue-600 h-full" style={{ width: `${Math.min((batchTotalForOp / 2400) * 100, 100)}%` }} />
-                                                                </div>
-                                                            </div>
                                                         )}
-
-                                                        <div className="grid grid-cols-1 gap-2">
-                                                            {/* Machine (Editable) */}
-                                                            <div className="space-y-1">
-                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Maquinaria</Label>
-                                                                <Select
-                                                                    value={effectiveItem.id_maquinaria?.toString() || "0"}
-                                                                    onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
-                                                                >
-                                                                    <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200">
-                                                                        <div className="flex items-center gap-2 truncate">
-                                                                            <Cog className="w-3 h-3 text-gray-400" />
-                                                                            <SelectValue placeholder="Toque para asignar..." />
+                                                    </td>
+                                                </tr>
+                                                {isExpanded && (
+                                                    <tr className="bg-gray-50/50">
+                                                        <td colSpan={7} className="px-0 py-0 border-b shadow-inner">
+                                                            <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
+                                                                <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
+                                                                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+                                                                    <div className="grid grid-cols-[auto_1fr_200px_200px_180px] gap-0 text-sm">
+                                                                        {/* Inner Header */}
+                                                                        <div className="contents text-xs font-bold text-gray-500 uppercase bg-gray-100/50">
+                                                                            <div className="px-4 py-2 border-b">#</div>
+                                                                            <div className="px-4 py-2 border-b">Proceso</div>
+                                                                            <div className="px-4 py-2 border-b">Operario</div>
+                                                                            <div className="px-4 py-2 border-b">Maquinaria</div>
+                                                                            <div className="px-4 py-2 border-b">Inicio Estimado</div>
                                                                         </div>
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
-                                                                        {availableMachines.map(m => (
-                                                                            <SelectItem key={m.id} value={m.id.toString()}>
-                                                                                {m.nombre}
-                                                                            </SelectItem>
-                                                                        ))}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                            </div>
 
-                                                            {/* Start Time (Editable) */}
-                                                            <div className="space-y-1">
-                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Inicio</Label>
-                                                                <div className="relative">
-                                                                    <Input
-                                                                        type="datetime-local"
-                                                                        className="h-9 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-200 font-medium"
-                                                                        value={effectiveItem.fecha_inicio_estimada ? effectiveItem.fecha_inicio_estimada.slice(0, 16) : getDateFromMin(effectiveItem.inicio_min)}
-                                                                        onChange={(e) => handleDateChange(item, e.target.value)}
-                                                                    />
+                                                                        {/* Inner Body */}
+                                                                        {items.map((item, idx) => {
+                                                                            const effectiveItem = getEffectiveItem(item);
+
+                                                                            // Is Late Check
+                                                                            let isLate = false;
+                                                                            if (effectiveItem.fecha_fin_estimada && effectiveItem.fecha_prometida) {
+                                                                                if (new Date(effectiveItem.fecha_fin_estimada) > new Date(effectiveItem.fecha_prometida)) isLate = true;
+                                                                            }
+
+                                                                            return (
+                                                                                <div key={`${item.orden_id}-${item.proceso_id}`} className="contents group/row">
+                                                                                    <div className="px-4 py-3 border-b flex items-center text-gray-400 font-mono text-xs">
+                                                                                        {idx + 1}
+                                                                                    </div>
+                                                                                    <div className="px-4 py-3 border-b flex flex-col justify-center">
+                                                                                        <span className="font-medium text-gray-800">{capitalize(effectiveItem.nombre_proceso)}</span>
+                                                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                                                            <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
+                                                                                            {isLate && <span className="text-[10px] text-red-600 font-bold flex items-center gap-0.5">⚠️ Retrasado</span>}
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    {/* Operator Select */}
+                                                                                    <div className="px-4 py-2 border-b flex items-center">
+                                                                                        <Select
+                                                                                            value={effectiveItem.id_operario?.toString() || "0"}
+                                                                                            onValueChange={(val) => handleUpdate(item, 'id_operario', val === "0" ? null : parseInt(val))}
+                                                                                        >
+                                                                                            <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100">
+                                                                                                <SelectValue placeholder="Sin asignar" />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent>
+                                                                                                <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                {availableOperators.map(op => {
+                                                                                                    const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
+                                                                                                    return (
+                                                                                                        <SelectItem
+                                                                                                            key={op.id}
+                                                                                                            value={op.id.toString()}
+                                                                                                            disabled={!op.disponible && !isPruebas}
+                                                                                                            className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
+                                                                                                        >
+                                                                                                            {op.nombre} {op.apellido} {(!op.disponible && !isPruebas) && "(Ausente)"}
+                                                                                                        </SelectItem>
+                                                                                                    );
+                                                                                                })}
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                    </div>
+
+                                                                                    {/* Machinery Select */}
+                                                                                    <div className="px-4 py-2 border-b flex items-center">
+                                                                                        <Select
+                                                                                            value={effectiveItem.id_maquinaria?.toString() || "0"}
+                                                                                            onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
+                                                                                        >
+                                                                                            <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100">
+                                                                                                <SelectValue placeholder="Sin asignar" />
+                                                                                            </SelectTrigger>
+                                                                                            <SelectContent>
+                                                                                                <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                {availableMachines.map(m => (
+                                                                                                    <SelectItem key={m.id} value={m.id.toString()}>
+                                                                                                        {m.nombre}
+                                                                                                    </SelectItem>
+                                                                                                ))}
+                                                                                            </SelectContent>
+                                                                                        </Select>
+                                                                                    </div>
+
+                                                                                    {/* Start Time Input */}
+                                                                                    <div className="px-4 py-2 border-b flex items-center">
+                                                                                        <Input
+                                                                                            type="datetime-local"
+                                                                                            className="h-8 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-amber-200"
+                                                                                            value={effectiveItem.fecha_inicio_estimada ? effectiveItem.fecha_inicio_estimada.slice(0, 16) : getDateFromMin(effectiveItem.inicio_min)}
+                                                                                            onChange={(e) => handleDateChange(item, e.target.value)}
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                        </div>
-
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     )}
                 </ScrollArea>

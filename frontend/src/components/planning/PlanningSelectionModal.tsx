@@ -438,6 +438,7 @@ export function PlanningSelectionModal({
                                 isLoading={isLoading}
                                 onRowClick={() => { }}
                                 onDataChange={onDataRefresh}
+                                hideStatus={true}
                             />
                         </div>
                     </div>

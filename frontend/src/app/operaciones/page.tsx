@@ -667,7 +667,9 @@ export default function OperacionesPage() {
           fecha_inicio_texto: formatDateShort(startDate),
           fecha_fin_texto: formatDateShort(endDate),
           fecha_prometida: order?.fecha_prometida || null,
-          unidades: order?.unidades || 0
+          unidades: order?.unidades || 0,
+          id_prioridad: order?.id_prioridad,
+          prioridad_descripcion: order?.prioridad?.descripcion
         };
       });
 

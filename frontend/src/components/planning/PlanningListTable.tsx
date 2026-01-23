@@ -62,6 +62,7 @@ interface PlanningListTableProps {
     maquinarias?: any[]; // Added
     planificacion?: PlanificacionItem[];
     onDataChange?: () => void; // Added for refreshing data without reload
+    hideStatus?: boolean; // New prop to hide status column
 }
 
 export const PlanningListTable = React.memo(_PlanningListTable);
@@ -79,7 +80,8 @@ function _PlanningListTable({
     operarios = [],
     maquinarias = [], // Added
     planificacion = [],
-    onDataChange // Added
+    onDataChange, // Added
+    hideStatus = false
 }: PlanningListTableProps) {
 
     const [sortConfig, setSortConfig] = React.useState<{
@@ -524,15 +526,17 @@ function _PlanningListTable({
                                 <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
                                     Material
                                 </th>
-                                <th
-                                    className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
-                                    onClick={() => handleSort('estado')}
-                                >
-                                    <div className="flex items-center justify-center">
-                                        Estado
-                                        <SortIcon column="estado" />
-                                    </div>
-                                </th>
+                                {!hideStatus && (
+                                    <th
+                                        className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                        onClick={() => handleSort('estado')}
+                                    >
+                                        <div className="flex items-center justify-center">
+                                            Estado
+                                            <SortIcon column="estado" />
+                                        </div>
+                                    </th>
+                                )}
                                 <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
                                     Entrega
                                 </th>
@@ -645,9 +649,11 @@ function _PlanningListTable({
                                                     </Badge>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-center">
-                                                {renderStatusBadge(getOrderStatus(item))}
-                                            </td>
+                                            {!hideStatus && (
+                                                <td className="px-4 py-3 text-center">
+                                                    {renderStatusBadge(getOrderStatus(item))}
+                                                </td>
+                                            )}
                                             <td className="px-4 py-3">
                                                 <div
                                                     className="cursor-pointer hover:opacity-70 transition-opacity"
@@ -911,8 +917,8 @@ function _PlanningListTable({
                         </tbody>
                     </table>
                 </div>
-            </Card>
-        </div>
+            </Card >
+        </div >
     );
 }
 
