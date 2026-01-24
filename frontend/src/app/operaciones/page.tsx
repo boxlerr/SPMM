@@ -667,7 +667,10 @@ export default function OperacionesPage() {
           fecha_inicio_texto: formatDateShort(startDate),
           fecha_fin_texto: formatDateShort(endDate),
           fecha_prometida: order?.fecha_prometida || null,
+          fecha_entrada: order?.fecha_entrada || null,
           unidades: order?.unidades || 0,
+          cantidad_entregada: order?.cantidad_entregada || 0,
+          estado_material: order?.estado_material || null,
           id_prioridad: order?.id_prioridad,
           prioridad_descripcion: order?.prioridad?.descripcion
         };
