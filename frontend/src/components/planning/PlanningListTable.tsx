@@ -705,7 +705,14 @@ function _PlanningListTable({
                                                         autoFocus
                                                     />
                                                 ) : (
-                                                    formatDate(item.fecha_entrega)
+                                                    item.fecha_entrega && !item.fecha_entrega.startsWith('1950') ? (
+                                                        formatDate(item.fecha_entrega)
+                                                    ) : (
+                                                        <div className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors bg-gray-50/50 px-2 py-1 rounded border border-transparent hover:border-gray-200">
+                                                            <CalendarClock className="h-3 w-3" />
+                                                            <span>dd/mm/aaaa</span>
+                                                        </div>
+                                                    )
                                                 )}
                                             </td>
                                         </tr>
