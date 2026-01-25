@@ -672,7 +672,10 @@ export default function OperacionesPage() {
           cantidad_entregada: order?.cantidad_entregada || 0,
           estado_material: order?.estado_material || null,
           id_prioridad: order?.id_prioridad,
-          prioridad_descripcion: order?.prioridad?.descripcion
+          prioridad_descripcion: order?.prioridad?.descripcion,
+          // Status flags for coloring
+          all_finalized: order?.procesos?.every(p => p.estado_proceso.id === 3) && (order?.procesos?.length || 0) > 0,
+          any_process_started: order?.procesos?.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3)
         };
       });
 
