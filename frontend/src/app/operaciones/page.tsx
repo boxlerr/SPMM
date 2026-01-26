@@ -16,7 +16,10 @@ import MateriaPrimaTab from "./_components/MateriaPrimaTab"
 
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw } from "lucide-react"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
 import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
@@ -71,7 +74,9 @@ export default function OperacionesPage() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [previewResults, setPreviewResults] = useState<any[]>([])
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
+
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
+  const [isReplanning, setIsReplanning] = useState(false)
 
   // Operators Shortcut State
   const [isOperatorsModalOpen, setIsOperatorsModalOpen] = useState(false)
@@ -232,7 +237,42 @@ export default function OperacionesPage() {
   // Use filteredPlanificacion for deriving planned orders to reflect the history selection
   const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
   const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
+
+  // Calculate REALLY Unplanned Orders (excluding ALL planned orders from ANY batch)
+  const allPlannedIds = new Set(rawPlanificacion.map(p => p.orden_id));
+  const trulyUnplannedOrders = ordenesTrabajo.filter(o => !allPlannedIds.has(o.id));
+
+  // For the standard view (not re-planning), we usually show 'unplannedOrdenes' which excludes CURRENTLY viewed planned.
+  // BUT if 'selectedLoteId' is specific, 'plannedOrdenes' has only that batch.
+  // If we want to show 'Unplanned' in the table, effectively it should be trulyUnplanned + those from other batches?
+  // Current logic: unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
+  // If I select 'Batch A', plannedOrderIds has Batch A IDs.
+  // unplannedOrdenes has Unplanned + Batch B IDs. This is CORRECT for the "Unplanned" table view if that's what's intended.
+  // BUT for Re-planning, user wants: Batch A + Unplanned. (Exclude Batch B).
   const unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
+
+
+  const ordersForPlanning = React.useMemo(() => {
+    if (isReplanning && selectedLoteId !== 'all') {
+      // Current batch orders (plannedOrdenes) + TRULY Unplanned
+      const map = new Map();
+      trulyUnplannedOrders.forEach(o => map.set(o.id, o));
+      plannedOrdenes.forEach(o => map.set(o.id, o));
+
+      // Filter out FULLY FINALIZED orders (all processes status 3)
+      // Users don't want to re-plan things that are already done.
+      const allOrders = Array.from(map.values());
+      return allOrders.filter(o => {
+        if (!o.procesos || o.procesos.length === 0) return true; // Keep if no processes (edge case)
+        // If every process is status 3 (Finalizado/Entregado etc - usually 3 is Finalizado), exclude it.
+        const allFinalized = o.procesos.every(p => p.estado_proceso.id === 3);
+        return !allFinalized;
+      });
+    }
+    // If not re-planning, we just show "unplanned" (which might include other batches' orders if we are filtering, but standard behavior)
+    return unplannedOrdenes;
+  }, [isReplanning, selectedLoteId, trulyUnplannedOrders, plannedOrdenes, unplannedOrdenes]);
+
 
   // ... existing code ...
 
@@ -782,7 +822,10 @@ export default function OperacionesPage() {
                 Disponibilidad
               </Button>
               <Button
-                onClick={() => setIsSelectionModalOpen(true)}
+                onClick={() => {
+                  setIsReplanning(false);
+                  setIsSelectionModalOpen(true);
+                }}
                 className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg"
               >
                 <CalendarClock className="mr-2 h-4 w-4" />
@@ -912,7 +955,31 @@ export default function OperacionesPage() {
                     </TabsTrigger>
                   </TabsList>
 
-                  <div className="py-2 pr-2">
+                  <div className="py-2 pr-2 flex items-center gap-2">
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (selectedLoteId === "all") {
+                          toast.error("Seleccione una planificación específica para re-planificar.");
+                          return;
+                        }
+                        setIsReplanning(true);
+                        setIsSelectionModalOpen(true);
+                      }}
+                      className={cn(
+                        "bg-white border-blue-200 transition-colors",
+                        selectedLoteId === "all"
+                          ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                          : "text-blue-600 hover:bg-gray-50"
+                      )}
+                      title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Re-planificar este lote (incluyendo órdenes pendientes)"}
+                    >
+                      <RefreshCw className={cn("mr-2 h-3.5 w-3.5", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
+                      Re-planificar
+                    </Button>
+
                     <Select value={selectedLoteId} onValueChange={setSelectedLoteId}>
                       <SelectTrigger className="w-[280px] bg-white border-gray-200">
                         <SelectValue placeholder="Filtrar por Historial / Lote" />
@@ -921,11 +988,20 @@ export default function OperacionesPage() {
                         <SelectItem value="all">Todas las Planificaciones</SelectItem>
                         {uniqueLotes.map(lote => {
                           const dateObj = new Date(lote.date);
-                          const dateStr = dateObj.toLocaleDateString();
+
+                          // Translate/Format Description
+                          let label = lote.descripcion;
+                          // If it looks like default format "Planificación [Month] [Year]", reformat it
+                          if (label.toLowerCase().includes("planificación")) {
+                            const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+                            const monthYear = capitalize(format(dateObj, 'MMMM yyyy', { locale: es }));
+                            label = `Planificación ${monthYear}`;
+                          }
+
                           const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                           return (
                             <SelectItem key={lote.id} value={lote.id}>
-                              {lote.descripcion} ({dateStr} {timeStr})
+                              {label} ({dateObj.toLocaleDateString()} {timeStr})
                             </SelectItem>
                           );
                         })}
@@ -1125,13 +1201,16 @@ export default function OperacionesPage() {
         }}
       />
 
+
       <PlanningSelectionModal
         isOpen={isSelectionModalOpen}
         onClose={() => setIsSelectionModalOpen(false)}
-        unplannedOrders={unplannedOrdenes}
+        unplannedOrders={ordersForPlanning}
         onPlan={handlePlanSelection}
         isLoading={false}
         onDataRefresh={fetchData}
+        initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
+        autoSelectAll={!isReplanning}
       /><AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}
         onClose={() => setIsAvailabilityModalOpen(false)}

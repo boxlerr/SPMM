@@ -23,7 +23,10 @@ interface PlanningSelectionModalProps {
     unplannedOrders: WorkOrder[]
     onPlan: (selectedIds: number[]) => void
     isLoading?: boolean
+
     onDataRefresh?: () => void
+    initialSelectedIds?: number[]
+    autoSelectAll?: boolean
 }
 
 export function PlanningSelectionModal({
@@ -32,9 +35,18 @@ export function PlanningSelectionModal({
     unplannedOrders,
     onPlan,
     isLoading = false,
-    onDataRefresh
+    onDataRefresh,
+    initialSelectedIds = [],
+    autoSelectAll = true
 }: PlanningSelectionModalProps) {
-    const [selectedIds, setSelectedIds] = useState<number[]>([])
+    const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
+
+    // Sync selectedIds when modal opens or initialSelectedIds changes
+    useEffect(() => {
+        if (isOpen) {
+            setSelectedIds(initialSelectedIds);
+        }
+    }, [isOpen, initialSelectedIds]);
 
     // Filter states
     const [priorityFilter, setPriorityFilter] = useState<string[]>([])
@@ -161,6 +173,12 @@ export function PlanningSelectionModal({
             return true
         })
         .sort((a, b) => {
+            // Priority Sort: Initial Selected Orders First
+            const isASelected = initialSelectedIds.includes(a.id);
+            const isBSelected = initialSelectedIds.includes(b.id);
+            if (isASelected && !isBSelected) return -1;
+            if (!isASelected && isBSelected) return 1;
+
             if (dateSort === 'DEFAULT') return 0
             const dateA = a.fecha_entrada ? new Date(a.fecha_entrada).getTime() : 0
             const dateB = b.fecha_entrada ? new Date(b.fecha_entrada).getTime() : 0
@@ -171,9 +189,10 @@ export function PlanningSelectionModal({
 
     // Auto-select filtered orders when filters change
     useEffect(() => {
+        if (!autoSelectAll) return;
         const ids = filteredOrders.map(o => o.id)
         setSelectedIds(ids)
-    }, [priorityFilter, dateSort, clientFilter, sectorFilter, materialFilter, promisedDateFilter, batchSizeFilter, showClaimsOnly, showDelayedOnly, showWithProcessesOnly])
+    }, [priorityFilter, dateSort, clientFilter, sectorFilter, materialFilter, promisedDateFilter, batchSizeFilter, showClaimsOnly, showDelayedOnly, showWithProcessesOnly, autoSelectAll])
 
     // Calculate estimated workload
     const calculateEstimatedTime = () => {
@@ -439,6 +458,7 @@ export function PlanningSelectionModal({
                                 onRowClick={() => { }}
                                 onDataChange={onDataRefresh}
                                 hideStatus={true}
+                                highlightedIds={initialSelectedIds}
                             />
                         </div>
                     </div>

@@ -63,6 +63,7 @@ interface PlanningListTableProps {
     planificacion?: PlanificacionItem[];
     onDataChange?: () => void; // Added for refreshing data without reload
     hideStatus?: boolean; // New prop to hide status column
+    highlightedIds?: number[]; // New prop for visual highlighting
 }
 
 export const PlanningListTable = React.memo(_PlanningListTable);
@@ -80,9 +81,13 @@ function _PlanningListTable({
     operarios = [],
     maquinarias = [], // Added
     planificacion = [],
+
+
     onDataChange, // Added
-    hideStatus = false
+    hideStatus = false,
+    highlightedIds = []
 }: PlanningListTableProps) {
+
 
     const [sortConfig, setSortConfig] = React.useState<{
         key: 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega' | null;
@@ -160,9 +165,16 @@ function _PlanningListTable({
         }).format(start);
     };
 
+
     const getRowColor = (item: WorkOrder) => {
+        // Highlighted check (e.g. reused orders in re-planning)
+        if (highlightedIds.includes(item.id)) {
+            return "bg-green-50 hover:bg-green-100 text-green-900 border-l-4 border-green-500";
+        }
+
         // 1. Finalizada Total (Violeta)
         const allFinalized = item.procesos?.every(p => p.estado_proceso.id === 3) && item.procesos.length > 0;
+
         if (allFinalized) return "bg-purple-200 hover:bg-purple-300 text-purple-900";
 
         // 2. Finalizada Parcial / Entregada Parcial (Gris)
