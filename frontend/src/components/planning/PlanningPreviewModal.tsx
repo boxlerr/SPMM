@@ -291,10 +291,25 @@ export function PlanningPreviewModal({
                                             const firstItem = items[0];
                                             const isExpanded = expandedOrderIds.includes(ordenId);
 
-                                            // Specific helper for this row
-                                            const rowConflicts = conflicts.details.filter(d => d.ordenId === ordenId);
-                                            const hasConflict = rowConflicts.length > 0;
-                                            const maxDelay = hasConflict ? Math.max(...rowConflicts.map(d => d.days)) : 0;
+                                            // Calculate alerts (Lateness)
+                                            const effectiveItems = items.map(i => getEffectiveItem(i));
+                                            const lateItems = effectiveItems.filter(i => {
+                                                if (!i.fecha_fin_estimada || !i.fecha_prometida) return false;
+                                                return new Date(i.fecha_fin_estimada) > new Date(i.fecha_prometida);
+                                            });
+                                            const isOrderLate = lateItems.length > 0;
+
+                                            // Calculate max delay in days
+                                            let maxDelayDays = 0;
+                                            if (isOrderLate) {
+                                                const delays = lateItems.map(i => {
+                                                    const fin = new Date(i.fecha_fin_estimada!);
+                                                    const prom = new Date(i.fecha_prometida!);
+                                                    const diffTime = fin.getTime() - prom.getTime(); // Positive if late
+                                                    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                                                });
+                                                maxDelayDays = Math.max(...delays);
+                                            }
 
                                             const percentage = firstItem.unidades ? ((firstItem.cantidad_entregada || 0) / firstItem.unidades) * 100 : 0;
 
@@ -345,10 +360,10 @@ export function PlanningPreviewModal({
                                                         </td>
                                                         <td className="px-4 py-3 text-center text-inherit opacity-90">{formatDate(firstItem.fecha_prometida)}</td>
                                                         <td className="px-4 py-3 text-center">
-                                                            {hasConflict ? (
-                                                                <div className="flex items-center justify-center gap-1 text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200 text-xs font-bold animate-pulse">
+                                                            {isOrderLate ? (
+                                                                <div className="flex items-center justify-center gap-1 text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200 text-xs font-bold whitespace-nowrap">
                                                                     <AlertTriangle className="w-3 h-3" />
-                                                                    +{maxDelay}d
+                                                                    <span>+{maxDelayDays} días</span>
                                                                 </div>
                                                             ) : null}
                                                         </td>
@@ -373,11 +388,7 @@ export function PlanningPreviewModal({
                                                                             {items.map((item, idx) => {
                                                                                 const effectiveItem = getEffectiveItem(item);
 
-                                                                                // Is Late Check
-                                                                                let isLate = false;
-                                                                                if (effectiveItem.fecha_fin_estimada && effectiveItem.fecha_prometida) {
-                                                                                    if (new Date(effectiveItem.fecha_fin_estimada) > new Date(effectiveItem.fecha_prometida)) isLate = true;
-                                                                                }
+
 
                                                                                 return (
                                                                                     <div key={`${item.orden_id}-${item.proceso_id}`} className="contents group/row">
@@ -388,7 +399,6 @@ export function PlanningPreviewModal({
                                                                                             <span className="font-medium text-gray-800">{capitalize(effectiveItem.nombre_proceso)}</span>
                                                                                             <div className="flex items-center gap-2 mt-0.5">
                                                                                                 <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
-                                                                                                {isLate && <span className="text-[10px] text-red-600 font-bold flex items-center gap-0.5">⚠️ Retrasado</span>}
                                                                                             </div>
                                                                                         </div>
 
