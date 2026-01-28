@@ -44,9 +44,13 @@ export function PlanningSelectionModal({
     // Sync selectedIds when modal opens or initialSelectedIds changes
     useEffect(() => {
         if (isOpen) {
-            setSelectedIds(initialSelectedIds);
+            // Filter out any IDs that are not in the available unplannedOrders
+            const validIds = initialSelectedIds.filter(id =>
+                unplannedOrders.some(order => order.id === id)
+            );
+            setSelectedIds(validIds);
         }
-    }, [isOpen, initialSelectedIds]);
+    }, [isOpen, initialSelectedIds, unplannedOrders]);
 
     // Filter states
     const [priorityFilter, setPriorityFilter] = useState<string[]>([])

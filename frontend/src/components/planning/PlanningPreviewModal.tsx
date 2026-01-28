@@ -253,7 +253,7 @@ export function PlanningPreviewModal({
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-[95vw] w-full h-[90vh] flex flex-col p-0 gap-0">
+            <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
                 <DialogHeader className="px-6 py-4 border-b border-gray-100 bg-white shrink-0">
                     <DialogTitle className="text-xl font-bold flex items-center gap-2">
                         <CalendarClock className="w-5 h-5 text-blue-600" />
@@ -481,6 +481,12 @@ export function PlanningPreviewModal({
                             <div className="space-y-4">
                                 {availableOperators
                                     .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden
+                                    .sort((a, b) => {
+                                        // Sort by Total Load DESC
+                                        const loadA = (operatorLoads[a.id] || 0) + results.map(r => getEffectiveItem(r)).filter(r => r.id_operario === a.id).reduce((sum, r) => sum + (r.duracion_min || 0), 0);
+                                        const loadB = (operatorLoads[b.id] || 0) + results.map(r => getEffectiveItem(r)).filter(r => r.id_operario === b.id).reduce((sum, r) => sum + (r.duracion_min || 0), 0);
+                                        return loadB - loadA;
+                                    })
                                     .map(op => {
                                         // Calculate Load
                                         const currentLoadMin = operatorLoads[op.id] || 0;
@@ -527,12 +533,6 @@ export function PlanningPreviewModal({
                                                 </div>
                                             </div>
                                         );
-                                    })
-                                    .sort((a, b) => {
-                                        // Sort by Total Load DESC
-                                        const loadA = (operatorLoads[a.id] || 0) + results.map(r => getEffectiveItem(r)).filter(r => r.id_operario === a.id).reduce((sum, r) => sum + (r.duracion_min || 0), 0);
-                                        const loadB = (operatorLoads[b.id] || 0) + results.map(r => getEffectiveItem(r)).filter(r => r.id_operario === b.id).reduce((sum, r) => sum + (r.duracion_min || 0), 0);
-                                        return loadB - loadA;
                                     })
                                 }
                             </div>
