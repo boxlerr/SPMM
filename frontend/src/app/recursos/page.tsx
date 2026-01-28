@@ -345,7 +345,13 @@ export default function RecursosPage() {
                       <tr key={maquina.id} className="hover:bg-muted/50 transition-colors">
                         <td className="px-6 py-4 text-sm font-medium">{maquina.nombre}</td>
                         <td className="px-6 py-4 text-sm">{maquina.cod_maquina || "-"}</td>
-                        <td className="px-6 py-4 text-sm">{maquina.limitacion || "-"}</td>
+                        <td className="px-6 py-4 text-sm">
+                          {maquina.limitacion ? (
+                            maquina.limitacion
+                          ) : (
+                            <span className="text-muted-foreground text-xs italic">Sin limitación</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4">
                           <div className="flex justify-end gap-2">
                             <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
@@ -382,12 +388,12 @@ export default function RecursosPage() {
                           <span className="ml-2 font-medium">{maquina.cod_maquina || "-"}</span>
                         </div>
                       </div>
-                      {maquina.limitacion && (
-                        <div className="mt-2 text-sm">
-                          <span className="text-muted-foreground">Limitación:</span>
-                          <span className="ml-2 font-medium">{maquina.limitacion}</span>
-                        </div>
-                      )}
+                      <div className="mt-2 text-sm">
+                        <span className="text-muted-foreground">Limitación:</span>
+                        <span className="ml-2 font-medium">
+                          {maquina.limitacion || <span className="text-muted-foreground text-xs italic">Sin limitación</span>}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex gap-2">
