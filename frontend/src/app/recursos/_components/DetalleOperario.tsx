@@ -275,7 +275,9 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   <div className="flex items-center gap-3 text-gray-700">
                     <Activity className="h-4 w-4 text-gray-400" />
                     <span className="font-medium">Sector:</span>
-                    <span className="ml-auto text-gray-900">{operario.sector}</span>
+                    <span className="ml-auto text-gray-900">
+                      {operario.sector || <span className="text-muted-foreground italic">Sin sector</span>}
+                    </span>
                   </div>
                   {operario.dni && (
                     <div className="flex items-center gap-3 text-gray-700">
@@ -284,13 +286,16 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       <span className="ml-auto text-gray-900">{(operario.dni || "").replace(/\./g, "")}</span>
                     </div>
                   )}
-                  {(operario.telefono || operario.celular) && (
-                    <div className="flex items-center gap-3 text-gray-700">
-                      <Phone className="h-4 w-4 text-gray-400" />
-                      <span className="font-medium">Contacto:</span>
-                      <span className="ml-auto text-gray-900">{(operario.celular || operario.telefono || "").replace(/\D/g, "")}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-3 text-gray-700">
+                    <Phone className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium">Contacto:</span>
+                    <span className="ml-auto text-gray-900">
+                      {(operario.celular || operario.telefono) ?
+                        (operario.celular || operario.telefono || "").replace(/\D/g, "") :
+                        <span className="text-muted-foreground italic">Sin teléfono</span>
+                      }
+                    </span>
+                  </div>
                   {operario.fecha_nacimiento && (
                     <div className="flex items-center gap-3 text-gray-700">
                       <Calendar className="h-4 w-4 text-gray-400" />

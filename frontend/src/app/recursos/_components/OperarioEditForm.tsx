@@ -81,31 +81,40 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 const sectRes = await fetch(`${cleanUrl}/sectores`, { headers: getAuthHeaders() });
                 if (sectRes.ok) {
                     const payload = await sectRes.json();
-                    const data = payload?.data || [];
-                    const lista = Array.isArray(data)
-                        ? data.map((s: any) => s.nombre || s).filter(Boolean)
-                        : [];
+                    const listData = Array.isArray(payload) ? payload : (payload?.data || []);
+                    const lista = listData.map((s: any) => s.nombre || s).filter(Boolean);
+
+                    if (data?.sector) {
+                        lista.push(data.sector);
+                    }
+
                     setSectores(Array.from(new Set(lista)));
                 }
             } catch (error) {
                 console.error("Error al obtener sectores:", error);
+                if (data?.sector) setSectores([data.sector]);
             }
 
             try {
                 const opRes = await fetch(`${cleanUrl}/operarios`, { headers: getAuthHeaders() });
                 if (opRes.ok) {
                     const payload = await opRes.json();
-                    const data = payload?.data || [];
-                    const arr = Array.isArray(data) ? data : [];
-                    const cats = arr.map((o: any) => o.categoria).filter(Boolean);
+                    const listData = Array.isArray(payload) ? payload : (payload?.data || []);
+                    const cats = listData.map((o: any) => o.categoria).filter(Boolean);
+
+                    if (data?.categoria) {
+                        cats.push(data.categoria);
+                    }
+
                     setCategorias(Array.from(new Set(cats)));
                 }
             } catch (error) {
                 console.error("Error al obtener categorías:", error);
+                if (data?.categoria) setCategorias([data.categoria]);
             }
         };
         loadOptions();
-    }, [cleanUrl]);
+    }, [cleanUrl, data]);
 
     const onlyDigits = (v: string) => v.replace(/\D/g, "");
     const isValidEmail = (v: string) => !v || /.+@.+\..+/.test(v);
@@ -211,15 +220,15 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                             <Label className="text-gray-700">Nombre *</Label>
-                            <Input value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} placeholder="Juan" className="bg-gray-50/50" />
+                            <Input value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} placeholder="Ej.: Juan" className="bg-gray-50/50" />
                         </div>
                         <div className="space-y-2">
                             <Label className="text-gray-700">Apellido *</Label>
-                            <Input value={formData.apellido} onChange={(e) => setFormData({ ...formData, apellido: e.target.value })} placeholder="Pérez" className="bg-gray-50/50" />
+                            <Input value={formData.apellido} onChange={(e) => setFormData({ ...formData, apellido: e.target.value })} placeholder="Ej.: Pérez" className="bg-gray-50/50" />
                         </div>
                         <div className="space-y-2">
                             <Label className="text-gray-700">DNI / CUIL / CUIT</Label>
-                            <Input value={formData.dni} onChange={(e) => setFormData({ ...formData, dni: e.target.value })} placeholder="20123456789" className="bg-gray-50/50" />
+                            <Input value={formData.dni} onChange={(e) => setFormData({ ...formData, dni: e.target.value })} placeholder="Ej.: 20123456789" className="bg-gray-50/50" />
                             {errors.dni && <p className="text-xs text-destructive">{errors.dni}</p>}
                         </div>
                         <div className="space-y-2">
@@ -302,15 +311,15 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                             <Label className="text-gray-700">Teléfono</Label>
-                            <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} placeholder="42332492" className="bg-gray-50/50" />
+                            <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} placeholder="Ej.: 42332492" className="bg-gray-50/50" />
                         </div>
                         <div className="space-y-2">
                             <Label className="text-gray-700">Celular</Label>
-                            <Input value={formData.celular} onChange={(e) => setFormData({ ...formData, celular: e.target.value })} placeholder="1127486366" className="bg-gray-50/50" />
+                            <Input value={formData.celular} onChange={(e) => setFormData({ ...formData, celular: e.target.value })} placeholder="Ej.: 1127486366" className="bg-gray-50/50" />
                         </div>
                         <div className="space-y-2 col-span-1 md:col-span-2">
                             <Label className="text-gray-700">Email (opcional)</Label>
-                            <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="persona@empresa.com" className="bg-gray-50/50" />
+                            <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="Ej.: persona@empresa.com" className="bg-gray-50/50" />
                             {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
                         </div>
                     </div>
