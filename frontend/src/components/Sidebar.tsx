@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
+import { capitalizeName } from "@/lib/utils";
 
 interface SidebarItem {
   name: string;
@@ -246,7 +247,7 @@ export default function Sidebar() {
             {((!isMobile && !isCollapsed) || (isMobile && isMobileOpen)) ? (
               <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
                 <p className="text-sm font-semibold text-gray-900 truncate">
-                  {user.nombre} {user.apellido}
+                  {capitalizeName(user.nombre)} {capitalizeName(user.apellido)}
                 </p>
                 <p className="text-xs text-gray-500 truncate mt-0.5">
                   {user.username}
@@ -255,7 +256,7 @@ export default function Sidebar() {
             ) : (
               <div className="flex items-center justify-center p-2">
                 <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white font-semibold flex items-center justify-center text-sm">
-                  {user.nombre.charAt(0)}{user.apellido.charAt(0)}
+                  {user.nombre.charAt(0).toUpperCase()}{user.apellido.charAt(0).toUpperCase()}
                 </div>
               </div>
             )}
