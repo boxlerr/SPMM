@@ -24,18 +24,18 @@ async def get_estadisticas(db=Depends(get_db)):
         total_ordenes = await db.execute(text("SELECT COUNT(*) FROM orden_trabajo"))
         total_ordenes = total_ordenes.scalar()
         
-        # Completadas: tienen fecha_entrega > 1950-01-01
-        completadas = await db.execute(text("SELECT COUNT(*) FROM orden_trabajo WHERE fecha_entrega IS NOT NULL AND fecha_entrega > '1950-01-01'"))
+        # Completadas: finalizadototal = 1
+        completadas = await db.execute(text("SELECT COUNT(*) FROM orden_trabajo WHERE finalizadototal = 1"))
         completadas = completadas.scalar()
         
-        # Retrasadas: no tienen fecha_entrega (o es 1950), fecha_prometida < hoy, Y NO tienen procesos iniciados
+        # Retrasadas: finalizadototal != 1, fecha_prometida < hoy, Y NO tienen procesos iniciados
         retrasadas = await db.execute(text("""
             SELECT COUNT(ot.id) 
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
+            WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
             AND ot.fecha_prometida < GETDATE()
             AND NOT EXISTS (
                 SELECT 1 FROM orden_trabajo_proceso otp 
@@ -46,7 +46,7 @@ async def get_estadisticas(db=Depends(get_db)):
         """))
         retrasadas = retrasadas.scalar()
         
-        # En Proceso (En Curso): fecha_entrega NULL (o 1950), tiene procesos iniciados (estado > 1)
+        # En Proceso (En Curso): finalizadototal != 1, tiene procesos iniciados (estado > 1)
         # NOTA: Incluye órdenes retrasadas si ya iniciaron
         en_proceso = await db.execute(text("""
             SELECT COUNT(ot.id) 
@@ -54,7 +54,7 @@ async def get_estadisticas(db=Depends(get_db)):
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
+            WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
             AND EXISTS (
                 SELECT 1 FROM orden_trabajo_proceso otp 
                 WHERE otp.id_orden_trabajo = ot.id 
@@ -64,14 +64,14 @@ async def get_estadisticas(db=Depends(get_db)):
         """))
         en_proceso = en_proceso.scalar()
         
-        # Pendientes: fecha_entrega NULL (o 1950), fecha_prometida >= HOY, NO tiene procesos iniciados
+        # Pendientes: finalizadototal != 1, fecha_prometida >= HOY, NO tiene procesos iniciados
         pendientes = await db.execute(text("""
             SELECT COUNT(ot.id) 
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
+            WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
             AND ot.fecha_prometida >= GETDATE() 
             AND NOT EXISTS (
                 SELECT 1 FROM orden_trabajo_proceso otp 
@@ -357,10 +357,10 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
         estado_lower = estado.lower()
         
         if estado_lower == "completadas":
-            where_clause = "ot.fecha_entrega IS NOT NULL AND ot.fecha_entrega > '1950-01-01'"
+            where_clause = "ot.finalizadototal = 1"
         elif estado_lower == "en_proceso" or estado_lower == "en_curso":
             where_clause = """
-                (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
+                (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
                 AND EXISTS (
                     SELECT 1 FROM orden_trabajo_proceso otp 
                     WHERE otp.id_orden_trabajo = ot.id 
@@ -369,7 +369,7 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
             """
         elif estado_lower == "retrasadas":
             where_clause = """
-                (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
+                (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
                 AND ot.fecha_prometida < GETDATE() 
                 AND NOT EXISTS (
                     SELECT 1 FROM orden_trabajo_proceso otp 
@@ -379,7 +379,7 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
             """
         elif estado_lower == "pendientes":
             where_clause = """
-                (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
+                (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
                 AND ot.fecha_prometida >= GETDATE() 
                 AND NOT EXISTS (
                     SELECT 1 FROM orden_trabajo_proceso otp 
@@ -390,13 +390,17 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
         else:
             return {"success": False, "error": "Estado no válido"}
         
-        # Add planificacion filter to all
-        where_clause += " AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)"
+        # Add planificacion filter to all except completed (consistent with get_estadisticas)
+        if estado_lower != "completadas":
+            where_clause += " AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)"
         
         query = text(f"""
             SELECT 
                 ot.id, 
-                a.descripcion as articulo, 
+                a.descripcion as articulo,
+                a.cod_articulo,
+                ot.fecha_entrada,
+                ot.unidades,
                 ot.fecha_prometida, 
                 ot.fecha_entrega,
                 s.nombre as sector,
@@ -462,12 +466,15 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
             data.append({
                 "id": orden.id,
                 "articulo": orden.articulo,
+                "cod_articulo": orden.cod_articulo,
+                "fecha_entrada": orden.fecha_entrada.strftime("%Y-%m-%d") if orden.fecha_entrada else None,
                 "fecha_entrega": fecha_display.strftime("%Y-%m-%d") if fecha_display else None,
+                "fecha_prometida": orden.fecha_prometida.strftime("%Y-%m-%d") if orden.fecha_prometida else None,
                 "estado": estado_display,
                 "sector": orden.sector,
                 "cliente": orden.cliente or "Sin Cliente",
                 "prioridad": orden.prioridad,
-                "cantidad": 1,  # Default
+                "cantidad": orden.unidades or 1,
                 "proceso_actual": orden.proceso_actual,
                 "procesos_totales": total_procs,
                 "procesos_pendientes": pending_procs
@@ -482,6 +489,7 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
 async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
     """Obtiene todas las órdenes prometidas para una fecha específica"""
     try:
+        print(f"DEBUG: Buscando órdenes para fecha: {fecha}")
         # Validar formato de fecha
         try:
             fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
@@ -508,14 +516,23 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
             LEFT JOIN cliente c ON ot.id_cliente = c.id
-            WHERE CAST(ot.fecha_prometida AS DATE) = :fecha
+            WHERE ot.fecha_prometida >= :fecha_inicio AND ot.fecha_prometida < :fecha_fin
             AND (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
             AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
             ORDER BY ot.id ASC
         """)
         
-        result = await db.execute(query, {"fecha": fecha})
+        # Create range for the whole day
+        fecha_fin = fecha_obj + timedelta(days=1)
+        
+        # Pass both datetimes
+        result = await db.execute(query, {
+            "fecha_inicio": datetime.combine(fecha_obj, datetime.min.time()),
+            "fecha_fin": datetime.combine(fecha_fin, datetime.min.time())
+        })
         ordenes = result.fetchall()
+        
+        print(f"DEBUG: Encontradas {len(ordenes)} órdenes para {fecha}")
         
         data = []
         for orden in ordenes:

@@ -255,7 +255,7 @@ export default function OperacionesPage() {
   const ordersForPlanning = React.useMemo(() => {
     if (isReplanning && selectedLoteId !== 'all') {
       // Current batch orders (plannedOrdenes) + TRULY Unplanned
-      const map = new Map();
+      const map = new Map<number, WorkOrder>();
       trulyUnplannedOrders.forEach(o => map.set(o.id, o));
       plannedOrdenes.forEach(o => map.set(o.id, o));
 
@@ -1107,22 +1107,7 @@ export default function OperacionesPage() {
                           if (lote) referenceDate = new Date(lote.date);
                         }
 
-                        // Normalize to YYYY-MM-DD for string comparison
-                        // (using local time to match likely user expectation vs server UTC)
-                        // Actually, 'fecha_inicio_estimada' comes as ISO string or YYYY-MM-DD from backend.
-                        // Let's use simple string slice YYYY-MM-DD if possible or proper date comparison.
 
-                        // Helper to get YYYY-MM-DD in local time
-                        const toISODate = (d: Date) => {
-                          const offset = d.getTimezoneOffset() * 60000;
-                          return new Date(d.getTime() - offset).toISOString().split('T')[0];
-                        };
-
-                        // If selectedLoteId is 'all', we use actual TODAY. 
-                        // If Lote is selected, we use that Lote's date.
-                        // Note: uniqueLotes dates are likely strings or Dates. Let's ensure string comparison matches.
-
-                        const refDateStr = toISODate(referenceDate);
 
                         // 3. Check if any process in this order is scheduled for this DAY
                         const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
@@ -1131,9 +1116,24 @@ export default function OperacionesPage() {
 
                         return orderProcesses.some(p => {
                           if (!p.fecha_inicio_estimada) return false;
-                          // p.fecha_inicio_estimada is ISO string from backend (calculated in Python)
-                          // We just need to check if it starts with the same YYYY-MM-DD
-                          return p.fecha_inicio_estimada.startsWith(refDateStr);
+                          const pStart = new Date(p.fecha_inicio_estimada);
+                          let pEnd: Date;
+
+                          if (p.fecha_fin_estimada) {
+                            pEnd = new Date(p.fecha_fin_estimada);
+                          } else {
+                            pEnd = new Date(pStart);
+                          }
+
+                          // Set reference range (Day start to Day end)
+                          const startOfDay = new Date(referenceDate);
+                          startOfDay.setHours(0, 0, 0, 0);
+
+                          const endOfDay = new Date(referenceDate);
+                          endOfDay.setHours(23, 59, 59, 999);
+
+                          // Check overlap: Task Start <= Day End AND Task End >= Day Start
+                          return pStart <= endOfDay && pEnd >= startOfDay;
                         });
                       })}
                       isLoading={isLoading}

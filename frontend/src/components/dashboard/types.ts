@@ -58,8 +58,11 @@ export interface OrdenPrioridad {
 
 export interface OrdenEstado {
     id: number
-    articulo: string
+    articulo: string // Now used as Description
+    cod_articulo?: string
+    fecha_entrada?: string | null
     fecha_entrega: string | null
+    fecha_prometida?: string | null
     estado: string
     sector: string
     cliente: string

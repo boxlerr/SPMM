@@ -17,6 +17,10 @@ class OrdenTrabajo(Base):
     id_articulo = Column(Integer, ForeignKey("articulo.id"), nullable=False)
     unidades = Column(Integer, nullable=True)
     cantidad_entregada = Column(Integer, nullable=True, default=0) # 🔹 Nuevo campo entrega
+    
+    finalizadototal = Column(Integer, nullable=True, default=0) # 0 = No, 1 = Si
+    finalizadoparcial = Column(Integer, nullable=True, default=0) 
+
     # 🔻 Eliminado: id_maquinaria (se quitó la FK a maquinaria)
 
     fecha_orden = Column(DateTime, nullable=False)

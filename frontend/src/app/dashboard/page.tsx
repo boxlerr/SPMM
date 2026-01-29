@@ -8,7 +8,7 @@ import TimelineEntregas from "@/components/dashboard/TimelineEntregas"
 import DistribucionPrioridades from "@/components/dashboard/DistribucionPrioridades"
 import TopClients from "@/components/dashboard/TopClients"
 import TopArticles from "@/components/dashboard/TopArticles"
-import AverageTime from "@/components/dashboard/AverageTime"
+
 
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
 import StatusOrdersModal from "@/components/dashboard/StatusOrdersModal"
@@ -19,8 +19,8 @@ export default function DashboardPage() {
     ordenesCriticas,
     timelineEntregas,
     topClientes,
+
     distribucionPrioridades,
-    tiempoPromedio,
     topArticulos,
     loading,
     loadingCriticas,
@@ -94,36 +94,30 @@ export default function DashboardPage() {
 
       {/* Contenedor principal */}
       <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
-        {/* Sección de estadísticas principales */}
+        {/* 1. Estado de Ordenes (Stats) */}
         <StatsCards estadisticas={estadisticas} loading={loading} error={error} onStatusClick={handleStatusClick} />
 
-        {/* Órdenes Críticas */}
+        {/* 2. Ordenes Críticas */}
         <OrdenesCriticas ordenes={ordenesCriticas} loading={loadingCriticas} />
 
-        {/* Grid de Métricas Secundarias */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-          {/* Top Clientes (Reemplaza Procesos) */}
+        {/* 3. Timeline de entregas */}
+        <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />
+
+        {/* 4. Top Artículos y Top Clientes (y Distribución) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 md:gap-8">
+          {/* Top Artículos */}
+          <TopArticles articulos={topArticulos} loading={loadingExtras} />
+
+          {/* Top Clientes */}
           <TopClients clientes={topClientes} loading={loadingExtras} />
 
-          {/* Distribución de Prioridades */}
+          {/* Distribución de Prioridades (Manteniendo para no perder funcionalidad) */}
           <DistribucionPrioridades
             prioridades={distribucionPrioridades}
             loading={loadingExtras}
             onPriorityClick={handlePriorityClick}
           />
         </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">
-          {/* Top Artículos */}
-          <TopArticles articulos={topArticulos} loading={loadingExtras} />
-
-          {/* Tiempo Promedio */}
-          <AverageTime tiempoPromedio={tiempoPromedio} loading={loadingExtras} />
-        </div>
-
-        {/* Timeline de entregas */}
-        <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />
-
 
       </div>
 

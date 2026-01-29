@@ -21,7 +21,13 @@ export default function TimelineEntregas({ timeline, loading }: TimelineEntregas
         setIsModalOpen(true)
 
         try {
-            const response = await fetch(`${API_URL}/api/dashboard/ordenes-por-fecha/${fecha}`)
+            const token = localStorage.getItem('access_token');
+            const headers: HeadersInit = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const response = await fetch(`${API_URL}/api/dashboard/ordenes-por-fecha/${fecha}`, { headers })
             const data = await response.json()
             if (data.success) {
                 setOrders(data.data)
