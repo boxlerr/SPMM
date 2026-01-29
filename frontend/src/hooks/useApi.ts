@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export function useApi<T>() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { logout } = useAuth(); // Get logout function from context
+  const { notifySessionExpired } = useAuth(); // Get notify function from context
 
   const fetchData = async (url: string): Promise<T[]> => {
     setLoading(true);
@@ -22,8 +22,8 @@ export function useApi<T>() {
       const response = await fetch(url, { headers });
 
       if (response.status === 401) {
-        console.warn("[useApi] 401 Unauthorized detected. Logging out...");
-        logout();
+        console.warn("[useApi] 401 Unauthorized detected. Notifying user...");
+        notifySessionExpired();
         return [];
       }
 
@@ -82,8 +82,8 @@ export function useApi<T>() {
       });
 
       if (response.status === 401) {
-        console.warn("[useApi] 401 Unauthorized detected during operation. Logging out...");
-        logout();
+        console.warn("[useApi] 401 Unauthorized detected during operation. Notifying user...");
+        notifySessionExpired();
         return false;
       }
 

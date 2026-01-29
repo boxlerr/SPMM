@@ -20,7 +20,7 @@ const getAuthHeaders = (): HeadersInit => {
 
 export function useDashboardData() {
     const apiUrl = API_URL
-    const { logout } = useAuth()
+    const { notifySessionExpired } = useAuth()
 
     const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null)
     const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([])
@@ -44,18 +44,18 @@ export function useDashboardData() {
     const [statusOrders, setStatusOrders] = useState<OrdenEstado[]>([])
     const [loadingStatusOrders, setLoadingStatusOrders] = useState(false)
 
-    // Helper to handle fetch with auth check
     const fetchWithAuth = useCallback(async (endpoint: string) => {
         const response = await fetch(`${apiUrl}${endpoint}`, { headers: getAuthHeaders() })
 
         if (response.status === 401) {
-            console.warn(`[useDashboardData] 401 Unauthorized at ${endpoint}. Logging out...`)
-            logout()
-            throw new Error("Sesión expirada")
+            console.warn(`[useDashboardData] 401 Unauthorized at ${endpoint}. Notifying user...`)
+            notifySessionExpired()
+            // Return a dummy response to prevent crashes in calling functions
+            return new Response(JSON.stringify({ data: [] }), { status: 401 })
         }
 
         return response
-    }, [apiUrl, logout])
+    }, [apiUrl, notifySessionExpired])
 
     const fetchEstadisticas = useCallback(async () => {
         try {

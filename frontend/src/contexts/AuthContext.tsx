@@ -2,6 +2,15 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { API_URL } from '../config';
 
 interface User {
@@ -21,6 +30,7 @@ interface AuthContextType {
   logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
+  notifySessionExpired: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const router = useRouter();
 
   // Cargar usuario del localStorage al iniciar
@@ -69,27 +80,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (data.status && data.data) {
         const { access_token, ...userData } = data.data;
-        
+
         // Guardar en localStorage
         localStorage.setItem('access_token', access_token);
         localStorage.setItem('user', JSON.stringify(userData));
-        
+
         // Actualizar estado
         setToken(access_token);
         setUser(userData);
-        
+
         return { success: true };
       } else {
-        return { 
-          success: false, 
-          error: data.errorDescription || 'Credenciales inválidas' 
+        return {
+          success: false,
+          error: data.errorDescription || 'Credenciales inválidas'
         };
       }
     } catch (error) {
       console.error('Error en login:', error);
-      return { 
-        success: false, 
-        error: 'Error de conexión con el servidor' 
+      return {
+        success: false,
+        error: 'Error de conexión con el servidor'
       };
     }
   };
@@ -98,13 +109,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Limpiar localStorage
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
-    
+
     // Limpiar estado
     setToken(null);
     setUser(null);
-    
+    setSessionExpired(false);
+
     // Redirigir a login
     router.push('/login');
+  };
+
+  const notifySessionExpired = () => {
+    setSessionExpired(true);
   };
 
   return (
@@ -116,9 +132,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         isAuthenticated: !!token && !!user,
         loading,
+        notifySessionExpired,
       }}
     >
       {children}
+
+      <AlertDialog open={sessionExpired}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sesión Expirada</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tu sesión ha caducado. Por favor, inicia sesión nuevamente para continuar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={logout}>
+              Iniciar Sesión
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AuthContext.Provider>
   );
 }

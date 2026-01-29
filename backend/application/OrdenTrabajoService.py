@@ -1,5 +1,6 @@
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
+from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
 from backend.dto.OrdenTrabajoResponseDTO import OrdenTrabajoResponseDTO
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from pydantic import ValidationError
@@ -190,7 +191,7 @@ class OrdenTrabajoService:
 
         return ResponseDTO(status=True, data=jsonable_encoder(orden))
 
-    async def modificarOrden(self, id: int, dto: OrdenTrabajoRequestDTO):
+    async def modificarOrden(self, id: int, dto: OrdenTrabajoUpdateDTO):
         logger.info(f"Service - Modificar orden de trabajo ID: {id}")
         
         nueva_data = dto.model_dump(exclude_unset=True)

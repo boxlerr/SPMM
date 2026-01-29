@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends
 from backend.application.OrdenTrabajoService import OrdenTrabajoService
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
+from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
 from backend.infrastructure.db import SessionLocal
 from backend.commons.loggers.logger import logger
 from datetime import datetime
@@ -60,7 +61,7 @@ async def obtener_orden(id: int, db=Depends(get_db)):
 
 # 🔹 Modificar orden
 @router.put("/ordenes/{id}")
-async def modificar_orden(id: int, dto: OrdenTrabajoRequestDTO, db=Depends(get_db)):
+async def modificar_orden(id: int, dto: OrdenTrabajoUpdateDTO, db=Depends(get_db)):
     service = OrdenTrabajoService(db)
     return await service.modificarOrden(id, dto)
 
