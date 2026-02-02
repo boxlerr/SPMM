@@ -32,7 +32,9 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
 
     const formatDate = (dateStr?: string) => {
         if (!dateStr) return "-";
+        if (dateStr.startsWith('1950')) return "Sin fecha prometida";
         const date = new Date(dateStr);
+        if (date.getFullYear() === 1950) return "Sin fecha prometida";
         return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 

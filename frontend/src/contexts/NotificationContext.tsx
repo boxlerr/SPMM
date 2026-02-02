@@ -7,13 +7,13 @@ export interface Notification {
   id: string; // Mantenemos string para compatibilidad con el frontend
   id_notificacion?: number; // ID de la base de datos
   message: string;
-  type: "operario_created" | "operario_updated" | "operario_deleted" | "usuario_created" | "usuario_updated" | "usuario_deleted" | "cliente_created" | "cliente_updated" | "cliente_deleted";
+  type: string; // Ahora es mas abierto, viene del backend
   timestamp: Date;
   read: boolean;
   motivo?: string; // Motivo o detalles adicionales (solo para cambio de estado)
 }
 
-import { API_URL } from "@/config";
+import { API_URL, WS_URL } from "@/config";
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -115,16 +115,65 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Recargar notificaciones periódicamente (cada 10 segundos para respuesta más rápida)
+  // 🔹 CONEXIÓN WEBSOCKET
   useEffect(() => {
-    if (!token || !isLoaded) return;
+    // Solo conectar si ya cargó inicialmente (para tener historial) y estamos en cliente
+    if (!isLoaded || typeof window === 'undefined') return;
 
-    const interval = setInterval(() => {
-      reloadNotifications();
-    }, 10000); // 10 segundos
+    // Usar la URL derivada dinámicamente en config.ts
+    // Esto manejará automáticamente localhost vs producción y http/https vs ws/wss
+    const wsUrl = `${WS_URL}/ws/notifications`;
 
-    return () => clearInterval(interval);
-  }, [token, isLoaded]);
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log("✅ WS Notificaciones Conectado");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("🔔 WS Notificación Recibida:", data);
+
+          // Mapear el DTO del backend a la estructura del frontend
+          const newNotif: Notification = {
+            id: `${Date.now()}-${Math.random()}`, // ID temporal local
+            message: data.message,
+            type: data.type, // WORK_ORDER_CREATED, etc.
+            timestamp: new Date(data.created_at || Date.now()),
+            read: false,
+            // entity podría tener info extra
+            motivo: data.entity ? JSON.stringify(data.entity) : undefined
+          };
+
+          setNotifications(prev => [newNotif, ...prev]);
+        } catch (err) {
+          console.error("Error procesando mensaje WS:", err);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("❌ WS Desconectado. Reintentando en 3s...");
+        reconnectTimeout = setTimeout(connect, 3000); // Reconnect
+      };
+
+      ws.onerror = (err) => {
+        console.error("⚠️ WS Error:", err);
+        ws?.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (ws) ws.close();
+      clearTimeout(reconnectTimeout);
+    };
+  }, [isLoaded]); // Dependencia isLoaded para asegurar que no pise la carga inicial
 
   // Exponer la función para recargar manualmente
   useEffect(() => {

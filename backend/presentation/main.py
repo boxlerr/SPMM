@@ -20,6 +20,12 @@ from backend.presentation.ClienteAPI import router as cliente_router
 from backend.presentation.ConfigAPI import router as config_router
 from backend.presentation.PiezaAPI import router as pieza_router
 from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
+from backend.presentation.ws_routes import router as ws_router, get_ws_manager
+from backend.application.event_bus import EventBus
+from backend.infrastructure.notifications.handlers import NotificationHandlers
+from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
+import asyncio
+
 
 import logging
 
@@ -57,6 +63,19 @@ app.add_middleware(
 # Auth queda público (sus endpoints protegidos lo manejan internamente)
 app.include_router(auth_router)
 
+# 🔹 Realtime & Events Wiring
+# Inicializar EventBus y Handlers
+event_bus = EventBus()
+ws_manager = get_ws_manager()
+notification_handlers = NotificationHandlers(ws_manager)
+
+# Suscribir handlers a eventos
+event_bus.subscribe(WorkOrderCreated, notification_handlers.on_work_order_created)
+event_bus.subscribe(WorkOrderStateChanged, notification_handlers.on_work_order_state_changed)
+
+# Guardar event_bus en app.state para acceso global/inyección scopeada
+app.state.event_bus = event_bus
+
 # El resto se protege globalmente
 protected_deps = [Depends(get_current_user)]
 
@@ -71,6 +90,7 @@ app.include_router(maquinaria_router,tags=["maquinarias"], dependencies=protecte
 app.include_router(notificacion_router, tags=["notificaciones"], dependencies=protected_deps)
 app.include_router(dashboard_router, tags=["dashboard"], dependencies=protected_deps)
 app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
+app.include_router(ws_router, tags=["websocket"])
 
 app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)
 
@@ -98,3 +118,10 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+@app.on_event("startup")
+async def startup_event():
+    print("🔹 RUTAS REGISTRADAS:")
+    for route in app.routes:
+        print(f"  - {route.path} ({getattr(route, 'methods', 'WS')})")
+

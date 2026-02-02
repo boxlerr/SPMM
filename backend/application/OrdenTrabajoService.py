@@ -13,9 +13,14 @@ from backend.commons.loggers.logger import logger
 from datetime import datetime
 from sqlalchemy import func, select
 
+from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
+from backend.application.event_bus import EventBus
+from typing import Optional
+
 class OrdenTrabajoService:
-    def __init__(self, db_session):
+    def __init__(self, db_session, event_bus: Optional[EventBus] = None):
         self.repository = OrdenTrabajoRepository(db_session)
+        self.event_bus = event_bus
 
     async def crearOrdenTrabajo(self, data_json: str, files: list = []):
         try:
@@ -89,6 +94,19 @@ class OrdenTrabajoService:
                     self.repository.db.add(nuevo_plano)
             
             await self.repository.db.commit()
+
+            # 🔹 Evento: Orden Creada
+            if self.event_bus:
+                try:
+                    event = WorkOrderCreated(
+                        id=orden_creada.id,
+                        id_cliente=orden_creada.id_cliente,
+                        unidades=orden_creada.unidades or 0,
+                        fecha_prometida=str(orden_creada.fecha_prometida)
+                    )
+                    await self.event_bus.publish(event)
+                except Exception as e:
+                    logger.error(f"Service - Error publishing WorkOrderCreated: {e}")
             
             return ResponseDTO(status=True, data=jsonable_encoder(orden_creada))
 
@@ -335,10 +353,24 @@ class OrdenTrabajoService:
         if is_complete:
             print(f"DEBUG: Marking order {id_orden} as completed")
             await self.repository.mark_as_completed(id_orden)
+            new_order_state = "Finalizado"
         else:
             # Si no está completa (porque se movió un proceso a no finalizado), marcar como incompleta
             print(f"DEBUG: Marking order {id_orden} as incomplete")
             await self.repository.mark_as_incomplete(id_orden)
+            new_order_state = "En Proceso"
+
+        # 🔹 Evento: Cambio de Estado
+        if self.event_bus:
+            try:
+                event = WorkOrderStateChanged(
+                    id=id_orden,
+                    new_state=new_order_state,
+                    previous_state="Desconocido" # Simplificado
+                )
+                await self.event_bus.publish(event)
+            except Exception as e:
+                logger.error(f"Service - Error publishing WorkOrderStateChanged: {e}")
             
         return ResponseDTO(status=True, data={
             "updated": True, 

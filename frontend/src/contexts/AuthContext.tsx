@@ -66,6 +66,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
   }, []);
 
+  // Control de inactividad (3 horas)
+  useEffect(() => {
+    if (!token) return;
+
+    // 3 horas en milisegundos
+    const INACTIVITY_TIMEOUT = 3 * 60 * 60 * 1000;
+    let timeoutId: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+
+      timeoutId = setTimeout(() => {
+        // Si hay un token y no ha expirado la sesión ya
+        if (token && !sessionExpired) {
+          notifySessionExpired();
+        }
+      }, INACTIVITY_TIMEOUT);
+    };
+
+    // Eventos que reinician el contador
+    const events = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart', 'click'];
+
+    // Iniciar timer
+    resetTimer();
+
+    // Agregar listeners
+    events.forEach(event => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    // Cleanup
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [token, sessionExpired]);
+
   const login = async (username: string, password: string) => {
     try {
       const response = await fetch(`${API_URL}/auth/login`, {

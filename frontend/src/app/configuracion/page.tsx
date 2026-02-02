@@ -144,6 +144,56 @@ export default function ConfiguracionPage() {
           });
         };
 
+        // Helper para formatear el motivo si es JSON
+        const formatMotivo = (motivo: string) => {
+          if (!motivo) return null;
+          try {
+            // Intentar parsear si parece JSON
+            if (motivo.trim().startsWith('{') || motivo.trim().startsWith('[')) {
+              const data = JSON.parse(motivo);
+
+              // Caso 1: Cambio de estado (WorkOrderStateChanged)
+              if (data.new_state && data.previous_state) {
+                return (
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Estado anterior:</span>
+                      <span className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 text-xs font-medium">
+                        {data.previous_state}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">Nuevo estado:</span>
+                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-xs font-medium">
+                        {data.new_state}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              // Caso 2: Creación de Orden (WorkOrderCreated)
+              if (data.unidades !== undefined) {
+                return (
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs text-gray-600">
+                      <span className="font-medium">Unidades:</span> {data.unidades}
+                    </span>
+                    {data.id && <span className="text-xs text-gray-500">ID Orden: #{data.id}</span>}
+                  </div>
+                );
+              }
+
+              // Fallback para otros JSON
+              return <pre className="text-xs text-gray-600 overflow-x-auto">{JSON.stringify(data, null, 2)}</pre>;
+            }
+            // Si no es JSON, mostrar texto plano
+            return <p className="text-xs text-gray-600 whitespace-pre-wrap">{motivo}</p>;
+          } catch (e) {
+            return <p className="text-xs text-gray-600 whitespace-pre-wrap">{motivo}</p>;
+          }
+        };
+
         return (
           <div className="p-6">
             <div className="flex items-center justify-between mb-6">
@@ -215,8 +265,8 @@ export default function ConfiguracionPage() {
                           </p>
                           {notification.motivo && (
                             <div className="mt-2 p-2 bg-gray-100 rounded-md border-l-2 border-blue-500">
-                              <p className="text-xs font-medium text-gray-700 mb-1">Motivo:</p>
-                              <p className="text-xs text-gray-600 whitespace-pre-wrap">{notification.motivo}</p>
+                              <span className="text-xs font-medium text-gray-700 block mb-1">Detalles:</span>
+                              {formatMotivo(notification.motivo)}
                             </div>
                           )}
                           <p className="text-xs text-gray-400 mt-1">

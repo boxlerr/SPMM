@@ -33,6 +33,9 @@ class Settings:
         "http://localhost:8000",
         "https://www.metlosys.com",
         "https://metlosys.com",
+        "https://spmm-1.onrender.com", # Backend production itself
+        os.getenv("FRONTEND_URL", ""),
+        "*" # Permissive for now to ensure connectivity from any frontend
     ]
 
 # Instancia global de configuración
