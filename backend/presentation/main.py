@@ -115,9 +115,17 @@ logger = logging.getLogger("uvicorn")
 def root():
     return {"message": "Backend funcionando correctamente"}
 
+from datetime import datetime
+from fastapi import Response
+
 @app.get("/health")
-def health_check():
-    return {"status": "ok"}
+def health_check(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "status": "ok", 
+        "timestamp": datetime.now().isoformat(),
+        "service": "SPMM Backend"
+    }
 
 @app.on_event("startup")
 async def startup_event():

@@ -397,6 +397,27 @@ export default function OperacionesPage() {
       return t;
     }));
 
+    // Optimistic update for PlanningListTable (ordenesTrabajo)
+    setOrdenesTrabajo(prev => prev.map(order => {
+      if (order.id !== targetTask.orden_id) return order;
+
+      const op = rawOperarios.find(o => o.id === opId);
+      const opName = op ? `${op.nombre} ${op.apellido}` : "";
+
+      return {
+        ...order,
+        procesos: order.procesos.map(proc => {
+          if (proc.proceso.id !== targetTask.proceso_id) return proc;
+          return {
+            ...proc,
+            operario_nombre: opName,
+            // If the local interface has id_operario, update it too
+            // id_operario: opId 
+          };
+        })
+      };
+    }));
+
     try {
       await fetch(`${API_URL}/planificacion/` + targetTask.id, {
         method: "PUT",
@@ -1211,7 +1232,8 @@ export default function OperacionesPage() {
         onDataRefresh={fetchData}
         initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
         autoSelectAll={!isReplanning}
-      /><AvailabilityConfigModal
+      />
+      <AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}
         onClose={() => setIsAvailabilityModalOpen(false)}
       />

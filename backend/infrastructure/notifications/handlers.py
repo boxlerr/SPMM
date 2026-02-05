@@ -20,8 +20,12 @@ class NotificationHandlers:
         saved_notification = None
         async with SessionLocal() as session:
             repo = NotificacionRepository(session)
+            msg = f"Nueva Orden de Trabajo #{event.id} creada."
+            if event.creator_name:
+                msg = f"Nueva Orden de Trabajo #{event.id} creada por {event.creator_name}."
+
             new_notif = Notificacion(
-                mensaje=f"Nueva Orden de Trabajo #{event.id} creada.",
+                mensaje=msg,
                 tipo="WORK_ORDER_CREATED",
                 leida=False,
                 id_usuario_creador=None # Podríamos pasarlo en el evento si existe
@@ -48,8 +52,12 @@ class NotificationHandlers:
         saved_notification = None
         async with SessionLocal() as session:
             repo = NotificacionRepository(session)
+            msg = f"La Orden #{event.id} cambió a estado '{event.new_state}'."
+            if event.actor_name:
+                msg = f"{event.actor_name} cambió la Orden #{event.id} a estado '{event.new_state}'."
+            
             new_notif = Notificacion(
-                mensaje=f"La Orden #{event.id} cambió a estado '{event.new_state}'.",
+                mensaje=msg,
                 tipo="WORK_ORDER_STATE_CHANGED",
                 leida=False,
                 motivo=f"Estado anterior: {event.previous_state}",

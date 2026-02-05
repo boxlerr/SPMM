@@ -1,0 +1,31 @@
+name: Keep Alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # Cada 10 minutos
+  workflow_dispatch: # Permite ejecución manual
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Health Endpoint
+        run: |
+          URL="${{ secrets.KEEPALIVE_URL || 'https://YOUR_RENDER_URL/health' }}"
+          echo "Pinging $URL..."
+          
+          # Intentar hasta 3 veces (intento inicial + 2 reintentos)
+          for i in {1..3}; do
+            if curl -fsS "$URL"; then
+              echo "Success!"
+              exit 0
+            fi
+            echo "Attempt $i failed. Web server might be down or waking up."
+            if [ $i -lt 3 ]; then
+              echo "Retrying in 5 seconds..."
+              sleep 5
+            fi
+          done
+          
+          echo "Failed after 3 attempts."
+          exit 1

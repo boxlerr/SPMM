@@ -34,3 +34,36 @@ pip install sqlalchemy
    - DB_USER
    - DB_PASSWORD
    - TRUSTED_CONNECTION
+
+## Keep Alive (Render Cold Start)
+
+Para evitar el "cold start" del plan gratuito de Render, se configuró un **GitHub Action** que hace ping al endpoint `/health` cada 10 minutos.
+
+### Configuración
+
+1.  Ir a **Settings > Secrets and variables > Actions** en el repositorio.
+2.  Crear un **New Repository Secret**:
+    *   **Name**: `KEEPALIVE_URL`
+    *   **Value**: `https://TU-APP-EN-RENDER.onrender.com/health`
+
+> **Nota:** Si no se configura este secret, el action fallará o intentará usar una URL por defecto que no funcionará.
+
+### Uso Manual
+
+El workflow corre automáticamente, pero se puede ejecutar manualmente:
+
+1.  Ir a la pestaña **Actions**.
+2.  Seleccionar "Keep Alive".
+3.  Click en **Run workflow**.
+
+### Endpoint `/health`
+
+El backend expone `GET /health` que retorna:
+```json
+{
+  "status": "ok",
+  "timestamp": "2024-02-05T10:00:00.123456",
+  "service": "SPMM Backend"
+}
+```
+Este endpoint tiene `Cache-Control: no-store` para asegurar que la petición llegue siempre al servidor.

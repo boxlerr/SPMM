@@ -22,7 +22,7 @@ class OrdenTrabajoService:
         self.repository = OrdenTrabajoRepository(db_session)
         self.event_bus = event_bus
 
-    async def crearOrdenTrabajo(self, data_json: str, files: list = []):
+    async def crearOrdenTrabajo(self, data_json: str, files: list = [], user: dict | None = None):
         try:
             import json
             data_dict = json.loads(data_json)
@@ -98,11 +98,19 @@ class OrdenTrabajoService:
             # 🔹 Evento: Orden Creada
             if self.event_bus:
                 try:
+                    creator_name = None
+                    if user:
+                        nombre = user.get('nombre', '') or ''
+                        apellido = user.get('apellido', '') or ''
+                        full_name = f"{nombre} {apellido}".strip()
+                        creator_name = full_name.title() if full_name else user.get('username', '').title()
+
                     event = WorkOrderCreated(
                         id=orden_creada.id,
                         id_cliente=orden_creada.id_cliente,
                         unidades=orden_creada.unidades or 0,
-                        fecha_prometida=str(orden_creada.fecha_prometida)
+                        fecha_prometida=str(orden_creada.fecha_prometida),
+                        creator_name=creator_name
                     )
                     await self.event_bus.publish(event)
                 except Exception as e:
@@ -338,7 +346,7 @@ class OrdenTrabajoService:
             raise ApplicationException("Error al obtener timeline de próximas entregas.") from e
 
 
-    async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, id_estado: int):
+    async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, id_estado: int, user: dict | None = None):
         logger.info(f"Service - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso} -> ID Estado {id_estado}")
         
         ot_proceso = await self.repository.update_proceso_status(id_orden, id_proceso, id_estado)
@@ -363,10 +371,18 @@ class OrdenTrabajoService:
         # 🔹 Evento: Cambio de Estado
         if self.event_bus:
             try:
+                actor_name = None
+                if user:
+                     nombre = user.get('nombre', '') or ''
+                     apellido = user.get('apellido', '') or ''
+                     full_name = f"{nombre} {apellido}".strip()
+                     actor_name = full_name.title() if full_name else user.get('username', '').title()
+
                 event = WorkOrderStateChanged(
                     id=id_orden,
                     new_state=new_order_state,
-                    previous_state="Desconocido" # Simplificado
+                    previous_state="Desconocido", # Simplificado
+                    actor_name=actor_name
                 )
                 await self.event_bus.publish(event)
             except Exception as e:

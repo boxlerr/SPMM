@@ -454,6 +454,234 @@ function _PlanningListTable({
         return `${diffMins} min`;
     };
 
+    const renderDetails = (item: WorkOrder) => (
+        <div className="ml-2 md:ml-4 w-fit border rounded-md overflow-hidden bg-white shadow-inner">
+            <div className="p-2 mb-2">
+                <div
+                    className="cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setDeliveryOrder({
+                            id: item.id,
+                            total: item.unidades || 0,
+                            delivered: item.cantidad_entregada || 0
+                        });
+                    }}
+                >
+                    <DeliveryProgress
+                        total={item.unidades}
+                        delivered={item.cantidad_entregada}
+                    />
+                </div>
+            </div>
+            <div className="px-2 pb-2">
+                <OrderFiles orderId={item.id} />
+            </div>
+            <div className="w-full text-sm">
+                <div className="hidden md:grid bg-gray-100 text-xs uppercase text-gray-600 grid-cols-[40px_280px_130px_110px_70px_80px_150px_150px] gap-2 px-4 py-2 font-bold border-t border-gray-200">
+                    <div>#</div>
+                    <div>Proceso</div>
+                    <div>Inicio Estimado</div>
+                    <div>Estado</div>
+                    <div className="text-center">Min. Est.</div>
+                    <div className="text-center text-blue-700">Min. Real</div>
+                    <div>Operario</div>
+                    <div>Maquinaria</div>
+                </div>
+
+                <div>
+                    {item.procesos && item.procesos.length > 0 ? (
+                        <>
+                            {item.procesos.map((proc, idx) => {
+                                const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
+                                const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Maquinaria no asignada");
+
+                                return (
+                                    <div
+                                        key={`${item.id}-${proc.proceso.id}`}
+                                        className="flex flex-col md:grid md:grid-cols-[40px_280px_130px_110px_70px_80px_150px_150px] gap-2 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
+                                    >
+                                        {/* # */}
+                                        <div className="flex flex-row justify-between md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase self-center">Orden</span>
+                                            <div className="flex items-center text-gray-500 font-mono">
+                                                {proc.orden}
+                                            </div>
+                                        </div>
+
+                                        {/* Proceso */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Proceso</span>
+                                            <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                        </div>
+
+                                        {/* Inicio Estimado */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Inicio Estimado</span>
+                                            <div
+                                                className="group relative flex items-center justify-center gap-1 text-xs font-medium text-amber-900 bg-amber-50/80 px-2 py-1 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
+                                                onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
+                                                title="Click para editar fecha de inicio estimada"
+                                            >
+                                                <CalendarClock className="w-3 h-3 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
+                                                {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
+                                                    <input
+                                                        type="datetime-local"
+                                                        className="border rounded px-1 py-0.5 text-[10px] w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
+                                                        value={editingStartDate.value}
+                                                        onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
+                                                        onBlur={handleStartDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
+                                                        autoFocus
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                ) : (
+                                                    <span className="group-hover:text-amber-950 transition-colors truncate max-w-[110px] block">
+                                                        {getScheduledStart(item.id, proc.proceso.id)}
+                                                    </span>
+                                                )}
+                                                <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-1 transition-all duration-200" />
+                                            </div>
+                                        </div>
+
+                                        {/* Estado */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Estado</span>
+                                            <div>
+                                                <Select
+                                                    defaultValue={proc.estado_proceso?.id?.toString() || "1"}
+                                                    onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
+                                                >
+                                                    <SelectTrigger className={cn(
+                                                        "h-7 text-xs w-full border-none shadow-none font-medium px-2",
+                                                        (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
+                                                            proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
+                                                                "text-gray-800 bg-gray-100 hover:bg-gray-200"
+                                                    )}>
+                                                        <SelectValue placeholder="Estado" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="1">Pendiente</SelectItem>
+                                                        <SelectItem value="2">En Proceso</SelectItem>
+                                                        <SelectItem value="3">Finalizado</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+
+                                        {/* Min. Est. */}
+                                        <div className="flex flex-row justify-between md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase self-center">Min. Est.</span>
+                                            <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
+                                        </div>
+
+                                        {/* Min. Real */}
+                                        <div className="flex flex-row justify-between md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase self-center">Min. Real</span>
+                                            <div className="text-center font-bold text-blue-700 text-xs">
+                                                {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
+                                            </div>
+                                        </div>
+
+                                        {/* Operario */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Operario</span>
+                                            <div>
+                                                {onOperatorChange && operarios.length > 0 ? (
+                                                    <Select
+                                                        value={operarios.find(op => {
+                                                            const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
+                                                            const currentName = (proc.operario_nombre || "").trim().toLowerCase();
+                                                            return opName === currentName;
+                                                        })?.id?.toString() || undefined}
+                                                        onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                    >
+                                                        <SelectTrigger className="h-7 text-xs w-full border border-gray-200 px-2">
+                                                            <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {operarios.map((op) => (
+                                                                <SelectItem key={op.id} value={op.id.toString()}>
+                                                                    {toTitleCase(`${op.nombre} ${op.apellido}`)}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <span className="text-gray-700 text-xs font-medium block truncate" title={toTitleCase(proc.operario_nombre) || "Sin Asignar"}>
+                                                        {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Maquinaria */}
+                                        <div className="flex flex-col md:block w-full md:w-auto">
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Maquinaria</span>
+                                            <div>
+                                                {onMachineryChange && maquinarias.length > 0 ? (
+                                                    <Select
+                                                        value={plannedItem?.id_maquinaria?.toString() || "0"}
+                                                        onValueChange={(val) => onMachineryChange(item.id, proc.proceso.id, parseInt(val))}
+                                                    >
+                                                        <SelectTrigger className="h-7 text-xs w-full border border-gray-200 px-2">
+                                                            <SelectValue placeholder={machineName} />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
+                                                            {maquinarias.map((m) => (
+                                                                <SelectItem key={m.id} value={m.id.toString()}>
+                                                                    {m.nombre}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <div className="text-gray-600 text-xs font-medium truncate" title={machineName}>
+                                                        {machineName}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+
+                            <RegisterDeliveryDialog
+                                open={!!deliveryOrder}
+                                onOpenChange={(open) => !open && setDeliveryOrder(null)}
+                                currentOrder={deliveryOrder}
+                                onSuccess={() => {
+                                    window.location.reload();
+                                }}
+                            />
+                            <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+                                <AddProcessRow
+                                    orderId={item.id}
+                                    onProcessAdded={() => {
+                                        if (onDataChange) onDataChange();
+                                    }}
+                                />
+                            </div>
+                        </>
+                    ) : (
+                        <div className="px-4 py-4 bg-gray-50 border-t border-gray-100">
+                            <div className="w-full">
+                                <AddProcessRow
+                                    orderId={item.id}
+                                    onProcessAdded={() => {
+                                        if (onDataChange) onDataChange();
+                                    }}
+                                    isCentered={true}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -474,7 +702,81 @@ function _PlanningListTable({
                 />
             </div>
 
-            <Card className="overflow-hidden border-none shadow-xl bg-white">
+            {/* Mobile Card View (< md) */}
+            <div className="md:hidden space-y-4">
+                {sortedData.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 bg-white rounded-lg shadow">
+                        {searchTerm ? "No se encontraron resultados." : "No hay órdenes activas."}
+                    </div>
+                ) : (
+                    sortedData.map((item) => (
+                        <Card key={item.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getRowColor(item))}>
+                            <div
+                                className="p-4"
+                                onClick={() => toggleRow(item.id)}
+                            >
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-bold text-lg text-gray-800">#{item.id}</span>
+                                        {!hideStatus && renderStatusBadge(getOrderStatus(item))}
+                                    </div>
+                                    <button className="text-gray-400">
+                                        {expandedOrderIds.includes(item.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                                    </button>
+                                </div>
+
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                        <span className="font-semibold text-gray-900 line-clamp-1">{item.cliente?.nombre || "-"}</span>
+                                        <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{item.articulo?.cod_articulo}</span>
+                                    </div>
+
+                                    <div className="text-gray-600 line-clamp-2 text-xs">
+                                        {item.articulo?.descripcion}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
+                                        <div>
+                                            <span className="text-gray-500 block text-[10px] uppercase">Cant.</span>
+                                            <span className="font-medium">{item.unidades}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500 block text-[10px] uppercase">Prioridad</span>
+                                            <Badge variant="outline" className="bg-white/50 text-[10px] h-5 px-1.5">
+                                                {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
+                                            </Badge>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500 block text-[10px] uppercase">Entrega</span>
+                                            <span className="font-medium">{item.fecha_entrega ? formatDate(item.fecha_entrega) : "-"}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500 block text-[10px] uppercase">Material</span>
+                                            <span className={cn("font-medium",
+                                                item.estado_material === 'sin_stock' ? "text-red-600" :
+                                                    item.estado_material === 'ok' ? "text-green-600" :
+                                                        "text-gray-600"
+                                            )}>
+                                                {item.estado_material === 'ok' ? 'OK' : item.estado_material === 'pedido' ? 'Pedido' : 'Sin Stock'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Expanded Details for Mobile */}
+                            {expandedOrderIds.includes(item.id) && (
+                                <div className="bg-gray-50 border-t p-2">
+                                    {renderDetails(item)}
+                                </div>
+                            )}
+                        </Card>
+                    ))
+                )}
+            </div>
+
+            {/* Desktop Table View (>= md) */}
+            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
@@ -572,7 +874,6 @@ function _PlanningListTable({
                                 </th>
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
-
                                     onClick={() => handleSort('fecha_prometida')}
                                 >
                                     <div className="flex items-center">
@@ -748,203 +1049,8 @@ function _PlanningListTable({
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={12} className="px-4 py-4">
-                                                    <div className="ml-8 border rounded-md overflow-hidden bg-white shadow-inner">
-                                                        <div className="px-4 pt-4 mb-4">
-                                                            <div
-                                                                className="cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setDeliveryOrder({
-                                                                        id: item.id,
-                                                                        total: item.unidades || 0,
-                                                                        delivered: item.cantidad_entregada || 0
-                                                                    });
-                                                                }}
-                                                            >
-                                                                <DeliveryProgress
-                                                                    total={item.unidades}
-                                                                    delivered={item.cantidad_entregada}
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                        <div className="px-4 pt-0">
-                                                            <OrderFiles orderId={item.id} />
-                                                        </div>
-                                                        <div className="w-full text-sm">
-                                                            <div className="bg-gray-100 text-xs uppercase text-gray-600 grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 px-4 py-2 font-bold border-t border-gray-200">
-                                                                <div>#</div>
-                                                                <div>Proceso</div>
-                                                                <div>Inicio Estimado</div>
-                                                                <div>Estado</div>
-                                                                <div className="text-center">Min. Est.</div>
-                                                                <div className="text-center text-blue-700">Min. Real</div>
-                                                                <div>Operario</div>
-                                                                <div>Maquinaria</div>
-                                                            </div>
-
-                                                            <div>
-                                                                {item.procesos && item.procesos.length > 0 ? (
-                                                                    <>
-                                                                        {item.procesos.map((proc, idx) => {
-                                                                            const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
-                                                                            const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Maquinaria no asignada");
-
-                                                                            return (
-                                                                                <div
-                                                                                    key={`${item.id}-${proc.proceso.id}`}
-                                                                                    // ... existing code ...
-                                                                                    className="grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4 px-4 py-2 border-t hover:bg-gray-50 items-center bg-white"
-                                                                                >
-                                                                                    {/* ... existing cells ... */}
-                                                                                    <div className="flex items-center text-gray-500 font-mono">
-                                                                                        {proc.orden}
-                                                                                    </div>
-                                                                                    <div className="font-medium">{proc.proceso?.nombre || "-"}</div>
-                                                                                    <div
-                                                                                        className="group relative flex items-center justify-center gap-2 text-xs font-medium text-amber-900 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
-                                                                                        onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
-                                                                                        title="Click para editar fecha de inicio estimada"
-                                                                                    >
-                                                                                        <CalendarClock className="w-3.5 h-3.5 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
-                                                                                        {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
-                                                                                            <input
-                                                                                                type="datetime-local"
-                                                                                                className="border rounded px-1 py-0.5 text-xs w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                                                                                                value={editingStartDate.value}
-                                                                                                onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
-                                                                                                onBlur={handleStartDateSave}
-                                                                                                onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
-                                                                                                autoFocus
-                                                                                                onClick={(e) => e.stopPropagation()}
-                                                                                            />
-                                                                                        ) : (
-                                                                                            <span className="group-hover:text-amber-950 transition-colors">
-                                                                                                {getScheduledStart(item.id, proc.proceso.id)}
-                                                                                            </span>
-                                                                                        )}
-                                                                                        <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-2 transition-all duration-200" />
-                                                                                    </div>
-                                                                                    <div>
-                                                                                        <Select
-                                                                                            defaultValue={proc.estado_proceso?.id?.toString() || "1"}
-                                                                                            onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
-                                                                                        >
-                                                                                            <SelectTrigger className={cn(
-                                                                                                "h-8 w-full border-none shadow-none font-medium",
-                                                                                                (proc.estado_proceso?.id === 3 || (!proc.estado_proceso?.id && false)) ? "text-green-800 bg-green-100 hover:bg-green-200" :
-                                                                                                    proc.estado_proceso?.id === 2 ? "text-blue-800 bg-blue-100 hover:bg-blue-200" :
-                                                                                                        "text-gray-800 bg-gray-100 hover:bg-gray-200"
-                                                                                            )}>
-                                                                                                <SelectValue placeholder="Estado" />
-                                                                                            </SelectTrigger>
-                                                                                            <SelectContent>
-                                                                                                <SelectItem value="1">Pendiente</SelectItem>
-                                                                                                <SelectItem value="2">En Proceso</SelectItem>
-                                                                                                <SelectItem value="3">Finalizado</SelectItem>
-                                                                                            </SelectContent>
-                                                                                        </Select>
-                                                                                    </div>
-                                                                                    <div className="text-center text-gray-600">{proc.tiempo_proceso || "-"}</div>
-
-                                                                                    {/* Real Minutes Column */}
-                                                                                    <div className="text-center font-bold text-blue-700">
-                                                                                        {calculateRealMinutes(proc.inicio_real, proc.fin_real)}
-                                                                                    </div>
-
-                                                                                    <div>
-                                                                                        {onOperatorChange && operarios.length > 0 ? (
-                                                                                            <Select
-                                                                                                value={operarios.find(op => {
-                                                                                                    const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
-                                                                                                    const currentName = (proc.operario_nombre || "").trim().toLowerCase();
-                                                                                                    return opName === currentName;
-                                                                                                })?.id?.toString() || undefined}
-                                                                                                onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
-                                                                                            >
-                                                                                                <SelectTrigger className="h-8 w-full border border-gray-200">
-                                                                                                    <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
-                                                                                                </SelectTrigger>
-                                                                                                <SelectContent>
-                                                                                                    {operarios.map((op) => (
-                                                                                                        <SelectItem key={op.id} value={op.id.toString()}>
-                                                                                                            {toTitleCase(`${op.nombre} ${op.apellido}`)}
-                                                                                                        </SelectItem>
-                                                                                                    ))}
-                                                                                                </SelectContent>
-                                                                                            </Select>
-                                                                                        ) : (
-                                                                                            <span className="text-gray-700 text-xs font-medium block">
-                                                                                                {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
-                                                                                            </span>
-                                                                                        )}
-                                                                                    </div>
-
-                                                                                    {/* Maquinaria Column */}
-                                                                                    <div>
-                                                                                        {onMachineryChange && maquinarias.length > 0 ? (
-                                                                                            <Select
-                                                                                                value={plannedItem?.id_maquinaria?.toString() || "0"}
-                                                                                                onValueChange={(val) => onMachineryChange(item.id, proc.proceso.id, parseInt(val))}
-                                                                                            >
-                                                                                                <SelectTrigger className="h-8 w-full border border-gray-200">
-                                                                                                    <SelectValue placeholder={machineName} />
-                                                                                                </SelectTrigger>
-                                                                                                <SelectContent>
-                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
-                                                                                                    {maquinarias.map((m) => (
-                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>
-                                                                                                            {m.nombre}
-                                                                                                        </SelectItem>
-                                                                                                    ))}
-                                                                                                </SelectContent>
-                                                                                            </Select>
-                                                                                        ) : (
-                                                                                            <div className="text-gray-600 text-xs font-medium">
-                                                                                                {machineName}
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                </div>
-                                                                            );
-                                                                        })}
-
-                                                                        {/* Add Process Button at the bottom of the list when items exist */}
-
-                                                                        <RegisterDeliveryDialog
-                                                                            open={!!deliveryOrder}
-                                                                            onOpenChange={(open) => !open && setDeliveryOrder(null)}
-                                                                            currentOrder={deliveryOrder}
-                                                                            onSuccess={() => {
-                                                                                window.location.reload();
-                                                                            }}
-                                                                        />
-                                                                        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
-                                                                            <AddProcessRow
-                                                                                orderId={item.id}
-                                                                                onProcessAdded={() => {
-                                                                                    if (onDataChange) onDataChange();
-                                                                                }}
-                                                                            />
-                                                                        </div>
-                                                                    </>
-                                                                ) : (
-                                                                    /* Empty State with integrated Add Process Button */
-                                                                    <div className="px-4 py-4 bg-gray-50 border-t border-gray-100">
-                                                                        <div className="w-full">
-                                                                            <AddProcessRow
-                                                                                orderId={item.id}
-                                                                                onProcessAdded={() => {
-                                                                                    if (onDataChange) onDataChange();
-                                                                                }}
-                                                                                isCentered={true}
-                                                                            />
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                                                <td colSpan={20} className="px-4 py-4">
+                                                    {renderDetails(item)}
                                                 </td>
                                             </tr>
                                         )}

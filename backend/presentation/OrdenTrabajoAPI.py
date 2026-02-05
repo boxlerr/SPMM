@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends
+from backend.core.security import get_current_user
 from backend.application.OrdenTrabajoService import OrdenTrabajoService
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
@@ -26,12 +27,13 @@ async def crear_orden(
     data: str = Form(...), 
     files: List[UploadFile] = File([]),
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
     request: Request = None
 ):
     logger.info("API - Inicio POST /ordenes (Multipart)")
     event_bus = getattr(request.app.state, "event_bus", None)
     service = OrdenTrabajoService(db, event_bus)
-    return await service.crearOrdenTrabajo(data, files)
+    return await service.crearOrdenTrabajo(data, files, user=current_user)
 
 from backend.dto.RegistrarEntregaDTO import RegistrarEntregaDTO
 
@@ -115,20 +117,34 @@ class EstadoUpdate(BaseModel):
     id_estado: int
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/estado")
-async def actualizar_estado_proceso(id_orden: int, id_proceso: int, body: EstadoUpdate, db=Depends(get_db), request: Request = None):
+async def actualizar_estado_proceso(
+    id_orden: int, 
+    id_proceso: int, 
+    body: EstadoUpdate, 
+    db=Depends(get_db), 
+    current_user: dict = Depends(get_current_user),
+    request: Request = None
+):
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/estado")
     event_bus = getattr(request.app.state, "event_bus", None)
     service = OrdenTrabajoService(db, event_bus)
-    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.id_estado)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.id_estado, user=current_user)
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/status")
-async def update_process_status(id_orden: int, id_proceso: int, body: dict, db=Depends(get_db), request: Request = None):
+async def update_process_status(
+    id_orden: int, 
+    id_proceso: int, 
+    body: dict, 
+    db=Depends(get_db), 
+    current_user: dict = Depends(get_current_user),
+    request: Request = None
+):
     # Endpoint alternativo recibiendo JSON
     new_status_id = body.get("id_estado")
     logger.info(f"API - Update Status ID: {new_status_id}")
     event_bus = getattr(request.app.state, "event_bus", None)
     service = OrdenTrabajoService(db, event_bus)
-    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status_id)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status_id, user=current_user)
 
 class ObservacionesUpdate(BaseModel):
     observaciones: str
