@@ -4,9 +4,9 @@ cd frontend
 npm install
 npm run dev
 
-http://localhost:3000
+http://localhost:3000 
 
-#Levantar Backend
+#Levantar Backend dale
 
 cd backend
 python -m venv venv # crear entorno virtual
