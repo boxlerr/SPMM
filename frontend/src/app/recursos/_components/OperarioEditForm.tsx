@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { capitalizeName } from "@/lib/utils";
-import { User, Briefcase, Phone } from "lucide-react";
+import { User, Briefcase, Phone, Wrench } from "lucide-react";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -43,6 +43,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
     const [sectores, setSectores] = useState<string[]>([]);
     const [categorias, setCategorias] = useState<string[]>([]);
+    const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
+    const [primarySkill, setPrimarySkill] = useState<string>("");
+    const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
     const [errors, setErrors] = useState<Record<string, string>>({});
 
     useEffect(() => {
@@ -59,6 +62,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 dni: data.dni || "",
                 email: (data as any)?.email || "",
             });
+            setPrimarySkill(data.skills?.find(s => s.nivel === 1)?.id_proceso?.toString() || "");
+            setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
         } else {
             setFormData({
                 nombre: "",
@@ -72,6 +77,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 dni: "",
                 email: "",
             });
+            setPrimarySkill("");
+            setSecondarySkills([]);
         }
     }, [data, isCreating]);
 
@@ -112,6 +119,17 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 console.error("Error al obtener categorías:", error);
                 if (data?.categoria) setCategorias([data.categoria]);
             }
+
+            try {
+                const procRes = await fetch(`${cleanUrl}/procesos`, { headers: getAuthHeaders() });
+                if (procRes.ok) {
+                    const payload = await procRes.json();
+                    const pdata = payload?.data || [];
+                    setProcesos(Array.isArray(pdata) ? pdata : []);
+                }
+            } catch (error) {
+                console.error("Error al obtener procesos:", error);
+            }
         };
         loadOptions();
     }, [cleanUrl, data]);
@@ -143,6 +161,20 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             dni: formData.dni ? onlyDigits(formData.dni) : null,
         } as any;
 
+        const skillsPayload: any[] = [];
+        if (primarySkill && primarySkill !== "none") {
+            skillsPayload.push({ id_proceso: parseInt(primarySkill), nivel: 1, habilitado: true });
+        }
+        secondarySkills.forEach(skillId => {
+            if (skillId && skillId !== "none" && skillId !== primarySkill) {
+                skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 2, habilitado: true });
+            }
+        });
+        const uniqueSkills = skillsPayload.filter((value, index, self) =>
+            index === self.findIndex((t) => (t.id_proceso === value.id_proceso))
+        );
+        payload.skills = uniqueSkills;
+
         if (!isCreating && data) {
             const originalTelefono = data.telefono ? onlyDigits(data.telefono) : null;
             const originalCelular = data.celular ? onlyDigits(data.celular) : null;
@@ -157,7 +189,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 (data.fecha_ingreso || "") !== (payload.fecha_ingreso || "") ||
                 (originalTelefono || "") !== (payload.telefono || "") ||
                 (originalCelular || "") !== (payload.celular || "") ||
-                (originalDni || "") !== (payload.dni || "");
+                (originalDni || "") !== (payload.dni || "") ||
+                JSON.stringify(data.skills?.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
                 method: "PUT",
@@ -196,6 +229,16 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     };
 
     const disabled = !formData.nombre || !formData.apellido || !formData.sector || !formData.categoria || !formData.fecha_nacimiento || !formData.fecha_ingreso;
+
+    const handleSecondaryChange = (index: number, val: string) => {
+        const newSkills = [...secondarySkills];
+        if (val === "none") {
+            newSkills[index] = "";
+        } else {
+            newSkills[index] = val;
+        }
+        setSecondarySkills(newSkills.filter(v => v !== ""));
+    };
 
     return (
         <div className="flex flex-col w-full">
@@ -292,6 +335,69 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                             <Label className="text-gray-700">Fecha de Ingreso *</Label>
                             <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} required className="bg-gray-50/50" />
                             {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Skills Info */}
+                <div className="bg-white rounded-lg border shadow-sm p-6 col-span-1 md:col-span-2 xl:col-span-1">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="h-10 w-10 rounded-full bg-purple-50 flex items-center justify-center">
+                            <Wrench className="h-5 w-5 text-purple-600" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-gray-900">Habilidades</h3>
+                            <p className="text-sm text-gray-500">Procesos asignados al operario</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-6">
+                        <div className="space-y-2">
+                            <Label className="text-gray-700">Habilidad Principal</Label>
+                            <Select value={primarySkill || "none"} onValueChange={setPrimarySkill}>
+                                <SelectTrigger className="bg-gray-50/50">
+                                    <SelectValue placeholder="Seleccionar" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Ninguna</SelectItem>
+                                    {procesos.map(p => (
+                                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="text-gray-700">Habilidades Secundarias (hasta 2)</Label>
+                            <div className="flex flex-col gap-3">
+                                <Select
+                                    value={secondarySkills[0] || "none"}
+                                    onValueChange={(val) => handleSecondaryChange(0, val)}
+                                >
+                                    <SelectTrigger className="bg-gray-50/50">
+                                        <SelectValue placeholder="Seleccionar habilidad" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">Ninguna</SelectItem>
+                                        {procesos.map(p => (
+                                            <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Select
+                                    value={secondarySkills[1] || "none"}
+                                    onValueChange={(val) => handleSecondaryChange(1, val)}
+                                >
+                                    <SelectTrigger className="bg-gray-50/50">
+                                        <SelectValue placeholder="Seleccionar habilidad" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">Ninguna</SelectItem>
+                                        {procesos.map(p => (
+                                            <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                     </div>
                 </div>

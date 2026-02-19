@@ -2,12 +2,13 @@ import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { User, Phone, Activity, Calendar, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil } from "lucide-react";
-import { Operario } from "../_types";
+import { User, Phone, Activity, Calendar, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench } from "lucide-react";
+import { Operario, ProcesoSkill } from "../_types";
 import { PlanificacionItem } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useToast } from "@/components/ui/toast";
 import { useNotifications } from "@/contexts/NotificationContext";
 import OperarioEditForm from "./OperarioEditForm";
@@ -32,6 +33,9 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   const { addNotification } = useNotifications();
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [procesosMap, setProcesosMap] = useState<Record<number, string>>({});
+  const [updatingSkills, setUpdatingSkills] = useState<Set<number>>(new Set());
+  const [renderTrigger, setRenderTrigger] = useState(0); // For optimistic UI updates
 
   // Local state for tasks to allow optimistic updates
   const [tasks, setTasks] = useState<PlanificacionItem[]>(initialTasks);
@@ -41,6 +45,23 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   useEffect(() => {
     setTasks(initialTasks);
   }, [initialTasks]);
+
+  useEffect(() => {
+    const fetchProcesos = async () => {
+      try {
+        const cleanUrl = API_URL.replace(/\/$/, "");
+        const res = await fetch(`${cleanUrl}/procesos`, { headers: getAuthHeaders() as Record<string, string> });
+        if (res.ok) {
+          const payload = await res.json();
+          const pdata = payload?.data || [];
+          const map: Record<number, string> = {};
+          pdata.forEach((p: any) => { map[p.id] = p.nombre; });
+          setProcesosMap(map);
+        }
+      } catch (e) { }
+    };
+    fetchProcesos();
+  }, []);
 
   const capitalizeName = (text?: string) => {
     if (!text) return "";
@@ -140,6 +161,51 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
       showToast("Error de conexión", 'error');
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleSkillToggle = async (id_proceso: number, currentState: boolean) => {
+    if (updatingSkills.has(id_proceso)) return;
+
+    setUpdatingSkills(prev => new Set(prev).add(id_proceso));
+    const newHabilitado = !currentState;
+
+    // Optimistic Update
+    const skillList = operario.skills || [];
+    const skillToUpdate = skillList.find(x => x.id_proceso === id_proceso);
+    if (skillToUpdate) {
+      skillToUpdate.habilitado = newHabilitado;
+      setRenderTrigger(r => r + 1);
+    }
+
+    try {
+      const cleanUrl = API_URL.replace(/\/$/, "");
+      const response = await fetch(`${cleanUrl}/operarios/${operario.id}/skills/${id_proceso}/estado`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        body: JSON.stringify({ habilitado: newHabilitado }),
+      });
+
+      if (response.ok) {
+        showToast(`Habilidad ${newHabilitado ? 'activada' : 'desactivada'}`, 'success');
+        onOperatorUpdated?.();
+      } else {
+        // Revert
+        if (skillToUpdate) skillToUpdate.habilitado = currentState;
+        setRenderTrigger(r => r + 1);
+        showToast("Error al actualizar la habilidad (Error del servidor)", 'error');
+      }
+    } catch (error) {
+      // Revert
+      if (skillToUpdate) skillToUpdate.habilitado = currentState;
+      setRenderTrigger(r => r + 1);
+      showToast("Error de conexión al actualizar la habilidad", 'error');
+    } finally {
+      setUpdatingSkills(prev => {
+        const next = new Set(prev);
+        next.delete(id_proceso);
+        return next;
+      });
     }
   };
 
@@ -316,6 +382,80 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       <span className="font-medium">Email:</span>
                       <span className="ml-auto text-gray-900">{operario.email}</span>
                     </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-4 text-sm mt-2">
+                  <div className="flex items-center gap-2 mb-2 px-1">
+                    <Wrench className="h-4 w-4 text-purple-500" />
+                    <h4 className="font-semibold text-gray-800">Habilidades</h4>
+                  </div>
+                  {(!operario.skills || operario.skills.length === 0) ? (
+                    <p className="text-muted-foreground italic text-xs px-2 mb-2">Sin habilidades registradas</p>
+                  ) : (
+                    <Accordion type="multiple" className="w-full" defaultValue={["primary", "secondary"]}>
+                      {operario.skills.some(s => s.nivel === 1) && (
+                        <AccordionItem value="primary" className="border-b-0 mb-3 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                          <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
+                            Habilidad Principal
+                          </AccordionTrigger>
+                          <AccordionContent className="pt-0 pb-3 ml-1">
+                            <div className="flex flex-col gap-2.5">
+                              {operario.skills.filter(s => s.nivel === 1).map(skill => (
+                                <div key={skill.id_proceso} className="flex justify-between items-center py-1">
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-medium text-gray-900 text-sm">
+                                      {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
+                                    </span>
+                                  </div>
+                                  <button
+                                    disabled={updatingSkills.has(skill.id_proceso)}
+                                    onClick={() => handleSkillToggle(skill.id_proceso, skill.habilitado)}
+                                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-green-500' : 'bg-slate-300'}`}
+                                    title={skill.habilitado ? "Desactivar Habilidad" : "Activar Habilidad"}
+                                  >
+                                    <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      )}
+
+                      {operario.skills.some(s => s.nivel === 2) && (
+                        <AccordionItem value="secondary" className="border-b-0 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
+                          <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
+                            Habilidades Secundarias
+                          </AccordionTrigger>
+                          <AccordionContent className="pt-0 pb-3 ml-1">
+                            <div className="flex flex-col gap-3">
+                              {operario.skills.filter(s => s.nivel === 2).map((skill, idx) => (
+                                <div key={skill.id_proceso} className={`flex justify-between items-center py-1 ${idx !== 0 ? 'border-t border-gray-100 pt-3' : ''}`}>
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-medium text-gray-900 text-sm">
+                                      {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
+                                    </span>
+                                  </div>
+                                  <button
+                                    disabled={updatingSkills.has(skill.id_proceso)}
+                                    onClick={() => handleSkillToggle(skill.id_proceso, skill.habilitado)}
+                                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-green-500' : 'bg-slate-300'}`}
+                                    title={skill.habilitado ? "Desactivar Habilidad" : "Activar Habilidad"}
+                                  >
+                                    <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      )}
+                    </Accordion>
                   )}
                 </div>
               </div>
