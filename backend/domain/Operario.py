@@ -1,6 +1,10 @@
 from sqlalchemy import Column, Integer, String, Date, Boolean
 from backend.infrastructure.db import Base
 from sqlalchemy.orm import relationship
+import typing
+
+if typing.TYPE_CHECKING:
+    from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 
 
 class Operario(Base):
@@ -29,3 +33,4 @@ class Operario(Base):
     #dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
 
     rangos = relationship("OperarioRango", back_populates="operario")
+    procesos_skill = relationship("OperarioProcesoSkill", back_populates="operario", cascade="all, delete-orphan")

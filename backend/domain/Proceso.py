@@ -1,6 +1,10 @@
 from sqlalchemy import Column, Integer, String, Text
 from backend.infrastructure.db import Base
 from sqlalchemy.orm import relationship
+import typing
+
+if typing.TYPE_CHECKING:
+    from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 
 class Proceso(Base):
     __tablename__ = "proceso"
@@ -12,3 +16,4 @@ class Proceso(Base):
     # 🔹 Relaciones
     rangos = relationship("RangoProceso", back_populates="proceso")
     ordenes_trabajo_proceso = relationship("OrdenTrabajoProceso", back_populates="proceso")
+    operarios_skill = relationship("OperarioProcesoSkill", back_populates="proceso", cascade="all, delete-orphan")
