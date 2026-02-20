@@ -44,7 +44,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     const [sectores, setSectores] = useState<string[]>([]);
     const [categorias, setCategorias] = useState<string[]>([]);
     const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
-    const [primarySkill, setPrimarySkill] = useState<string>("");
+    const [primarySkills, setPrimarySkills] = useState<string[]>([]);
     const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
     const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -62,7 +62,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 dni: data.dni || "",
                 email: (data as any)?.email || "",
             });
-            setPrimarySkill(data.skills?.find(s => s.nivel === 1)?.id_proceso?.toString() || "");
+            setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
             setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
         } else {
             setFormData({
@@ -77,7 +77,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 dni: "",
                 email: "",
             });
-            setPrimarySkill("");
+            setPrimarySkills([]);
             setSecondarySkills([]);
         }
     }, [data, isCreating]);
@@ -162,12 +162,17 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         } as any;
 
         const skillsPayload: any[] = [];
-        if (primarySkill && primarySkill !== "none") {
-            skillsPayload.push({ id_proceso: parseInt(primarySkill), nivel: 1, habilitado: true });
-        }
+        primarySkills.forEach(skillId => {
+            if (skillId && skillId !== "none") {
+                skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 1, habilitado: true });
+            }
+        });
         secondarySkills.forEach(skillId => {
-            if (skillId && skillId !== "none" && skillId !== primarySkill) {
-                skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 2, habilitado: true });
+            if (skillId && skillId !== "none") {
+                // Remove duplicates by preferring primary if user messed up and selected the same thing
+                if (!skillsPayload.find(s => s.id_proceso === parseInt(skillId))) {
+                    skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 2, habilitado: true });
+                }
             }
         });
         const uniqueSkills = skillsPayload.filter((value, index, self) =>
@@ -230,14 +235,28 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
     const disabled = !formData.nombre || !formData.apellido || !formData.sector || !formData.categoria || !formData.fecha_nacimiento || !formData.fecha_ingreso;
 
+    const handlePrimaryChange = (index: number, val: string) => {
+        const newSkills = [...primarySkills];
+        newSkills[index] = val === "none" ? "" : val;
+        setPrimarySkills(newSkills); // don't filter out empties immediately so deleting works
+    };
+
     const handleSecondaryChange = (index: number, val: string) => {
         const newSkills = [...secondarySkills];
-        if (val === "none") {
-            newSkills[index] = "";
-        } else {
-            newSkills[index] = val;
-        }
-        setSecondarySkills(newSkills.filter(v => v !== ""));
+        newSkills[index] = val === "none" ? "" : val;
+        setSecondarySkills(newSkills);
+    };
+
+    const removePrimarySkill = (index: number) => {
+        const newSkills = [...primarySkills];
+        newSkills.splice(index, 1);
+        setPrimarySkills(newSkills);
+    };
+
+    const removeSecondarySkill = (index: number) => {
+        const newSkills = [...secondarySkills];
+        newSkills.splice(index, 1);
+        setSecondarySkills(newSkills);
     };
 
     return (
@@ -352,51 +371,91 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     </div>
 
                     <div className="grid grid-cols-1 gap-6">
-                        <div className="space-y-2">
-                            <Label className="text-gray-700">Habilidad Principal</Label>
-                            <Select value={primarySkill || "none"} onValueChange={setPrimarySkill}>
-                                <SelectTrigger className="bg-gray-50/50">
-                                    <SelectValue placeholder="Seleccionar" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">Ninguna</SelectItem>
-                                    {procesos.map(p => (
-                                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                        <div className="space-y-4">
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <Label className="text-gray-700">Habilidades Principales</Label>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs"
+                                        onClick={() => setPrimarySkills([...primarySkills, ""])}
+                                    >
+                                        + Añadir Principal
+                                    </Button>
+                                </div>
+                                <div className="flex flex-col gap-3">
+                                    {primarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay habilidades principales</p>}
+                                    {primarySkills.map((skillId, idx) => (
+                                        <div key={`param-${idx}`} className="flex gap-2 items-center">
+                                            <Select value={skillId || "none"} onValueChange={(val) => handlePrimaryChange(idx, val)}>
+                                                <SelectTrigger className="bg-gray-50/50 flex-1">
+                                                    <SelectValue placeholder="Seleccionar" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">Seleccionar proceso</SelectItem>
+                                                    {procesos.map(p => (
+                                                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                onClick={() => removePrimarySkill(idx)}
+                                            >
+                                                X
+                                            </Button>
+                                        </div>
                                     ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label className="text-gray-700">Habilidades Secundarias (hasta 2)</Label>
-                            <div className="flex flex-col gap-3">
-                                <Select
-                                    value={secondarySkills[0] || "none"}
-                                    onValueChange={(val) => handleSecondaryChange(0, val)}
-                                >
-                                    <SelectTrigger className="bg-gray-50/50">
-                                        <SelectValue placeholder="Seleccionar habilidad" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="none">Ninguna</SelectItem>
-                                        {procesos.map(p => (
-                                            <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Select
-                                    value={secondarySkills[1] || "none"}
-                                    onValueChange={(val) => handleSecondaryChange(1, val)}
-                                >
-                                    <SelectTrigger className="bg-gray-50/50">
-                                        <SelectValue placeholder="Seleccionar habilidad" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="none">Ninguna</SelectItem>
-                                        {procesos.map(p => (
-                                            <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                </div>
+                            </div>
+
+                            <hr className="my-2" />
+
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <Label className="text-gray-700">Habilidades Secundarias</Label>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs"
+                                        onClick={() => setSecondarySkills([...secondarySkills, ""])}
+                                    >
+                                        + Añadir Secundaria
+                                    </Button>
+                                </div>
+                                <div className="flex flex-col gap-3">
+                                    {secondarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay habilidades secundarias</p>}
+                                    {secondarySkills.map((skillId, idx) => (
+                                        <div key={`sec-${idx}`} className="flex gap-2 items-center">
+                                            <Select value={skillId || "none"} onValueChange={(val) => handleSecondaryChange(idx, val)}>
+                                                <SelectTrigger className="bg-gray-50/50 flex-1">
+                                                    <SelectValue placeholder="Seleccionar habilidad" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">Seleccionar proceso</SelectItem>
+                                                    {procesos.map(p => (
+                                                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                onClick={() => removeSecondarySkill(idx)}
+                                            >
+                                                X
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>

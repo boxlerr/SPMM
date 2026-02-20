@@ -25,13 +25,6 @@ class OperarioService:
 
             procesos_skill = []
             if operario_dto.skills:
-                primary_skills = [s for s in operario_dto.skills if s.nivel == 1]
-                secondary_skills = [s for s in operario_dto.skills if s.nivel == 2]
-                if len(primary_skills) > 1:
-                    raise BusinessException("Un operario no puede tener más de 1 habilidad principal.")
-                if len(secondary_skills) > 2:
-                    raise BusinessException("Un operario no puede tener más de 2 habilidades secundarias.")
-
                 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
                 for s in operario_dto.skills:
                     procesos_skill.append(OperarioProcesoSkill(
@@ -154,12 +147,7 @@ class OperarioService:
             skills_data = nueva_data.pop("skills", None)
 
             if skills_data is not None:
-                primary_skills = [s for s in skills_data if s["nivel"] == 1]
-                secondary_skills = [s for s in skills_data if s["nivel"] == 2]
-                if len(primary_skills) > 1:
-                    raise BusinessException("Un operario no puede tener más de 1 habilidad principal.")
-                if len(secondary_skills) > 2:
-                    raise BusinessException("Un operario no puede tener más de 2 habilidades secundarias.")
+                pass # validations removed
 
             actualizado = await self.repository.update(id, nueva_data)
 
@@ -211,3 +199,57 @@ class OperarioService:
             await self.repository.db.rollback()
             logger.error(f"Service - Error al actualizar estado de skill: {e}")
             raise InfrastructureException("Error al actualizar la habilidad.") from e
+
+    # 🔹 Agregar nueva habilidad a operario
+    async def agregarSkill(self, id_operario: int, dto):
+        try:
+            from sqlalchemy import select
+            from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+            
+            # Check if it already exists
+            stmt = select(OperarioProcesoSkill).where(
+                OperarioProcesoSkill.id_operario == id_operario,
+                OperarioProcesoSkill.id_proceso == dto.id_proceso
+            )
+            result = await self.repository.db.execute(stmt)
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                # Actualizar el nivel o la habilitacion si ya existe
+                existing.nivel = dto.nivel
+                existing.habilitado = True
+            else:
+                # Agregar nueva
+                nueva_skill = OperarioProcesoSkill(
+                    id_operario=id_operario,
+                    id_proceso=dto.id_proceso,
+                    nivel=dto.nivel,
+                    habilitado=True
+                )
+                self.repository.db.add(nueva_skill)
+                
+            await self.repository.db.commit()
+            return ResponseDTO(status=True, data={"id_operario": id_operario, "id_proceso": dto.id_proceso, "nivel": dto.nivel}, errorDescription="")
+        except Exception as e:
+            await self.repository.db.rollback()
+            logger.error(f"Service - Error al agregar skill: {e}")
+            raise InfrastructureException("Error al agregar la habilidad.") from e
+
+    # 🔹 Eliminar habilidad de operario
+    async def eliminarSkill(self, id_operario: int, id_proceso: int):
+        try:
+            from sqlalchemy import delete
+            from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+            
+            stmt = delete(OperarioProcesoSkill).where(
+                OperarioProcesoSkill.id_operario == id_operario,
+                OperarioProcesoSkill.id_proceso == id_proceso
+            )
+            await self.repository.db.execute(stmt)
+            await self.repository.db.commit()
+            
+            return ResponseDTO(status=True, data={"id_operario": id_operario, "id_proceso_eliminado": id_proceso}, errorDescription="")
+        except Exception as e:
+            await self.repository.db.rollback()
+            logger.error(f"Service - Error al eliminar skill: {e}")
+            raise InfrastructureException("Error al eliminar la habilidad.") from e

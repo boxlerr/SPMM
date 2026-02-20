@@ -16,7 +16,7 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 TRUSTED = os.getenv("TRUSTED_CONNECTION")
-DRIVER = "ODBC Driver 18 for SQL Server"  # Updated to ODBC Driver 18
+DRIVER = "ODBC Driver 17 for SQL Server"  # Updated to ODBC Driver 17
 
 # 🔹 Armar la cadena ODBC según el tipo de conexión
 if TRUSTED and TRUSTED.lower() == "yes":
