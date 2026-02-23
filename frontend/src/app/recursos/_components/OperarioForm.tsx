@@ -44,6 +44,9 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
   const [sectores, setSectores] = useState<string[]>([]);
   const [categorias, setCategorias] = useState<string[]>([]);
+  const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
+  const [primarySkill, setPrimarySkill] = useState<string>("");
+  const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -60,6 +63,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         dni: data.dni || "",
         email: (data as any)?.email || "",
       });
+      setPrimarySkill(data.skills?.find(s => s.nivel === 1)?.id_proceso?.toString() || "");
+      setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
     } else {
       setFormData({
         nombre: "",
@@ -73,6 +78,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         dni: "",
         email: "",
       });
+      setPrimarySkill("");
+      setSecondarySkills([]);
     }
   }, [data, open]);
 
@@ -115,6 +122,18 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       } catch (error) {
         console.error("Error al obtener categorías:", error);
       }
+
+      // Cargar procesos
+      try {
+        const procRes = await fetch(`${cleanUrl}/procesos`, { headers: getAuthHeaders() });
+        if (procRes.ok) {
+          const payload = await procRes.json();
+          const pdata = payload?.data || [];
+          setProcesos(Array.isArray(pdata) ? pdata : []);
+        }
+      } catch (error) {
+        console.error("Error al obtener procesos:", error);
+      }
     };
     if (open) loadOptions();
   }, [open, cleanUrl]);
@@ -149,6 +168,26 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       celular: formData.celular ? onlyDigits(formData.celular) : null,
       dni: formData.dni ? onlyDigits(formData.dni) : null,
     } as any;
+
+    // Preparar skills
+    const skillsPayload = [];
+    if (primarySkill && primarySkill !== "none") {
+      skillsPayload.push({ id_proceso: parseInt(primarySkill), nivel: 1, habilitado: true });
+    }
+    secondarySkills.forEach(skillId => {
+      if (skillId && skillId !== "none" && skillId !== primarySkill) { // Evitar duplicar la principal
+        skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 2, habilitado: true });
+      }
+    });
+
+    // Filtramos duplicados por las dudas en caso de que ambas form requests sean iguales
+    const uniqueSkills = skillsPayload.filter((value, index, self) =>
+      index === self.findIndex((t) => (
+        t.id_proceso === value.id_proceso
+      ))
+    );
+    payload.skills = uniqueSkills;
+
     // No enviar email al backend hasta que el DTO lo soporte
     // delete payload.email; // Email is now supported by backend
 
@@ -207,6 +246,16 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
   };
 
   const disabled = !formData.nombre || !formData.apellido || !formData.categoria;
+
+  const handleSecondaryChange = (index: number, val: string) => {
+    const newSkills = [...secondarySkills];
+    if (val === "none") {
+      newSkills[index] = "";
+    } else {
+      newSkills[index] = val;
+    }
+    setSecondarySkills(newSkills.filter(v => v !== ""));
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -286,6 +335,59 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
               <Label>Fecha de Ingreso</Label>
               <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} />
               {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold">Habilidades del Operario</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Habilidad Principal</Label>
+                <Select value={primarySkill || "none"} onValueChange={setPrimarySkill}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ninguna</SelectItem>
+                    {procesos.map(p => (
+                      <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Habilidades Secundarias (hasta 2)</Label>
+                <div className="flex flex-col gap-2">
+                  <Select
+                    value={secondarySkills[0] || "none"}
+                    onValueChange={(val) => handleSecondaryChange(0, val)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar habilidad" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Ninguna</SelectItem>
+                      {procesos.map(p => (
+                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={secondarySkills[1] || "none"}
+                    onValueChange={(val) => handleSecondaryChange(1, val)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar habilidad" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Ninguna</SelectItem>
+                      {procesos.map(p => (
+                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
           </div>
 

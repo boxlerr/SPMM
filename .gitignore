@@ -28,3 +28,7 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+
+.agents
+.agent/

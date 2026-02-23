@@ -1,5 +1,6 @@
 from sqlalchemy import select, delete
 from sqlalchemy.orm import joinedload, selectinload
+from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 
 from backend.domain.Operario import Operario
 from backend.domain.OperarioRango import OperarioRango
@@ -18,7 +19,7 @@ class OperarioRepository:
 
     async def find_by_id(self, id: int):
         try:
-            result = await self.db.execute(select(Operario).where(Operario.id == id))
+            result = await self.db.execute(select(Operario).options(selectinload(Operario.rangos), selectinload(Operario.procesos_skill)).where(Operario.id == id))
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Repository - Error al buscar Operario {id}: {e}")
@@ -28,7 +29,7 @@ class OperarioRepository:
         try:
             logger.info("Repository - Obtener todos los operarios desde la base de datos.")
             result = await self.db.execute(
-                select(Operario).options(selectinload(Operario.rangos))
+                select(Operario).options(selectinload(Operario.rangos), selectinload(Operario.procesos_skill))
             )
             data = result.scalars().unique().all()
             logger.info(f"Repository - Resultado OK ({len(data)} registros)")
@@ -81,6 +82,7 @@ class OperarioRepository:
 
             # Eliminar relaciones en operario_rango previamente
             await self.db.execute(delete(OperarioRango).where(OperarioRango.id_operario == id))
+            await self.db.execute(delete(OperarioProcesoSkill).where(OperarioProcesoSkill.id_operario == id))
 
             await self.db.delete(operario)
             await self.db.commit()

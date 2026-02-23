@@ -1,6 +1,7 @@
 from typing import Optional
 from pydantic import BaseModel, Field
 from datetime import date
+from backend.dto.ProcesoSkillDTO import ProcesoSkillDTO
 
 class OperarioRequestDTO(BaseModel):
     """
@@ -13,6 +14,7 @@ class OperarioRequestDTO(BaseModel):
     sector: Optional[str] = None
     categoria: str = Field(..., max_length=100)
     disponible: Optional[bool] = True
+    skills: Optional[list['ProcesoSkillDTO']] = Field(default_factory=list)
     
     # Estos sí pueden ser opcionales
     telefono: Optional[str] = Field(None, max_length=50)

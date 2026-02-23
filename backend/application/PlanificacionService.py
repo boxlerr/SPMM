@@ -9,6 +9,7 @@ from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 from backend.infrastructure.ConfigRepository import ConfigRepository
+from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProcesoSkillRepository
 from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -219,7 +220,8 @@ def _normalizar_procesos(procesos, prioridad_pesos):
         prioridad_desc,
         dur_min,
         rangos_validos,
-        nombre_proceso,usa_maquina,familia_req) in procesos:
+        nombre_proceso,usa_maquina,familia_req,
+        op_skill_levels) in procesos:
 
         dur = int(dur_min) if dur_min is not None else 1
         if dur <= 0:
@@ -229,7 +231,8 @@ def _normalizar_procesos(procesos, prioridad_pesos):
         rangos_proc = list(rangos_validos or [])
         procesos_norm.append(
             (orden_id, proc_id, secuencia, fecha_prometida,
-            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,familia_req)
+            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,familia_req,
+            op_skill_levels)
         )
 
     # Horizonte en minutos laborales:
@@ -277,7 +280,8 @@ def _crear_variables_y_dominios(
     maq_domain_vals = {}
 
     for (orden_id, proc_id, secuencia, _fp,
-        _peso_prioridad, dur, rangos_proc, nombre_proc, usa_maquina,familia_req) in procesos_norm:
+        _peso_prioridad, dur, rangos_proc, nombre_proc, usa_maquina,familia_req,
+        op_skill_levels) in procesos_norm:
 
         # Intervalo base
         start = model.NewIntVar(0, H, f"start_{orden_id}_{proc_id}")
@@ -286,7 +290,10 @@ def _crear_variables_y_dominios(
         dur_map[(orden_id, proc_id)] = dur
 
         # ----------------- Operarios válidos -----------------
-        if not rangos_proc:
+        if op_skill_levels:
+            # Lógica de Skills primero
+            operarios_validos = list(op_skill_levels.keys())
+        elif not rangos_proc:
             operarios_validos = REAL_OP_IDS[:]
         else:
             requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
@@ -482,7 +489,7 @@ def _agregar_no_solape_maquinas(
     """
     for m_id in REAL_MAQ_IDS:
         pres_intervals = []
-        for (orden_id, proc_id, _seq, _fp, _pp, _dur, _rangos, _nombre, usa_maquina,_familia_req) in procesos_norm:
+        for (orden_id, proc_id, _seq, _fp, _pp, _dur, _rangos, _nombre, usa_maquina,_familia_req, _skills) in procesos_norm:
 
             # ❌ Proceso manual → no genera intervalos de maquinaria
             if not usa_maquina:
@@ -525,7 +532,7 @@ def _agregar_compatibilidad_op_maq(
     mediante AddAllowedAssignments.
     """
     for (orden_id, proc_id, _seq, _fp,
-        _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req) in procesos_norm:
+        _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
 
         op_var = operario_vars[(orden_id, proc_id)]
         maq_var = maq_vars[(orden_id, proc_id)]
@@ -605,8 +612,12 @@ def _agregar_funcion_objetivo(
     total_obj = []
     now = datetime.now()
 
+    PENAL_SKILL1 = 2000
+    PENAL_SKILL2 = 5000
+
     for (orden_id, proc_id, secuencia, fecha_prometida,
-        peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,_familia_req) in procesos_norm:
+        peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,_familia_req,
+        op_skill_levels) in procesos_norm:
 
         op_var  = operario_vars[(orden_id, proc_id)]
         maq_var = maq_vars[(orden_id, proc_id)]
@@ -620,6 +631,14 @@ def _agregar_funcion_objetivo(
             model.Add(op_var == op_id).OnlyEnforceIf(pres)
             model.Add(op_var != op_id).OnlyEnforceIf(pres.Not())
             pres_list.append(pres)
+
+            # Penalización por Skill Level
+            if op_skill_levels and op_id in op_skill_levels:
+                nivel = op_skill_levels[op_id]
+                if nivel == 1:
+                    total_obj.append((pres, PENAL_SKILL1))
+                elif nivel == 2:
+                    total_obj.append((pres, PENAL_SKILL2))
 
         pick_dummy = model.NewBoolVar(f"pick_op_{orden_id}_{proc_id}_dummy")
         model.Add(op_var == 999999).OnlyEnforceIf(pick_dummy)
@@ -802,7 +821,7 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         for (orden_id, proc_id, secuencia, fecha_prometida,
-            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria,_familia_req) in procesos_norm:
+            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria,_familia_req, _skills) in procesos_norm:
 
             op_id  = solver.Value(operario_vars[(orden_id, proc_id)])
             maq_id = solver.Value(maq_vars[(orden_id, proc_id)])
@@ -1130,8 +1149,16 @@ async def planificar(
     ordenes_ids: list[int] | None = None,
     preview: bool = False,
     plan: list[dict] | None = None,
+    repo_skill: OperarioProcesoSkillRepository | None = None,
 ):
     
+    # 🔹 Inyectar repo de skills si no viene
+    if not repo_skill:
+        repo_skill = OperarioProcesoSkillRepository(db)
+
+    # 🔹 Cargar mapa de skills (proceso_id -> {operario_id: nivel})
+    mapa_skills = await repo_skill.get_map_por_proceso()
+
     # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
     if not preview and plan:
         logger.info(f"Service - Guardando plan manual ({len(plan)} items)")
@@ -1221,7 +1248,8 @@ async def planificar(
                 rangos_validos,         # rangos permitidos
                 nombre_proceso,         # nombre
                 usa_maquina,            # si usa máquina o no
-                familia_req
+                familia_req,
+                mapa_skills.get(rel.proceso.id, {}) # op_skill_levels
             ))
 
             # print(f"PROCESO: {rel.proceso.id} {nombre_proceso} usa_maquina={usa_maquina}")
@@ -1248,9 +1276,15 @@ async def planificar_pendientes(
         repo_maquinaria,
         repo_planificacion,
         db,
-        ordenes_ids: list[int] | None = None
+        ordenes_ids: list[int] | None = None,
+        repo_skill: OperarioProcesoSkillRepository | None = None
     ):
         logger.info("Service - Planificación de procesos pendientes.")
+        
+        if not repo_skill:
+            repo_skill = OperarioProcesoSkillRepository(db)
+        
+        mapa_skills = await repo_skill.get_map_por_proceso()
 
         # 🔹 SOLO órdenes con procesos pendientes
         ordenes = await repo_orden.find_with_pending_procesos(ordenes_ids)
@@ -1298,7 +1332,8 @@ async def planificar_pendientes(
                     rangos_validos,
                     nombre_proceso,
                     usa_maquina,
-                    familia_req
+                    familia_req,
+                    mapa_skills.get(rel.proceso.id, {}) # op_skill_levels
                 ))
 
         resultados = await asyncio.to_thread(

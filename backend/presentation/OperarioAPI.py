@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from backend.application.OperarioService import OperarioService
 from backend.dto.OperarioRequestDTO import OperarioRequestDTO
+from backend.dto.ProcesoSkillDTO import ProcesoSkillUpdateDTO, ProcesoSkillDTO
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.BusinessException import BusinessException
@@ -89,3 +90,29 @@ async def modificar_operario(id: int, operario_dto: OperarioRequestDTO, db=Depen
 # 🔹 Registrar rutas
 app.include_router(router)
 
+# 🔹 PUT /operarios/{id}/skills/{id_proceso}/estado
+@router.put("/operarios/{id}/skills/{id_proceso}/estado")
+async def actualizar_estado_skill(id: int, id_proceso: int, dto: ProcesoSkillUpdateDTO, db=Depends(get_db)):
+    try:
+        service = OperarioService(db)
+        return await service.actualizarEstadoSkill(id, id_proceso, dto.habilitado)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 🔹 POST /operarios/{id}/skills
+@router.post("/operarios/{id}/skills")
+async def agregar_skill(id: int, dto: ProcesoSkillDTO, db=Depends(get_db)):
+    try:
+        service = OperarioService(db)
+        return await service.agregarSkill(id, dto)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 🔹 DELETE /operarios/{id}/skills/{id_proceso}
+@router.delete("/operarios/{id}/skills/{id_proceso}")
+async def eliminar_skill(id: int, id_proceso: int, db=Depends(get_db)):
+    try:
+        service = OperarioService(db)
+        return await service.eliminarSkill(id, id_proceso)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))

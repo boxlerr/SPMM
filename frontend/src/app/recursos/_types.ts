@@ -1,3 +1,10 @@
+export interface ProcesoSkill {
+  id_proceso: number;
+  nombre_proceso?: string;
+  nivel: number;
+  habilitado: boolean;
+}
+
 export interface Operario {
   id: number;
   nombre: string;
@@ -11,6 +18,7 @@ export interface Operario {
   fecha_nacimiento?: string;
   fecha_ingreso?: string;
   email?: string;
+  skills?: ProcesoSkill[];
 }
 
 export interface Maquina {
