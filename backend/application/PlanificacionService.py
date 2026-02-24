@@ -1016,29 +1016,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     status = solver.Solve(model)
 
     # Capturamos el 'ahora' una sola vez para que todas las conversiones sean consistentes
-    ahora_audit = datetime.now()
-
-    # ---- Auditoría de Precedencias ----
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        logger.info(f"AUDITORÍA DE PRECEDENCIAS: Verificando solución (Ref: {ahora_audit.isoformat()})...")
-        ord_ids = sorted(list(set(p[0] for p in procesos_norm)))
-        for oid in ord_ids:
-            p_order = sorted([p for p in procesos_norm if p[0] == oid], key=lambda x: x[2])
-            prev_end = -1
-            for p_info in p_order:
-                oid_p, pid_p, seq_p = p_info[0], p_info[1], p_info[2]
-                st_val = solver.Value(inicio_vars[(oid_p, seq_p)])
-                en_val = solver.Value(fin_vars[(oid_p, seq_p)])
-                
-                # Convertir a fecha para el log también
-                fecha_st = _convertir_minutos_a_fecha(st_val, ahora_audit)
-                
-                msg = f"OT {oid_p} | Seq {seq_p} | Proc {pid_p} | Start {st_val} ({fecha_st}) | End {en_val}"
-                if st_val < prev_end:
-                    logger.error(f"❌ VIOLACIÓN: {msg} (Inicia antes de que termine el anterior en {prev_end})")
-                else:
-                    logger.info(f"✅ OK: {msg}")
-                prev_end = en_val
+    ahora_ref = datetime.now()
 
     # ---- Extraer resultados ----
     resultados = _extraer_resultados(
@@ -1052,7 +1030,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         op_to_rango,
         DUMMY_OP_ID,
         DUMMY_MAQ_ID,
-        ahora_audit
+        ahora_ref
     )
 
     return resultados
