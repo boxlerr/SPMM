@@ -19,7 +19,7 @@ from backend.commons.exceptions.PlanificacionException import PlanificacionExcep
 from backend.commons.loggers.logger import logger
 
 from sqlalchemy import text
-import time
+
 import math
 
 import re
@@ -284,10 +284,10 @@ def _crear_variables_y_dominios(
         op_skill_levels) in procesos_norm:
 
         # Intervalo base
-        start = model.NewIntVar(0, H, f"start_{orden_id}_{proc_id}")
-        end   = model.NewIntVar(0, H, f"end_{orden_id}_{proc_id}")
-        itv   = model.NewIntervalVar(start, dur, end, f"int_{orden_id}_{proc_id}")
-        dur_map[(orden_id, proc_id)] = dur
+        start = model.NewIntVar(0, H, f"start_{orden_id}_{secuencia}")
+        end   = model.NewIntVar(0, H, f"end_{orden_id}_{secuencia}")
+        itv   = model.NewIntervalVar(start, dur, end, f"int_{orden_id}_{secuencia}")
+        dur_map[(orden_id, secuencia)] = dur
 
         # ----------------- Operarios válidos -----------------
         if op_skill_levels:
@@ -314,15 +314,15 @@ def _crear_variables_y_dominios(
         # Variable de operario
         op_var = model.NewIntVarFromDomain(
             cp_model.Domain.FromValues(operarios_validos),
-            f"op_{orden_id}_{proc_id}"
+            f"op_{orden_id}_{secuencia}"
         )
 
         # ✔ REGISTRAR OPERARIOS ANTES DE ABANDONAR LA ITERACIÓN
-        op_domain_vals[(orden_id, proc_id)] = operarios_validos[:]
-        operario_vars[(orden_id, proc_id)] = op_var
-        inicio_vars[(orden_id, proc_id)] = start
-        fin_vars[(orden_id, proc_id)] = end
-        intervalo_vars[(orden_id, proc_id)] = itv
+        op_domain_vals[(orden_id, secuencia)] = operarios_validos[:]
+        operario_vars[(orden_id, secuencia)] = op_var
+        inicio_vars[(orden_id, secuencia)] = start
+        fin_vars[(orden_id, secuencia)] = end
+        intervalo_vars[(orden_id, secuencia)] = itv
 
         # ----------------- Caso especial: proceso sin maquinaria -----------------
         if not usa_maquina:
@@ -330,11 +330,11 @@ def _crear_variables_y_dominios(
 
             maq_var = model.NewIntVarFromDomain(
                 cp_model.Domain.FromValues(maqs_validas),
-                f"maq_{orden_id}_{proc_id}"
+                f"maq_{orden_id}_{secuencia}"
             )
 
-            maq_domain_vals[(orden_id, proc_id)] = maqs_validas[:]
-            maq_vars[(orden_id, proc_id)] = maq_var
+            maq_domain_vals[(orden_id, secuencia)] = maqs_validas[:]
+            maq_vars[(orden_id, secuencia)] = maq_var
 
             continue   # ← AHORA ES CORRECTO, operarios ya están guardados
 
@@ -403,11 +403,11 @@ def _crear_variables_y_dominios(
 
         maq_var = model.NewIntVarFromDomain(
             cp_model.Domain.FromValues(maqs_validas),
-            f"maq_{orden_id}_{proc_id}"
+            f"maq_{orden_id}_{secuencia}"
         )
 
-        maq_domain_vals[(orden_id, proc_id)] = maqs_validas[:]
-        maq_vars[(orden_id, proc_id)] = maq_var
+        maq_domain_vals[(orden_id, secuencia)] = maqs_validas[:]
+        maq_vars[(orden_id, secuencia)] = maq_var
 
     return (
         inicio_vars,
@@ -439,7 +439,7 @@ def _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars
         for i in range(len(procs) - 1):
             act = procs[i]
             sig = procs[i + 1]
-            model.Add(inicio_vars[(orden_id, sig[1])] >= fin_vars[(orden_id, act[1])])
+            model.Add(inicio_vars[(orden_id, sig[2])] >= fin_vars[(orden_id, act[2])])
 
 
 def _agregar_no_solape_operarios(
@@ -456,18 +456,18 @@ def _agregar_no_solape_operarios(
     """
     for op_id in REAL_OP_IDS:
         pres_intervals = []
-        for (orden_id, proc_id), op_var in operario_vars.items():
-            pres = model.NewBoolVar(f"pres_{orden_id}_{proc_id}_op{op_id}")
+        for (orden_id, secuencia), op_var in operario_vars.items():
+            pres = model.NewBoolVar(f"pres_{orden_id}_{secuencia}_op{op_id}")
             model.Add(op_var == op_id).OnlyEnforceIf(pres)
             model.Add(op_var != op_id).OnlyEnforceIf(pres.Not())
 
-            start = inicio_vars[(orden_id, proc_id)]
-            end   = fin_vars[(orden_id, proc_id)]
-            dur   = dur_map[(orden_id, proc_id)]
+            start = inicio_vars[(orden_id, secuencia)]
+            end   = fin_vars[(orden_id, secuencia)]
+            dur   = dur_map[(orden_id, secuencia)]
 
             opt_interval = model.NewOptionalIntervalVar(
                 start, dur, end, pres,
-                f"i_op_{orden_id}_{proc_id}_{op_id}"
+                f"i_op_{orden_id}_{secuencia}_{op_id}"
             )
             pres_intervals.append(opt_interval)
 
@@ -489,25 +489,25 @@ def _agregar_no_solape_maquinas(
     """
     for m_id in REAL_MAQ_IDS:
         pres_intervals = []
-        for (orden_id, proc_id, _seq, _fp, _pp, _dur, _rangos, _nombre, usa_maquina,_familia_req, _skills) in procesos_norm:
+        for (orden_id, proc_id, secuencia, _fp, _pp, _dur, _rangos, _nombre, usa_maquina,_familia_req, _skills) in procesos_norm:
 
             # ❌ Proceso manual → no genera intervalos de maquinaria
             if not usa_maquina:
                 continue
 
-            maq_var = maq_vars[(orden_id, proc_id)]
+            maq_var = maq_vars[(orden_id, secuencia)]
 
-            pres = model.NewBoolVar(f"mpres_{orden_id}_{proc_id}_m{m_id}")
+            pres = model.NewBoolVar(f"mpres_{orden_id}_{secuencia}_m{m_id}")
             model.Add(maq_var == m_id).OnlyEnforceIf(pres)
             model.Add(maq_var != m_id).OnlyEnforceIf(pres.Not())
 
-            start = inicio_vars[(orden_id, proc_id)]
-            end   = fin_vars[(orden_id, proc_id)]
-            dur   = dur_map[(orden_id, proc_id)]
+            start = inicio_vars[(orden_id, secuencia)]
+            end   = fin_vars[(orden_id, secuencia)]
+            dur   = dur_map[(orden_id, secuencia)]
 
             opt_interval = model.NewOptionalIntervalVar(
                 start, dur, end, pres,
-                f"i_maq_{orden_id}_{proc_id}_{m_id}"
+                f"i_maq_{orden_id}_{secuencia}_{m_id}"
             )
             pres_intervals.append(opt_interval)
 
@@ -531,14 +531,14 @@ def _agregar_compatibilidad_op_maq(
     Añade restricciones de compatibilidad Operario–Maquinaria
     mediante AddAllowedAssignments.
     """
-    for (orden_id, proc_id, _seq, _fp,
+    for (orden_id, proc_id, secuencia, _fp,
         _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
 
-        op_var = operario_vars[(orden_id, proc_id)]
-        maq_var = maq_vars[(orden_id, proc_id)]
+        op_var = operario_vars[(orden_id, secuencia)]
+        maq_var = maq_vars[(orden_id, secuencia)]
 
-        ops_dom  = op_domain_vals[(orden_id, proc_id)]
-        maqs_dom = maq_domain_vals[(orden_id, proc_id)]
+        ops_dom  = op_domain_vals[(orden_id, secuencia)]
+        maqs_dom = maq_domain_vals[(orden_id, secuencia)]
 
         # ❌ Proceso manual → no usa máquina real
         if not usa_maquina:
@@ -619,15 +619,15 @@ def _agregar_funcion_objetivo(
         peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,_familia_req,
         op_skill_levels) in procesos_norm:
 
-        op_var  = operario_vars[(orden_id, proc_id)]
-        maq_var = maq_vars[(orden_id, proc_id)]
+        op_var  = operario_vars[(orden_id, secuencia)]
+        maq_var = maq_vars[(orden_id, secuencia)]
 
         # --- Exactly-one operario (reales + dummy) ---
         pres_list = []
         for op_id in op_to_rango.keys():
             if op_id == 999999:  # dummy, lo tratamos aparte
                 continue
-            pres = model.NewBoolVar(f"pick_op_{orden_id}_{proc_id}_{op_id}")
+            pres = model.NewBoolVar(f"pick_op_{orden_id}_{secuencia}_{op_id}")
             model.Add(op_var == op_id).OnlyEnforceIf(pres)
             model.Add(op_var != op_id).OnlyEnforceIf(pres.Not())
             pres_list.append(pres)
@@ -640,7 +640,7 @@ def _agregar_funcion_objetivo(
                 elif nivel == 2:
                     total_obj.append((pres, PENAL_SKILL2))
 
-        pick_dummy = model.NewBoolVar(f"pick_op_{orden_id}_{proc_id}_dummy")
+        pick_dummy = model.NewBoolVar(f"pick_op_{orden_id}_{secuencia}_dummy")
         model.Add(op_var == 999999).OnlyEnforceIf(pick_dummy)
         model.Add(op_var != 999999).OnlyEnforceIf(pick_dummy.Not())
         model.Add(sum(pres_list) + pick_dummy == 1)
@@ -653,18 +653,18 @@ def _agregar_funcion_objetivo(
 
         mpres_list = []
         for m_id in REAL_MAQ_IDS:
-            mp = model.NewBoolVar(f"pick_maq_{orden_id}_{proc_id}_{m_id}")
+            mp = model.NewBoolVar(f"pick_maq_{orden_id}_{secuencia}_{m_id}")
             model.Add(maq_var == m_id).OnlyEnforceIf(mp)
             model.Add(maq_var != m_id).OnlyEnforceIf(mp.Not())
             mpres_list.append(mp)
 
-        pick_dummy_maq = model.NewBoolVar(f"pick_maq_{orden_id}_{proc_id}_dummy")
+        pick_dummy_maq = model.NewBoolVar(f"pick_maq_{orden_id}_{secuencia}_dummy")
         model.Add(maq_var == 999998).OnlyEnforceIf(pick_dummy_maq)
         model.Add(maq_var != 999998).OnlyEnforceIf(pick_dummy_maq.Not())
         model.Add(sum(mpres_list) + pick_dummy_maq == 1)
 
         # --- Lateness / prioridad ---
-        end = fin_vars[(orden_id, proc_id)]
+        end = fin_vars[(orden_id, secuencia)]
         if fecha_prometida:
             try:
                 if isinstance(fecha_prometida, str):
@@ -684,20 +684,20 @@ def _agregar_funcion_objetivo(
         else:
             deadline_rel = H * 10
 
-        diff = model.NewIntVar(-H * 10, H * 10, f"diff_{orden_id}_{proc_id}")
+        diff = model.NewIntVar(-H * 10, H * 10, f"diff_{orden_id}_{secuencia}")
         model.Add(diff == end - deadline_rel)
 
-        lateness = model.NewIntVar(0, H * 10, f"late_{orden_id}_{proc_id}")
+        lateness = model.NewIntVar(0, H * 10, f"late_{orden_id}_{secuencia}")
         model.AddMaxEquality(lateness, [diff, 0])
 
         mult = atraso_mult_por_prioridad.get(peso_prioridad, 200)
         total_obj.append((lateness, mult))
 
-        base_prior = model.NewIntVar(0, 10000, f"base_{orden_id}_{proc_id}")
+        base_prior = model.NewIntVar(0, 10000, f"base_{orden_id}_{secuencia}")
         model.Add(base_prior == (6 - min(peso_prioridad, 5)) * 100)
         total_obj.append((base_prior, 1))
 
-        total_obj.append((inicio_vars[(orden_id, proc_id)], 1))
+        total_obj.append((inicio_vars[(orden_id, secuencia)], 1))
 
         # Penalizaciones por dummy
         total_obj.append((pick_dummy, PENAL_DUMMY))
@@ -708,16 +708,16 @@ def _agregar_funcion_objetivo(
 
         # Penalización por sobre-cualificación en tareas básicas
         if rangos_proc and any(rid in RANGOS_BÁSICOS for rid in rangos_proc):
-            is_over = model.NewBoolVar(f"overq_{orden_id}_{proc_id}")
-            not_b1 = model.NewBoolVar(f"not_peon_{orden_id}_{proc_id}")
-            not_b2 = model.NewBoolVar(f"not_ayud_{orden_id}_{proc_id}")
+            is_over = model.NewBoolVar(f"overq_{orden_id}_{secuencia}")
+            not_b1 = model.NewBoolVar(f"not_peon_{orden_id}_{secuencia}")
+            not_b2 = model.NewBoolVar(f"not_ayud_{orden_id}_{secuencia}")
             model.Add(op_var != PEON_ID).OnlyEnforceIf(not_b1)
             model.Add(op_var == PEON_ID).OnlyEnforceIf(not_b1.Not())
             model.Add(op_var != AYUDANTE_ID).OnlyEnforceIf(not_b2)
             model.Add(op_var == AYUDANTE_ID).OnlyEnforceIf(not_b2.Not())
             model.Add(is_over <= not_b1)
             model.Add(is_over <= not_b2)
-            tmp = model.NewIntVar(0, 2, f"tmp_over_{orden_id}_{proc_id}")
+            tmp = model.NewIntVar(0, 2, f"tmp_over_{orden_id}_{secuencia}")
             model.Add(tmp == not_b1 + not_b2)
             model.Add(is_over >= tmp - 1)
             total_obj.append((is_over, PENAL_OVERQUAL))
@@ -725,7 +725,7 @@ def _agregar_funcion_objetivo(
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
 
-def _convertir_minutos_a_fecha(minutos_acumulados: int):
+def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
     """
     Convierte minutos de trabajo (desde 'ahora') a una fecha real,
     respetando la capacidad diaria definida (MIN_LABORAL_DIA) y calendario.
@@ -737,7 +737,7 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int):
     config_repo = ConfigRepository()
     blocked_dates = set(config_repo.get_blocked_dates())
 
-    ahora = datetime.now()
+    ahora = ahora_ref if ahora_ref else datetime.now()
     inicio_base = ahora
     
     # 1. Ajustar inicio si cae fuera de horario (antes de 7 o despues de 17)
@@ -814,7 +814,7 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int):
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID,):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     """
@@ -823,11 +823,11 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
         for (orden_id, proc_id, secuencia, fecha_prometida,
             peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria,_familia_req, _skills) in procesos_norm:
 
-            op_id  = solver.Value(operario_vars[(orden_id, proc_id)])
-            maq_id = solver.Value(maq_vars[(orden_id, proc_id)])
+            op_id  = solver.Value(operario_vars[(orden_id, secuencia)])
+            maq_id = solver.Value(maq_vars[(orden_id, secuencia)])
 
-            inicio_m = solver.Value(inicio_vars[(orden_id, proc_id)])
-            fin_m = solver.Value(fin_vars[(orden_id, proc_id)])
+            inicio_m = solver.Value(inicio_vars[(orden_id, secuencia)])
+            fin_m = solver.Value(fin_vars[(orden_id, secuencia)])
 
             resultados.append({
                 "orden_id": orden_id,
@@ -849,10 +849,13 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 ),
                 "sin_asignar": (op_id == DUMMY_OP_ID),
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
-                # Fechas estimadas reales
-                "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m),
-                "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m),
+                # Fechas estimadas reales - USANDO REFERENCIA FIJA
+                "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m, start_time_ref),
+                "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m, start_time_ref),
             })
+        
+        # 🔹 ORDENAR RESULTADOS POR ORDEN Y SECUENCIA PARA EVITAR CONFUSIÓN EN UI
+        resultados.sort(key=lambda x: (x["orden_id"], x["secuencia"]))
     else:
         logger.warning("No se encontró solución.")
         raise PlanificacionException("No se pudo generar una planificación viable con las restricciones actuales.")
@@ -866,15 +869,15 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas)
     - termine antes de que esa ventana cierre
     """
 
-    for (orden_id, proc_id, *_resto) in procesos_norm:
-        start = inicio_vars[(orden_id, proc_id)]
-        dur = dur_map[(orden_id, proc_id)]
+    for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
+        start = inicio_vars[(orden_id, secuencia)]
+        dur = dur_map[(orden_id, secuencia)]
 
         # Un booleano por ventana
         en_ventana = []
 
         for idx, (v_ini, v_fin) in enumerate(ventanas):
-            b = model.NewBoolVar(f"vent_{orden_id}_{proc_id}_{idx}")
+            b = model.NewBoolVar(f"vent_{orden_id}_{secuencia}_{idx}")
 
             # Si b == 1 → el proceso está dentro de esta ventana
             model.Add(start >= v_ini).OnlyEnforceIf(b)
@@ -1012,6 +1015,31 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
 
     status = solver.Solve(model)
 
+    # Capturamos el 'ahora' una sola vez para que todas las conversiones sean consistentes
+    ahora_audit = datetime.now()
+
+    # ---- Auditoría de Precedencias ----
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        logger.info(f"AUDITORÍA DE PRECEDENCIAS: Verificando solución (Ref: {ahora_audit.isoformat()})...")
+        ord_ids = sorted(list(set(p[0] for p in procesos_norm)))
+        for oid in ord_ids:
+            p_order = sorted([p for p in procesos_norm if p[0] == oid], key=lambda x: x[2])
+            prev_end = -1
+            for p_info in p_order:
+                oid_p, pid_p, seq_p = p_info[0], p_info[1], p_info[2]
+                st_val = solver.Value(inicio_vars[(oid_p, seq_p)])
+                en_val = solver.Value(fin_vars[(oid_p, seq_p)])
+                
+                # Convertir a fecha para el log también
+                fecha_st = _convertir_minutos_a_fecha(st_val, ahora_audit)
+                
+                msg = f"OT {oid_p} | Seq {seq_p} | Proc {pid_p} | Start {st_val} ({fecha_st}) | End {en_val}"
+                if st_val < prev_end:
+                    logger.error(f"❌ VIOLACIÓN: {msg} (Inicia antes de que termine el anterior en {prev_end})")
+                else:
+                    logger.info(f"✅ OK: {msg}")
+                prev_end = en_val
+
     # ---- Extraer resultados ----
     resultados = _extraer_resultados(
         solver,
@@ -1024,6 +1052,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         op_to_rango,
         DUMMY_OP_ID,
         DUMMY_MAQ_ID,
+        ahora_audit
     )
 
     return resultados
