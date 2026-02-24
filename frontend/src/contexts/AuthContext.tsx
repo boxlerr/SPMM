@@ -70,8 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!token) return;
 
-    // 3 horas en milisegundos
-    const INACTIVITY_TIMEOUT = 3 * 60 * 60 * 1000;
+    // 8 horas en milisegundos
+    const INACTIVITY_TIMEOUT = 8 * 60 * 60 * 1000;
     let timeoutId: NodeJS.Timeout;
 
     const resetTimer = () => {

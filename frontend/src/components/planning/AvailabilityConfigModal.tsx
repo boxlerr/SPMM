@@ -19,6 +19,12 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
+    const getAuthHeaders = (): HeadersInit => {
+        if (typeof window === 'undefined') return {};
+        const token = localStorage.getItem('access_token');
+        return token ? { 'Authorization': `Bearer ${token}` } : {};
+    };
+
     useEffect(() => {
         if (isOpen) {
             fetchBlockedDates();
@@ -28,7 +34,9 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
     const fetchBlockedDates = async () => {
         try {
             setIsLoading(true);
-            const res = await fetch(`${API_URL}/config/availability`);
+            const res = await fetch(`${API_URL}/config/availability`, {
+                headers: getAuthHeaders()
+            });
             if (res.ok) {
                 const data = await res.json();
                 // Parse "YYYY-MM-DD" to Date objects (fixing timezone offset issues by treating as local noon)
@@ -58,7 +66,8 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
             if (isBlocked) {
                 // Remove
                 const res = await fetch(`${API_URL}/config/availability/${dateStr}`, {
-                    method: "DELETE"
+                    method: "DELETE",
+                    headers: getAuthHeaders()
                 });
                 if (!res.ok) throw new Error("Failed to remove");
 
@@ -68,7 +77,7 @@ export function AvailabilityConfigModal({ isOpen, onClose }: AvailabilityConfigM
                 // Add
                 const res = await fetch(`${API_URL}/config/availability`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                     body: JSON.stringify({ date: dateStr })
                 });
                 if (!res.ok) throw new Error("Failed to add");
