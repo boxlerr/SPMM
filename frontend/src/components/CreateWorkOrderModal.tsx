@@ -179,11 +179,27 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     reclamo: orderToEdit.reclamo === 1 || (orderToEdit as any).reclamo === true,
                     finalizadototal: (orderToEdit as any).finalizadototal === 1 || (orderToEdit as any).finalizadototal === true,
                     finalizadoparcial: (orderToEdit as any).finalizadoparcial === 1 || (orderToEdit as any).finalizadoparcial === true,
-                    // Campos no funcionales
-                    n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
-                    f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
-                    revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false,
-                    programada: false, en_proceso: false
+                    // Campos Pronto funcionales
+                    n_ped_l: (orderToEdit as any).n_ped_l || "",
+                    n_pedido: (orderToEdit as any).n_pedido || "",
+                    subsector: (orderToEdit as any).subsector || "",
+                    requerido_por: (orderToEdit as any).requerido_por || "",
+                    aprobado_por: (orderToEdit as any).aprobado_por || "",
+                    remitos_salida: (orderToEdit as any).remitos_salida || "",
+                    f_disp_material: (orderToEdit as any).f_disp_material ? (orderToEdit as any).f_disp_material.split('T')[0] : "",
+                    fabricacion: (orderToEdit as any).fabricacion === 1 || (orderToEdit as any).fabricacion === true,
+                    reparacion: (orderToEdit as any).reparacion === 1 || (orderToEdit as any).reparacion === true,
+                    sin_cargo: (orderToEdit as any).sin_cargo === 1 || (orderToEdit as any).sin_cargo === true,
+                    stock: (orderToEdit as any).stock === 1 || (orderToEdit as any).stock === true,
+                    interno: (orderToEdit as any).interno === 1 || (orderToEdit as any).interno === true,
+                    revisada: (orderToEdit as any).revisada === 1 || (orderToEdit as any).revisada === true,
+                    tercerizado_total: (orderToEdit as any).tercerizado_total === 1 || (orderToEdit as any).tercerizado_total === true,
+                    tercerizado_parcial: (orderToEdit as any).tercerizado_parcial === 1 || (orderToEdit as any).tercerizado_parcial === true,
+                    suspendida: (orderToEdit as any).suspendida === 1 || (orderToEdit as any).suspendida === true,
+                    email: (orderToEdit as any).email === 1 || (orderToEdit as any).email === true,
+                    tiene_plano: (orderToEdit as any).tiene_plano === 1 || (orderToEdit as any).tiene_plano === true,
+                    programada: (orderToEdit as any).programada === 1 || (orderToEdit as any).programada === true,
+                    en_proceso: (orderToEdit as any).en_proceso === 1 || (orderToEdit as any).en_proceso === true
                 });
 
                 setDetailsData({
@@ -404,6 +420,29 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             finalizadototal: generalData.finalizadototal ? 1 : 0,
             finalizadoparcial: generalData.finalizadoparcial ? 1 : 0,
 
+            // Nuevos Campos "Pronto"
+            n_ped_l: generalData.n_ped_l,
+            n_pedido: generalData.n_pedido,
+            subsector: generalData.subsector,
+            requerido_por: generalData.requerido_por,
+            aprobado_por: generalData.aprobado_por,
+            remitos_salida: generalData.remitos_salida,
+            f_disp_material: generalData.f_disp_material ? new Date(generalData.f_disp_material).toISOString() : null,
+
+            fabricacion: generalData.fabricacion,
+            reparacion: generalData.reparacion,
+            sin_cargo: generalData.sin_cargo,
+            stock: generalData.stock,
+            interno: generalData.interno,
+            revisada: generalData.revisada,
+            tercerizado_total: generalData.tercerizado_total,
+            tercerizado_parcial: generalData.tercerizado_parcial,
+            suspendida: generalData.suspendida,
+            email: generalData.email,
+            tiene_plano: generalData.tiene_plano,
+            programada: generalData.programada,
+            en_proceso: generalData.en_proceso,
+
             procesos: processes.map(p => ({
                 proceso_id: parseInt(p.proceso_id),
                 tiempo_proceso: parseInt(p.tiempo_proceso) || 0,
@@ -603,7 +642,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                             <Input id="fecha_orden" type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-9 text-sm" />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="n_ped_l" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Ped L <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="n_ped_l" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Ped L</Label>
                                             <Input id="n_ped_l" value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
                                         <div className="space-y-2">
@@ -621,11 +660,11 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                             <SearchableSelect options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="Cliente" />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="n_pedido" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Pedido <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="n_pedido" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Pedido</Label>
                                             <Input id="n_pedido" value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="subsector" className="text-xs font-semibold text-gray-700 flex items-center gap-2">SubSector <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="subsector" className="text-xs font-semibold text-gray-700 flex items-center gap-2">SubSector</Label>
                                             <Input id="subsector" value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
                                         <div className="space-y-2">
@@ -635,11 +674,11 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                         {/* Row 3 */}
                                         <div className="space-y-2">
-                                            <Label htmlFor="requerido_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Requerido por <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="requerido_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Requerido por</Label>
                                             <Input id="requerido_por" value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="aprobado_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Aprobado por <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="aprobado_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Aprobado por</Label>
                                             <Input id="aprobado_por" value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
                                         <div className="space-y-2">
@@ -667,42 +706,42 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                         {/* Row 5 / Other dates/texts */}
                                         <div className="space-y-2">
-                                            <Label htmlFor="remitos_salida" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Remitos Salida <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="remitos_salida" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Remitos Salida</Label>
                                             <Input id="remitos_salida" value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="f_disp_material" className="text-xs font-semibold text-gray-700 flex items-center gap-2">F. Disp Material <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-600 border-amber-200 px-1 py-0 shadow-none">Pronto</Badge></Label>
+                                            <Label htmlFor="f_disp_material" className="text-xs font-semibold text-gray-700 flex items-center gap-2">F. Disp Material</Label>
                                             <Input id="f_disp_material" type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
                                         </div>
 
                                         {/* Row 6 Toggles - First full width span block */}
                                         <div className="md:col-span-4 grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border border-gray-100 rounded-xl bg-gray-50/50">
                                             <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="fabricacion" checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> <Label htmlFor="fabricacion" className="text-sm cursor-pointer">Fabricación</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="fabricacion" checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> <Label htmlFor="fabricacion" className="text-sm cursor-pointer">Fabricación</Label></div>
                                                 <div className="flex items-center space-x-2 opacity-70"><Checkbox id="reparacion" checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> <Label htmlFor="reparacion" className="text-sm cursor-pointer">Reparación</Label></div>
                                                 <div className="flex items-center space-x-2 opacity-70"><Checkbox id="sin_cargo" checked={generalData.sin_cargo} onCheckedChange={(c) => setGeneralData({ ...generalData, sin_cargo: !!c })} /> <Label htmlFor="sin_cargo" className="text-sm cursor-pointer">Sin Cargo</Label></div>
                                             </div>
                                             <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="stock" checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> <Label htmlFor="stock" className="text-sm cursor-pointer">Stock</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="stock" checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> <Label htmlFor="stock" className="text-sm cursor-pointer">Stock</Label></div>
                                                 <div className="flex items-center space-x-2 opacity-70"><Checkbox id="interno" checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> <Label htmlFor="interno" className="text-sm cursor-pointer">Interno</Label></div>
                                                 <div className="flex items-center space-x-2 opacity-70"><Checkbox id="revisada" checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> <Label htmlFor="revisada" className="text-sm cursor-pointer">Revisada</Label></div>
                                             </div>
                                             <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 text-red-600 font-bold"><Checkbox id="suspendida" className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> <Label htmlFor="suspendida" className="text-sm cursor-pointer">SUSPENDIDA</Label> <Badge variant="outline" className="text-[9px] border-red-200 text-red-500 bg-red-50 px-1 py-0 leading-none">Pronto</Badge></div>
+                                                <div className="flex items-center space-x-2 text-red-600 font-bold"><Checkbox id="suspendida" className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> <Label htmlFor="suspendida" className="text-sm cursor-pointer">SUSPENDIDA</Label></div>
                                                 <div className="flex items-center space-x-2 text-orange-600 font-bold"><Checkbox id="reclamo" className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> <Label htmlFor="reclamo" className="text-sm cursor-pointer text-orange-600">RECLAMO</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70 mt-1"><Checkbox id="email" checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> <Label htmlFor="email" className="text-sm cursor-pointer">Email</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
+                                                <div className="flex items-center space-x-2 opacity-70 mt-1"><Checkbox id="email" checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> <Label htmlFor="email" className="text-sm cursor-pointer">Email</Label></div>
                                             </div>
                                             <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_total" checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> <Label htmlFor="tercerizado_total" className="text-sm cursor-pointer">Tercerizado Total</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_total" checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> <Label htmlFor="tercerizado_total" className="text-sm cursor-pointer">Tercerizado Total</Label></div>
                                                 <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_parcial" checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> <Label htmlFor="tercerizado_parcial" className="text-sm cursor-pointer">Tercerizado Parcial</Label></div>
                                             </div>
                                         </div>
 
                                         {/* Status Progress block */}
                                         <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-5 gap-4 bg-blue-50/40 p-3 rounded-lg border border-blue-100 items-center">
-                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tiene_plano" checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> <Label htmlFor="tiene_plano" className="text-sm cursor-pointer">Tiene Plano</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
-                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="programada" checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> <Label htmlFor="programada" className="text-sm cursor-pointer">PROGRAMADA</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
-                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="en_proceso" checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> <Label htmlFor="en_proceso" className="text-sm cursor-pointer">EN PROCESO</Label> <Badge variant="outline" className="text-[9px] px-1 py-0 leading-none">Pronto</Badge></div>
+                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tiene_plano" checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> <Label htmlFor="tiene_plano" className="text-sm cursor-pointer">Tiene Plano</Label></div>
+                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="programada" checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> <Label htmlFor="programada" className="text-sm cursor-pointer">PROGRAMADA</Label></div>
+                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="en_proceso" checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> <Label htmlFor="en_proceso" className="text-sm cursor-pointer">EN PROCESO</Label></div>
                                             <div className="flex items-center space-x-2"><Checkbox id="finalizadoparcial" checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> <Label htmlFor="finalizadoparcial" className="text-sm cursor-pointer font-medium">FIN. PARCIAL</Label></div>
                                             <div className="flex items-center space-x-2"><Checkbox id="finalizadototal" checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> <Label htmlFor="finalizadototal" className="text-sm cursor-pointer font-medium text-green-700">FIN. TOTAL</Label></div>
                                         </div>
@@ -719,15 +758,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         {/* Additional Notas (Pronto) */}
                                         <div className="md:col-span-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div className="space-y-1">
-                                                <Label htmlFor="nota_1" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 1 <Badge variant="outline" className="text-[9px] px-1 py-0">Pronto</Badge></Label>
+                                                <Label htmlFor="nota_1" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 1</Label>
                                                 <Input id="nota_1" value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
                                             </div>
                                             <div className="space-y-1">
-                                                <Label htmlFor="nota_2" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 2 <Badge variant="outline" className="text-[9px] px-1 py-0">Pronto</Badge></Label>
+                                                <Label htmlFor="nota_2" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 2</Label>
                                                 <Input id="nota_2" value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
                                             </div>
                                             <div className="space-y-1">
-                                                <Label htmlFor="nota_3" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 3 <Badge variant="outline" className="text-[9px] px-1 py-0">Pronto</Badge></Label>
+                                                <Label htmlFor="nota_3" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 3</Label>
                                                 <Input id="nota_3" value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
                                             </div>
                                         </div>
@@ -866,7 +905,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         <div className="flex items-center justify-between mb-2">
                                             <div className="space-y-1">
                                                 <h3 className="text-lg font-semibold text-gray-900">Materias Primas</h3>
-                                                <p className="text-sm text-gray-500">Administra los materiales necesarios para esta orden <Badge variant="outline" className="text-[10px] ml-2">Pronto</Badge></p>
+                                                <p className="text-sm text-gray-500">Administra los materiales necesarios para esta orden</p>
                                             </div>
                                         </div>
 

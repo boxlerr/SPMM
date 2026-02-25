@@ -62,6 +62,32 @@ class OrdenTrabajoResponseDTO(BaseModel):
     reclamo: Optional[int] = 0
     estado_material: Optional[str] = 'sin_datos'  # 'ok', 'pedido', 'sin_stock', 'sin_datos'
     
+    # 🔹 Nuevos campos "Pronto"
+    n_ped_l: Optional[str] = None
+    n_pedido: Optional[str] = None
+    subsector: Optional[str] = None
+    requerido_por: Optional[str] = None
+    aprobado_por: Optional[str] = None
+    remitos_salida: Optional[str] = None
+    f_disp_material: Optional[datetime] = None
+    
+    fabricacion: Optional[int] = 0
+    reparacion: Optional[int] = 0
+    sin_cargo: Optional[int] = 0
+    stock: Optional[int] = 0
+    interno: Optional[int] = 0
+    revisada: Optional[int] = 0
+    tercerizado_total: Optional[int] = 0
+    tercerizado_parcial: Optional[int] = 0
+    suspendida: Optional[int] = 0
+    email: Optional[int] = 0
+    tiene_plano: Optional[int] = 0
+    programada: Optional[int] = 0
+    en_proceso: Optional[int] = 0
+    
+    finalizadototal: Optional[int] = 0
+    finalizadoparcial: Optional[int] = 0
+
     fecha_orden: Optional[datetime] = None
     fecha_entrada: Optional[datetime] = None
     fecha_prometida: Optional[datetime] = None

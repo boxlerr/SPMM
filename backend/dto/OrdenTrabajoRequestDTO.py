@@ -18,6 +18,32 @@ class OrdenTrabajoRequestDTO(BaseModel):
     unidades: Optional[int] = None
     cantidad_entregada: Optional[int] = 0
 
+    # 🔹 Nuevos campos "Pronto"
+    n_ped_l: Optional[str] = None
+    n_pedido: Optional[str] = None
+    subsector: Optional[str] = None
+    requerido_por: Optional[str] = None
+    aprobado_por: Optional[str] = None
+    remitos_salida: Optional[str] = None
+    f_disp_material: Optional[datetime] = None
+    
+    fabricacion: Optional[bool] = False
+    reparacion: Optional[bool] = False
+    sin_cargo: Optional[bool] = False
+    stock: Optional[bool] = False
+    interno: Optional[bool] = False
+    revisada: Optional[bool] = False
+    tercerizado_total: Optional[bool] = False
+    tercerizado_parcial: Optional[bool] = False
+    suspendida: Optional[bool] = False
+    email: Optional[bool] = False
+    tiene_plano: Optional[bool] = False
+    programada: Optional[bool] = False
+    en_proceso: Optional[bool] = False
+    
+    finalizadototal: Optional[bool] = False
+    finalizadoparcial: Optional[bool] = False
+    reclamo: Optional[bool] = False
 
     id_prioridad: int
     id_sector: int
