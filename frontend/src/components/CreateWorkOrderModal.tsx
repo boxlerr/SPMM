@@ -176,9 +176,9 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     fecha_orden: orderToEdit.fecha_orden ? orderToEdit.fecha_orden.split('T')[0] : new Date().toISOString().split('T')[0],
                     fecha_entrega: orderToEdit.fecha_entrega ? orderToEdit.fecha_entrega.split('T')[0] : "",
                     cantidad_entregada: orderToEdit.cantidad_entregada?.toString() || "",
-                    reclamo: orderToEdit.reclamo === 1 || orderToEdit.reclamo === true,
-                    finalizadototal: orderToEdit.finalizadototal === 1 || orderToEdit.finalizadototal === true,
-                    finalizadoparcial: orderToEdit.finalizadoparcial === 1 || orderToEdit.finalizadoparcial === true,
+                    reclamo: orderToEdit.reclamo === 1 || (orderToEdit as any).reclamo === true,
+                    finalizadototal: (orderToEdit as any).finalizadototal === 1 || (orderToEdit as any).finalizadototal === true,
+                    finalizadoparcial: (orderToEdit as any).finalizadoparcial === 1 || (orderToEdit as any).finalizadoparcial === true,
                     // Campos no funcionales
                     n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
                     f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
