@@ -341,33 +341,39 @@ def _crear_variables_y_dominios(
         # ----------------- Maquinarias válidas -----------------
         nombre_upper = (nombre_proc or "").upper()
         tipo_proc = _get_tipo_proceso(nombre_proc)
-
-        maqs_validas = []
-
         if tipo_proc == "SETUP":
-            # Lógica SETUP: Buscar coincidencia de nombre de máquina
-            # Ej: PREPARACION DE TORNO -> busca "TORNO" en nombres de máquinas
-            base = (
-                nombre_upper
-                .replace("PREPARACION DE", "")
-                .replace("PREPARACION", "")
-                .replace("CAMBIO DE", "")
-                .strip()
-            )
+            # Lógica SETUP: Intentar heredar dominio por familia si existe (por coordinación)
+            # o fallback a nombre de máquina directo.
+            candidates = []
+            
+            if familia_req:
+                candidates = [m for m in REAL_MAQ_IDS if maq_to_familia.get(m) == familia_req]
+                if rangos_proc:
+                     req = set(rangos_proc)
+                     candidates = [m for m in candidates if (req & maq_to_rangos.get(m, set()))]
 
-            # Buscamos máquinas cuyo nombre contenga la base
-            # Esto es un filtro simple como pidió el usuario
-            posibles = [
-                m_id for (m_id, _rs, nombre_m, _cod) in maquinarias
-                if base and base in (nombre_m or "").upper()
-            ]
+            if not candidates:
+                # Fallback al comportamiento original por nombre
+                nombre_upper = _norm(nombre_proc)
+                base = (
+                    nombre_upper
+                    .replace("PROGRAMACION DE", "")
+                    .replace("PROGRAMACION", "")
+                    .replace("PREPARACION DE", "")
+                    .replace("PREPARACION", "")
+                    .replace("CAMBIO DE", "")
+                    .strip()
+                )
 
-            if posibles:
-                maqs_validas = posibles
+                candidates = [
+                    m_id for (m_id, _rs, nombre_m, _cod) in maquinarias
+                    if base and base in (_norm(nombre_m) or "")
+                ]
+
+            if candidates:
+                maqs_validas = candidates
             else:
-                # ❌ ANTES: Fallback abierto (REAL_MAQ_IDS)
-                # ✅ AHORA: Dummy si no encuentra match
-                logger.warning(f"SETUP {proc_id} ({nombre_proc}) no encontró máquina para '{base}'; asignando DUMMY.")
+                logger.warning(f"SETUP {proc_id} ({nombre_proc}) no encontró máquina; asignando DUMMY.")
                 maqs_validas = [DUMMY_MAQ_ID]
 
         elif tipo_proc == "PRODUCCION_MAQUINA":
@@ -512,6 +518,41 @@ def _agregar_no_solape_maquinas(
             pres_intervals.append(opt_interval)
 
         model.AddNoOverlap(pres_intervals)
+
+
+def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars):
+    """
+    Fuerza a que procesos coordinados (ej: Programacion + Produccion) 
+    usen la misma máquina.
+    """
+    # Agrupar por OT
+    ord_ids = set(p[0] for p in procesos_norm)
+    for oid in ord_ids:
+        # Procesos de esta OT ordenados por secuencia
+        p_order = sorted([p for p in procesos_norm if p[0] == oid], key=lambda x: x[2])
+        
+        for i in range(len(p_order) - 1):
+            act = p_order[i]
+            sig = p_order[i+1]
+            
+            # (orden_id, proc_id, secuencia, fecha_prometida, peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria, familia_req, op_skill)
+            seq_a  = act[2]
+            name_a = act[7]
+            usa_m_a= act[8]
+            
+            seq_s  = sig[2]
+            name_s = sig[7]
+            usa_m_s= sig[8]
+            
+            # Si el actual es SETUP y el siguiente es PRODUCCIÓN
+            # Y ambos están marcados para usar máquina
+            tipo_act = _get_tipo_proceso(name_a)
+            tipo_sig = _get_tipo_proceso(name_s)
+            
+            if tipo_act == "SETUP" and tipo_sig == "PRODUCCION_MAQUINA" and usa_m_a and usa_m_s:
+                # Forzamos igualdad de la variable de máquina
+                model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
+                logger.info(f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y Seq {seq_s} ({name_s}) en OT {oid}")
 
 
 def _agregar_compatibilidad_op_maq(
@@ -937,6 +978,21 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     # ---- Normalizar procesos ----
     procesos_norm, H_local = _normalizar_procesos(procesos, prioridad_pesos)
 
+    # ---- Coordinación de dominios: SETUP hereda de PRODUCCIÓN ----
+    # Si un SETUP precede a una PRODUCCIÓN, debe usar el mismo dominio de máquinas
+    procesos_norm_list = [list(p) for p in procesos_norm]
+    for oid in set(p[0] for p in procesos_norm):
+        idxs = sorted([i for i, p in enumerate(procesos_norm) if p[0] == oid], key=lambda i: procesos_norm[i][2])
+        for j in range(len(idxs)-1):
+            idx_a = idxs[j]
+            idx_s = idxs[j+1]
+            if (_get_tipo_proceso(procesos_norm[idx_a][7]) == "SETUP" and 
+                _get_tipo_proceso(procesos_norm[idx_s][7]) == "PRODUCCION_MAQUINA"):
+                # Heredar familia (idx 9) y rangos (idx 6)
+                procesos_norm_list[idx_a][9] = procesos_norm[idx_s][9]
+                procesos_norm_list[idx_a][6] = procesos_norm[idx_s][6]
+    procesos_norm = [tuple(p) for p in procesos_norm_list]
+
     # H se usa en helpers (lo hago global dentro de esta función)
     global H
     H = H_local
@@ -972,6 +1028,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars)
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
     ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates)
@@ -1111,8 +1168,8 @@ def _get_tipo_proceso(nombre_proceso: str) -> str:
     """
     n = _norm(nombre_proceso)
     
-    # 1. SETUP / PREPARACION
-    if n.startswith("PREPARACION") or n.startswith("CAMBIO DE") or "SETUP" in n:
+    # 1. SETUP / PREPARACION / PROGRAMACION
+    if n.startswith("PREPARACION") or n.startswith("CAMBIO DE") or "SETUP" in n or "PROGRAM" in n:
         # Excepciones que podrían ser manuales? Por ahora asumimos que SETUP implica tocar máquina
         # salvo que sea algo muy obvio. Pero el usuario pidió: 'PREPARACION...' -> SETUP.
         return "SETUP"
@@ -1121,7 +1178,7 @@ def _get_tipo_proceso(nombre_proceso: str) -> str:
     # Palabras clave que indican proceso MANUAL
     keywords_manual = [
         "EMBALAD", "DESARM", "ENSAMBL", "LAVADO", "LIMPIEZA",
-        "REBABA", "REBARB", "AMOLAD", "PROGRAM", "BICELAD", "BISELAD", 
+        "REBABA", "REBARB", "AMOLAD", "BICELAD", "BISELAD", 
         "ENDEREZ", "PINTU", "ARMADO", "AJUSTE", "CONTROL", "REVISION",
         "DISENO", "PLANIFICACION", "CUBICACION", "CONSULTAR",
         "SOLICITAR", "TRABAJO DE FORMA", "MANUAL"
