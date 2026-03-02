@@ -27,6 +27,7 @@ interface PlanningSelectionModalProps {
     onDataRefresh?: () => void
     initialSelectedIds?: number[]
     autoSelectAll?: boolean
+    availableResourcesCount?: number
 }
 
 export function PlanningSelectionModal({
@@ -37,7 +38,8 @@ export function PlanningSelectionModal({
     isLoading = false,
     onDataRefresh,
     initialSelectedIds = [],
-    autoSelectAll = true
+    autoSelectAll = true,
+    availableResourcesCount = 1
 }: PlanningSelectionModalProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
@@ -210,9 +212,13 @@ export function PlanningSelectionModal({
 
         if (totalMinutes === 0) return null
 
+        // Calculate time based on available resources
+        const resourceCount = Math.max(1, availableResourcesCount);
+        const effectiveMinutes = totalMinutes / resourceCount;
+
         const MIN_LABORAL_DIA = 495 // 8.25 hours
-        const days = (totalMinutes / MIN_LABORAL_DIA).toFixed(1)
-        const hours = (totalMinutes / 60).toFixed(1)
+        const days = (effectiveMinutes / MIN_LABORAL_DIA).toFixed(1)
+        const hours = (effectiveMinutes / 60).toFixed(1)
 
         return `${days} días (${hours} hs)`
     }
