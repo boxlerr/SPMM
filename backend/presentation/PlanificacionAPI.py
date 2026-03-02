@@ -180,4 +180,10 @@ async def actualizar_planificacion(id: int, dto: PlanificacionUpdateDTO, db = De
     
     return {"message": "Planificación actualizada correctamente"}
 
+@router.delete("/planificacion/lote/{id_lote}")
+async def eliminar_planificacion_lote(id_lote: str, db = Depends(get_db)):
+    repo_planificacion = PlanificacionRepository(db)
+    await repo_planificacion.eliminar_lote(id_lote)
+    return {"message": "Lote de planificación eliminado correctamente"}
+
 app.include_router(router)

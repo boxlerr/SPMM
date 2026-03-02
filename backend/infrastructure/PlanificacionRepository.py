@@ -88,3 +88,31 @@ class PlanificacionRepository:
                 "Error al guardar la planificación en la base de datos."
             ) from e
 
+    async def eliminar_lote(self, id_lote: str):
+        """
+        Elimina los registros de planificación asociados a un ID de lote,
+        PERO solo para aquellas órdenes que NO han sido finalizadas/entregadas aún.
+        """
+        logger.info(f"Repository - Eliminando lote de planificación (solo activas): {id_lote}")
+        
+        # Solo eliminamos de 'planificacion' si la orden asociada tiene fecha_entrega = 1950-01-01
+        # (vuelve a aparecer en el listado de 'No Planificadas')
+        delete_query = text("""
+            DELETE p 
+            FROM planificacion p
+            INNER JOIN orden_trabajo ot ON p.orden_id = ot.id
+            WHERE p.id_planificacion_lote = :id_lote
+            AND ot.fecha_entrega = '1950-01-01 00:00:00'
+        """)
+        
+        try:
+            await self.db.execute(delete_query, {"id_lote": id_lote})
+            await self.db.commit()
+            logger.info(f"Repository - Lote {id_lote} (registros no terminados) eliminado con éxito.")
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error al eliminar lote de planificación {id_lote}: {e}")
+            raise InfrastructureException(
+                f"Error al eliminar el lote de planificación {id_lote}."
+            ) from e

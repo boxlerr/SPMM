@@ -17,7 +17,7 @@ import MateriaPrimaTab from "./_components/MateriaPrimaTab"
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { cn } from "@/lib/utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2 } from "lucide-react"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { usePanelContext } from "@/contexts/PanelContext"
@@ -78,11 +78,14 @@ export default function OperacionesPage() {
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
 
-  // Operators Shortcut State
   const [isOperatorsModalOpen, setIsOperatorsModalOpen] = useState(false)
   const [selectedOperatorForModal, setSelectedOperatorForModal] = useState<Operario | null>(null)
   const [isCambiarEstadoOpen, setIsCambiarEstadoOpen] = useState(false)
   const [operatorTasks, setOperatorTasks] = useState<PlanificacionItem[]>([])
+
+  // Delete Planning Batch State
+  const [isDeleteLoteDialogOpen, setIsDeleteLoteDialogOpen] = useState(false)
+  const [isDeletingLote, setIsDeletingLote] = useState(false)
 
 
 
@@ -816,6 +819,30 @@ export default function OperacionesPage() {
     }
   };
 
+  const handleDeleteLote = async () => {
+    if (selectedLoteId === "all") return;
+
+    try {
+      setIsDeletingLote(true);
+      const response = await fetch(`${API_URL}/planificacion/lote/${selectedLoteId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) throw new Error("Error al eliminar el lote de planificación");
+
+      toast.success("Lote de planificación eliminado correctamente");
+      setSelectedLoteId("all");
+      await fetchData();
+    } catch (error) {
+      console.error("Error deleting planning batch:", error);
+      toast.error("Error al eliminar el lote de planificación");
+    } finally {
+      setIsDeletingLote(false);
+      setIsDeleteLoteDialogOpen(false);
+    }
+  };
+
 
   return (
     <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'mr-[400px]' : 'mr-0')}>
@@ -999,6 +1026,22 @@ export default function OperacionesPage() {
                     >
                       <RefreshCw className={cn("mr-2 h-3.5 w-3.5", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
                       Re-planificar
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsDeleteLoteDialogOpen(true)}
+                      className={cn(
+                        "bg-white border-red-200 transition-colors",
+                        selectedLoteId === "all"
+                          ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                          : "text-red-600 hover:bg-red-50"
+                      )}
+                      disabled={selectedLoteId === "all" || isDeletingLote}
+                      title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Eliminar este lote de planificación"}
+                    >
+                      <Trash2 className={cn("h-3.5 w-3.5", selectedLoteId === "all" ? "text-gray-400" : "text-red-600")} />
                     </Button>
 
                     <Select value={selectedLoteId} onValueChange={setSelectedLoteId}>
@@ -1264,6 +1307,16 @@ export default function OperacionesPage() {
           variant="destructive"
         />
       )}
+      <ConfirmationDialog
+        isOpen={isDeleteLoteDialogOpen}
+        onClose={() => setIsDeleteLoteDialogOpen(false)}
+        onConfirm={handleDeleteLote}
+        title="¿Eliminar lote de planificación?"
+        description="Esta acción eliminará permanentemente todos los registros de esta planificación. Las órdenes volverán a estar disponibles para planificar. ¿Está seguro?"
+        confirmText={isDeletingLote ? "Eliminando..." : "Sí, eliminar"}
+        cancelText="Cancelar"
+        variant="destructive"
+      />
 
       {/* Operator Detail Modal */}
       {selectedOperatorForModal && (
