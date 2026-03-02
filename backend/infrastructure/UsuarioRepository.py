@@ -152,17 +152,22 @@ class UsuarioRepository:
             logger.error(f"Error al guardar token de reset para {email}: {str(e)}")
             raise InfrastructureException("Error al guardar token de reset") from e
     
-    async def eliminar(self, id_usuario: int) -> bool:
-        """Elimina un usuario permanentemente de la base de datos"""
+    async def eliminar(self, id_usuario: int, eliminado_por: Optional[int] = None) -> bool:
+        """Desactiva un usuario (soft delete) en lugar de eliminarlo permanentemente"""
         try:
             await self.db.execute(
-                delete(Usuario)
+                update(Usuario)
                 .where(Usuario.id_usuario == id_usuario)
+                .values(
+                    activo=False,
+                    fecha_actualizacion=datetime.utcnow(),
+                    actualizado_por=eliminado_por
+                )
             )
             await self.db.commit()
-            logger.info(f"Usuario eliminado permanentemente ID: {id_usuario}")
+            logger.info(f"Usuario desactivado (soft delete) ID: {id_usuario}")
             return True
         except Exception as e:
             await self.db.rollback()
-            logger.error(f"Error al eliminar usuario {id_usuario}: {str(e)}")
-            raise InfrastructureException("Error al eliminar usuario") from e
+            logger.error(f"Error al desactivar usuario {id_usuario}: {str(e)}")
+            raise InfrastructureException("Error al desactivar usuario") from e

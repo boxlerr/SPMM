@@ -543,8 +543,8 @@ async def eliminar_usuario(
         username_eliminado = usuario.username
         nombre_eliminado = f"{usuario.nombre} {usuario.apellido}"
         
-        # Eliminar
-        await usuario_repository.eliminar(id_usuario)
+        # Eliminar (soft delete)
+        await usuario_repository.eliminar(id_usuario, eliminado_por=current_user['id_usuario'])
         
         # Crear notificación
         try:

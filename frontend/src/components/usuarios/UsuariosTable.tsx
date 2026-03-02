@@ -70,6 +70,7 @@ export default function UsuariosTable() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null);
   const [formData, setFormData] = useState<FormData>({
     username: '',
@@ -296,6 +297,7 @@ export default function UsuariosTable() {
     if (!selectedUsuario) return;
 
     try {
+      setIsDeleting(true);
       const token = localStorage.getItem('access_token');
 
       const response = await fetch(`${API_URL}/auth/usuarios/${selectedUsuario.id_usuario}`, {
@@ -309,9 +311,7 @@ export default function UsuariosTable() {
 
       if (data.status) {
         // La notificación se crea automáticamente en el backend
-        if (selectedUsuario) {
-          showToast(`Usuario '${selectedUsuario.username}' eliminado correctamente`, 'success');
-        }
+        showToast(`Usuario '${selectedUsuario.username}' eliminado correctamente`, 'success');
         await fetchUsuarios();
         setIsDeleteModalOpen(false);
         // Recargar notificaciones inmediatamente después de un pequeño delay
@@ -320,9 +320,14 @@ export default function UsuariosTable() {
             (window as any).reloadNotifications();
           }
         }, 500); // Esperar 500ms para que el backend procese la notificación
+      } else {
+        showToast(data.message || 'Error al eliminar usuario', 'error');
       }
     } catch (error) {
       console.error('Error al eliminar usuario:', error);
+      showToast('Error de conexión al eliminar usuario', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -733,14 +738,22 @@ export default function UsuariosTable() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>
+            <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)} disabled={isDeleting}>
               Cancelar
             </Button>
             <Button
               onClick={submitDeleteUser}
               className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={isDeleting}
             >
-              Eliminar Usuario
+              {isDeleting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Eliminando...
+                </>
+              ) : (
+                'Eliminar Usuario'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
