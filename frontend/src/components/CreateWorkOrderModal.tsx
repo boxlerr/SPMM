@@ -6,13 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { cn, capitalizeName } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
@@ -52,6 +54,21 @@ interface Articulo {
     descripcion: string;
 }
 
+interface MateriaPrimaItem {
+    id: string; // Temp ID
+    codigo: string;
+    descripcion: string;
+    cantidad: string;
+    unidad: string;
+    disponible: string;
+    en_produccion: string;
+    observaciones: string;
+    precio: string;
+    c_usado: string;
+    utilizado: boolean;
+    cortes: string;
+}
+
 export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -68,15 +85,55 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         descripcion: "",
         prioridad_id: "",
         articulo_id: "",
+        sector_id: "", // Nuevo campo DB
         fecha_prometida: "",
+        fecha_entrada: new Date().toISOString().split('T')[0],
+        fecha_orden: new Date().toISOString().split('T')[0],
+        fecha_entrega: "",
+        cantidad_entregada: "",
+        reclamo: false,
+        finalizadototal: false,
+        finalizadoparcial: false,
+        // Campos "En Desarrollo" (sin db)
+        n_ped_l: "",
+        n_pedido: "",
+        subsector: "",
+        requerido_por: "",
+        aprobado_por: "",
+        remitos_salida: "",
+        f_disp_material: "",
+        fabricacion: false,
+        reparacion: false,
+        sin_cargo: false,
+        stock: false,
+        interno: false,
+        revisada: false,
+        tercerizado_total: false,
+        tercerizado_parcial: false,
+        suspendida: false,
+        email: false,
+        tiene_plano: false,
+        programada: false,
+        en_proceso: false,
     });
 
     const [detailsData, setDetailsData] = useState({
         cantidad: "",
         observaciones: "",
+        nota_1: "",
+        nota_2: "",
+        nota_3: "",
+    });
+
+    const [materiasPrimasForm, setMateriasPrimasForm] = useState({
+        articulo_id: "",
+        cantidad: "",
+        observaciones: "",
+        no_lleva: false
     });
 
     const [processes, setProcesses] = useState<ProcessItem[]>([]);
+    const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrimaItem[]>([]);
     const [files, setFiles] = useState<File[]>([]);
     const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
     const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
@@ -94,6 +151,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const [clientes, setClientes] = useState<Option[]>([]); // New state
     const [operarios, setOperarios] = useState<{ id: number, nombre: string, apellido: string }[]>([]);
     const [maquinarias, setMaquinarias] = useState<Maquina[]>([]);
+    const [sectores, setSectores] = useState<Option[]>([]);
 
     useEffect(() => {
         if (isOpen) {
@@ -112,12 +170,44 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     descripcion: orderToEdit.detalle || orderToEdit.observaciones || "",
                     prioridad_id: getSafeId(orderToEdit.prioridad) || orderToEdit.id_prioridad?.toString() || "1",
                     articulo_id: getSafeId(orderToEdit.articulo) || orderToEdit.id_articulo?.toString() || "",
-                    fecha_prometida: orderToEdit.fecha_prometida || "",
+                    sector_id: getSafeId(orderToEdit.sector) || orderToEdit.id_sector?.toString() || "1",
+                    fecha_prometida: orderToEdit.fecha_prometida ? orderToEdit.fecha_prometida.split('T')[0] : "",
+                    fecha_entrada: orderToEdit.fecha_entrada ? orderToEdit.fecha_entrada.split('T')[0] : new Date().toISOString().split('T')[0],
+                    fecha_orden: orderToEdit.fecha_orden ? orderToEdit.fecha_orden.split('T')[0] : new Date().toISOString().split('T')[0],
+                    fecha_entrega: orderToEdit.fecha_entrega ? orderToEdit.fecha_entrega.split('T')[0] : "",
+                    cantidad_entregada: orderToEdit.cantidad_entregada?.toString() || "",
+                    reclamo: orderToEdit.reclamo === 1 || (orderToEdit as any).reclamo === true,
+                    finalizadototal: (orderToEdit as any).finalizadototal === 1 || (orderToEdit as any).finalizadototal === true,
+                    finalizadoparcial: (orderToEdit as any).finalizadoparcial === 1 || (orderToEdit as any).finalizadoparcial === true,
+                    // Campos Pronto funcionales
+                    n_ped_l: (orderToEdit as any).n_ped_l || "",
+                    n_pedido: (orderToEdit as any).n_pedido || "",
+                    subsector: (orderToEdit as any).subsector || "",
+                    requerido_por: (orderToEdit as any).requerido_por || "",
+                    aprobado_por: (orderToEdit as any).aprobado_por || "",
+                    remitos_salida: (orderToEdit as any).remitos_salida || "",
+                    f_disp_material: (orderToEdit as any).f_disp_material ? (orderToEdit as any).f_disp_material.split('T')[0] : "",
+                    fabricacion: (orderToEdit as any).fabricacion === 1 || (orderToEdit as any).fabricacion === true,
+                    reparacion: (orderToEdit as any).reparacion === 1 || (orderToEdit as any).reparacion === true,
+                    sin_cargo: (orderToEdit as any).sin_cargo === 1 || (orderToEdit as any).sin_cargo === true,
+                    stock: (orderToEdit as any).stock === 1 || (orderToEdit as any).stock === true,
+                    interno: (orderToEdit as any).interno === 1 || (orderToEdit as any).interno === true,
+                    revisada: (orderToEdit as any).revisada === 1 || (orderToEdit as any).revisada === true,
+                    tercerizado_total: (orderToEdit as any).tercerizado_total === 1 || (orderToEdit as any).tercerizado_total === true,
+                    tercerizado_parcial: (orderToEdit as any).tercerizado_parcial === 1 || (orderToEdit as any).tercerizado_parcial === true,
+                    suspendida: (orderToEdit as any).suspendida === 1 || (orderToEdit as any).suspendida === true,
+                    email: (orderToEdit as any).email === 1 || (orderToEdit as any).email === true,
+                    tiene_plano: (orderToEdit as any).tiene_plano === 1 || (orderToEdit as any).tiene_plano === true,
+                    programada: (orderToEdit as any).programada === 1 || (orderToEdit as any).programada === true,
+                    en_proceso: (orderToEdit as any).en_proceso === 1 || (orderToEdit as any).en_proceso === true
                 });
 
                 setDetailsData({
                     cantidad: orderToEdit.unidades ? orderToEdit.unidades.toString() : "",
-                    observaciones: "",
+                    observaciones: orderToEdit.observaciones || "",
+                    nota_1: "",
+                    nota_2: "",
+                    nota_3: "",
                 });
 
                 // Populate processes if they exist
@@ -154,13 +244,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [prioridadesRes, procesosRes, operariosRes, maquinariasRes, articulosRes, clientesRes] = await Promise.all([
+            const [prioridadesRes, procesosRes, operariosRes, maquinariasRes, articulosRes, clientesRes, sectoresRes] = await Promise.all([
                 fetch(`${API_URL}/prioridades`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/articulos`, { headers: getAuthHeaders() }),
-                fetch(`${API_URL}/clientes`, { headers: getAuthHeaders() }) // Fetch clients
+                fetch(`${API_URL}/clientes`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/sectores`, { headers: getAuthHeaders() })
             ]);
 
             if (prioridadesRes.ok) {
@@ -189,11 +280,48 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 const data = await articulosRes.json();
                 setArticulos(Array.isArray(data) ? data : (data.data || []));
             }
+            if (sectoresRes.ok) {
+                const data = await sectoresRes.json();
+                const rawData = Array.isArray(data) ? data : (data.data || []);
+                setSectores(rawData.map((s: any) => ({ id: s.id, nombre: s.nombre || s.descripcion })));
+            }
         } catch (error) {
             console.error("Error fetching data:", error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleAddMateriaPrima = () => {
+        if (!materiasPrimasForm.articulo_id) {
+            toast.error("Seleccione una Materia Prima / Artículo");
+            return;
+        }
+
+        const selectedArt = articulos.find(a => a.id.toString() === materiasPrimasForm.articulo_id);
+
+        const newMP: MateriaPrimaItem = {
+            id: Math.random().toString(36).substr(2, 9),
+            codigo: selectedArt?.cod_articulo || "",
+            descripcion: selectedArt?.descripcion || "",
+            cantidad: materiasPrimasForm.cantidad || "1",
+            unidad: "U", // Default
+            disponible: "-",
+            en_produccion: "-",
+            observaciones: materiasPrimasForm.observaciones,
+            precio: "-",
+            c_usado: "-",
+            utilizado: false,
+            cortes: "Cortes"
+        };
+
+        setMateriasPrimas([...materiasPrimas, newMP]);
+        // Reset mini form
+        setMateriasPrimasForm({ ...materiasPrimasForm, articulo_id: "", cantidad: "", observaciones: "" });
+    };
+
+    const handleRemoveMateriaPrima = (id: string) => {
+        setMateriasPrimas(materiasPrimas.filter(p => p.id !== id));
     };
 
     const handleAddProcess = () => {
@@ -240,9 +368,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     };
 
     const handleNextStep = () => {
-        if (activeTab === "general") setActiveTab("procesos");
-        else if (activeTab === "procesos") setActiveTab("detalles");
+        if (activeTab === "general") setActiveTab("materias");
+        else if (activeTab === "materias") setActiveTab("procesos");
     };
+
+    const handlePrevStep = () => {
+        if (activeTab === "procesos") setActiveTab("materias");
+        else if (activeTab === "materias") setActiveTab("general");
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -256,26 +389,59 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const performSubmission = async () => {
         setSubmitting(true);
 
-        // Find selected article for auto-filling observations
         const selectedArticle = articulos.find(a => a.id.toString() === generalData.articulo_id);
         const articleDescription = selectedArticle ? `${selectedArticle.cod_articulo} - ${selectedArticle.descripcion}` : "";
 
+        // Unir las notas en observaciones
+        let observacionesUnidas = detailsData.observaciones || articleDescription;
+        if (detailsData.nota_1) observacionesUnidas += `\nNota 1: ${detailsData.nota_1}`;
+        if (detailsData.nota_2) observacionesUnidas += `\nNota 2: ${detailsData.nota_2}`;
+        if (detailsData.nota_3) observacionesUnidas += `\nNota 3: ${detailsData.nota_3}`;
+
         const fullData = {
             id_otvieja: 0, // 0 triggers backend auto-generation
-            observaciones: articleDescription, // Solo nombre del articulo
-            detalle: detailsData.observaciones ? `${generalData.descripcion}\n\nNota: ${detailsData.observaciones}`.trim() : generalData.descripcion, // Descripcion + Notas
-            id_cliente: parseInt(generalData.cliente_id), // Send ID
-            cliente: clientes.find(c => c.id.toString() === generalData.cliente_id)?.nombre || "", // Send name for display (optional)
+            observaciones: observacionesUnidas,
+            detalle: generalData.descripcion,
+            id_cliente: parseInt(generalData.cliente_id),
+            cliente: clientes.find(c => c.id.toString() === generalData.cliente_id)?.nombre || "",
             unidades: detailsData.cantidad ? parseInt(detailsData.cantidad) : 0,
 
             id_prioridad: parseInt(generalData.prioridad_id),
-            id_sector: 1, // Hardcoded as per user request
+            id_sector: generalData.sector_id ? parseInt(generalData.sector_id) : 1,
             id_articulo: parseInt(generalData.articulo_id),
 
-            fecha_orden: new Date().toISOString(),
-            fecha_entrada: new Date().toISOString(),
-            fecha_prometida: generalData.fecha_prometida || new Date().toISOString(),
-            fecha_entrega: null,
+            fecha_orden: generalData.fecha_orden ? new Date(generalData.fecha_orden).toISOString() : new Date().toISOString(),
+            fecha_entrada: generalData.fecha_entrada ? new Date(generalData.fecha_entrada).toISOString() : new Date().toISOString(),
+            fecha_prometida: generalData.fecha_prometida ? new Date(generalData.fecha_prometida).toISOString() : new Date().toISOString(),
+            fecha_entrega: generalData.fecha_entrega ? new Date(generalData.fecha_entrega).toISOString() : null,
+
+            cantidad_entregada: generalData.cantidad_entregada ? parseInt(generalData.cantidad_entregada) : 0,
+            reclamo: generalData.reclamo ? 1 : 0,
+            finalizadototal: generalData.finalizadototal ? 1 : 0,
+            finalizadoparcial: generalData.finalizadoparcial ? 1 : 0,
+
+            // Nuevos Campos "Pronto"
+            n_ped_l: generalData.n_ped_l,
+            n_pedido: generalData.n_pedido,
+            subsector: generalData.subsector,
+            requerido_por: generalData.requerido_por,
+            aprobado_por: generalData.aprobado_por,
+            remitos_salida: generalData.remitos_salida,
+            f_disp_material: generalData.f_disp_material ? new Date(generalData.f_disp_material).toISOString() : null,
+
+            fabricacion: generalData.fabricacion,
+            reparacion: generalData.reparacion,
+            sin_cargo: generalData.sin_cargo,
+            stock: generalData.stock,
+            interno: generalData.interno,
+            revisada: generalData.revisada,
+            tercerizado_total: generalData.tercerizado_total,
+            tercerizado_parcial: generalData.tercerizado_parcial,
+            suspendida: generalData.suspendida,
+            email: generalData.email,
+            tiene_plano: generalData.tiene_plano,
+            programada: generalData.programada,
+            en_proceso: generalData.en_proceso,
 
             procesos: processes.map(p => ({
                 proceso_id: parseInt(p.proceso_id),
@@ -375,18 +541,18 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
     const resetForm = () => {
         setGeneralData({
-            cliente: "",
-            cliente_id: "",
-            descripcion: "",
-            prioridad_id: "",
-            articulo_id: "",
-            fecha_prometida: "",
+            cliente: "", cliente_id: "", descripcion: "", prioridad_id: "", articulo_id: "", sector_id: "", fecha_prometida: "",
+            fecha_entrada: new Date().toISOString().split('T')[0], fecha_orden: new Date().toISOString().split('T')[0],
+            fecha_entrega: "", cantidad_entregada: "", reclamo: false, finalizadototal: false, finalizadoparcial: false,
+            n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
+            f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
+            revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false,
+            programada: false, en_proceso: false
         });
-        setDetailsData({
-            cantidad: "",
-            observaciones: "",
-        });
+        setDetailsData({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
+        setMateriasPrimasForm({ articulo_id: "", cantidad: "", observaciones: "", no_lleva: false });
         setProcesses([]);
+        setMateriasPrimas([]);
         setFiles([]);
         setExistingFiles([]);
         setDeletedFileIds([]);
@@ -452,99 +618,159 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
                         <div className="flex-1 overflow-y-auto p-6 relative">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                                <TabsList className="grid w-full grid-cols-2 mb-8 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
-                                    <TabsTrigger value="general" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all">
-                                        <FileText size={16} className="mr-2" />
-                                        1. Información General y Detalles
+                                <TabsList className="grid w-full grid-cols-3 mb-8 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
+                                    <TabsTrigger value="general" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <FileText size={16} className="mr-1 md:mr-2" />
+                                        1. Información General
                                     </TabsTrigger>
-                                    <TabsTrigger value="procesos" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all">
-                                        <Settings size={16} className="mr-2" />
-                                        2. Procesos y Recursos (Opcional)
+                                    <TabsTrigger value="materias" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Layers size={16} className="mr-1 md:mr-2" />
+                                        2. Materias Primas
+                                    </TabsTrigger>
+                                    <TabsTrigger value="procesos" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Settings size={16} className="mr-1 md:mr-2" />
+                                        3. Procesos (Opcional)
                                     </TabsTrigger>
                                 </TabsList>
 
                                 {/* Tab: General */}
                                 <TabsContent value="general" className="space-y-6 mt-0 animate-in fade-in-50 slide-in-from-left-2 duration-300">
-                                    <div className="grid grid-cols-2 gap-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                        {/* Row 1 */}
                                         <div className="space-y-2">
-                                            <Label htmlFor="articulo" className="text-sm font-semibold text-gray-700">
-                                                Artículo / Producto <span className="text-red-500">*</span>
-                                            </Label>
-                                            <SearchableSelect
-                                                options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))}
-                                                value={generalData.articulo_id}
-                                                onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })}
-                                                placeholder="Seleccionar artículo"
-                                            />
+                                            <Label htmlFor="fecha_orden" className="text-xs font-semibold text-gray-700">Fecha</Label>
+                                            <Input id="fecha_orden" type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-9 text-sm" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="n_ped_l" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Ped L</Label>
+                                            <Input id="n_ped_l" value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="prioridad" className="text-xs font-semibold text-gray-700">Prioridad <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="Prioridad" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="sector" className="text-xs font-semibold text-gray-700">Sector <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="Sector" />
                                         </div>
 
+                                        {/* Row 2 */}
                                         <div className="space-y-2">
-                                            <Label htmlFor="cliente" className="text-sm font-semibold text-gray-700">
-                                                Cliente <span className="text-red-500">*</span>
-                                            </Label>
-                                            <SearchableSelect
-                                                options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))}
-                                                value={generalData.cliente_id}
-                                                onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })}
-                                                placeholder="Seleccionar cliente"
-                                            />
+                                            <Label htmlFor="cliente" className="text-xs font-semibold text-gray-700">Cliente <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="Cliente" />
                                         </div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label htmlFor="descripcion" className="text-sm font-semibold text-gray-700">
-                                            Descripción del Trabajo <span className="text-red-500">*</span>
-                                        </Label>
-                                        <Textarea
-                                            id="descripcion"
-                                            placeholder="Describe el trabajo a realizar..."
-                                            value={generalData.descripcion}
-                                            onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })}
-                                            className="min-h-[100px] border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 bg-gray-50/30 resize-none"
-                                            required
-                                        />
-                                    </div>
-
-                                    <div className="grid grid-cols-3 gap-6">
                                         <div className="space-y-2">
-                                            <Label htmlFor="prioridad" className="text-sm font-semibold text-gray-700">
-                                                Prioridad <span className="text-red-500">*</span>
-                                            </Label>
-                                            <SearchableSelect
-                                                options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))}
-                                                value={generalData.prioridad_id}
-                                                onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })}
-                                                placeholder="Seleccionar prioridad"
-                                            />
+                                            <Label htmlFor="n_pedido" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Pedido</Label>
+                                            <Input id="n_pedido" value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="subsector" className="text-xs font-semibold text-gray-700 flex items-center gap-2">SubSector</Label>
+                                            <Input id="subsector" value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="cantidad" className="text-xs font-semibold text-gray-700">Cant a Fabricar</Label>
+                                            <Input id="cantidad" type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-9 text-sm" />
                                         </div>
 
+                                        {/* Row 3 */}
                                         <div className="space-y-2">
-                                            <Label htmlFor="fecha_prometida" className="text-sm font-semibold text-gray-700">
-                                                Fecha Prometida
-                                            </Label>
-                                            <Input
-                                                id="fecha_prometida"
-                                                type="date"
-                                                value={generalData.fecha_prometida ? generalData.fecha_prometida.split('T')[0] : ''}
-                                                onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })}
-                                                className="h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 bg-gray-50/30"
-                                            />
+                                            <Label htmlFor="requerido_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Requerido por</Label>
+                                            <Input id="requerido_por" value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="aprobado_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Aprobado por</Label>
+                                            <Input id="aprobado_por" value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="cantidad_entregada" className="text-xs font-semibold text-gray-700">Cant. Entregada</Label>
+                                            <Input id="cantidad_entregada" type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-9 text-sm" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="fecha_entrada" className="text-xs font-semibold text-gray-700">Fecha Entrada</Label>
+                                            <Input id="fecha_entrada" type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-9 text-sm" />
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <Label htmlFor="cantidad" className="text-sm font-semibold text-gray-700">
-                                                Cantidad
-                                            </Label>
-                                            <Input
-                                                id="cantidad"
-                                                type="number"
-                                                placeholder="Ej: 100"
-                                                value={detailsData.cantidad}
-                                                onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })}
-                                                className="h-11 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 bg-gray-50/30"
-                                                min="1"
-                                            />
+                                        {/* Row 4 */}
+                                        <div className="space-y-2 md:col-span-2">
+                                            <Label htmlFor="articulo" className="text-xs font-semibold text-gray-700">Producto <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Producto" />
                                         </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="fecha_prometida" className="text-xs font-semibold text-gray-700">F. Prometida</Label>
+                                            <Input id="fecha_prometida" type="date" value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className="h-9 text-sm" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="fecha_entrega" className="text-xs font-semibold text-gray-700">F. Entrega</Label>
+                                            <Input id="fecha_entrega" type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-9 text-sm" />
+                                        </div>
+
+                                        {/* Row 5 / Other dates/texts */}
+                                        <div className="space-y-2">
+                                            <Label htmlFor="remitos_salida" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Remitos Salida</Label>
+                                            <Input id="remitos_salida" value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="f_disp_material" className="text-xs font-semibold text-gray-700 flex items-center gap-2">F. Disp Material</Label>
+                                            <Input id="f_disp_material" type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        </div>
+
+                                        {/* Row 6 Toggles - First full width span block */}
+                                        <div className="md:col-span-4 grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border border-gray-100 rounded-xl bg-gray-50/50">
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="fabricacion" checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> <Label htmlFor="fabricacion" className="text-sm cursor-pointer">Fabricación</Label></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="reparacion" checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> <Label htmlFor="reparacion" className="text-sm cursor-pointer">Reparación</Label></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="sin_cargo" checked={generalData.sin_cargo} onCheckedChange={(c) => setGeneralData({ ...generalData, sin_cargo: !!c })} /> <Label htmlFor="sin_cargo" className="text-sm cursor-pointer">Sin Cargo</Label></div>
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="stock" checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> <Label htmlFor="stock" className="text-sm cursor-pointer">Stock</Label></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="interno" checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> <Label htmlFor="interno" className="text-sm cursor-pointer">Interno</Label></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="revisada" checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> <Label htmlFor="revisada" className="text-sm cursor-pointer">Revisada</Label></div>
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex items-center space-x-2 text-red-600 font-bold"><Checkbox id="suspendida" className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> <Label htmlFor="suspendida" className="text-sm cursor-pointer">SUSPENDIDA</Label></div>
+                                                <div className="flex items-center space-x-2 text-orange-600 font-bold"><Checkbox id="reclamo" className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> <Label htmlFor="reclamo" className="text-sm cursor-pointer text-orange-600">RECLAMO</Label></div>
+                                                <div className="flex items-center space-x-2 opacity-70 mt-1"><Checkbox id="email" checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> <Label htmlFor="email" className="text-sm cursor-pointer">Email</Label></div>
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_total" checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> <Label htmlFor="tercerizado_total" className="text-sm cursor-pointer">Tercerizado Total</Label></div>
+                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_parcial" checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> <Label htmlFor="tercerizado_parcial" className="text-sm cursor-pointer">Tercerizado Parcial</Label></div>
+                                            </div>
+                                        </div>
+
+                                        {/* Status Progress block */}
+                                        <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-5 gap-4 bg-blue-50/40 p-3 rounded-lg border border-blue-100 items-center">
+                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tiene_plano" checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> <Label htmlFor="tiene_plano" className="text-sm cursor-pointer">Tiene Plano</Label></div>
+                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="programada" checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> <Label htmlFor="programada" className="text-sm cursor-pointer">PROGRAMADA</Label></div>
+                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="en_proceso" checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> <Label htmlFor="en_proceso" className="text-sm cursor-pointer">EN PROCESO</Label></div>
+                                            <div className="flex items-center space-x-2"><Checkbox id="finalizadoparcial" checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> <Label htmlFor="finalizadoparcial" className="text-sm cursor-pointer font-medium">FIN. PARCIAL</Label></div>
+                                            <div className="flex items-center space-x-2"><Checkbox id="finalizadototal" checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> <Label htmlFor="finalizadototal" className="text-sm cursor-pointer font-medium text-green-700">FIN. TOTAL</Label></div>
+                                        </div>
+
+                                        {/* Row 7 Textareas */}
+                                        <div className="md:col-span-2 space-y-2">
+                                            <Label htmlFor="descripcion" className="text-sm font-semibold text-gray-700">Info Gral / Descripción *</Label>
+                                            <Textarea id="descripcion" value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-20 min-h-[80px] bg-white border-gray-200" required />
+                                        </div>
+                                        <div className="md:col-span-2 space-y-2">
+                                            <Label htmlFor="nota_taller" className="text-sm font-semibold text-gray-700">Nota de Taller</Label>
+                                            <Textarea id="nota_taller" value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-20 min-h-[80px] bg-white border-gray-200" />
+                                        </div>
+                                        {/* Additional Notas (Pronto) */}
+                                        <div className="md:col-span-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div className="space-y-1">
+                                                <Label htmlFor="nota_1" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 1</Label>
+                                                <Input id="nota_1" value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label htmlFor="nota_2" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 2</Label>
+                                                <Input id="nota_2" value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label htmlFor="nota_3" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 3</Label>
+                                                <Input id="nota_3" value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
+                                            </div>
+                                        </div>
+
                                     </div>
 
                                     <div className="space-y-2 pt-4">
@@ -673,6 +899,109 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                     </div>
                                 </TabsContent>
 
+                                {/* Tab: Materias Primas */}
+                                <TabsContent value="materias" className="space-y-6 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
+                                    <div className="flex flex-col gap-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="space-y-1">
+                                                <h3 className="text-lg font-semibold text-gray-900">Materias Primas</h3>
+                                                <p className="text-sm text-gray-500">Administra los materiales necesarios para esta orden</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Upper Form */}
+                                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-gray-50/50 p-4 rounded-xl border border-gray-100 items-end">
+                                            <div className="md:col-span-5 space-y-1.5">
+                                                <Label className="text-xs font-semibold text-gray-600">M. Primas</Label>
+                                                <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={materiasPrimasForm.articulo_id} onValueChange={(val) => setMateriasPrimasForm({ ...materiasPrimasForm, articulo_id: val })} placeholder="Seleccione material" />
+                                            </div>
+                                            <div className="md:col-span-2 space-y-1.5">
+                                                <Label className="text-xs font-semibold text-gray-600">Cantidad</Label>
+                                                <Input type="number" value={materiasPrimasForm.cantidad} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, cantidad: e.target.value })} className="h-9" placeholder="1" />
+                                            </div>
+                                            <div className="md:col-span-4 space-y-1.5">
+                                                <Label className="text-xs font-semibold text-gray-600">Obs.</Label>
+                                                <Input value={materiasPrimasForm.observaciones} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, observaciones: e.target.value })} className="h-9" placeholder="Observaciones..." />
+                                            </div>
+                                            <div className="md:col-span-1">
+                                                <Button type="button" onClick={handleAddMateriaPrima} className="w-full h-9 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200">
+                                                    Agregar
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        {/* Table */}
+                                        <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
+                                            <table className="w-full text-sm text-left relative">
+                                                <thead className="text-xs text-gray-600 bg-gray-50/80 border-b border-gray-200 uppercase whitespace-nowrap">
+                                                    <tr>
+                                                        <th className="px-3 py-2">Código</th>
+                                                        <th className="px-3 py-2">Descripción</th>
+                                                        <th className="px-3 py-2">Cant</th>
+                                                        <th className="px-3 py-2">UN</th>
+                                                        <th className="px-3 py-2">Disponible</th>
+                                                        <th className="px-3 py-2">En Prod.</th>
+                                                        <th className="px-3 py-2 w-32">Obs</th>
+                                                        <th className="px-3 py-2">Precio</th>
+                                                        <th className="px-3 py-2">C. Usado</th>
+                                                        <th className="px-3 py-2 text-center">Utiliz.</th>
+                                                        <th className="px-3 py-2 text-center">Cortes</th>
+                                                        <th className="px-2 py-2 text-center"></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {materiasPrimas.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan={12} className="px-4 py-8 text-center text-gray-400">
+                                                                No se agregaron materias primas.
+                                                            </td>
+                                                        </tr>
+                                                    ) : (
+                                                        materiasPrimas.map((mp, index) => (
+                                                            <tr key={mp.id} className="hover:bg-gray-50/50 transition-colors group">
+                                                                <td className="px-3 py-2 font-medium">{mp.codigo}</td>
+                                                                <td className="px-3 py-2 truncate max-w-[150px]" title={mp.descripcion}>{mp.descripcion}</td>
+                                                                <td className="px-3 py-2">{mp.cantidad}</td>
+                                                                <td className="px-3 py-2">{mp.unidad}</td>
+                                                                <td className="px-3 py-2 text-gray-500">{mp.disponible}</td>
+                                                                <td className="px-3 py-2 text-gray-500">{mp.en_produccion}</td>
+                                                                <td className="px-3 py-2 truncate max-w-[100px] text-gray-500" title={mp.observaciones}>{mp.observaciones}</td>
+                                                                <td className="px-3 py-2 text-gray-500">{mp.precio}</td>
+                                                                <td className="px-3 py-2 text-gray-500">{mp.c_usado}</td>
+                                                                <td className="px-3 py-2 text-center">
+                                                                    <Checkbox checked={mp.utilizado} onCheckedChange={(c) => {
+                                                                        const copy = [...materiasPrimas];
+                                                                        copy[index].utilizado = !!c;
+                                                                        setMateriasPrimas(copy);
+                                                                    }} />
+                                                                </td>
+                                                                <td className="px-3 py-2">
+                                                                    <Input className="h-7 w-20 text-xs text-center" value={mp.cortes} onChange={(e) => {
+                                                                        const copy = [...materiasPrimas];
+                                                                        copy[index].cortes = e.target.value;
+                                                                        setMateriasPrimas(copy);
+                                                                    }} />
+                                                                </td>
+                                                                <td className="px-2 py-2 text-center">
+                                                                    <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveMateriaPrima(mp.id)} className="h-7 w-7 p-0 text-gray-400 hover:text-red-500">
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </Button>
+                                                                </td>
+                                                            </tr>
+                                                        ))
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {/* Bottom Control */}
+                                        <div className="flex items-center space-x-2 mt-2 pt-4 border-t border-gray-100">
+                                            <Checkbox id="no_lleva_mp" checked={materiasPrimasForm.no_lleva} onCheckedChange={(c) => setMateriasPrimasForm({ ...materiasPrimasForm, no_lleva: !!c })} />
+                                            <Label htmlFor="no_lleva_mp" className="text-sm font-medium text-gray-700 cursor-pointer uppercase">NO LLEVA MATERIAS PRIMAS</Label>
+                                        </div>
+                                    </div>
+                                </TabsContent>
+
                                 {/* Tab: Procesos */}
                                 <TabsContent value="procesos" className="space-y-6 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
                                     <div className="flex items-center justify-between mb-2">
@@ -763,12 +1092,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                     Cancelar
                                 </Button>
                                 <div className="flex gap-3">
-                                    {activeTab === "procesos" && (
+                                    {(activeTab === "procesos" || activeTab === "materias") && (
                                         <Button
                                             key="prev-button"
                                             type="button"
                                             variant="outline"
-                                            onClick={() => setActiveTab("general")}
+                                            onClick={handlePrevStep}
                                             className="h-11 px-6"
                                         >
                                             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -776,19 +1105,31 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         </Button>
                                     )}
 
-                                    <Button
-                                        key="submit-button"
-                                        type="submit"
-                                        disabled={submitting || loading}
-                                        className="h-11 px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
-                                    >
-                                        {submitting ? (
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <CheckCircle2 className="mr-2 h-4 w-4" />
-                                        )}
-                                        {activeTab === "procesos" ? "Crear Orden" : "Siguiente / Crear"}
-                                    </Button>
+                                    {activeTab === "procesos" ? (
+                                        <Button
+                                            key="submit-button"
+                                            type="submit"
+                                            disabled={submitting || loading}
+                                            className="h-11 px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
+                                        >
+                                            {submitting ? (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                            )}
+                                            Crear Orden
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            key="next-button"
+                                            type="button"
+                                            onClick={handleNextStep}
+                                            className="h-11 px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
+                                        >
+                                            Siguiente
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Button>
+                                    )}
                                 </div>
                             </div>
                         </DialogFooter>

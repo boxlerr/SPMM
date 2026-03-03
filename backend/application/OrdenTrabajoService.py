@@ -53,7 +53,34 @@ class OrdenTrabajoService:
                 fecha_orden=dto.fecha_orden,
                 fecha_entrada=dto.fecha_entrada,
                 fecha_prometida=dto.fecha_prometida,
-                fecha_entrega=dto.fecha_entrega
+                fecha_entrega=dto.fecha_entrega,
+                
+                # 🔹 Nuevos campos "Pronto"
+                n_ped_l=dto.n_ped_l,
+                n_pedido=dto.n_pedido,
+                subsector=dto.subsector,
+                requerido_por=dto.requerido_por,
+                aprobado_por=dto.aprobado_por,
+                remitos_salida=dto.remitos_salida,
+                f_disp_material=dto.f_disp_material,
+                
+                fabricacion=1 if dto.fabricacion else 0,
+                reparacion=1 if dto.reparacion else 0,
+                sin_cargo=1 if dto.sin_cargo else 0,
+                stock=1 if dto.stock else 0,
+                interno=1 if dto.interno else 0,
+                revisada=1 if dto.revisada else 0,
+                tercerizado_total=1 if dto.tercerizado_total else 0,
+                tercerizado_parcial=1 if dto.tercerizado_parcial else 0,
+                suspendida=1 if dto.suspendida else 0,
+                email=1 if dto.email else 0,
+                tiene_plano=1 if dto.tiene_plano else 0,
+                programada=1 if dto.programada else 0,
+                en_proceso=1 if dto.en_proceso else 0,
+                
+                finalizadototal=1 if dto.finalizadototal else 0,
+                finalizadoparcial=1 if dto.finalizadoparcial else 0,
+                reclamo=1 if dto.reclamo else 0
             )
             
             orden_creada = await self.repository.save(orden)

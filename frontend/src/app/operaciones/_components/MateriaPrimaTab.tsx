@@ -20,6 +20,7 @@ interface Pieza {
     estante?: string;
     letra?: string;
     nro?: string;
+    id_otvieja?: number;
 }
 
 interface MetaData {
@@ -156,6 +157,7 @@ const MateriaPrimaTab = () => {
                                     <TableHead>Ubicación</TableHead>
                                     <TableHead>Proveedor</TableHead>
                                     <TableHead>Precio</TableHead>
+                                    <TableHead>Nº OT (id_otvieja)</TableHead>
                                     <TableHead className="max-w-[150px]">Obs</TableHead>
 
                                 </TableRow>
@@ -184,6 +186,7 @@ const MateriaPrimaTab = () => {
                                             </TableCell>
                                             <TableCell className="text-xs text-gray-500">{pieza.proveedor || '-'}</TableCell>
                                             <TableCell className="text-xs text-right">${pieza.unitario || 0}</TableCell>
+                                            <TableCell className="text-xs text-gray-500">{pieza.id_otvieja ? `#${pieza.id_otvieja}` : '-'}</TableCell>
                                             <TableCell className="text-xs text-gray-500 max-w-[150px] truncate" title={pieza.observaciones || ''}>{pieza.observaciones || '-'}</TableCell>
 
                                         </TableRow>

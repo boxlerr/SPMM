@@ -14,3 +14,4 @@ class PiezaRequestDTO(BaseModel):
     estante: Optional[str] = None
     letra: Optional[str] = None
     nro: Optional[str] = None
+    id_otvieja: Optional[int] = None

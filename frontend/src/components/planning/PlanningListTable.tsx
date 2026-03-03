@@ -455,7 +455,7 @@ function _PlanningListTable({
     };
 
     const renderDetails = (item: WorkOrder) => (
-        <div className="ml-2 md:ml-4 w-fit border rounded-md overflow-hidden bg-white shadow-inner">
+        <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
             <div className="p-2 mb-2">
                 <div
                     className="cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all"
@@ -478,7 +478,7 @@ function _PlanningListTable({
                 <OrderFiles orderId={item.id} />
             </div>
             <div className="w-full text-sm">
-                <div className="hidden md:grid bg-gray-100 text-xs uppercase text-gray-600 grid-cols-[40px_280px_130px_110px_70px_80px_150px_150px] gap-2 px-4 py-2 font-bold border-t border-gray-200">
+                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[40px_3fr_110px_110px_70px_70px_2fr_2fr] gap-3 px-4 py-2 font-bold border-t border-gray-200">
                     <div>#</div>
                     <div>Proceso</div>
                     <div>Inicio Estimado</div>
@@ -499,7 +499,7 @@ function _PlanningListTable({
                                 return (
                                     <div
                                         key={`${item.id}-${proc.proceso.id}`}
-                                        className="flex flex-col md:grid md:grid-cols-[40px_280px_130px_110px_70px_80px_150px_150px] gap-2 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
+                                        className="flex flex-col md:grid md:grid-cols-[40px_3fr_110px_110px_70px_70px_2fr_2fr] gap-3 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
                                     >
                                         {/* # */}
                                         <div className="flex flex-row justify-between md:block w-full md:w-auto">
@@ -776,9 +776,9 @@ function _PlanningListTable({
             </div>
 
             {/* Desktop Table View (>= md) */}
-            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
+            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full">
+                <div className="w-full overflow-x-auto pb-4">
+                    <table className="w-full min-w-[1000px] text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                             <tr>
                                 <th className="w-10 px-4 py-3">

@@ -93,6 +93,7 @@ app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
 app.include_router(ws_router, tags=["websocket"])
 
 app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)
+app.include_router(config_router, tags=["configuracion"], dependencies=protected_deps)
 
 app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
 app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)

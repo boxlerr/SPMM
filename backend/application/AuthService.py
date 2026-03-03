@@ -3,6 +3,7 @@ Servicio de Autenticación
 Maneja login, logout, recuperación de contraseña
 """
 from datetime import datetime, timedelta
+import time
 from typing import Optional
 import secrets
 from backend.infrastructure.UsuarioRepository import UsuarioRepository
@@ -33,6 +34,8 @@ class AuthService:
             BusinessException: Si las credenciales son inválidas
         """
         try:
+            # Validar credenciales
+            start_db = time.time()
             # Buscar usuario por username o email
             usuario = await self.usuario_repository.obtener_por_username(username)
             
@@ -40,17 +43,24 @@ class AuthService:
                 # Intentar buscar por email
                 usuario = await self.usuario_repository.obtener_por_email(username)
             
-            # Validar credenciales
+            db_time = time.time() - start_db
+            logger.info(f"Login Time - DB Lookup for '{username}': {db_time:.4f}s")
+
             if not usuario:
-                logger.error(f"Intento de login fallido: usuario {username} no encontrado")
+                logger.error(f"LOGIN FAILED: Usuario '{username}' no encontrado en BD.")
                 raise BusinessException("Usuario o contraseña incorrectos")
             
             if not usuario.activo:
-                logger.error(f"Intento de login de usuario inactivo: {username}")
+                logger.error(f"LOGIN FAILED: Usuario '{username}' inactivo.")
                 raise BusinessException("Usuario inactivo. Contacta al administrador")
             
-            if not verify_password(password, usuario.password_hash):
-                logger.error(f"Intento de login fallido: contraseña incorrecta para {username}")
+            start_hash = time.time()
+            is_valid_password = verify_password(password, usuario.password_hash)
+            hash_time = time.time() - start_hash
+            logger.info(f"Login Time - Password Hash Verify for '{username}': {hash_time:.4f}s")
+
+            if not is_valid_password:
+                logger.error(f"LOGIN FAILED: Password incorrecto para usuario '{username}'.")
                 raise BusinessException("Usuario o contraseña incorrectos")
             
             # Actualizar último login

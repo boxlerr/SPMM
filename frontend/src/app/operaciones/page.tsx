@@ -845,62 +845,62 @@ export default function OperacionesPage() {
 
 
   return (
-    <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'mr-[400px]' : 'mr-0')}>
+    <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
       {/* Header normal (no sticky) */}
-      <div className="bg-white border-b border-gray-200 shadow-sm flex-shrink-0">
-        <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
+      <div className="bg-white border-b border-gray-200 shadow-sm flex-shrink-0 w-full">
+        <div className="w-full mx-auto px-4 md:px-6 lg:px-8 py-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-br from-[#DC143C] to-[#B8112E] rounded-xl shadow-lg">
-                  <Activity className="h-7 w-7 text-white" />
+              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-[#DC143C] to-[#B8112E] rounded-xl shadow-lg shrink-0">
+                  <Activity className="h-5 w-5 md:h-7 md:w-7 text-white" />
                 </div>
                 Operaciones
               </h1>
               <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona la planificación de las órdenes de trabajo</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 w-full md:w-auto">
               <Button
                 variant="outline"
                 onClick={() => setIsAvailabilityModalOpen(true)}
-                className="bg-white hover:bg-gray-50 text-gray-700 border-gray-300 shadow-sm"
+                className="bg-white hover:bg-gray-50 text-gray-700 border-gray-300 shadow-sm flex-1 md:flex-none"
                 title="Configurar feriados y días no laborales"
               >
-                <CalendarClock className="h-4 w-4 mr-2" />
-                Disponibilidad
+                <CalendarClock className="h-4 w-4 md:mr-2" />
+                <span className="hidden md:inline">Disponibilidad</span>
               </Button>
               <Button
                 onClick={() => {
                   setIsReplanning(false);
                   setIsSelectionModalOpen(true);
                 }}
-                className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg"
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all hover:shadow-lg flex-1 md:flex-none"
               >
-                <CalendarClock className="mr-2 h-4 w-4" />
-                Planificar
+                <CalendarClock className="md:mr-2 h-4 w-4" />
+                <span className="hidden md:inline">Planificar</span>
               </Button>
               <Button
                 onClick={() => setIsCreateModalOpen(true)}
-                className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg"
+                className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg flex-1 md:flex-none w-full sm:w-auto mt-2 sm:mt-0"
               >
                 <Plus className="mr-2 h-4 w-4" />
-                Nueva Orden
+                <span>Nueva Orden</span>
               </Button>
             </div>
           </div>
 
           {/* Tabs Navigation */}
-          <div className="flex items-center gap-1 mt-6 border-b border-gray-200">
+          <div className="flex overflow-x-auto pb-1 items-center gap-1 mt-6 border-b border-gray-200 scrollbar-hide">
             <button
               onClick={() => setActiveTab("lista_planificacion")}
-              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "lista_planificacion" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "lista_planificacion" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <LayoutList size={18} />
               Planificación
             </button>
             {/* <button
               onClick={() => setActiveTab("gantt")}
-              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "gantt" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "gantt" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <GanttChartSquare size={18} />
               Gantt
@@ -908,7 +908,7 @@ export default function OperacionesPage() {
 
             <button
               onClick={() => setActiveTab("operarios")}
-              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "operarios" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "operarios" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <User size={18} />
               Operarios
@@ -916,7 +916,7 @@ export default function OperacionesPage() {
 
             <button
               onClick={() => setActiveTab("materia_prima")}
-              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "materia_prima" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "materia_prima" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <Box size={18} />
               Materia Prima
@@ -924,7 +924,7 @@ export default function OperacionesPage() {
 
             <button
               onClick={() => setActiveTab("work_orders")}
-              className={"flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
+              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <LayoutList size={18} />
               Órdenes de Trabajo
@@ -933,8 +933,8 @@ export default function OperacionesPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-visible">
-        <div className={"flex-1 transition-all duration-300 flex flex-col " + (activeTab === 'gantt' ? 'max-w-full px-2 py-4' : 'max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-8 w-full')}>
+      <div className="flex-1 flex overflow-visible w-full">
+        <div className={"flex-1 transition-all w-full duration-300 flex flex-col " + (activeTab === 'gantt' ? 'w-full px-2 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-8')}>
           <div className={"bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col " + (activeTab === 'gantt' ? 'p-2' : 'p-6')}>
             {/* Redundant header removed */}
 
@@ -975,35 +975,35 @@ export default function OperacionesPage() {
             {activeTab === "work_orders" && <WorkOrdersListWrapper refreshTrigger={refreshTrigger} />}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
-                <div className="border-b px-4 bg-gray-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <TabsList className="bg-transparent p-0 h-auto gap-4">
+                <div className="border-b px-2 sm:px-4 bg-gray-50/50 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                  <TabsList className="bg-transparent p-0 h-auto flex flex-wrap gap-2 sm:gap-4 justify-start w-full xl:w-auto">
                     <TabsTrigger
                       value="general"
-                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Planificadas
                     </TabsTrigger>
                     <TabsTrigger
                       value="semanal"
-                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Semanal
                     </TabsTrigger>
                     <TabsTrigger
                       value="diaria"
-                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Diaria
                     </TabsTrigger>
                     <TabsTrigger
                       value="finalizadas"
-                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Finalizadas
                     </TabsTrigger>
                   </TabsList>
 
-                  <div className="py-2 pr-2 flex items-center gap-2">
+                  <div className="py-2 pr-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full xl:w-auto">
 
                     <Button
                       variant="outline"

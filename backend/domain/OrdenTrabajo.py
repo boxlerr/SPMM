@@ -21,6 +21,29 @@ class OrdenTrabajo(Base):
     finalizadototal = Column(Integer, nullable=True, default=0) # 0 = No, 1 = Si
     finalizadoparcial = Column(Integer, nullable=True, default=0) 
 
+    # 🔹 Nuevos campos "Pronto"
+    n_ped_l = Column(String(100), nullable=True)
+    n_pedido = Column(String(100), nullable=True)
+    subsector = Column(String(100), nullable=True)
+    requerido_por = Column(String(100), nullable=True)
+    aprobado_por = Column(String(100), nullable=True)
+    remitos_salida = Column(String(200), nullable=True)
+    f_disp_material = Column(DateTime, nullable=True)
+    
+    fabricacion = Column(Integer, nullable=True, default=0)
+    reparacion = Column(Integer, nullable=True, default=0)
+    sin_cargo = Column(Integer, nullable=True, default=0)
+    stock = Column(Integer, nullable=True, default=0)
+    interno = Column(Integer, nullable=True, default=0)
+    revisada = Column(Integer, nullable=True, default=0)
+    tercerizado_total = Column(Integer, nullable=True, default=0)
+    tercerizado_parcial = Column(Integer, nullable=True, default=0)
+    suspendida = Column(Integer, nullable=True, default=0)
+    email = Column(Integer, nullable=True, default=0)
+    tiene_plano = Column(Integer, nullable=True, default=0)
+    programada = Column(Integer, nullable=True, default=0)
+    en_proceso = Column(Integer, nullable=True, default=0)
+
     # 🔻 Eliminado: id_maquinaria (se quitó la FK a maquinaria)
 
     fecha_orden = Column(DateTime, nullable=False)

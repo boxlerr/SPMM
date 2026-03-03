@@ -4,9 +4,9 @@ cd frontend
 npm install
 npm run dev
 
-http://localhost:3000
+http://localhost:3000 
 
-#Levantar Backend
+#Levantar Backend dale
 
 cd backend
 python -m venv venv # crear entorno virtual
@@ -22,7 +22,7 @@ http://127.0.0.1:8000
 
 en caso que no te ande FastAPI y SQLAlchemy:
 pip install fastapi uvicorn
-pip install sqlalchemy
+pip install sqlalchemy hola
 
 
 ## Configuración BDD
