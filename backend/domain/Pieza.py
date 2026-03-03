@@ -17,3 +17,4 @@ class Pieza(Base):
     estante = Column(String, nullable=True)
     letra = Column(String, nullable=True)
     nro = Column(String, nullable=True)
+    id_otvieja = Column(Integer, nullable=True)
