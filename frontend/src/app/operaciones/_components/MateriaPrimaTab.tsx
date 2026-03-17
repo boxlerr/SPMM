@@ -4,6 +4,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Search, Plus, Edit, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 interface Pieza {
@@ -40,6 +42,7 @@ const MateriaPrimaTab = () => {
     const [page, setPage] = useState(1);
     const [pageSize] = useState(50);
     const [meta, setMeta] = useState<MetaData | null>(null);
+    const [onlyWithOT, setOnlyWithOT] = useState(false);
 
     // Debounce Search
     useEffect(() => {
@@ -52,7 +55,7 @@ const MateriaPrimaTab = () => {
 
     useEffect(() => {
         fetchPiezas();
-    }, [page, debouncedSearch]);
+    }, [page, debouncedSearch, onlyWithOT]);
 
     const fetchPiezas = async () => {
         setLoading(true);
@@ -61,7 +64,8 @@ const MateriaPrimaTab = () => {
             const params = new URLSearchParams({
                 page: page.toString(),
                 size: pageSize.toString(),
-                search: debouncedSearch
+                search: debouncedSearch,
+                only_with_ot: onlyWithOT.toString()
             });
 
             const response = await fetch(`${API_URL}/piezas?${params.toString()}`, {
@@ -107,6 +111,19 @@ const MateriaPrimaTab = () => {
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
+                </div>
+                <div className="flex items-center space-x-2 bg-white p-2 rounded-md border shadow-sm">
+                    <Checkbox
+                        id="only-ot"
+                        checked={onlyWithOT}
+                        onCheckedChange={(checked) => {
+                            setOnlyWithOT(!!checked);
+                            setPage(1);
+                        }}
+                    />
+                    <Label htmlFor="only-ot" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
+                        Solo con OT asignada
+                    </Label>
                 </div>
 
             </div>

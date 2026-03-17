@@ -102,7 +102,7 @@ class PlanificacionRepository:
             FROM planificacion p
             INNER JOIN orden_trabajo ot ON p.orden_id = ot.id
             WHERE p.id_planificacion_lote = :id_lote
-            AND ot.fecha_entrega = '1950-01-01 00:00:00'
+            AND (ot.fecha_entrega = '1950-01-01 00:00:00' OR ot.fecha_entrega IS NULL)
         """)
         
         try:

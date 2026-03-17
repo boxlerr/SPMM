@@ -13,6 +13,7 @@ import CambiarEstado from "@/app/recursos/_components/CambiarEstado"
 import { Operario } from "@/app/recursos/_types"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import MateriaPrimaTab from "./_components/MateriaPrimaTab"
+import { OperatorLoadTab } from "./_components/OperatorLoadTab"
 
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
@@ -46,7 +47,7 @@ const getAuthHeaders = (): HeadersInit => {
 };
 
 export default function OperacionesPage() {
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima">("lista_planificacion")
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima" | "carga">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -1001,6 +1002,12 @@ export default function OperacionesPage() {
                     >
                       Finalizadas
                     </TabsTrigger>
+                    <TabsTrigger
+                      value="carga"
+                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                    >
+                      Carga
+                    </TabsTrigger>
                   </TabsList>
 
                   <div className="py-2 pr-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full xl:w-auto">
@@ -1230,6 +1237,14 @@ export default function OperacionesPage() {
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="carga" className="m-0 h-full p-4">
+                    <OperatorLoadTab
+                      planificacion={filteredPlanificacion}
+                      operarios={rawOperarios}
+                      ordenes={ordenesTrabajo}
                     />
                   </TabsContent>
                 </div>

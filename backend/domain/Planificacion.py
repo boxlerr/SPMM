@@ -1,10 +1,8 @@
-from sqlalchemy import Column, Integer, String, Date, Boolean, DateTime, UniqueIdentifier, NVARCHAR
+from sqlalchemy import Column, Integer, String, Date, Boolean, DateTime, NVARCHAR
 from sqlalchemy.dialects.mssql import UNIQUEIDENTIFIER
-from sqlalchemy.ext.declarative import declarative_base
+from backend.infrastructure.db import Base
 import datetime
 import uuid
-
-Base = declarative_base()
 
 class Planificacion(Base):
     __tablename__ = "planificacion"

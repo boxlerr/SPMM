@@ -61,9 +61,9 @@ class PiezaService:
 
         return ResponseDTO(status=True, data={"deleted": id})
 
-    async def listarPiezas(self, page: int = 1, size: int = 50, search: str = ""):
-        logger.info(f"Service - Listar piezas paginadas page={page} search='{search}'.")
-        data, total = await self.repository.find_all(page=page, size=size, search=search)
+    async def listarPiezas(self, page: int = 1, size: int = 50, search: str = "", only_with_ot: bool = False):
+        logger.info(f"Service - Listar piezas paginadas page={page} search='{search}' only_with_ot={only_with_ot}.")
+        data, total = await self.repository.find_all(page=page, size=size, search=search, only_with_ot=only_with_ot)
         
         import math
         total_pages = math.ceil(total / size) if size > 0 else 0

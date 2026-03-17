@@ -39,40 +39,73 @@ class PiezaRepository:
             logger.error(f"Repository - Error real en delete: {e}")
             raise InfrastructureException("Error al eliminar la Pieza.") from e
 
-    async def find_all(self, page: int = 1, size: int = 50, search: str = ""):
+    async def find_all(self, page: int = 1, size: int = 50, search: str = "", only_with_ot: bool = False):
         try:
-            logger.info(f"Repository - Obtener piezas paginadas: page={page}, size={size}, search='{search}'")
+            from sqlalchemy import func
+            from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
+            from backend.domain.OrdenTrabajo import OrdenTrabajo
             
-            # Base query
-            query = select(Pieza)
+            logger.info(f"Repository - Obtener piezas paginadas: page={page}, size={size}, search='{search}', only_with_ot={only_with_ot}")
             
-            # Filter if search term provided
+            # Subquery to get the related old work order ID for each piece
+            ot_subquery = select(
+                OrdenTrabajoPieza.id_pieza,
+                func.max(OrdenTrabajo.id_otvieja).label("ot_vie_rel")
+            ).join(
+                OrdenTrabajo, OrdenTrabajoPieza.id_orden_trabajo == OrdenTrabajo.id
+            ).group_by(OrdenTrabajoPieza.id_pieza).subquery()
+
+            # Main query
+            if only_with_ot:
+                # Use INNER JOIN if we only want pieces with OT
+                query = select(Pieza, ot_subquery.c.ot_vie_rel).join(
+                    ot_subquery, Pieza.id == ot_subquery.c.id_pieza
+                )
+            else:
+                # Use OUTER JOIN to include all pieces
+                query = select(Pieza, ot_subquery.c.ot_vie_rel).outerjoin(
+                    ot_subquery, Pieza.id == ot_subquery.c.id_pieza
+                )
+            
             if search:
                 search_filter = (Pieza.descripcion.ilike(f"%{search}%")) | (Pieza.cod_pieza.ilike(f"%{search}%"))
                 query = query.where(search_filter)
             
-            # Count total API call
-            # We need a separate count query or use func.count()
-            # Efficient way for simple count:
-            from sqlalchemy import func
-            count_query = select(func.count()).select_from(query.subquery())
+            # Count total
+            if only_with_ot:
+                count_query = select(func.count(Pieza.id)).join(
+                    ot_subquery, Pieza.id == ot_subquery.c.id_pieza
+                )
+            else:
+                count_query = select(func.count(Pieza.id))
+                
+            if search:
+                count_query = count_query.where((Pieza.descripcion.ilike(f"%{search}%")) | (Pieza.cod_pieza.ilike(f"%{search}%")))
+            
             total_result = await self.db.execute(count_query)
             total = total_result.scalar()
             
             # Pagination
-            # MSSQL requires ORDER BY for OFFSET/LIMIT
             query = query.order_by(Pieza.id.asc())
             offset = (page - 1) * size
             query = query.offset(offset).limit(size)
             
             result = await self.db.execute(query)
-            data = result.scalars().all()
+            rows = result.all()
+            
+            data = []
+            for row in rows:
+                pieza = row[0]
+                # Populate id_otvieja dynamically for display
+                if row[1] is not None:
+                    pieza.id_otvieja = row[1]
+                data.append(pieza)
             
             logger.info(f"Repository - Resultado OK ({len(data)} registros de {total}).")
             return data, total
         except Exception as e:
             logger.error(f"Repository - Error real en find_all: {e}")
-            raise InfrastructureException("Error al listar Piezas.") from e
+            raise InfrastructureException(f"Error al listar Piezas: {str(e)}") from e
 
 
     async def find_by_id(self, id: int):
