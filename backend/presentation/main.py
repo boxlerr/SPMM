@@ -25,6 +25,7 @@ from backend.application.event_bus import EventBus
 from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
+from backend.scripts.sync_db import main as sync_main
 
 
 import logging
@@ -130,7 +131,11 @@ def health_check(response: Response):
 
 @app.on_event("startup")
 async def startup_event():
-    print("🔹 RUTAS REGISTRADAS:")
+    print("RUTAS REGISTRADAS:")
     for route in app.routes:
         print(f"  - {route.path} ({getattr(route, 'methods', 'WS')})")
+    
+    # 🔹 Iniciar la sincronización de base de datos en segundo plano
+    logger.info("Iniciando tarea de sincronización de BD en segundo plano...")
+    asyncio.create_task(sync_main())
 
