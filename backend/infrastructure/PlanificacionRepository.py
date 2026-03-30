@@ -95,14 +95,10 @@ class PlanificacionRepository:
         """
         logger.info(f"Repository - Eliminando lote de planificación (solo activas): {id_lote}")
         
-        # Solo eliminamos de 'planificacion' si la orden asociada tiene fecha_entrega = 1950-01-01
-        # (vuelve a aparecer en el listado de 'No Planificadas')
+        # Eliminar todos los registros del lote sin importar el estado de entrega de la orden
         delete_query = text("""
-            DELETE p 
-            FROM planificacion p
-            INNER JOIN orden_trabajo ot ON p.orden_id = ot.id
-            WHERE p.id_planificacion_lote = :id_lote
-            AND (ot.fecha_entrega = '1950-01-01 00:00:00' OR ot.fecha_entrega IS NULL)
+            DELETE FROM planificacion
+            WHERE id_planificacion_lote = :id_lote
         """)
         
         try:

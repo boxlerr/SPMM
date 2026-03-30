@@ -90,7 +90,7 @@ function _PlanningListTable({
 
 
     const [sortConfig, setSortConfig] = React.useState<{
-        key: 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega' | null;
+        key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega' | null;
         direction: 'asc' | 'desc' | null
     }>({
         key: null,
@@ -213,7 +213,7 @@ function _PlanningListTable({
         }
     };
 
-    const handleSort = (key: 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega') => {
+    const handleSort = (key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega') => {
         let direction: 'asc' | 'desc' | null = 'asc'; // 1st click: asc (default)
 
         if (sortConfig.key === key) {
@@ -232,6 +232,7 @@ function _PlanningListTable({
         const lowerTerm = searchTerm.toLowerCase();
         return data.filter(item =>
             item.id.toString().includes(lowerTerm) ||
+            (item.id_otvieja && item.id_otvieja.toString().includes(lowerTerm)) ||
             String(item.observaciones || "").toLowerCase().includes(lowerTerm) ||
             String(item.cliente?.nombre || "").toLowerCase().includes(lowerTerm) ||
             String(item.articulo?.cod_articulo || "").toLowerCase().includes(lowerTerm) ||
@@ -253,6 +254,10 @@ function _PlanningListTable({
             switch (sortConfig.key) {
                 case 'id':
                     return sortConfig.direction === 'asc' ? a.id - b.id : b.id - a.id;
+                case 'id_otvieja':
+                    const valViejaA = a.id_otvieja || 0;
+                    const valViejaB = b.id_otvieja || 0;
+                    return sortConfig.direction === 'asc' ? valViejaA - valViejaB : valViejaB - valViejaA;
                 case 'fecha_entrada':
                     return sortConfig.direction === 'asc'
                         ? new Date(a.fecha_entrada || 0).getTime() - new Date(b.fecha_entrada || 0).getTime()
@@ -295,7 +300,7 @@ function _PlanningListTable({
         });
     }, [filteredData, sortConfig]);
 
-    type SortColumn = 'id' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega';
+    type SortColumn = 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega';
 
     const SortIcon = ({ column }: { column: SortColumn }) => {
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
@@ -718,6 +723,11 @@ function _PlanningListTable({
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="flex items-center gap-2">
                                         <span className="font-bold text-lg text-gray-800">#{item.id}</span>
+                                        {item.id_otvieja && (
+                                            <span className="text-xs font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                                Vieja: #{item.id_otvieja}
+                                            </span>
+                                        )}
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
                                     </div>
                                     <button className="text-gray-400">
@@ -797,6 +807,15 @@ function _PlanningListTable({
                                     <div className="flex items-center">
                                         OT
                                         <SortIcon column="id" />
+                                    </div>
+                                </th>
+                                <th
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('id_otvieja')}
+                                >
+                                    <div className="flex items-center">
+                                        OT Vieja
+                                        <SortIcon column="id_otvieja" />
                                     </div>
                                 </th>
                                 <th
@@ -895,7 +914,7 @@ function _PlanningListTable({
                         <tbody>
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
-                                    <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
+                                    <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
@@ -934,6 +953,7 @@ function _PlanningListTable({
                                                 </button>
                                             </td>
                                             <td className="px-4 py-3 font-medium">{item.id}</td>
+                                            <td className="px-4 py-3 text-gray-500">{item.id_otvieja || "-"}</td>
                                             <td className="px-4 py-3">{formatDate(item.fecha_entrada)}</td>
                                             <td className="px-4 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
                                             <td className="px-4 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>

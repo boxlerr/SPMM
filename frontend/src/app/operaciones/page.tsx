@@ -238,22 +238,29 @@ export default function OperacionesPage() {
     return rawPlanificacion.filter(p => p.id_planificacion_lote === selectedLoteId);
   }, [rawPlanificacion, selectedLoteId]);
 
+
+  const isOrderDelivered = (order: WorkOrder) => {
+    if (!order.fecha_entrega) return false;
+    const deliveryDate = new Date(order.fecha_entrega);
+    return deliveryDate.getFullYear() > 1950;
+  };
+
   // Use filteredPlanificacion for deriving planned orders to reflect the history selection
   const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
   const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
 
-  // Calculate REALLY Unplanned Orders (excluding ALL planned orders from ANY batch)
+  // Calculate REALLY Unplanned Orders (excluding ALL planned orders from ANY batch AND delivered orders)
   const allPlannedIds = new Set(rawPlanificacion.map(p => p.orden_id));
-  const trulyUnplannedOrders = ordenesTrabajo.filter(o => !allPlannedIds.has(o.id));
+  const trulyUnplannedOrders = ordenesTrabajo.filter(o => !allPlannedIds.has(o.id) && !isOrderDelivered(o));
 
-  // For the standard view (not re-planning), we usually show 'unplannedOrdenes' which excludes CURRENTLY viewed planned.
+  // For the standard view (not re-planning), we usually show 'unplannedOrdenes' which excludes CURRENTLY viewed planned + Delivered.
   // BUT if 'selectedLoteId' is specific, 'plannedOrdenes' has only that batch.
   // If we want to show 'Unplanned' in the table, effectively it should be trulyUnplanned + those from other batches?
   // Current logic: unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
   // If I select 'Batch A', plannedOrderIds has Batch A IDs.
   // unplannedOrdenes has Unplanned + Batch B IDs. This is CORRECT for the "Unplanned" table view if that's what's intended.
   // BUT for Re-planning, user wants: Batch A + Unplanned. (Exclude Batch B).
-  const unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
+  const unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id) && !isOrderDelivered(o));
 
 
   const ordersForPlanning = React.useMemo(() => {
@@ -263,17 +270,18 @@ export default function OperacionesPage() {
       trulyUnplannedOrders.forEach(o => map.set(o.id, o));
       plannedOrdenes.forEach(o => map.set(o.id, o));
 
-      // Filter out FULLY FINALIZED orders (all processes status 3)
+      // Filter out FULLY FINALIZED or DELIVERED orders
       // Users don't want to re-plan things that are already done.
       const allOrders = Array.from(map.values());
       return allOrders.filter(o => {
+        if (isOrderDelivered(o)) return false;
         if (!o.procesos || o.procesos.length === 0) return true; // Keep if no processes (edge case)
-        // If every process is status 3 (Finalizado/Entregado etc - usually 3 is Finalizado), exclude it.
+        // If every process is status 3 (Finalizado), exclude it.
         const allFinalized = o.procesos.every(p => p.estado_proceso.id === 3);
         return !allFinalized;
       });
     }
-    // If not re-planning, we just show "unplanned" (which might include other batches' orders if we are filtering, but standard behavior)
+    // If not re-planning, we just show "unplanned"
     return unplannedOrdenes;
   }, [isReplanning, selectedLoteId, trulyUnplannedOrders, plannedOrdenes, unplannedOrdenes]);
 
