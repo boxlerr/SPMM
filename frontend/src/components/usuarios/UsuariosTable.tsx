@@ -14,7 +14,9 @@ import {
   MoreHorizontal,
   CheckCircle2,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -82,6 +84,8 @@ export default function UsuariosTable() {
     activo: true
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [showPassword, setShowPassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   // Cargar usuarios al montar el componente
   useEffect(() => {
@@ -139,6 +143,7 @@ export default function UsuariosTable() {
       activo: true
     });
     setFormErrors({});
+    setShowPassword(false);
     setIsCreateModalOpen(true);
   };
 
@@ -154,6 +159,7 @@ export default function UsuariosTable() {
       activo: usuario.activo
     });
     setFormErrors({});
+    setShowEditPassword(false);
     setIsEditModalOpen(true);
   };
 
@@ -515,14 +521,23 @@ export default function UsuariosTable() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">Contraseña *</Label>
-              <Input
-                id="password"
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                placeholder="Mínimo 6 caracteres"
-                className={formErrors.password ? 'border-red-500' : ''}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="Mínimo 6 caracteres"
+                  className={(formErrors.password ? 'border-red-500' : '') + " pr-10"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {formErrors.password && (
                 <p className="text-xs text-red-500">{formErrors.password}</p>
               )}
@@ -632,14 +647,23 @@ export default function UsuariosTable() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-password">Nueva Contraseña</Label>
-              <Input
-                id="edit-password"
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                placeholder="Dejar vacío para mantener la actual"
-                className={formErrors.password ? 'border-red-500' : ''}
-              />
+              <div className="relative">
+                <Input
+                  id="edit-password"
+                  type={showEditPassword ? "text" : "password"}
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="Dejar vacío para mantener la actual"
+                  className={(formErrors.password ? 'border-red-500' : '') + " pr-10"}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEditPassword(!showEditPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                >
+                  {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {formErrors.password && (
                 <p className="text-xs text-red-500">{formErrors.password}</p>
               )}
