@@ -44,9 +44,7 @@ WITH src AS (
       fecha_entrada    = v.fechaentrada,
       fecha_prometida  = v.fechaprometida,
       fecha_entrega    = CASE WHEN v.fechaentrega = '1950-01-01' THEN NULL ELSE v.fechaentrega END,
-      unidades         = v.cantidad,
-      requerido         = ISNULL(v.requerido, 0),
-      aprobado          = ISNULL(v.aprobado, 0),
+      unidades          = v.cantidad,
       reclamo           = ISNULL(v.reclamo, 0),
       revisada          = ISNULL(v.revisada, 0),
       finalizadoparcial = ISNULL(v.finalizadoparcial, 0),
@@ -54,14 +52,28 @@ WITH src AS (
       programada        = ISNULL(v.programada, 0),
       en_proceso        = ISNULL(v.enproceso, 0),
       suspendida        = ISNULL(v.suspendida, 0),
-      email            = CASE WHEN ISNULL(v.email, '') <> '' THEN 1 ELSE 0 END, -- Adaptado a Integer según dominio
-      tiene_plano = CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(v.plano,''))), '') IS NOT NULL THEN 1 WHEN ISNULL(v.tplano,0) = 1 THEN 1 ELSE 0 END
+      email              = CASE WHEN ISNULL(v.email, '') <> '' THEN 1 ELSE 0 END, -- Adaptado a Integer según dominio
+      tiene_plano        = CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(v.plano,''))), '') IS NOT NULL THEN 1 WHEN ISNULL(v.tplano,0) = 1 THEN 1 ELSE 0 END,
+      n_ped_l            = '',
+      n_pedido           = ISNULL(v.nropedido, ''),
+      subsector          = ISNULL(v.subsector, ''),
+      requerido_por      = ISNULL(v.requerido, ''),
+      aprobado_por       = ISNULL(v.aprobado, ''),
+      remitos_salida     = ISNULL(v.remitosalida, ''),
+      f_disp_material    = CASE WHEN v.fmaterial = '1950-01-01' THEN NULL ELSE v.fmaterial END,
+      fabricacion        = ISNULL(v.afabricar, 0),
+      reparacion         = 0,
+      sin_cargo          = 0,
+      stock              = 0,
+      interno            = 0,
+      tercerizado_total  = ISNULL(v.ttotal, 0),
+      tercerizado_parcial = ISNULL(v.tparcial, 0)
     FROM metalurgica_db.dbo.otrabajo v
     LEFT JOIN dbo.prioridad p ON p.descripcion = LTRIM(RTRIM(v.prioridad))
     LEFT JOIN dbo.sector    s ON s.nombre      = LTRIM(RTRIM(v.sector))
     LEFT JOIN dbo.articulo  a ON a.cod_articulo= LTRIM(RTRIM(v.idarticulo))
     WHERE v.fecha >= :fecha_desde
-      AND (:incluir_terminadas = 1 OR v.fechaentrega = '1950-01-01')
+      AND (:incluir_terminadas = 1 OR (v.fechaentrega = '1950-01-01' AND v.finalizadototal = 0 AND v.finalizadoparcial = 0 AND v.ttotal = 0 AND v.remitido = 0))
 )
 MERGE dbo.orden_trabajo AS tgt
 USING src ON tgt.id_otvieja = src.id_otvieja
@@ -75,8 +87,6 @@ WHEN MATCHED AND (
     OR ISNULL(tgt.fecha_prometida,'1900-01-01') <> ISNULL(src.fecha_prometida,'1900-01-01')
     OR ISNULL(tgt.fecha_entrega,'1900-01-01')   <> ISNULL(src.fecha_entrega,'1900-01-01')
     OR ISNULL(tgt.unidades,0)         <> ISNULL(src.unidades,0)
-    OR ISNULL(tgt.requerido,0)         <> ISNULL(src.requerido,0)
-    OR ISNULL(tgt.aprobado,0)          <> ISNULL(src.aprobado,0)
     OR ISNULL(tgt.reclamo,0)           <> ISNULL(src.reclamo,0)
     OR ISNULL(tgt.revisada,0)          <> ISNULL(src.revisada,0)
     OR ISNULL(tgt.finalizadoparcial,0) <> ISNULL(src.finalizadoparcial,0)
@@ -86,6 +96,20 @@ WHEN MATCHED AND (
     OR ISNULL(tgt.suspendida,0)        <> ISNULL(src.suspendida,0)
     OR ISNULL(tgt.email,0)             <> ISNULL(src.email,0)
     OR ISNULL(tgt.tiene_plano,0)       <> ISNULL(src.tiene_plano,0)
+    OR ISNULL(tgt.n_ped_l,'')          <> ISNULL(src.n_ped_l,'')
+    OR ISNULL(tgt.n_pedido,'')         <> ISNULL(src.n_pedido,'')
+    OR ISNULL(tgt.subsector,'')        <> ISNULL(src.subsector,'')
+    OR ISNULL(tgt.requerido_por,'')    <> ISNULL(src.requerido_por,'')
+    OR ISNULL(tgt.aprobado_por,'')     <> ISNULL(src.aprobado_por,'')
+    OR ISNULL(tgt.remitos_salida,'')   <> ISNULL(src.remitos_salida,'')
+    OR ISNULL(tgt.f_disp_material,'1900-01-01') <> ISNULL(src.f_disp_material,'1900-01-01')
+    OR ISNULL(tgt.fabricacion,0)       <> ISNULL(src.fabricacion,0)
+    OR ISNULL(tgt.reparacion,0)        <> ISNULL(src.reparacion,0)
+    OR ISNULL(tgt.sin_cargo,0)         <> ISNULL(src.sin_cargo,0)
+    OR ISNULL(tgt.stock,0)             <> ISNULL(src.stock,0)
+    OR ISNULL(tgt.interno,0)           <> ISNULL(src.interno,0)
+    OR ISNULL(tgt.tercerizado_total,0) <> ISNULL(src.tercerizado_total,0)
+    OR ISNULL(tgt.tercerizado_parcial,0) <> ISNULL(src.tercerizado_parcial,0)
 )
 THEN UPDATE SET
       tgt.observaciones   = src.observaciones,
@@ -97,8 +121,6 @@ THEN UPDATE SET
       tgt.fecha_prometida = src.fecha_prometida,
       tgt.fecha_entrega   = src.fecha_entrega,
       tgt.unidades        = src.unidades,
-      tgt.requerido         = src.requerido,
-      tgt.aprobado          = src.aprobado,
       tgt.reclamo           = src.reclamo,
       tgt.revisada          = src.revisada,
       tgt.finalizadoparcial = src.finalizadoparcial,
@@ -107,10 +129,24 @@ THEN UPDATE SET
       tgt.en_proceso        = src.en_proceso,
       tgt.suspendida        = src.suspendida,
       tgt.email             = src.email,
-      tgt.tiene_plano       = src.tiene_plano
+      tgt.tiene_plano       = src.tiene_plano,
+      tgt.n_ped_l           = src.n_ped_l,
+      tgt.n_pedido          = src.n_pedido,
+      tgt.subsector         = src.subsector,
+      tgt.requerido_por     = src.requerido_por,
+      tgt.aprobado_por      = src.aprobado_por,
+      tgt.remitos_salida    = src.remitos_salida,
+      tgt.f_disp_material   = src.f_disp_material,
+      tgt.fabricacion       = src.fabricacion,
+      tgt.reparacion        = src.reparacion,
+      tgt.sin_cargo         = src.sin_cargo,
+      tgt.stock             = src.stock,
+      tgt.interno           = src.interno,
+      tgt.tercerizado_total = src.tercerizado_total,
+      tgt.tercerizado_parcial = src.tercerizado_parcial
 WHEN NOT MATCHED THEN
-    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, requerido, aprobado, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano)
-    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.requerido, src.aprobado, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano);
+    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial)
+    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial);
 """
 
 QUERY_SYNC_PROCESO_CATALOG = """
