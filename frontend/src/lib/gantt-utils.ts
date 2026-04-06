@@ -170,7 +170,7 @@ export function convertPlanificacionToGanttTasks(
       id: `task-${item.orden_id}-${item.proceso_id}-${item.id}`,
       dbId: item.id,
       workOrderId: item.orden_id,
-      workOrderNumber: item.orden_id.toString(),
+      workOrderNumber: item.pedido_externo?.toString() || item.orden_id.toString(),
       quantity: item.cantidad,
       cantidad_entregada: item.cantidad_entregada,
       resourceId: (() => {

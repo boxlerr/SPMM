@@ -37,6 +37,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
         const term = searchTerm.toLowerCase();
         return (
             task.workOrderNumber.toLowerCase().includes(term) ||
+            task.workOrderId.toString().includes(term) ||
             task.process.toLowerCase().includes(term) ||
             task.resourceName.toLowerCase().includes(term)
         );
@@ -226,7 +227,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     setSelectedOrderForDelivery({
-                                                        id: parseInt(otNumber),
+                                                        id: otTasks[0].workOrderId,
                                                         total: otTasks[0].quantity || 0,
                                                         delivered: otTasks[0].cantidad_entregada || 0
                                                     });
@@ -254,7 +255,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                 </div>
                             </div>
                             <div className="w-full px-1">
-                                <OrderFiles orderId={parseInt(otNumber)} />
+                                <OrderFiles orderId={otTasks[0].workOrderId} />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
@@ -357,7 +358,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                 <div className="bg-white border border-dashed border-gray-300 rounded-xl p-4 flex items-center justify-center hover:border-blue-400 hover:shadow-md transition-all min-h-[150px]">
                                     <div className="w-full">
                                         <AddProcessRow
-                                            orderId={parseInt(otNumber)}
+                                            orderId={otTasks[0].workOrderId}
                                             onProcessAdded={() => {
                                                 if (onDataRefresh) onDataRefresh();
                                             }}

@@ -56,8 +56,34 @@ export interface WorkOrder {
     fecha_entrada?: string;
     fecha_prometida?: string;
     fecha_entrega?: string;
-    reclamo?: number;
+    reclamo?: number | boolean;
     estado_material?: 'ok' | 'pedido' | 'sin_stock' | 'sin_datos';
+
+    // 🔹 Nuevos campos "Pronto"
+    n_ped_l?: string;
+    n_pedido?: string;
+    subsector?: string;
+    requerido_por?: string;
+    aprobado_por?: string;
+    remitos_salida?: string;
+    f_disp_material?: string;
+
+    fabricacion?: number | boolean;
+    reparacion?: number | boolean;
+    sin_cargo?: number | boolean;
+    stock?: number | boolean;
+    interno?: number | boolean;
+    revisada?: number | boolean;
+    tercerizado_total?: number | boolean;
+    tercerizado_parcial?: number | boolean;
+    suspendida?: number | boolean;
+    email?: number | boolean;
+    tiene_plano?: number | boolean;
+    programada?: number | boolean;
+    en_proceso?: number | boolean;
+
+    finalizadototal?: number | boolean;
+    finalizadoparcial?: number | boolean;
 
     prioridad?: {
         id?: number;

@@ -39,7 +39,6 @@ class OrdenTrabajoRepository:
                     joinedload(OrdenTrabajo.sector),
                     joinedload(OrdenTrabajo.cliente),
                     joinedload(OrdenTrabajo.prioridad),
-                    # Also load processes for the dropdown
                     joinedload(OrdenTrabajo.procesos).options(
                         joinedload(OrdenTrabajoProceso.proceso),
                         joinedload(OrdenTrabajoProceso.estado_proceso)
@@ -57,7 +56,20 @@ class OrdenTrabajoRepository:
     async def find_by_id(self, id: int):
         try:
             logger.info(f"Repository - Buscar orden de trabajo por ID {id}.")
-            result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id))
+            result = await self.db.execute(
+                select(OrdenTrabajo)
+                .where(OrdenTrabajo.id == id)
+                .options(
+                    joinedload(OrdenTrabajo.articulo),
+                    joinedload(OrdenTrabajo.sector),
+                    joinedload(OrdenTrabajo.cliente),
+                    joinedload(OrdenTrabajo.prioridad),
+                    joinedload(OrdenTrabajo.procesos).options(
+                        joinedload(OrdenTrabajoProceso.proceso),
+                        joinedload(OrdenTrabajoProceso.estado_proceso)
+                    )
+                )
+            )
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Repository - Error real en find_by_id: {e}")
@@ -135,10 +147,17 @@ class OrdenTrabajoRepository:
     async def find_by_prioridad(self, id_prioridad: int):
         try:
             logger.info(f"Repository - Buscar órdenes por prioridad {id_prioridad}.")
-            result = await self.db.execute(select(OrdenTrabajo).where(
-                OrdenTrabajo.id_prioridad == id_prioridad
-            ))
-            data = result.scalars().all()
+            result = await self.db.execute(
+                select(OrdenTrabajo)
+                .where(OrdenTrabajo.id_prioridad == id_prioridad)
+                .options(
+                    joinedload(OrdenTrabajo.articulo),
+                    joinedload(OrdenTrabajo.cliente),
+                    joinedload(OrdenTrabajo.sector),
+                    joinedload(OrdenTrabajo.prioridad)
+                )
+            )
+            data = result.scalars().unique().all()
             logger.info(f"Repository - Resultado OK ({len(data)} registros).")
             return data
         except Exception as e:
@@ -576,6 +595,7 @@ class OrdenTrabajoRepository:
             ).options(
                 joinedload(OrdenTrabajo.articulo),
                 joinedload(OrdenTrabajo.sector),
+                joinedload(OrdenTrabajo.cliente),
                 joinedload(OrdenTrabajo.prioridad)
             )
             

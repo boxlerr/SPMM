@@ -94,6 +94,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         reclamo: false,
         finalizadototal: false,
         finalizadoparcial: false,
+        id_otvieja: "",
         // Campos "En Desarrollo" (sin db)
         n_ped_l: "",
         n_pedido: "",
@@ -176,30 +177,31 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     fecha_orden: orderToEdit.fecha_orden ? orderToEdit.fecha_orden.split('T')[0] : new Date().toISOString().split('T')[0],
                     fecha_entrega: orderToEdit.fecha_entrega ? orderToEdit.fecha_entrega.split('T')[0] : "",
                     cantidad_entregada: orderToEdit.cantidad_entregada?.toString() || "",
-                    reclamo: orderToEdit.reclamo === 1 || (orderToEdit as any).reclamo === true,
-                    finalizadototal: (orderToEdit as any).finalizadototal === 1 || (orderToEdit as any).finalizadototal === true,
-                    finalizadoparcial: (orderToEdit as any).finalizadoparcial === 1 || (orderToEdit as any).finalizadoparcial === true,
+                    reclamo: orderToEdit.reclamo === 1 || orderToEdit.reclamo === true,
+                    finalizadototal: orderToEdit.finalizadototal === 1 || orderToEdit.finalizadototal === true,
+                    finalizadoparcial: orderToEdit.finalizadoparcial === 1 || orderToEdit.finalizadoparcial === true,
+                    id_otvieja: orderToEdit.id_otvieja?.toString() || "",
                     // Campos Pronto funcionales
-                    n_ped_l: (orderToEdit as any).n_ped_l || "",
-                    n_pedido: (orderToEdit as any).n_pedido || "",
-                    subsector: (orderToEdit as any).subsector || "",
-                    requerido_por: (orderToEdit as any).requerido_por || "",
-                    aprobado_por: (orderToEdit as any).aprobado_por || "",
-                    remitos_salida: (orderToEdit as any).remitos_salida || "",
-                    f_disp_material: (orderToEdit as any).f_disp_material ? (orderToEdit as any).f_disp_material.split('T')[0] : "",
-                    fabricacion: (orderToEdit as any).fabricacion === 1 || (orderToEdit as any).fabricacion === true,
-                    reparacion: (orderToEdit as any).reparacion === 1 || (orderToEdit as any).reparacion === true,
-                    sin_cargo: (orderToEdit as any).sin_cargo === 1 || (orderToEdit as any).sin_cargo === true,
-                    stock: (orderToEdit as any).stock === 1 || (orderToEdit as any).stock === true,
-                    interno: (orderToEdit as any).interno === 1 || (orderToEdit as any).interno === true,
-                    revisada: (orderToEdit as any).revisada === 1 || (orderToEdit as any).revisada === true,
-                    tercerizado_total: (orderToEdit as any).tercerizado_total === 1 || (orderToEdit as any).tercerizado_total === true,
-                    tercerizado_parcial: (orderToEdit as any).tercerizado_parcial === 1 || (orderToEdit as any).tercerizado_parcial === true,
-                    suspendida: (orderToEdit as any).suspendida === 1 || (orderToEdit as any).suspendida === true,
-                    email: (orderToEdit as any).email === 1 || (orderToEdit as any).email === true,
-                    tiene_plano: (orderToEdit as any).tiene_plano === 1 || (orderToEdit as any).tiene_plano === true,
-                    programada: (orderToEdit as any).programada === 1 || (orderToEdit as any).programada === true,
-                    en_proceso: (orderToEdit as any).en_proceso === 1 || (orderToEdit as any).en_proceso === true
+                    n_ped_l: orderToEdit.n_ped_l || "",
+                    n_pedido: orderToEdit.n_pedido || "",
+                    subsector: orderToEdit.subsector || "",
+                    requerido_por: orderToEdit.requerido_por || "",
+                    aprobado_por: orderToEdit.aprobado_por || "",
+                    remitos_salida: orderToEdit.remitos_salida || "",
+                    f_disp_material: orderToEdit.f_disp_material ? orderToEdit.f_disp_material.split('T')[0] : "",
+                    fabricacion: orderToEdit.fabricacion === 1 || orderToEdit.fabricacion === true,
+                    reparacion: orderToEdit.reparacion === 1 || orderToEdit.reparacion === true,
+                    sin_cargo: orderToEdit.sin_cargo === 1 || orderToEdit.sin_cargo === true,
+                    stock: orderToEdit.stock === 1 || orderToEdit.stock === true,
+                    interno: orderToEdit.interno === 1 || orderToEdit.interno === true,
+                    revisada: orderToEdit.revisada === 1 || orderToEdit.revisada === true,
+                    tercerizado_total: orderToEdit.tercerizado_total === 1 || orderToEdit.tercerizado_total === true,
+                    tercerizado_parcial: orderToEdit.tercerizado_parcial === 1 || orderToEdit.tercerizado_parcial === true,
+                    suspendida: orderToEdit.suspendida === 1 || orderToEdit.suspendida === true,
+                    email: orderToEdit.email === 1 || orderToEdit.email === true,
+                    tiene_plano: orderToEdit.tiene_plano === 1 || orderToEdit.tiene_plano === true,
+                    programada: orderToEdit.programada === 1 || orderToEdit.programada === true,
+                    en_proceso: orderToEdit.en_proceso === 1 || orderToEdit.en_proceso === true
                 });
 
                 setDetailsData({
@@ -399,7 +401,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         if (detailsData.nota_3) observacionesUnidas += `\nNota 3: ${detailsData.nota_3}`;
 
         const fullData = {
-            id_otvieja: 0, // 0 triggers backend auto-generation
+            id_otvieja: generalData.id_otvieja ? parseInt(generalData.id_otvieja) : 0, // 0 triggers backend auto-generation
             observaciones: observacionesUnidas,
             detalle: generalData.descripcion,
             id_cliente: parseInt(generalData.cliente_id),
@@ -547,7 +549,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
             f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
             revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false,
-            programada: false, en_proceso: false
+            programada: false, en_proceso: false, id_otvieja: ""
         });
         setDetailsData({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
         setMateriasPrimasForm({ articulo_id: "", cantidad: "", observaciones: "", no_lleva: false });
@@ -607,7 +609,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                 <CalendarIcon className="h-6 w-6 text-white" />
                             </div>
                             <div className="flex flex-col">
-                                <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
+                                <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id_otvieja || orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
                                 <span className="text-sm font-normal text-gray-500 mt-0.5">
                                     {orderToEdit ? "Modifica la información de la OT existente" : "Completa la información para crear una nueva OT"}
                                 </span>
@@ -635,142 +637,201 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                 {/* Tab: General */}
                                 <TabsContent value="general" className="space-y-6 mt-0 animate-in fade-in-50 slide-in-from-left-2 duration-300">
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                        {/* Row 1 */}
-                                        <div className="space-y-2">
-                                            <Label htmlFor="fecha_orden" className="text-xs font-semibold text-gray-700">Fecha</Label>
-                                            <Input id="fecha_orden" type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-9 text-sm" />
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-x-4 gap-y-3">
+                                        {/* Section: Identification */}
+                                        <div className="md:col-span-4 flex items-center gap-2 mb-1">
+                                            <div className="h-px flex-1 bg-gray-100"></div>
+                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Identificación</span>
+                                            <div className="h-px flex-1 bg-gray-100"></div>
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="n_ped_l" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Ped L</Label>
-                                            <Input id="n_ped_l" value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="id_otvieja" className="text-[11px] font-bold text-blue-600 uppercase">Nº OT Vieja</Label>
+                                            <Input id="id_otvieja" value={generalData.id_otvieja} onChange={(e) => setGeneralData({ ...generalData, id_otvieja: e.target.value })} className="h-8 text-sm border-blue-200 focus:ring-blue-500 font-mono font-bold" placeholder="No especificado" />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="prioridad" className="text-xs font-semibold text-gray-700">Prioridad <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="Prioridad" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="n_pedido" className="text-[11px] font-bold text-gray-500 uppercase">N° Pedido</Label>
+                                            <Input id="n_pedido" value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="sector" className="text-xs font-semibold text-gray-700">Sector <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="Sector" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="n_ped_l" className="text-[11px] font-bold text-gray-500 uppercase">N° Ped L</Label>
+                                            <Input id="n_ped_l" value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
-
-                                        {/* Row 2 */}
-                                        <div className="space-y-2">
-                                            <Label htmlFor="cliente" className="text-xs font-semibold text-gray-700">Cliente <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="Cliente" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="n_pedido" className="text-xs font-semibold text-gray-700 flex items-center gap-2">N° Pedido</Label>
-                                            <Input id="n_pedido" value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="subsector" className="text-xs font-semibold text-gray-700 flex items-center gap-2">SubSector</Label>
-                                            <Input id="subsector" value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="cantidad" className="text-xs font-semibold text-gray-700">Cant a Fabricar</Label>
-                                            <Input id="cantidad" type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-9 text-sm" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="prioridad" className="text-[11px] font-bold text-gray-400 uppercase">Prioridad <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
 
-                                        {/* Row 3 */}
-                                        <div className="space-y-2">
-                                            <Label htmlFor="requerido_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Requerido por</Label>
-                                            <Input id="requerido_por" value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        <div className="md:col-span-2 space-y-1.5">
+                                            <Label htmlFor="cliente" className="text-[11px] font-bold text-gray-400 uppercase">Cliente <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="aprobado_por" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Aprobado por</Label>
-                                            <Input id="aprobado_por" value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="sector" className="text-[11px] font-bold text-gray-400 uppercase">Sector <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="cantidad_entregada" className="text-xs font-semibold text-gray-700">Cant. Entregada</Label>
-                                            <Input id="cantidad_entregada" type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-9 text-sm" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="fecha_entrada" className="text-xs font-semibold text-gray-700">Fecha Entrada</Label>
-                                            <Input id="fecha_entrada" type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-9 text-sm" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="subsector" className="text-[11px] font-bold text-gray-400 uppercase">SubSector</Label>
+                                            <Input id="subsector" value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
-                                        {/* Row 4 */}
-                                        <div className="space-y-2 md:col-span-2">
-                                            <Label htmlFor="articulo" className="text-xs font-semibold text-gray-700">Producto <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Producto" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="fecha_prometida" className="text-xs font-semibold text-gray-700">F. Prometida</Label>
-                                            <Input id="fecha_prometida" type="date" value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className="h-9 text-sm" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="fecha_entrega" className="text-xs font-semibold text-gray-700">F. Entrega</Label>
-                                            <Input id="fecha_entrega" type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-9 text-sm" />
+                                        {/* Section: Logistics & Quantities */}
+                                        <div className="md:col-span-4 flex items-center gap-2 mb-1 mt-2">
+                                            <div className="h-px flex-1 bg-gray-100"></div>
+                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Logística y Cantidades</span>
+                                            <div className="h-px flex-1 bg-gray-100"></div>
                                         </div>
 
-                                        {/* Row 5 / Other dates/texts */}
-                                        <div className="space-y-2">
-                                            <Label htmlFor="remitos_salida" className="text-xs font-semibold text-gray-700 flex items-center gap-2">Remitos Salida</Label>
-                                            <Input id="remitos_salida" value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="cantidad" className="text-[11px] font-bold text-gray-400 uppercase">Cant Fabricar</Label>
+                                            <Input id="cantidad" type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-8 text-sm font-bold text-blue-700" />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="f_disp_material" className="text-xs font-semibold text-gray-700 flex items-center gap-2">F. Disp Material</Label>
-                                            <Input id="f_disp_material" type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-9 text-sm bg-gray-50 opacity-70" />
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="cantidad_entregada" className="text-[11px] font-bold text-gray-400 uppercase">Cant Entregada</Label>
+                                            <Input id="cantidad_entregada" type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-8 text-sm" />
                                         </div>
-
-                                        {/* Row 6 Toggles - First full width span block */}
-                                        <div className="md:col-span-4 grid grid-cols-2 lg:grid-cols-4 gap-4 p-4 border border-gray-100 rounded-xl bg-gray-50/50">
-                                            <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="fabricacion" checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> <Label htmlFor="fabricacion" className="text-sm cursor-pointer">Fabricación</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="reparacion" checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> <Label htmlFor="reparacion" className="text-sm cursor-pointer">Reparación</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="sin_cargo" checked={generalData.sin_cargo} onCheckedChange={(c) => setGeneralData({ ...generalData, sin_cargo: !!c })} /> <Label htmlFor="sin_cargo" className="text-sm cursor-pointer">Sin Cargo</Label></div>
-                                            </div>
-                                            <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="stock" checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> <Label htmlFor="stock" className="text-sm cursor-pointer">Stock</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="interno" checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> <Label htmlFor="interno" className="text-sm cursor-pointer">Interno</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="revisada" checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> <Label htmlFor="revisada" className="text-sm cursor-pointer">Revisada</Label></div>
-                                            </div>
-                                            <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 text-red-600 font-bold"><Checkbox id="suspendida" className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> <Label htmlFor="suspendida" className="text-sm cursor-pointer">SUSPENDIDA</Label></div>
-                                                <div className="flex items-center space-x-2 text-orange-600 font-bold"><Checkbox id="reclamo" className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> <Label htmlFor="reclamo" className="text-sm cursor-pointer text-orange-600">RECLAMO</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70 mt-1"><Checkbox id="email" checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> <Label htmlFor="email" className="text-sm cursor-pointer">Email</Label></div>
-                                            </div>
-                                            <div className="flex flex-col gap-2">
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_total" checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> <Label htmlFor="tercerizado_total" className="text-sm cursor-pointer">Tercerizado Total</Label></div>
-                                                <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tercerizado_parcial" checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> <Label htmlFor="tercerizado_parcial" className="text-sm cursor-pointer">Tercerizado Parcial</Label></div>
-                                            </div>
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="requerido_por" className="text-[11px] font-bold text-gray-400 uppercase">Requerido por</Label>
+                                            <Input id="requerido_por" value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="aprobado_por" className="text-[11px] font-bold text-gray-400 uppercase">Aprobado por</Label>
+                                            <Input id="aprobado_por" value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
-                                        {/* Status Progress block */}
-                                        <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-5 gap-4 bg-blue-50/40 p-3 rounded-lg border border-blue-100 items-center">
-                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="tiene_plano" checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> <Label htmlFor="tiene_plano" className="text-sm cursor-pointer">Tiene Plano</Label></div>
-                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="programada" checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> <Label htmlFor="programada" className="text-sm cursor-pointer">PROGRAMADA</Label></div>
-                                            <div className="flex items-center space-x-2 opacity-70"><Checkbox id="en_proceso" checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> <Label htmlFor="en_proceso" className="text-sm cursor-pointer">EN PROCESO</Label></div>
-                                            <div className="flex items-center space-x-2"><Checkbox id="finalizadoparcial" checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> <Label htmlFor="finalizadoparcial" className="text-sm cursor-pointer font-medium">FIN. PARCIAL</Label></div>
-                                            <div className="flex items-center space-x-2"><Checkbox id="finalizadototal" checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> <Label htmlFor="finalizadototal" className="text-sm cursor-pointer font-medium text-green-700">FIN. TOTAL</Label></div>
+                                        {/* Product Full Width */}
+                                        <div className="md:col-span-4 space-y-1.5">
+                                            <Label htmlFor="articulo" className="text-[11px] font-bold text-gray-400 uppercase">Producto / Artículo <span className="text-red-500">*</span></Label>
+                                            <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
 
-                                        {/* Row 7 Textareas */}
-                                        <div className="md:col-span-2 space-y-2">
-                                            <Label htmlFor="descripcion" className="text-sm font-semibold text-gray-700">Info Gral / Descripción *</Label>
-                                            <Textarea id="descripcion" value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-20 min-h-[80px] bg-white border-gray-200" required />
+                                        {/* Section: Dates */}
+                                        <div className="md:col-span-4 flex items-center gap-2 mb-1 mt-2">
+                                            <div className="h-px flex-1 bg-gray-100"></div>
+                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Fechas Clave</span>
+                                            <div className="h-px flex-1 bg-gray-100"></div>
                                         </div>
-                                        <div className="md:col-span-2 space-y-2">
-                                            <Label htmlFor="nota_taller" className="text-sm font-semibold text-gray-700">Nota de Taller</Label>
-                                            <Textarea id="nota_taller" value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-20 min-h-[80px] bg-white border-gray-200" />
+
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="fecha_orden" className="text-[11px] font-bold text-gray-400 uppercase">Fecha Orden</Label>
+                                            <Input id="fecha_orden" type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-8 text-sm" />
                                         </div>
-                                        {/* Additional Notas (Pronto) */}
-                                        <div className="md:col-span-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="fecha_entrada" className="text-[11px] font-bold text-gray-400 uppercase">Fecha Entrada</Label>
+                                            <Input id="fecha_entrada" type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-8 text-sm" />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="fecha_prometida" className="text-[11px] font-bold text-blue-600 uppercase font-black">F. Prometida</Label>
+                                            <Input id="fecha_prometida" type="date" value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className="h-8 text-sm border-blue-200" />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="fecha_entrega" className="text-[11px] font-bold text-gray-400 uppercase">F. Entrega Real</Label>
+                                            <Input id="fecha_entrega" type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-8 text-sm" />
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="f_disp_material" className="text-[11px] font-bold text-gray-400 uppercase">F. Disp Mat</Label>
+                                            <Input id="f_disp_material" type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-8 text-sm" />
+                                        </div>
+                                        <div className="md:col-span-3 space-y-1.5">
+                                            <Label htmlFor="remitos_salida" className="text-[11px] font-bold text-gray-400 uppercase">Remitos Salida</Label>
+                                            <Input id="remitos_salida" value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                        </div>
+
+                                        {/* Section: Flags (Compact) */}
+                                        <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-2.5 p-3 border border-gray-100 rounded-xl bg-gray-50/30 mt-2">
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="fabricacion" checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Fabricación</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="reparacion" checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Reparación</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="stock" checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Stock</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="interno" checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Interno</span>
+                                            </Label>
+                                            
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="tercerizado_total" checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Terc. Total</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="tercerizado_parcial" checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Terc. Parcial</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="email" checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> 
+                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Email</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-orange-50 px-2 py-1 rounded border border-transparent transition-colors text-orange-600 font-bold w-full h-9">
+                                                <Checkbox id="reclamo" className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> 
+                                                <span className="text-xs uppercase">Reclamo</span>
+                                            </Label>
+                                            
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-red-50 px-2 py-1 rounded border border-transparent transition-colors text-red-600 font-bold w-full h-9">
+                                                <Checkbox id="suspendida" className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> 
+                                                <span className="text-xs uppercase">Suspendida</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
+                                                <Checkbox id="finalizadoparcial" checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> 
+                                                <span className="text-xs text-gray-800 font-bold">Fin. Parcial</span>
+                                            </Label>
+                                            <Label className="md:col-span-2 flex items-center space-x-2 bg-green-50 px-2 py-1 rounded border border-green-200 cursor-pointer hover:bg-green-100 transition-colors w-full h-9">
+                                                <Checkbox id="finalizadototal" checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> 
+                                                <span className="text-xs font-bold text-green-700 uppercase tracking-tighter truncate">Entrega Completa (Total)</span>
+                                            </Label>
+                                        </div>
+
+                                        {/* Status block (Row 7) */}
+                                        <div className="md:col-span-4 flex items-center justify-between gap-4 py-2 border-t border-gray-100 mt-1">
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
+                                                <Checkbox id="tiene_plano" checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> 
+                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Tiene Plano</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
+                                                <Checkbox id="programada" checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 
+                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Programada</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
+                                                <Checkbox id="en_proceso" checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> 
+                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">En Proceso</span>
+                                            </Label>
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
+                                                <Checkbox id="revisada" checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> 
+                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Revisada</span>
+                                            </Label>
+                                        </div>
+
+                                        {/* Textareas (Compact Row 8) */}
+                                        <div className="md:col-span-2 space-y-1.5">
+                                            <Label htmlFor="descripcion" className="text-[11px] font-bold text-gray-600 uppercase">Info Gral / Descripción *</Label>
+                                            <Textarea id="descripcion" value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" required />
+                                        </div>
+                                        <div className="md:col-span-2 space-y-1.5">
+                                            <Label htmlFor="nota_taller" className="text-[11px] font-bold text-gray-600 uppercase">Nota de Taller</Label>
+                                            <Textarea id="nota_taller" value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
+                                        </div>
+                                        
+                                        <div className="md:col-span-4 grid grid-cols-3 gap-3">
                                             <div className="space-y-1">
-                                                <Label htmlFor="nota_1" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 1</Label>
-                                                <Input id="nota_1" value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
+                                                <Label htmlFor="nota_1" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 1</Label>
+                                                <Input id="nota_1" value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                             <div className="space-y-1">
-                                                <Label htmlFor="nota_2" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 2</Label>
-                                                <Input id="nota_2" value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
+                                                <Label htmlFor="nota_2" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 2</Label>
+                                                <Input id="nota_2" value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                             <div className="space-y-1">
-                                                <Label htmlFor="nota_3" className="text-xs font-semibold text-gray-500 flex items-center justify-between">Nota 3</Label>
-                                                <Input id="nota_3" value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-8 bg-gray-50/50 opacity-70 text-sm" />
+                                                <Label htmlFor="nota_3" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 3</Label>
+                                                <Input id="nota_3" value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                         </div>
-
                                     </div>
 
                                     <div className="space-y-2 pt-4">

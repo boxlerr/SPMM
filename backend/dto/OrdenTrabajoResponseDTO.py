@@ -53,6 +53,7 @@ class OrdenTrabajoResponseDTO(BaseModel):
     id: int
     id_otvieja: Optional[int] = None
     observaciones: Optional[str] = None
+    detalle: Optional[str] = None
     id_prioridad: Optional[int] = None
     id_sector: Optional[int] = None
     id_cliente: Optional[int] = None

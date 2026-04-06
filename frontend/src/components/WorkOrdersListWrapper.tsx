@@ -5,6 +5,7 @@ import type { GanttTask, PlanificacionItem, WorkOrder } from "@/lib/types";
 import TaskDetailsModal from "./gantt/TaskDetailsModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnplannedWorkOrdersList } from "./UnplannedWorkOrdersList";
+import { CompletedWorkOrdersList } from "./CompletedWorkOrdersList";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { toast } from "sonner";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -196,11 +197,12 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
     };
 
     // Filter Logic
-    // Planned = Exists in Planificacion table
+    // Planned = Exists in Planificacion table AND not completed
     const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
 
-    const plannedOrders = allOrders.filter(o => plannedOrderIds.has(o.id));
-    const unplannedOrders = allOrders.filter(o => !plannedOrderIds.has(o.id));
+    const plannedOrders = allOrders.filter(o => plannedOrderIds.has(o.id) && !o.finalizadototal);
+    const unplannedOrders = allOrders.filter(o => !plannedOrderIds.has(o.id) && !o.finalizadototal);
+    const completedOrders = allOrders.filter(o => o.finalizadototal);
 
     const handleEditOrder = (order: WorkOrder) => {
         setOrderToEdit(order);
@@ -250,6 +252,9 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                     <TabsTrigger value="no_planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm">
                         No Planificadas ({unplannedOrders.length})
                     </TabsTrigger>
+                    <TabsTrigger value="historial" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-sm">
+                        Historial ({completedOrders.length})
+                    </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="planificadas" className="mt-0">
@@ -266,6 +271,13 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
                         onDelete={handleDeleteOrder}
+                    />
+                </TabsContent>
+
+                <TabsContent value="historial" className="mt-0">
+                    <CompletedWorkOrdersList
+                        orders={completedOrders}
+                        onEdit={handleEditOrder}
                     />
                 </TabsContent>
             </Tabs>

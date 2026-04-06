@@ -242,12 +242,23 @@ class OrdenTrabajoService:
         if not orden:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
 
-        return ResponseDTO(status=True, data=jsonable_encoder(orden))
+        dto = OrdenTrabajoResponseDTO.model_validate(orden)
+        return ResponseDTO(status=True, data=jsonable_encoder(dto))
 
     async def modificarOrden(self, id: int, dto: OrdenTrabajoUpdateDTO):
         logger.info(f"Service - Modificar orden de trabajo ID: {id}")
         
         nueva_data = dto.model_dump(exclude_unset=True)
+        
+        # 🔹 Convert Boolean fields to Integer (0/1) for compatibility with DB schema
+        bool_fields = [
+            'fabricacion', 'reparacion', 'sin_cargo', 'stock', 'interno', 'revisada',
+            'tercerizado_total', 'tercerizado_parcial', 'suspendida', 'email',
+            'tiene_plano', 'programada', 'en_proceso', 'finalizadototal', 'finalizadoparcial', 'reclamo'
+        ]
+        for field in bool_fields:
+            if field in nueva_data and isinstance(nueva_data[field], bool):
+                nueva_data[field] = 1 if nueva_data[field] else 0
         
         # Extract processes to handle separately
         procesos_data = nueva_data.pop('procesos', [])
@@ -281,8 +292,18 @@ class OrdenTrabajoService:
         
         if not ordenes:
             logger.info("Service - No hay órdenes en el rango de fechas especificado.")
+            return ResponseDTO(status=True, data=[])
         
-        return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
+        valid_ordenes = []
+        for o in ordenes:
+            try:
+                dto = OrdenTrabajoResponseDTO.model_validate(o)
+                valid_ordenes.append(jsonable_encoder(dto))
+            except Exception as e:
+                logger.error(f"Service - Error validando orden ID {o.id}: {e}")
+                continue
+                
+        return ResponseDTO(status=True, data=valid_ordenes)
 
     async def listarPorPrioridad(self, id_prioridad: int):
         logger.info(f"Service - Listar órdenes por prioridad: {id_prioridad}")
@@ -290,8 +311,18 @@ class OrdenTrabajoService:
         
         if not ordenes:
             logger.info(f"Service - No hay órdenes con prioridad {id_prioridad}.")
+            return ResponseDTO(status=True, data=[])
+            
+        valid_ordenes = []
+        for o in ordenes:
+            try:
+                dto = OrdenTrabajoResponseDTO.model_validate(o)
+                valid_ordenes.append(jsonable_encoder(dto))
+            except Exception as e:
+                logger.error(f"Service - Error validando orden ID {o.id}: {e}")
+                continue
         
-        return ResponseDTO(status=True, data=jsonable_encoder(ordenes))
+        return ResponseDTO(status=True, data=valid_ordenes)
 
     async def obtenerEstadisticasEstados(self):
         """
@@ -457,20 +488,22 @@ class OrdenTrabajoService:
             if not ordenes:
                 return ResponseDTO(status=True, data=[])
 
-            # Check material availability - now returns status string per order
+            # Check material availability
             orden_ids = [o.id for o in ordenes]
             material_statuses = await self.repository.get_material_status(orden_ids)
             
-            # Serialize and inject status
-            data = jsonable_encoder(ordenes)
-            
-            for item in data:
-                oid = item.get('id')
-                # Set estado_material: 'ok', 'pedido', 'sin_stock', or 'sin_datos'
-                item['estado_material'] = material_statuses.get(oid, 'sin_datos')
+            valid_ordenes = []
+            for o in ordenes:
+                try:
+                    dto = OrdenTrabajoResponseDTO.model_validate(o)
+                    dto.estado_material = material_statuses.get(o.id, 'sin_datos')
+                    valid_ordenes.append(jsonable_encoder(dto))
+                except Exception as e:
+                    logger.error(f"Service - Error validando orden ID {o.id}: {e}")
+                    continue
                 
-            logger.info(f"Service - Órdenes no planificadas obtenidas: {len(ordenes)}")
-            return ResponseDTO(status=True, data=data)
+            logger.info(f"Service - Órdenes no planificadas obtenidas: {len(valid_ordenes)}")
+            return ResponseDTO(status=True, data=valid_ordenes)
         except InfrastructureException:
             raise
         except Exception as e:

@@ -92,7 +92,7 @@ export default function LoginPage() {
           </div>
 
           <div className="flex justify-between items-center text-white/70 text-sm">
-            <span>Copyright © 2025 Vaxler.</span>
+            <span>Desarrollado por <a href="https://vaxler.com.ar" target="_blank" rel="noopener noreferrer" className="hover:underline">Vaxler</a> {new Date().getFullYear()}</span>
           </div>
         </div>
       </div>

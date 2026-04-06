@@ -119,7 +119,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
     }
 
     return (
-        <div className="mt-4 px-4 py-3 bg-blue-50/30 rounded-lg border border-blue-100/50 mb-4">
+        <div className="mt-2 mb-2">
             <ConfirmationDialog
                 isOpen={!!fileToDelete}
                 onClose={() => setFileToDelete(null)}
@@ -132,41 +132,14 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
             />
 
             <div className="flex items-center justify-between mb-3">
-                <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
-                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-white shadow-sm border border-blue-100 text-blue-600">
-                        <Paperclip className="w-3 h-3" />
-                    </div>
-                    Archivos Adjuntos <span className="text-gray-400 font-normal ml-0.5">({files.length})</span>
+                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Paperclip className="w-3 h-3" />
+                    Archivos <span className="text-gray-400 font-normal ml-0.5">({files.length})</span>
                 </h4>
-
-                {/* Upload Button/Input */}
-                <div className="relative">
-                    <input
-                        type="file"
-                        multiple
-                        accept="image/*,.pdf"
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                        onChange={handleFileUpload}
-                        disabled={isUploading}
-                    />
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs bg-white hover:bg-blue-50 border-blue-200 text-blue-700 px-2 gap-1"
-                        disabled={isUploading}
-                    >
-                        {isUploading ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                            <Plus className="w-3 h-3" />
-                        )}
-                        {isUploading ? "Subiendo..." : "Adjuntar"}
-                    </Button>
-                </div>
             </div>
 
             {files.length === 0 ? (
-                <div className="text-center py-4 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50/50 relative hover:border-blue-300 hover:bg-blue-50/30 transition-all group">
+                <div className="relative group inline-block">
                     <input
                         type="file"
                         multiple
@@ -175,12 +148,10 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
                         onChange={handleFileUpload}
                         disabled={isUploading}
                     />
-                    <div className="flex flex-col items-center gap-1 pointer-events-none">
-                        <div className="p-1.5 bg-gray-100 rounded-full text-gray-400 group-hover:text-blue-500 group-hover:bg-blue-100 transition-colors">
-                            <UploadCloud className="w-4 h-4" />
-                        </div>
-                        <span className="text-xs text-gray-500 font-medium group-hover:text-blue-600 transition-colors">
-                            Arrastra o haz clic para subir
+                    <div className="flex items-center gap-2 py-1 px-2 border border-dashed border-gray-300 rounded hover:border-blue-400 hover:bg-blue-50/50 transition-all">
+                        <UploadCloud className="w-3 h-3 text-gray-400 group-hover:text-blue-500" />
+                        <span className="text-[10px] text-gray-400 group-hover:text-blue-600">
+                            Subir planos
                         </span>
                     </div>
                 </div>
