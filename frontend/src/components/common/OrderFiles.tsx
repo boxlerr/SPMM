@@ -4,6 +4,7 @@ import { API_URL } from "@/config";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { FileViewerModal } from "./FileViewerModal";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -17,6 +18,7 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
     const [loading, setLoading] = React.useState(true);
     const [isUploading, setIsUploading] = React.useState(false);
     const [fileToDelete, setFileToDelete] = React.useState<{ id: number, name: string } | null>(null);
+    const [viewingFile, setViewingFile] = React.useState<{ id: number; nombre: string; tipo_archivo: string } | null>(null);
 
     const fetchFiles = React.useCallback(async () => {
         if (!orderId) return;
@@ -131,6 +133,12 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
                 variant="destructive"
             />
 
+            <FileViewerModal 
+                isOpen={!!viewingFile}
+                onClose={() => setViewingFile(null)}
+                file={viewingFile}
+            />
+
             <div className="flex items-center justify-between mb-3">
                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Paperclip className="w-3 h-3" />
@@ -188,15 +196,16 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
 
                                 {/* View/Download Buttons */}
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all bg-gray-50 rounded-lg p-0.5 border border-gray-100 shadow-sm absolute -right-2 -top-8 z-10 pointer-events-none group-hover:pointer-events-auto">
-                                    <a
-                                        href={`${API_URL}/planos/${file.id}/archivo`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            setViewingFile({ id: file.id, nombre: file.nombre, tipo_archivo: file.tipo_archivo });
+                                        }}
                                         className="p-1.5 hover:bg-white hover:rounded-md text-gray-500 hover:text-blue-600 transition-all"
                                         title="Ver archivo"
                                     >
                                         <Eye className="w-3.5 h-3.5" />
-                                    </a>
+                                    </button>
                                     <a
                                         href={`${API_URL}/planos/${file.id}/archivo?download=true`}
                                         download={file.nombre}

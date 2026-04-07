@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Check, ChevronsUpDown, Search, Info } from "lucide-react";
+import { Check, ChevronsUpDown, Search, Info, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { WorkOrder } from "@/lib/types";
 
@@ -46,6 +46,19 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
 
     const uniqueClients = Array.from(new Set(orders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort();
     const uniqueSectors = Array.from(new Set(orders.map(o => o.sector?.nombre).filter((n): n is string => !!n))).sort();
+    
+    const hasFiltersActive = 
+        filters.priority.length > 0 ||
+        filters.client.length > 0 ||
+        filters.sector !== 'ALL' ||
+        filters.material !== 'ALL' ||
+        filters.promisedDate !== 'ALL' ||
+        filters.batchSize !== 'ALL' ||
+        filters.dateFrom !== '' ||
+        filters.dateTo !== '' ||
+        filters.showClaimsOnly ||
+        filters.showDelayedOnly ||
+        filters.showWithProcessesOnly;
 
     const filteredClients = uniqueClients.filter(c =>
         c.toLowerCase().includes(clientSearchTerm.toLowerCase())
@@ -160,6 +173,16 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
                             </div>
                         </PopoverContent>
                     </Popover>
+
+                    {hasFiltersActive && (
+                        <button 
+                            onClick={() => setFilters(initialFilterState)}
+                            className="flex items-center gap-1.5 px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded border border-orange-200 transition-colors text-[10px] font-bold tracking-wide uppercase animate-in fade-in slide-in-from-right-1 duration-200 shadow-sm ml-auto"
+                        >
+                            <X className="w-3 h-3" />
+                            Limpiar Filtros
+                        </button>
+                    )}
                 </div>
             </div>
 
