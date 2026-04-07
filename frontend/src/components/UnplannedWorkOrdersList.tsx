@@ -22,14 +22,22 @@ import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
+import { API_URL } from "@/config";
+
+const getAuthHeaders = (): HeadersInit => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('access_token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
     onEdit: (order: WorkOrder) => void;
     onDelete: (id: number) => void;
+    onDataChange?: () => void;
 }
 
-export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedWorkOrdersListProps) {
+export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange }: UnplannedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
@@ -53,6 +61,76 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
             else if (sortConfig.direction === 'desc') direction = null;
         }
         setSortConfig({ key: direction ? key : null, direction });
+    };
+
+    const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: string, value: string, originalValue: string } | null>(null);
+
+    const handleTextClick = (orderId: number, field: string, currentValue: string | undefined | number) => {
+        const val = currentValue?.toString() || "";
+        setEditingOrder({
+            id: orderId,
+            field,
+            value: val,
+            originalValue: val
+        });
+    };
+
+    const handleDateClick = (orderId: number, field: string, currentValue: string | undefined) => {
+        let val = "";
+        if (currentValue && !currentValue.startsWith('1950')) {
+            try {
+                val = new Date(currentValue).toISOString().split('T')[0];
+            } catch (e) {
+                val = "";
+            }
+        }
+        setEditingOrder({
+            id: orderId,
+            field,
+            value: val,
+            originalValue: val
+        });
+    };
+
+    const handleFieldSave = async () => {
+        if (!editingOrder) return;
+        if (editingOrder.value === editingOrder.originalValue) {
+            setEditingOrder(null);
+            return;
+        }
+
+        try {
+            const payload: Record<string, any> = {};
+            if (editingOrder.field === 'unidades') {
+                payload[editingOrder.field] = parseInt(editingOrder.value) || 0;
+            } else if (editingOrder.field.startsWith('fecha_')) {
+                payload[editingOrder.field] = editingOrder.value ? new Date(editingOrder.value).toISOString() : null;
+            } else {
+                payload[editingOrder.field] = editingOrder.value;
+            }
+
+            const response = await fetch(`${API_URL}/ordenes/${editingOrder.id}`, {
+                method: 'PUT',
+                headers: { ...getAuthHeaders() as Record<string, string>, 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) throw new Error('Failed to update field');
+
+            setEditingOrder(null);
+            if (onDataChange) {
+                onDataChange();
+            }
+        } catch (error) {
+            console.error('Error saving field:', error);
+        }
+    };
+
+    const getEditableProductDescription = (order: WorkOrder) => {
+        if ((order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones) {
+            return order.observaciones;
+        }
+        return order.articulo?.descripcion;
     };
 
     const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
@@ -326,12 +404,70 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                                         </button>
                                                     </td>
                                                     <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
-                                                    <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
+                                                    <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(order.id, 'fecha_entrada', order.fecha_entrada); }}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'fecha_entrada' ? (
+                                                            <input
+                                                                type="date"
+                                                                className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            formatDate(order.fecha_entrada)
+                                                        )}
+                                                    </td>
                                                     <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
                                                     <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
-                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[400px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
-                                                    <td className="px-4 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
+                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px] cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'observaciones', getEditableProductDescription(order)); }}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'observaciones' ? (
+                                                            <input
+                                                                type="text"
+                                                                className="border rounded px-2 py-1 text-xs w-full shadow-inner focus:ring-2 focus:ring-blue-500/20"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            <span className="line-clamp-2" title={getEditableProductDescription(order)}>
+                                                                {getEditableProductDescription(order) || "-"}
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'n_pedido', order.n_pedido || order.n_ped_l); }}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'n_pedido' ? (
+                                                            <input
+                                                                type="text"
+                                                                className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            order.n_pedido || order.n_ped_l || "-"
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'unidades', order.unidades); }}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'unidades' ? (
+                                                            <input
+                                                                type="number"
+                                                                className="border rounded px-1 py-1 text-xs w-16 text-center shadow-inner"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            order.unidades ?? "-"
+                                                        )}
+                                                    </td>
                                                     <td className="px-4 py-3 text-center">
                                                         <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                             {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
@@ -364,9 +500,51 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                                             {order.cantidad_entregada || 0} / {order.unidades || 0}
                                                         </span>
                                                     </td>
-                                                    <td className="px-3 py-3 font-medium">{formatDate(order.fecha_prometida)}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>{order.aprobado_por || "-"}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>{order.requerido_por || "-"}</td>
+                                                    <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(order.id, 'fecha_prometida', order.fecha_prometida); }}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'fecha_prometida' ? (
+                                                            <input
+                                                                type="date"
+                                                                className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            formatDate(order.fecha_prometida)
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'aprobado_por', order.aprobado_por); }} title={order.aprobado_por || "-"}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'aprobado_por' ? (
+                                                            <input
+                                                                type="text"
+                                                                className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            order.aprobado_por || "-"
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'requerido_por', order.requerido_por); }} title={order.requerido_por || "-"}>
+                                                        {editingOrder?.id === order.id && editingOrder.field === 'requerido_por' ? (
+                                                            <input
+                                                                type="text"
+                                                                className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                                value={editingOrder.value}
+                                                                onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                                onBlur={handleFieldSave}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleFieldSave()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            order.requerido_por || "-"
+                                                        )}
+                                                    </td>
                                                     <td className="px-3 py-3">
                                                         <div className="flex items-center justify-center gap-1">
                                                             <Button 

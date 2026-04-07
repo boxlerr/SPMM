@@ -64,6 +64,7 @@ interface PlanningListTableProps {
     onDataChange?: () => void; // Added for refreshing data without reload
     hideStatus?: boolean; // New prop to hide status column
     highlightedIds?: number[]; // New prop for visual highlighting
+    onFieldUpdate?: (ordenId: number, field: string, value: any) => Promise<void>;
 }
 
 export const PlanningListTable = React.memo(_PlanningListTable);
@@ -143,6 +144,14 @@ function _PlanningListTable({
         if (!str) return "";
         return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
     };
+
+    const getEditableProductDescription = (item: WorkOrder) => {
+        if ((item.articulo?.cod_articulo === 'NO-DEF' || item.articulo?.descripcion?.toLowerCase().includes('heredado')) && item.observaciones) {
+            return item.observaciones;
+        }
+        return item.articulo?.descripcion;
+    };
+
 
     const getScheduledStart = (ordenId: number, procesoId: number) => {
         if (!planificacion || planificacion.length === 0) return "-";
@@ -305,42 +314,61 @@ function _PlanningListTable({
         }
     };
 
-    const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: 'fecha_prometida' | 'fecha_entrega', value: string } | null>(null);
+    const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: string, value: string, originalValue: string } | null>(null);
     const [editingStartDate, setEditingStartDate] = React.useState<{ orderId: number, processId: number, planId: number, value: string } | null>(null);
     const [deliveryOrder, setDeliveryOrder] = React.useState<{ id: number, total: number, delivered: number } | null>(null);
 
-    const handleDateClick = (orderId: number, field: 'fecha_prometida' | 'fecha_entrega', currentValue: string | undefined) => {
-        // Prevent editing if it's a legacy date
-        if (currentValue?.startsWith('1950')) {
-            setEditingOrder({ id: orderId, field, value: '' }); // Clear for new date
-            return;
+    const handleTextClick = (orderId: number, field: string, currentValue: string | undefined | number) => {
+        const val = currentValue?.toString() || "";
+        setEditingOrder({
+            id: orderId,
+            field,
+            value: val,
+            originalValue: val
+        });
+    };
+
+    const handleDateClick = (orderId: number, field: string, currentValue: string | undefined) => {
+        let val = "";
+        if (currentValue && !currentValue.startsWith('1950')) {
+            try {
+                val = new Date(currentValue).toISOString().split('T')[0];
+            } catch (e) {
+                val = "";
+            }
         }
         setEditingOrder({
             id: orderId,
             field,
-            value: currentValue ? new Date(currentValue).toISOString().split('T')[0] : ''
+            value: val,
+            originalValue: val
         });
     };
 
     const handleDateSave = async () => {
         if (!editingOrder) return;
+        if (editingOrder.value === editingOrder.originalValue) {
+            setEditingOrder(null);
+            return;
+        }
 
         try {
             const response = await fetch(`${API_URL}/ordenes/${editingOrder.id}`, {
                 method: 'PUT',
                 headers: { ...getAuthHeaders() as Record<string, string>, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    [editingOrder.field]: editingOrder.value ? new Date(editingOrder.value).toISOString() : null
+                    [editingOrder.field]: editingOrder.field.startsWith('fecha_') ? (editingOrder.value ? new Date(editingOrder.value).toISOString() : null) : (editingOrder.field === 'unidades' ? parseInt(editingOrder.value) || 0 : editingOrder.value)
                 })
             });
 
-            if (!response.ok) throw new Error('Failed to update date');
+            if (!response.ok) throw new Error('Failed to update field');
 
-            // Optimistic update or refetch needed. 
-            // For now, let's just close. The parent should probably handle data refresh or we pass an onUpdate callback.
             setEditingOrder(null);
-            // Force refresh ideally
-            window.location.reload();
+            
+            // If the parent provided an onDataChange callback, use it
+            if (onDataChange) {
+                onDataChange();
+            }
 
         } catch (error) {
             console.error('Error saving date:', error);
@@ -930,12 +958,70 @@ function _PlanningListTable({
                                                 </button>
                                             </td>
                                             <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
-                                            <td className="px-3 py-3">{formatDate(item.fecha_entrada)}</td>
+                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrada', item.fecha_entrada); }}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrada' ? (
+                                                    <input
+                                                        type="date"
+                                                        className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    formatDate(item.fecha_entrada)
+                                                )}
+                                            </td>
                                             <td className="px-3 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
                                             <td className="px-3 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>
-                                            <td className="px-3 py-3 font-medium text-gray-900 min-w-[400px]">{(item.articulo?.cod_articulo === 'NO-DEF' || item.articulo?.descripcion?.toLowerCase().includes('heredado')) && item.observaciones ? item.observaciones : (item.articulo?.descripcion || "-")}</td>
-                                            <td className="px-3 py-3 text-xs text-gray-600">{item.n_pedido || item.n_ped_l || "-"}</td>
-                                            <td className="px-3 py-3 text-center font-medium">{item.unidades ?? "-"}</td>
+                                            <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px] cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'observaciones', getEditableProductDescription(item)); }}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'observaciones' ? (
+                                                    <input
+                                                        type="text"
+                                                        className="border rounded px-2 py-1 text-xs w-full shadow-inner focus:ring-2 focus:ring-blue-500/20"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    <span className="line-clamp-2" title={getEditableProductDescription(item)}>
+                                                        {getEditableProductDescription(item) || "-"}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'n_pedido', item.n_pedido || item.n_ped_l); }}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'n_pedido' ? (
+                                                    <input
+                                                        type="text"
+                                                        className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    item.n_pedido || item.n_ped_l || "-"
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'unidades', item.unidades); }}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'unidades' ? (
+                                                    <input
+                                                        type="number"
+                                                        className="border rounded px-1 py-1 text-xs w-16 text-center shadow-inner"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    item.unidades ?? "-"
+                                                )}
+                                            </td>
                                             <td className="px-3 py-3 text-center">
                                                 <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                     {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
@@ -1043,8 +1129,36 @@ function _PlanningListTable({
                                                     )
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600" title={item.aprobado_por || "-"}>{item.aprobado_por || "-"}</td>
-                                            <td className="px-3 py-3 text-xs text-gray-600" title={item.requerido_por || "-"}>{item.requerido_por || "-"}</td>
+                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'aprobado_por', item.aprobado_por); }} title={item.aprobado_por || "-"}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'aprobado_por' ? (
+                                                    <input
+                                                        type="text"
+                                                        className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    item.aprobado_por || "-"
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'requerido_por', item.requerido_por); }} title={item.requerido_por || "-"}>
+                                                {editingOrder?.id === item.id && editingOrder.field === 'requerido_por' ? (
+                                                    <input
+                                                        type="text"
+                                                        className="border rounded px-1 py-1 text-xs w-full shadow-inner"
+                                                        value={editingOrder.value}
+                                                        onChange={(e) => setEditingOrder({ ...editingOrder, value: e.target.value })}
+                                                        onBlur={handleDateSave}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleDateSave()}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    item.requerido_por || "-"
+                                                )}
+                                            </td>
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">

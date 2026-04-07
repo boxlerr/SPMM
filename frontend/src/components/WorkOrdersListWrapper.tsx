@@ -271,6 +271,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
                         onDelete={handleDeleteOrder}
+                        onDataChange={fetchData}
                     />
                 </TabsContent>
 

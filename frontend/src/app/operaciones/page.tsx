@@ -1109,6 +1109,7 @@ export default function OperacionesPage() {
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
+                      onDataChange={fetchData}
                     />
                   </TabsContent>
 
@@ -1168,6 +1169,7 @@ export default function OperacionesPage() {
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
+                      onDataChange={fetchData}
                     />
                   </TabsContent>
 
@@ -1226,6 +1228,7 @@ export default function OperacionesPage() {
                       onRowClick={(item) => {
                         console.log("Clicked order:", item);
                       }}
+                      onDataChange={fetchData}
                     />
                   </TabsContent>
 
