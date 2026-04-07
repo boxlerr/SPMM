@@ -943,8 +943,8 @@ export default function OperacionesPage() {
       </div>
 
       <div className="flex-1 flex overflow-visible w-full">
-        <div className={"flex-1 transition-all w-full duration-300 flex flex-col " + (activeTab === 'gantt' ? 'w-full px-2 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-8')}>
-          <div className={"bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col " + (activeTab === 'gantt' ? 'p-2' : 'p-6')}>
+        <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : activeTab === 'work_orders' ? 'w-full px-2 sm:px-3 md:px-4 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-8'}`}>
+          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-3 sm:p-4' : 'p-6'}`}>
             {/* Redundant header removed */}
 
             {activeTab === "operarios" && (

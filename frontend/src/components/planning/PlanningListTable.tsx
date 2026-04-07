@@ -722,12 +722,7 @@ function _PlanningListTable({
                             >
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="flex items-center gap-2">
-                                        <span className="font-bold text-lg text-gray-800">#{item.id}</span>
-                                        {item.id_otvieja && (
-                                            <span className="text-xs font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                                                Vieja: #{item.id_otvieja}
-                                            </span>
-                                        )}
+                                        <span className="font-bold text-lg text-gray-800">#{item.id_otvieja || item.id}</span>
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
                                     </div>
                                     <button className="text-gray-400">
@@ -742,7 +737,9 @@ function _PlanningListTable({
                                     </div>
 
                                     <div className="text-gray-600 line-clamp-2 text-xs">
-                                        {item.articulo?.descripcion}
+                                        {(item.articulo?.cod_articulo === 'NO-DEF' || item.articulo?.descripcion?.toLowerCase().includes('heredado')) && item.observaciones
+                                            ? item.observaciones
+                                            : item.articulo?.descripcion}
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
@@ -769,6 +766,14 @@ function _PlanningListTable({
                                             )}>
                                                 {item.estado_material === 'ok' ? 'OK' : item.estado_material === 'pedido' ? 'Pedido' : 'Sin Stock'}
                                             </span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500 block text-[10px] uppercase">N° Pedido</span>
+                                            <span className="font-medium text-gray-700">{item.n_pedido || item.n_ped_l || "-"}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
+                                            <span className="font-medium text-gray-700">{item.aprobado_por || "-"}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -802,19 +807,10 @@ function _PlanningListTable({
                                 <th className="w-10 px-4 py-3"></th>
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
-                                    onClick={() => handleSort('id')}
-                                >
-                                    <div className="flex items-center">
-                                        OT
-                                        <SortIcon column="id" />
-                                    </div>
-                                </th>
-                                <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('id_otvieja')}
                                 >
                                     <div className="flex items-center">
-                                        OT Vieja
+                                        OT
                                         <SortIcon column="id_otvieja" />
                                     </div>
                                 </th>
@@ -846,16 +842,20 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group min-w-[400px]"
                                     onClick={() => handleSort('descripcion')}
+                                    title="Ordenar por producto"
                                 >
                                     <div className="flex items-center">
-                                        Descripción
+                                        Producto
                                         <SortIcon column="descripcion" />
                                     </div>
                                 </th>
+                                <th className="px-3 py-3 font-bold text-gray-600">
+                                    N° Pedido
+                                </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('unidades')}
                                     title="Ordenar por cantidad"
                                 >
@@ -901,7 +901,7 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('fecha_entrega')}
                                 >
                                     <div className="flex items-center">
@@ -909,12 +909,18 @@ function _PlanningListTable({
                                         <SortIcon column="fecha_entrega" />
                                     </div>
                                 </th>
+                                <th className="px-3 py-3 font-bold text-gray-600">
+                                    Aprobado x
+                                </th>
+                                <th className="px-3 py-3 font-bold text-gray-600">
+                                    Pedido x
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
-                                    <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
+                                    <td colSpan={16} className="px-3 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
@@ -952,14 +958,14 @@ function _PlanningListTable({
                                                     )}
                                                 </button>
                                             </td>
-                                            <td className="px-4 py-3 font-medium">{item.id}</td>
-                                            <td className="px-4 py-3 text-gray-500">{item.id_otvieja || "-"}</td>
-                                            <td className="px-4 py-3">{formatDate(item.fecha_entrada)}</td>
-                                            <td className="px-4 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
-                                            <td className="px-4 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>
-                                            <td className="px-4 py-3 font-medium text-gray-900">{item.articulo?.descripcion || "-"}</td>
-                                            <td className="px-4 py-3 text-center font-medium">{item.unidades ?? "-"}</td>
-                                            <td className="px-4 py-3 text-center">
+                                            <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
+                                            <td className="px-3 py-3">{formatDate(item.fecha_entrada)}</td>
+                                            <td className="px-3 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
+                                            <td className="px-3 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>
+                                            <td className="px-3 py-3 font-medium text-gray-900 min-w-[400px]">{(item.articulo?.cod_articulo === 'NO-DEF' || item.articulo?.descripcion?.toLowerCase().includes('heredado')) && item.observaciones ? item.observaciones : (item.articulo?.descripcion || "-")}</td>
+                                            <td className="px-3 py-3 text-xs text-gray-600">{item.n_pedido || item.n_ped_l || "-"}</td>
+                                            <td className="px-3 py-3 text-center font-medium">{item.unidades ?? "-"}</td>
+                                            <td className="px-3 py-3 text-center">
                                                 <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                     {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
                                                 </Badge>
@@ -1066,10 +1072,12 @@ function _PlanningListTable({
                                                     )
                                                 )}
                                             </td>
+                                            <td className="px-3 py-3 text-xs text-gray-600" title={item.aprobado_por || "-"}>{item.aprobado_por || "-"}</td>
+                                            <td className="px-3 py-3 text-xs text-gray-600" title={item.requerido_por || "-"}>{item.requerido_por || "-"}</td>
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={20} className="px-4 py-4">
+                                                <td colSpan={16} className="px-4 py-4">
                                                     {renderDetails(item)}
                                                 </td>
                                             </tr>

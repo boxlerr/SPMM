@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn } from "@/lib/utils";
+import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -31,6 +32,7 @@ interface UnplannedWorkOrdersListProps {
 export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
+    const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
     const [sortConfig, setSortConfig] = useState<{
         key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'material' | null;
         direction: 'asc' | 'desc' | null;
@@ -58,7 +60,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
         return <span className="ml-1 text-orange-600 font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
     };
 
-    const filteredOrders = orders.filter(order => {
+    const filteredOrders = applyWorkOrderFilters(orders, filters).filter(order => {
         const searchLower = searchTerm.toLowerCase();
         const otId = order.id.toString();
         const oldOtId = order.id_otvieja?.toString() || "";
@@ -158,6 +160,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                 </div>
             </div>
 
+            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} />
+
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">
                     <Clock className="w-12 h-12 text-gray-200 mx-auto mb-3" />
@@ -175,12 +179,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                 <div className="p-4" onClick={() => toggleRow(order.id)}>
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2">
-                                            <span className="font-bold text-lg text-gray-800">#{order.id}</span>
-                                            {order.id_otvieja && (
-                                                <span className="text-xs font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                                                    Vieja: #{order.id_otvieja}
-                                                </span>
-                                            )}
+                                            <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
                                             <Badge className="bg-orange-50 text-orange-700 border-orange-100 text-[9px]">PENDIENTE</Badge>
                                         </div>
                                         <button className="text-gray-400">
@@ -192,7 +191,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                             <span className="font-semibold text-gray-900 line-clamp-1">{order.cliente?.nombre || "-"}</span>
                                             <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
                                         </div>
-                                        <div className="text-gray-600 line-clamp-2 text-xs">{order.articulo?.descripcion}</div>
+                                        <div className="text-gray-600 line-clamp-2 text-xs">{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : order.articulo?.descripcion}</div>
                                         <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
                                             <div>
                                                 <span className="text-gray-500 block text-[10px] uppercase">Cant.</span>
@@ -204,12 +203,54 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                                     {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
                                                 </Badge>
                                             </div>
+                                            <div>
+                                                <span className="text-gray-500 block text-[10px] uppercase">N° Pedido</span>
+                                                <span className="font-medium text-gray-700">{order.n_pedido || order.n_ped_l || "-"}</span>
+                                            </div>
+                                            <div>
+                                                <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
+                                                <span className="font-medium text-gray-700">{order.aprobado_por || "-"}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                                 {expandedOrderIds.includes(order.id) && (
                                     <div className="bg-gray-50 border-t p-3 space-y-2">
+                                        <div className="text-xs text-gray-600">
+                                            <span className="font-bold text-gray-800">Observaciones: </span>
+                                            {order.observaciones || order.detalle || "Sin observaciones adicionales"}
+                                        </div>
                                         <OrderFiles orderId={order.id} />
+                                        {/* Process Sub-Table */}
+                                        {order.procesos && order.procesos.length > 0 ? (
+                                            <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
+                                                <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-2 font-bold border-b border-gray-200">
+                                                    <div>#</div>
+                                                    <div>Proceso</div>
+                                                    <div>Estado</div>
+                                                    <div className="text-center">Min. Est.</div>
+                                                </div>
+                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
+                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                                        <div className="text-gray-500 font-mono">{proc.orden}</div>
+                                                        <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
+                                                        <div>
+                                                            <Badge className={cn(
+                                                                "text-[10px] shadow-none",
+                                                                proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
+                                                                proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
+                                                                "bg-gray-100 text-gray-800 border-gray-200"
+                                                            )}>
+                                                                {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
+                                                            </Badge>
+                                                        </div>
+                                                        <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
+                                        )}
                                         <div className="flex gap-2 justify-end pt-2">
                                             <Button variant="ghost" size="sm" className="h-8 text-orange-600 hover:bg-orange-50 gap-1.5" onClick={() => onEdit(order)}>
                                                 <Edit2 className="w-3.5 h-3.5" /> Editar
@@ -230,41 +271,41 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                             <table className="w-full min-w-[1000px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                                     <tr>
-                                        <th className="w-10 px-4 py-3"></th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id')}>
-                                            <div className="flex items-center">OT<SortIcon column="id" /></div>
+                                        <th className="w-10 px-3 py-3"></th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id_otvieja')}>
+                                            <div className="flex items-center">OT<SortIcon column="id_otvieja" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id_otvieja')}>
-                                            <div className="flex items-center">OT Vieja<SortIcon column="id_otvieja" /></div>
-                                        </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrada')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrada')}>
                                             <div className="flex items-center">F. Entrada<SortIcon column="fecha_entrada" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('cliente')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('cliente')}>
                                             <div className="flex items-center">Cliente<SortIcon column="cliente" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('codigo')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('codigo')}>
                                             <div className="flex items-center">Código<SortIcon column="codigo" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('descripcion')}>
-                                            <div className="flex items-center">Descripción<SortIcon column="descripcion" /></div>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group min-w-[400px]" onClick={() => handleSort('descripcion')}>
+                                            <div className="flex items-center">Producto<SortIcon column="descripcion" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('unidades')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600">N° Pedido</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('unidades')}>
                                             <div className="flex items-center justify-center">Cant.<SortIcon column="unidades" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('prioridad')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('prioridad')}>
                                             <div className="flex items-center justify-center">Prioridad<SortIcon column="prioridad" /></div>
                                         </th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Material</th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Entrega</th>
-                                        <th className="px-4 py-3 font-bold text-gray-600">F. Prometida</th>
-                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Acciones</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Material</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Entrega</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600">F. Prometida</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600">Aprobado x</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600">Pedido x</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={16} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes pendientes."}
                                             </td>
                                         </tr>
@@ -284,12 +325,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                                             )}
                                                         </button>
                                                     </td>
-                                                    <td className="px-4 py-3 font-medium">{order.id}</td>
-                                                    <td className="px-4 py-3 text-gray-500">{order.id_otvieja || "-"}</td>
-                                                    <td className="px-4 py-3">{formatDate(order.fecha_entrada)}</td>
-                                                    <td className="px-4 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
-                                                    <td className="px-4 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
-                                                    <td className="px-4 py-3 font-medium text-gray-900 max-w-[200px] truncate" title={order.articulo?.descripcion || "-"}>{order.articulo?.descripcion || "-"}</td>
+                                                    <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
+                                                    <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
+                                                    <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
+                                                    <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
+                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[400px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}</td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
                                                     <td className="px-4 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
                                                     <td className="px-4 py-3 text-center">
                                                         <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
@@ -323,8 +364,10 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                                             {order.cantidad_entregada || 0} / {order.unidades || 0}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-3 font-medium">{formatDate(order.fecha_prometida)}</td>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 py-3 font-medium">{formatDate(order.fecha_prometida)}</td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>{order.aprobado_por || "-"}</td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>{order.requerido_por || "-"}</td>
+                                                    <td className="px-3 py-3">
                                                         <div className="flex items-center justify-center gap-1">
                                                             <Button 
                                                                 variant="ghost" 
@@ -348,13 +391,54 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete }: UnplannedW
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={13} className="px-4 py-4">
+                                                        <td colSpan={16} className="px-4 py-4">
                                                             <div className="space-y-3">
                                                                 <div className="text-xs text-gray-600">
                                                                     <span className="font-bold text-gray-800">Observaciones: </span>
                                                                     {order.observaciones || order.detalle || "Sin observaciones adicionales"}
                                                                 </div>
                                                                 <OrderFiles orderId={order.id} />
+                                                                {/* Process Sub-Table */}
+                                                                {order.procesos && order.procesos.length > 0 ? (
+                                                                    <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
+                                                                        <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-2 font-bold border-b border-gray-200">
+                                                                            <div>#</div>
+                                                                            <div>Proceso</div>
+                                                                            <div>Estado</div>
+                                                                            <div className="text-center">Min. Est.</div>
+                                                                            <div className="text-center text-blue-700">Min. Real</div>
+                                                                            <div>Operario</div>
+                                                                        </div>
+                                                                        {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
+                                                                            <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                                                                <div className="text-gray-500 font-mono">{proc.orden}</div>
+                                                                                <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                                                                <div>
+                                                                                    <Badge className={cn(
+                                                                                        "text-[10px] shadow-none font-medium",
+                                                                                        proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
+                                                                                        proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
+                                                                                        "bg-gray-100 text-gray-800 border-gray-200"
+                                                                                    )}>
+                                                                                        {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
+                                                                                    </Badge>
+                                                                                </div>
+                                                                                <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
+                                                                                <div className="text-center font-bold text-blue-700 text-xs">
+                                                                                    {proc.inicio_real && proc.fin_real
+                                                                                        ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)} min`
+                                                                                        : proc.inicio_real ? "En curso..." : "-"
+                                                                                    }
+                                                                                </div>
+                                                                                <div className="text-gray-700 text-xs font-medium truncate">
+                                                                                    {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
+                                                                )}
                                                             </div>
                                                         </td>
                                                     </tr>
