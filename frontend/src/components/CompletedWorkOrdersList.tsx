@@ -1,19 +1,23 @@
+"use client";
+
 import React, { useState } from "react";
 import { 
     Search, 
     Calendar, 
-    User, 
     Package, 
     CheckCircle2, 
-    FileText, 
     Eye,
-    ChevronLeft,
-    ChevronRight
+    ChevronDown,
+    ChevronRight,
+    AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
+import { cn } from "@/lib/utils";
 
 interface CompletedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -22,8 +26,33 @@ interface CompletedWorkOrdersListProps {
 
 export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = useState("");
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 8;
+    const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
+    const [sortConfig, setSortConfig] = useState<{
+        key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'fecha_entrega' | null;
+        direction: 'asc' | 'desc' | null;
+    }>({ key: null, direction: null });
+
+    const toggleRow = (orderId: number) => {
+        setExpandedOrderIds(prev =>
+            prev.includes(orderId)
+                ? prev.filter(id => id !== orderId)
+                : [...prev, orderId]
+        );
+    };
+
+    const handleSort = (key: typeof sortConfig.key) => {
+        let direction: 'asc' | 'desc' | null = 'asc';
+        if (sortConfig.key === key) {
+            if (sortConfig.direction === 'asc') direction = 'desc';
+            else if (sortConfig.direction === 'desc') direction = null;
+        }
+        setSortConfig({ key: direction ? key : null, direction });
+    };
+
+    const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
+        if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
+        return <span className="ml-1 text-green-600 font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
+    };
 
     const filteredOrders = orders.filter(order => {
         const searchLower = searchTerm.toLowerCase();
@@ -31,7 +60,6 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
         const oldOtId = order.id_otvieja?.toString() || "";
         const clientRaw = order.cliente;
         const clientName = (typeof clientRaw === 'object' && clientRaw !== null ? (clientRaw as any).nombre : (clientRaw || "")).toString().toLowerCase();
-        
         const artRaw = order.articulo;
         const article = (typeof artRaw === 'object' && artRaw !== null ? (artRaw as any).descripcion : (artRaw || "")).toString().toLowerCase();
         const codArticle = (typeof artRaw === 'object' && artRaw !== null ? (artRaw as any).cod_articulo : "").toString().toLowerCase();
@@ -41,23 +69,58 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                clientName.includes(searchLower) ||
                article.includes(searchLower) ||
                codArticle.includes(searchLower);
-    }).sort((a, b) => {
-        // Sort by completion date (desc) if available, otherwise by ID
-        const dateA = a.fecha_entrega ? new Date(a.fecha_entrega).getTime() : 0;
-        const dateB = b.fecha_entrega ? new Date(b.fecha_entrega).getTime() : 0;
-        return dateB - dateA || b.id - a.id;
     });
 
-    const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
-    const paginatedOrders = filteredOrders.slice(
-        (currentPage - 1) * itemsPerPage,
-        currentPage * itemsPerPage
-    );
+    const sortedOrders = React.useMemo(() => {
+        const sorted = [...filteredOrders];
+        if (!sortConfig.key || !sortConfig.direction) {
+            // Default: sort by completion date desc then by ID desc
+            return sorted.sort((a, b) => {
+                const dateA = a.fecha_entrega ? new Date(a.fecha_entrega).getTime() : 0;
+                const dateB = b.fecha_entrega ? new Date(b.fecha_entrega).getTime() : 0;
+                return dateB - dateA || b.id - a.id;
+            });
+        }
+        return sorted.sort((a, b) => {
+            switch (sortConfig.key) {
+                case 'id':
+                    return sortConfig.direction === 'asc' ? a.id - b.id : b.id - a.id;
+                case 'id_otvieja':
+                    return sortConfig.direction === 'asc' ? (a.id_otvieja || 0) - (b.id_otvieja || 0) : (b.id_otvieja || 0) - (a.id_otvieja || 0);
+                case 'fecha_entrada':
+                    return sortConfig.direction === 'asc'
+                        ? new Date(a.fecha_entrada || 0).getTime() - new Date(b.fecha_entrada || 0).getTime()
+                        : new Date(b.fecha_entrada || 0).getTime() - new Date(a.fecha_entrada || 0).getTime();
+                case 'cliente':
+                    return sortConfig.direction === 'asc'
+                        ? (a.cliente?.nombre || "").localeCompare(b.cliente?.nombre || "")
+                        : (b.cliente?.nombre || "").localeCompare(a.cliente?.nombre || "");
+                case 'codigo':
+                    return sortConfig.direction === 'asc'
+                        ? (a.articulo?.cod_articulo || "").localeCompare(b.articulo?.cod_articulo || "")
+                        : (b.articulo?.cod_articulo || "").localeCompare(a.articulo?.cod_articulo || "");
+                case 'descripcion':
+                    return sortConfig.direction === 'asc'
+                        ? (a.articulo?.descripcion || "").localeCompare(b.articulo?.descripcion || "")
+                        : (b.articulo?.descripcion || "").localeCompare(a.articulo?.descripcion || "");
+                case 'unidades':
+                    return sortConfig.direction === 'asc' ? (a.unidades || 0) - (b.unidades || 0) : (b.unidades || 0) - (a.unidades || 0);
+                case 'fecha_entrega':
+                    return sortConfig.direction === 'asc'
+                        ? new Date(a.fecha_entrega || '2100-01-01').getTime() - new Date(b.fecha_entrega || '2100-01-01').getTime()
+                        : new Date(b.fecha_entrega || '1970-01-01').getTime() - new Date(a.fecha_entrega || '1970-01-01').getTime();
+                default:
+                    return 0;
+            }
+        });
+    }, [filteredOrders, sortConfig]);
 
     const formatDate = (dateStr?: string) => {
-        if (!dateStr) return "N/A";
+        if (!dateStr || dateStr.startsWith('1950')) return "-";
         try {
-            return new Date(dateStr).toLocaleDateString('es-AR', {
+            const date = new Date(dateStr);
+            if (date.getFullYear() === 1950) return "-";
+            return date.toLocaleDateString('es-AR', {
                 day: '2-digit',
                 month: '2-digit',
                 year: 'numeric'
@@ -85,10 +148,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                     <Input
                         placeholder="Buscar por OT, Cliente o Producto..."
                         value={searchTerm}
-                        onChange={(e) => {
-                            setSearchTerm(e.target.value);
-                            setCurrentPage(1);
-                        }}
+                        onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-10 h-10 bg-gray-50/50 border-gray-200 focus:bg-white transition-all rounded-lg"
                     />
                 </div>
@@ -103,106 +163,170 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                     </p>
                 </div>
             ) : (
-                <div className="flex flex-col gap-3">
-                    <div className="grid grid-cols-1 gap-3">
-                        {paginatedOrders.map(order => (
-                            <div key={order.id} className="group border border-gray-200 rounded-xl p-5 hover:shadow-md transition-all duration-200 bg-white hover:border-green-200 relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1.5 h-full bg-green-400 group-hover:bg-green-500 transition-colors"></div>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-                                    {/* OT & Status */}
-                                    <div className="md:col-span-3 space-y-2">
-                                        <div className="flex items-center gap-3">
-                                            <span className="text-base font-bold text-gray-900 font-mono tracking-tight">OT #{order.id_otvieja || order.id}</span>
-                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-green-100 text-green-700 border border-green-200 uppercase tracking-widest">
-                                                FINALIZADA
-                                            </span>
+                <>
+                    {/* Mobile Card View */}
+                    <div className="md:hidden space-y-3">
+                        {sortedOrders.map((order) => (
+                            <Card key={order.id} className="overflow-hidden border border-gray-200 shadow-sm bg-white">
+                                <div className="p-4" onClick={() => toggleRow(order.id)}>
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
+                                            <Badge className="bg-green-100 text-green-700 border-green-200 text-[9px]">FINALIZADA</Badge>
                                         </div>
-                                        <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                                            <span className="font-black uppercase tracking-wider">Cliente:</span>
-                                            <span className="font-bold text-gray-700">
-                                                {typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "Sin Cliente"}
-                                            </span>
-                                        </div>
+                                        <button className="text-gray-400">
+                                            {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                                        </button>
                                     </div>
-
-                                    {/* Article & Details */}
-                                    <div className="md:col-span-4 space-y-2">
-                                        <div className="flex items-start gap-2 text-sm font-bold text-gray-800 leading-tight">
-                                            <Package className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
-                                            <span>
-                                                {typeof order.articulo === 'object' ? `${order.articulo?.cod_articulo} - ${order.articulo?.descripcion}` : "Sin Artículo"}
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="font-semibold text-gray-900 line-clamp-1">
+                                                {typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}
                                             </span>
+                                            <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
                                         </div>
-                                        <p className="text-xs text-gray-500 italic pl-6 leading-relaxed">
-                                            {order.observaciones || order.detalle || "Sin observaciones adicionales"}
-                                        </p>
-                                    </div>
-
-                                    {/* Quantities & Files */}
-                                    <div className="md:col-span-3 flex flex-col gap-4">
-                                        <div className="flex items-start gap-6">
-                                            <div className="flex flex-col gap-1">
-                                                <span className="text-[10px] uppercase font-black text-gray-400 tracking-wider">Entregado</span>
-                                                <span className="text-base font-black text-green-700 leading-none">{order.cantidad_entregada || 0} / {order.unidades || 0}</span>
+                                        <div className="text-gray-600 line-clamp-2 text-xs">{order.articulo?.descripcion}</div>
+                                        <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
+                                            <div>
+                                                <span className="text-gray-500 block text-[10px] uppercase">Entregado</span>
+                                                <span className="font-medium text-green-700">{order.cantidad_entregada || 0} / {order.unidades || 0}</span>
                                             </div>
-                                            <div className="flex flex-col gap-1 border-l border-gray-100 pl-6">
-                                                <span className="text-[10px] uppercase font-black text-gray-400 tracking-wider">F. Entrega</span>
-                                                <div className="flex items-center gap-1.5 text-gray-800 font-bold text-sm leading-none">
-                                                    <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                                                    {formatDate(order.fecha_entrega)}
-                                                </div>
+                                            <div>
+                                                <span className="text-gray-500 block text-[10px] uppercase">F. Entrega</span>
+                                                <span className="font-medium">{formatDate(order.fecha_entrega)}</span>
                                             </div>
                                         </div>
-                                        <div className="space-y-1.5">
-                                            <OrderFiles orderId={order.id} />
-                                        </div>
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div className="md:col-span-2 flex items-center justify-end h-full self-center">
-                                        <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            className="h-10 px-4 text-gray-500 hover:text-blue-600 hover:bg-blue-50 gap-2 border border-gray-100 hover:border-blue-100 rounded-xl group/btn transition-all shadow-sm"
-                                            onClick={() => onEdit(order)}
-                                        >
-                                            <Eye className="w-4 h-4 transition-transform group-hover/btn:scale-110" />
-                                            <span className="text-xs font-black uppercase tracking-wider">Ver Detalles</span>
-                                        </Button>
                                     </div>
                                 </div>
-                            </div>
+                                {expandedOrderIds.includes(order.id) && (
+                                    <div className="bg-gray-50 border-t p-3 space-y-2">
+                                        <div className="text-xs text-gray-600">
+                                            <span className="font-bold text-gray-800">Observaciones: </span>
+                                            {order.observaciones || order.detalle || "Sin observaciones adicionales"}
+                                        </div>
+                                        <OrderFiles orderId={order.id} />
+                                        <div className="flex justify-end pt-2">
+                                            <Button variant="ghost" size="sm" className="h-8 text-blue-600 hover:bg-blue-50 gap-1.5" onClick={() => onEdit(order)}>
+                                                <Eye className="w-3.5 h-3.5" /> Ver Detalles
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                            </Card>
                         ))}
                     </div>
 
-                    {/* Pagination */}
-                    {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-2 mt-4 py-2 border-t border-gray-50">
-                            <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg"
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                            >
-                                <ChevronLeft className="w-4 h-4" />
-                            </Button>
-                            <span className="text-xs font-bold bg-gray-100 px-3 py-1.5 rounded-lg text-gray-600">
-                                Página {currentPage} de {totalPages}
-                            </span>
-                            <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 rounded-lg"
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                            >
-                                <ChevronRight className="w-4 h-4" />
-                            </Button>
+                    {/* Desktop Table View */}
+                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full">
+                        <div className="w-full overflow-x-auto">
+                            <table className="w-full min-w-[1000px] text-sm text-left">
+                                <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
+                                    <tr>
+                                        <th className="w-10 px-4 py-3"></th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id')}>
+                                            <div className="flex items-center">OT<SortIcon column="id" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id_otvieja')}>
+                                            <div className="flex items-center">OT Vieja<SortIcon column="id_otvieja" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrada')}>
+                                            <div className="flex items-center">F. Entrada<SortIcon column="fecha_entrada" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('cliente')}>
+                                            <div className="flex items-center">Cliente<SortIcon column="cliente" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('codigo')}>
+                                            <div className="flex items-center">Código<SortIcon column="codigo" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('descripcion')}>
+                                            <div className="flex items-center">Descripción<SortIcon column="descripcion" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('unidades')}>
+                                            <div className="flex items-center justify-center">Cant.<SortIcon column="unidades" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Entregado</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrega')}>
+                                            <div className="flex items-center">F. Entrega<SortIcon column="fecha_entrega" /></div>
+                                        </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Estado</th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 text-center">Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedOrders.length === 0 ? (
+                                        <tr className="bg-gray-50 border-b">
+                                            <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
+                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes completadas."}
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        sortedOrders.map((order) => (
+                                            <React.Fragment key={order.id}>
+                                                <tr className="border-b transition-colors duration-150 hover:bg-green-50/50 bg-white cursor-pointer">
+                                                    <td className="px-4 py-3">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
+                                                            className="p-1 hover:bg-black/10 rounded transition-colors"
+                                                        >
+                                                            {expandedOrderIds.includes(order.id) ? (
+                                                                <ChevronDown className="h-4 w-4 text-gray-600" />
+                                                            ) : (
+                                                                <ChevronRight className="h-4 w-4 text-gray-400" />
+                                                            )}
+                                                        </button>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-medium">{order.id}</td>
+                                                    <td className="px-4 py-3 text-gray-500">{order.id_otvieja || "-"}</td>
+                                                    <td className="px-4 py-3">{formatDate(order.fecha_entrada)}</td>
+                                                    <td className="px-4 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
+                                                    <td className="px-4 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
+                                                    <td className="px-4 py-3 font-medium text-gray-900 max-w-[200px] truncate" title={order.articulo?.descripcion || "-"}>{order.articulo?.descripcion || "-"}</td>
+                                                    <td className="px-4 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <span className="text-xs font-bold text-green-700">
+                                                            {order.cantidad_entregada || 0} / {order.unidades || 0}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-medium">{formatDate(order.fecha_entrega)}</td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">
+                                                            Finalizada
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex items-center justify-center">
+                                                            <Button 
+                                                                variant="ghost" 
+                                                                size="sm" 
+                                                                className="h-7 px-2.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 text-xs font-bold"
+                                                                onClick={(e) => { e.stopPropagation(); onEdit(order); }}
+                                                            >
+                                                                <Eye className="w-3 h-3" /> Ver
+                                                            </Button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {expandedOrderIds.includes(order.id) && (
+                                                    <tr className="bg-gray-50 border-b">
+                                                        <td colSpan={12} className="px-4 py-4">
+                                                            <div className="space-y-3">
+                                                                <div className="text-xs text-gray-600">
+                                                                    <span className="font-bold text-gray-800">Observaciones: </span>
+                                                                    {order.observaciones || order.detalle || "Sin observaciones adicionales"}
+                                                                </div>
+                                                                <OrderFiles orderId={order.id} />
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </React.Fragment>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
-                    )}
-                </div>
+                    </Card>
+                </>
             )}
         </div>
     );
