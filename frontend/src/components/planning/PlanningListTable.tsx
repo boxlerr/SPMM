@@ -5,7 +5,7 @@ import { WorkOrder, PlanificacionItem } from "@/lib/types";
 import { AddProcessRow } from "@/components/planning/AddProcessRow";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import {
     Search, ChevronDown, ChevronRight, CalendarClock,
@@ -171,36 +171,7 @@ function _PlanningListTable({
         if (highlightedIds.includes(item.id)) {
             return "bg-green-50 hover:bg-green-100 text-green-900 border-l-4 border-green-500";
         }
-
-        // 1. Finalizada Total (Violeta)
-        const allFinalized = item.procesos?.every(p => p.estado_proceso.id === 3) && item.procesos.length > 0;
-
-        if (allFinalized) return "bg-purple-200 hover:bg-purple-300 text-purple-900";
-
-        // 2. Finalizada Parcial / Entregada Parcial (Gris)
-        // If delivered > 0 but not all finished or not all units
-        if ((item.cantidad_entregada || 0) > 0 && (item.cantidad_entregada || 0) < (item.unidades || 0)) {
-            return "bg-gray-200 hover:bg-gray-300 text-gray-900";
-        }
-
-        // 3. En Producción (Naranja)
-        // Any process started (id 2) or finished (id 3) but not all finalized
-        const anyStarted = item.procesos?.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3);
-        if (anyStarted) return "bg-orange-200 hover:bg-orange-300 text-orange-900";
-
-        // 4. Programada (Verde)
-        // Check if present in planificacion
-        const isScheduled = planificacion?.some(p => p.orden_id === item.id);
-        if (isScheduled) return "bg-green-100 hover:bg-green-200 text-green-900";
-
-        // 5. Material Disponible (Marrón/Amber)
-        if (item.estado_material === 'ok') return "bg-amber-200 hover:bg-amber-300 text-amber-900";
-
-        // 6. Material Pedido (Amarillo)
-        if (item.estado_material === 'pedido') return "bg-yellow-100 hover:bg-yellow-200 text-yellow-900";
-
-        // Default / Sin Stock (Normal or Red ish)
-        return "bg-white hover:bg-gray-50 text-gray-900"; // Or maintain white for clean look if no other status
+        return getWorkOrderRowColor(item);
     };
 
     const getPriorityLabel = (priorityId?: number, descripcion?: string) => {

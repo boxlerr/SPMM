@@ -17,7 +17,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
-import { cn } from "@/lib/utils";
+import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 
 interface CompletedWorkOrdersListProps {
@@ -171,7 +171,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                     {/* Mobile Card View */}
                     <div className="md:hidden space-y-3">
                         {sortedOrders.map((order) => (
-                            <Card key={order.id} className="overflow-hidden border border-gray-200 shadow-sm bg-white">
+                            <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
                                 <div className="p-4" onClick={() => toggleRow(order.id)}>
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2">
@@ -304,7 +304,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                     ) : (
                                         sortedOrders.map((order) => (
                                             <React.Fragment key={order.id}>
-                                                <tr className="border-b transition-colors duration-150 hover:bg-green-50/50 bg-white cursor-pointer">
+                                                <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
                                                     <td className="px-4 py-3">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}

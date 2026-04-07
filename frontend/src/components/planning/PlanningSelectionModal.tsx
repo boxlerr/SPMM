@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { Calendar, Filter, Clock, AlertCircle, CheckCircle2, Check, ChevronsUpDown, Search } from "lucide-react"
+import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 
 interface PlanningSelectionModalProps {
     isOpen: boolean
@@ -55,18 +56,9 @@ export function PlanningSelectionModal({
     }, [isOpen, initialSelectedIds, unplannedOrders]);
 
     // Filter states
-    const [priorityFilter, setPriorityFilter] = useState<string[]>([])
+    const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState)
     const [dateSort, setDateSort] = useState<'DEFAULT' | 'OLDEST_FIRST' | 'NEWEST_FIRST'>('DEFAULT')
-    const [clientFilter, setClientFilter] = useState<string[]>([])
-    const [sectorFilter, setSectorFilter] = useState<string>('ALL')
-    const [materialFilter, setMaterialFilter] = useState<string>('ALL')
-    const [promisedDateFilter, setPromisedDateFilter] = useState<string>('ALL')
-    const [batchSizeFilter, setBatchSizeFilter] = useState<string>('ALL')
-    const [showClaimsOnly, setShowClaimsOnly] = useState<boolean>(false)
-    const [showDelayedOnly, setShowDelayedOnly] = useState<boolean>(false)
-    const [showWithProcessesOnly, setShowWithProcessesOnly] = useState<boolean>(false)
     const [clientSearchTerm, setClientSearchTerm] = useState('')
-
 
     // Derived lists
     const uniqueClients = Array.from(new Set(unplannedOrders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort()
@@ -77,107 +69,7 @@ export function PlanningSelectionModal({
     );
 
     // Apply filters and sort
-    const filteredOrders = unplannedOrders
-        .filter(order => {
-            // Priority
-            if (priorityFilter.length > 0) {
-                const p = order.prioridad?.descripcion?.toLowerCase() || ''
-                // If "Normal" selected, we match "normal". 
-                // If "Urgente" (generic) selected, exact match or contains? 
-                // Previous logic: 'URGENTE' -> exact 'urgente'. 'URGENTE 1' -> includes 'urgente 1'.
-
-                const matchesPriority = priorityFilter.some(filter => {
-                    if (filter === 'URGENTE') return p === 'urgente';
-                    if (filter === 'URGENTE 1') return p.includes('urgente 1') || p === 'urgente 1';
-                    if (filter === 'URGENTE 2') return p.includes('urgente 2') || p === 'urgente 2';
-                    if (filter === 'NORMAL') return p.includes('normal');
-                    return false;
-                });
-
-                if (!matchesPriority) return false;
-            }
-
-            // Client
-            if (clientFilter.length > 0) {
-                const clientName = order.cliente?.nombre || '';
-                // Since our filter values come from the unique list directly, exact match is appropriate.
-                // However, we need to ensure the stored filter values match what's in the order.
-                if (!clientFilter.includes(clientName)) return false;
-            }
-
-            // Sector
-            if (sectorFilter !== 'ALL') {
-                if (order.sector?.nombre !== sectorFilter) return false
-            }
-
-            // Claims Filter
-            if (showClaimsOnly) {
-                if (!order.reclamo || order.reclamo === 0) return false
-            }
-
-            // Material Status Filter
-            if (materialFilter !== 'ALL') {
-                const estado = order.estado_material || 'sin_datos'
-                if (materialFilter === 'OK' && estado !== 'ok') return false
-                if (materialFilter === 'PEDIDO' && estado !== 'pedido') return false
-                if (materialFilter === 'SIN_STOCK' && estado !== 'sin_stock' && estado !== 'sin_datos') return false
-            }
-
-            // Promised Date Filter
-            if (promisedDateFilter !== 'ALL') {
-                const promisedDate = order.fecha_prometida ? new Date(order.fecha_prometida) : null
-                if (!promisedDate) return false
-
-                const today = new Date()
-                today.setHours(0, 0, 0, 0)
-
-                // End of this week (Sunday)
-                const endOfWeek = new Date(today)
-                endOfWeek.setDate(today.getDate() + (7 - today.getDay()))
-
-                // End of month
-                const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-
-                // Next 2 weeks
-                const nextWeekEnd = new Date(today)
-                nextWeekEnd.setDate(today.getDate() + 14)
-
-                // Filter: date must be >= today AND <= end of period
-                if (promisedDateFilter === 'THIS_WEEK') {
-                    if (promisedDate < today || promisedDate > endOfWeek) return false
-                }
-                if (promisedDateFilter === 'THIS_MONTH') {
-                    if (promisedDate < today || promisedDate > endOfMonth) return false
-                }
-                if (promisedDateFilter === 'NEXT_2_WEEKS') {
-                    if (promisedDate < today || promisedDate > nextWeekEnd) return false
-                }
-            }
-
-            // Delayed Orders Filter
-            if (showDelayedOnly) {
-                const promisedDate = order.fecha_prometida ? new Date(order.fecha_prometida) : null
-                if (!promisedDate) return false
-                const today = new Date()
-                today.setHours(0, 0, 0, 0)
-                if (promisedDate >= today) return false
-            }
-
-            // Has Processes Filter
-            if (showWithProcessesOnly) {
-                if (!order.procesos || order.procesos.length === 0) return false
-            }
-
-            // Batch Size Filter
-            if (batchSizeFilter !== 'ALL') {
-                const units = order.unidades || 0
-                if (batchSizeFilter === 'SMALL' && units > 10) return false
-                if (batchSizeFilter === 'MEDIUM' && (units <= 10 || units > 50)) return false
-                if (batchSizeFilter === 'LARGE' && units <= 50) return false
-            }
-
-            return true
-        })
+    const filteredOrders = applyWorkOrderFilters(unplannedOrders, filters)
         .sort((a, b) => {
             // Priority Sort: Initial Selected Orders First
             const isASelected = initialSelectedIds.includes(a.id);
@@ -198,7 +90,7 @@ export function PlanningSelectionModal({
         if (!autoSelectAll) return;
         const ids = filteredOrders.map(o => o.id)
         setSelectedIds(ids)
-    }, [priorityFilter, dateSort, clientFilter, sectorFilter, materialFilter, promisedDateFilter, batchSizeFilter, showClaimsOnly, showDelayedOnly, showWithProcessesOnly, autoSelectAll])
+    }, [filters, dateSort, autoSelectAll])
 
     // Calculate estimated workload
     const calculateEstimatedTime = () => {
@@ -224,18 +116,6 @@ export function PlanningSelectionModal({
     }
 
     const estimatedTime = calculateEstimatedTime()
-
-    const togglePriority = (p: string) => {
-        setPriorityFilter(prev =>
-            prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
-        )
-    }
-
-    const toggleClient = (c: string) => {
-        setClientFilter(prev =>
-            prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
-        )
-    }
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -268,180 +148,8 @@ export function PlanningSelectionModal({
                 </DialogHeader>
 
                 {/* Filter Toolbar Section - Symmetric & Compact */}
-                <div className="px-6 py-2.5 border-b bg-slate-50/80 space-y-2.5 shrink-0">
-
-                    {/* Row 1: Unified Priority & Status Toggles */}
-                    <div className="flex items-center gap-6">
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Prioridad:</span>
-                            <div className="flex bg-slate-200/50 p-0.5 rounded-lg border border-slate-200">
-                                <button
-                                    onClick={() => setPriorityFilter([])}
-                                    className={cn(
-                                        "px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
-                                        priorityFilter.length === 0 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                    )}
-                                >
-                                    Todas
-                                </button>
-                                {(['URGENTE', 'URGENTE 1', 'URGENTE 2', 'NORMAL'] as const).map(option => (
-                                    <button
-                                        key={option}
-                                        onClick={() => togglePriority(option)}
-                                        className={cn(
-                                            "px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
-                                            priorityFilter.includes(option) ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                                        )}
-                                    >
-                                        {option === 'URGENTE' ? 'URG' : option}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="h-5 w-px bg-slate-300" />
-
-                        <div className="flex items-center gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setShowWithProcessesOnly(!showWithProcessesOnly)}>
-                                <div className={cn(
-                                    "w-7 h-3.5 rounded-full p-0.5 transition-colors",
-                                    showWithProcessesOnly ? "bg-green-500" : "bg-slate-300"
-                                )}>
-                                    <div className={cn(
-                                        "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
-                                        showWithProcessesOnly ? "translate-x-3" : "translate-x-0"
-                                    )} />
-                                </div>
-                                <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Procesos</span>
-                            </label>
-
-                            <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setShowDelayedOnly(!showDelayedOnly)}>
-                                <div className={cn(
-                                    "w-7 h-3.5 rounded-full p-0.5 transition-colors",
-                                    showDelayedOnly ? "bg-red-500" : "bg-slate-300"
-                                )}>
-                                    <div className={cn(
-                                        "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
-                                        showDelayedOnly ? "translate-x-3" : "translate-x-0"
-                                    )} />
-                                </div>
-                                <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Retrasadas</span>
-                            </label>
-
-                            <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setShowClaimsOnly(!showClaimsOnly)}>
-                                <div className={cn(
-                                    "w-7 h-3.5 rounded-full p-0.5 transition-colors",
-                                    showClaimsOnly ? "bg-orange-500" : "bg-slate-300"
-                                )}>
-                                    <div className={cn(
-                                        "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
-                                        showClaimsOnly ? "translate-x-3" : "translate-x-0"
-                                    )} />
-                                </div>
-                                <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Reclamos</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    {/* Row 2: Symmetric Grid of All Selectors */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-                        {/* Client Selector */}
-                        <Popover>
-                            <PopoverTrigger asChild>
-                                <Button variant="outline" className="justify-between bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                                    <span className="truncate">
-                                        {clientFilter.length === 0 ? "Cliente: Todos" : clientFilter.length === 1 ? clientFilter[0] : `${clientFilter.length} Selecc.`}
-                                    </span>
-                                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-40" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[280px] p-0 shadow-xl border-slate-200" align="start">
-                                <div className="flex flex-col w-full bg-white rounded-md">
-                                    <div className="flex items-center border-b px-2.5 py-2 bg-slate-50/50">
-                                        <Search className="mr-2 h-3.5 w-3.5 shrink-0 opacity-40" />
-                                        <input
-                                            className="flex h-7 w-full rounded-md bg-transparent text-sm outline-none placeholder:text-slate-400"
-                                            placeholder="Filtrar clientes..."
-                                            value={clientSearchTerm}
-                                            onChange={(e) => setClientSearchTerm(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="max-h-[250px] overflow-auto p-1.5 space-y-0.5">
-                                        <div
-                                            className="relative flex cursor-pointer select-none items-center rounded-md px-2 py-1.5 text-xs hover:bg-slate-100 transition-colors"
-                                            onClick={() => setClientFilter([])}
-                                        >
-                                            <div className={cn(
-                                                "mr-2.5 flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-slate-300",
-                                                clientFilter.length === 0 ? "bg-slate-900 border-slate-900 text-white" : "text-transparent"
-                                            )}>
-                                                <Check className="h-3 w-3" />
-                                            </div>
-                                            Todos los clientes
-                                        </div>
-                                        {filteredClients.map((client) => (
-                                            <div
-                                                key={client}
-                                                className="relative flex cursor-pointer select-none items-center rounded-md px-2 py-1.5 text-xs hover:bg-slate-100 transition-colors"
-                                                onClick={() => setClientFilter(prev => prev.includes(client) ? prev.filter(c => c !== client) : [...prev, client])}
-                                            >
-                                                <div className={cn(
-                                                    "mr-2.5 flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-slate-300",
-                                                    clientFilter.includes(client) ? "bg-slate-900 border-slate-900 text-white" : "text-transparent"
-                                                )}>
-                                                    <Check className="h-3 w-3" />
-                                                </div>
-                                                <span className="truncate">{client}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </PopoverContent>
-                        </Popover>
-
-                        <Select value={sectorFilter} onValueChange={setSectorFilter}>
-                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                                <SelectValue placeholder="Sector" />
-                            </SelectTrigger>
-                            <SelectContent><SelectItem value="ALL" className="text-xs">Sector: Todos</SelectItem>{uniqueSectors.map(s => (<SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>))}</SelectContent>
-                        </Select>
-
-                        <Select value={materialFilter} onValueChange={setMaterialFilter}>
-                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                                <SelectValue placeholder="Material" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL" className="text-xs">Material: Todos</SelectItem>
-                                <SelectItem value="OK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-500" />Disponible</div></SelectItem>
-                                <SelectItem value="PEDIDO" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" />Pedido</div></SelectItem>
-                                <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />Sin Stock</div></SelectItem>
-                            </SelectContent>
-                        </Select>
-
-                        <Select value={promisedDateFilter} onValueChange={setPromisedDateFilter}>
-                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                                <SelectValue placeholder="Entrega" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL" className="text-xs">Entrega: Todas</SelectItem>
-                                <SelectItem value="THIS_WEEK" className="text-xs">Esta semana</SelectItem>
-                                <SelectItem value="NEXT_2_WEEKS" className="text-xs">Próx. 2 semanas</SelectItem>
-                                <SelectItem value="THIS_MONTH" className="text-xs">Este mes</SelectItem>
-                            </SelectContent>
-                        </Select>
-
-                        <Select value={batchSizeFilter} onValueChange={setBatchSizeFilter}>
-                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                                <SelectValue placeholder="Unidades" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="ALL" className="text-xs">Lote: Todos</SelectItem>
-                                <SelectItem value="SMALL" className="text-xs">Pequeño (≤10)</SelectItem>
-                                <SelectItem value="MEDIUM" className="text-xs">Mediano (11-50)</SelectItem>
-                                <SelectItem value="LARGE" className="text-xs">Grande ({">"}50)</SelectItem>
-                            </SelectContent>
-                        </Select>
-
+                <div className="px-6 py-0 border-b bg-slate-50/80 shrink-0">
+                    <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders}>
                         <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>
                             <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
                                 <SelectValue placeholder="Ordenar" />
@@ -452,7 +160,7 @@ export function PlanningSelectionModal({
                                 <SelectItem value="NEWEST_FIRST" className="text-xs">Más recientes</SelectItem>
                             </SelectContent>
                         </Select>
-                    </div>
+                    </WorkOrderFilters>
                 </div>
 
 

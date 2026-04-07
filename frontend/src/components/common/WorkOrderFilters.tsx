@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Check, ChevronsUpDown, Search } from "lucide-react";
+import { Check, ChevronsUpDown, Search, Info } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { WorkOrder } from "@/lib/types";
 
@@ -13,6 +13,8 @@ export interface WorkOrderFilterState {
     material: string;
     promisedDate: string;
     batchSize: string;
+    dateFrom: string;
+    dateTo: string;
     showClaimsOnly: boolean;
     showDelayedOnly: boolean;
     showWithProcessesOnly: boolean;
@@ -25,6 +27,8 @@ export const initialFilterState: WorkOrderFilterState = {
     material: 'ALL',
     promisedDate: 'ALL',
     batchSize: 'ALL',
+    dateFrom: '',
+    dateTo: '',
     showClaimsOnly: false,
     showDelayedOnly: false,
     showWithProcessesOnly: false,
@@ -34,9 +38,10 @@ interface WorkOrderFiltersProps {
     filters: WorkOrderFilterState;
     setFilters: React.Dispatch<React.SetStateAction<WorkOrderFilterState>>;
     orders: WorkOrder[];
+    children?: React.ReactNode;
 }
 
-export function WorkOrderFilters({ filters, setFilters, orders }: WorkOrderFiltersProps) {
+export function WorkOrderFilters({ filters, setFilters, orders, children }: WorkOrderFiltersProps) {
     const [clientSearchTerm, setClientSearchTerm] = useState("");
 
     const uniqueClients = Array.from(new Set(orders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort();
@@ -132,6 +137,29 @@ export function WorkOrderFilters({ filters, setFilters, orders }: WorkOrderFilte
                         </div>
                         <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Reclamos</span>
                     </label>
+
+                    <div className="hidden md:block h-5 w-px bg-slate-300 mx-1" />
+
+                    {/* Color Legend */}
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button className="flex items-center gap-1.5 px-2 py-1 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded border border-slate-200 transition-colors text-[10px] font-bold tracking-wide uppercase">
+                                <Info className="w-3 h-3" />
+                                Colores
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-[320px] p-3 text-xs shadow-xl border-slate-200" side="bottom" sideOffset={8}>
+                            <h4 className="font-bold text-slate-800 mb-2 uppercase text-[10px] tracking-wider pb-2 border-b border-slate-100">Leyenda de Estados</h4>
+                            <div className="space-y-2.5">
+                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-purple-200 border border-purple-300"></div> <span className="text-slate-600 font-medium">Tercerizado <span className="text-slate-400 font-normal">(Total/Parcial)</span></span></div>
+                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-orange-200 border border-orange-300"></div> <span className="text-slate-600 font-medium">En Producción</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-emerald-300 border border-emerald-400"></div> <span className="text-slate-600 font-medium">Programada</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-green-100 border border-green-200"></div> <span className="text-slate-600 font-medium">Material Disponible <span className="text-slate-400 font-normal">(Para Programar)</span></span></div>
+                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-yellow-100 border border-yellow-200"></div> <span className="text-slate-600 font-medium">Material pedido al Proveedor</span></div>
+                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-gray-100 border border-gray-200"></div> <span className="text-slate-600 font-medium">Completa para pedir Materiales <span className="text-slate-400 font-normal">(Sin Stock)</span></span></div>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
                 </div>
             </div>
 
@@ -233,6 +261,69 @@ export function WorkOrderFilters({ filters, setFilters, orders }: WorkOrderFilte
                         <SelectItem value="LARGE" className="text-xs">Grande ({">"}50)</SelectItem>
                     </SelectContent>
                 </Select>
+
+                {/* Custom Date Range Filter */}
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button variant="outline" className={cn(
+                            "justify-between bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal",
+                            (filters.dateFrom || filters.dateTo) ? "bg-slate-100 border-slate-300 font-semibold text-slate-800" : ""
+                        )}>
+                            <span className="truncate">
+                                {(() => {
+                                    if (!filters.dateFrom && !filters.dateTo) return "Fecha: Todas";
+                                    const formatStr = (d: string) => {
+                                        if (!d) return "";
+                                        const [y, m, day] = d.split('-');
+                                        return `${day}/${m}/${y.slice(2)}`;
+                                    };
+                                    if (filters.dateFrom && filters.dateTo) {
+                                        if (filters.dateFrom === filters.dateTo) return `Fecha: ${formatStr(filters.dateFrom)}`;
+                                        return `${formatStr(filters.dateFrom)} - ${formatStr(filters.dateTo)}`;
+                                    }
+                                    if (filters.dateFrom) return `Desde: ${formatStr(filters.dateFrom)}`;
+                                    if (filters.dateTo) return `Hasta: ${formatStr(filters.dateTo)}`;
+                                    return "Fecha: Filtrada";
+                                })()}
+                            </span>
+                            <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-40" />
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64 p-3 shadow-xl border-slate-200" align="start">
+                        <div className="space-y-3">
+                            <h4 className="font-semibold text-xs text-slate-800 uppercase tracking-widest border-b pb-1">Filtrar por Fecha</h4>
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] uppercase font-bold text-slate-500">Desde (Ingreso/Promesa)</label>
+                                <input 
+                                    type="date" 
+                                    className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
+                                    value={filters.dateFrom}
+                                    onChange={e => setFilters(prev => ({...prev, dateFrom: e.target.value}))}
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] uppercase font-bold text-slate-500">Hasta (Ingreso/Promesa)</label>
+                                <input 
+                                    type="date" 
+                                    className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
+                                    value={filters.dateTo}
+                                    onChange={e => setFilters(prev => ({...prev, dateTo: e.target.value}))}
+                                />
+                            </div>
+                            {(filters.dateFrom || filters.dateTo) && (
+                                <Button 
+                                    variant="ghost" 
+                                    className="w-full h-7 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 mt-2"
+                                    onClick={() => setFilters(prev => ({...prev, dateFrom: '', dateTo: ''}))}
+                                >
+                                    Limpiar Fechas
+                                </Button>
+                            )}
+                        </div>
+                    </PopoverContent>
+                </Popover>
+
+                {children}
             </div>
         </div>
     );
@@ -302,6 +393,36 @@ export function applyWorkOrderFilters(orders: WorkOrder[], filters: WorkOrderFil
             if (filters.promisedDate === 'NEXT_2_WEEKS') {
                 if (promisedDate < today || promisedDate > nextWeekEnd) return false
             }
+        }
+
+        // Exact Date Range Filter (checks if fecha_entrada or fecha_prometida falls entirely within the selected range)
+        if (filters.dateFrom || filters.dateTo) {
+            const dateIn = order.fecha_entrada ? new Date(order.fecha_entrada) : null;
+            const dateProm = order.fecha_prometida ? new Date(order.fecha_prometida) : null;
+            
+            const fromTime = filters.dateFrom ? new Date(filters.dateFrom).getTime() : null;
+            let toTime = null;
+            if (filters.dateTo) {
+                // Add 24h to include the entire day of 'dateTo', but handle local timezone offset cleanly
+                const toDateObj = new Date(filters.dateTo);
+                // Depending on the format 'YYYY-MM-DD', new Date() parses as UTC. 
+                // We add exactly 24 hours - 1 ms to it to cover the day in UTC.
+                toDateObj.setUTCHours(23, 59, 59, 999);
+                toTime = toDateObj.getTime();
+            }
+
+            const checkDateInRange = (d: Date | null) => {
+                if (!d) return false;
+                const t = d.getTime();
+                if (fromTime !== null && t < fromTime) return false;
+                if (toTime !== null && t > toTime) return false;
+                return true;
+            };
+
+            const inMatches = checkDateInRange(dateIn);
+            const promMatches = checkDateInRange(dateProm);
+
+            if (!inMatches && !promMatches) return false;
         }
 
         // Delayed Orders Filter
