@@ -1,7 +1,9 @@
 # backend/presentation/controllers/PlanificacionAPI.py
-from fastapi import FastAPI,APIRouter, Depends
+from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from backend.application.PlanificacionService import planificar,planificar_pendientes
 from backend.infrastructure.db import SessionLocal
+from backend.commons.exceptions.PlanificacionException import PlanificacionException
+from backend.commons.loggers.logger import logger
 
 from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
@@ -31,17 +33,24 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     preview_mode = body.preview if body else False
     manual_plan = body.plan if body else None
 
-    resultados = await planificar(
-        repo_orden,
-        repo_operario,
-        repo_maquinaria,
-        repo_planificacion,
-        db,
-        ordenes_ids, 
-        preview=preview_mode,
-        plan=manual_plan
-    )
-    return resultados
+    try:
+        resultados = await planificar(
+            repo_orden,
+            repo_operario,
+            repo_maquinaria,
+            repo_planificacion,
+            db,
+            ordenes_ids, 
+            preview=preview_mode,
+            plan=manual_plan
+        )
+        return resultados
+    except PlanificacionException as e:
+        logger.error(f"Error de Planificación: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error inesperado en planificar_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al procesar la planificación. Por favor, intente con menos órdenes.")
     
     
 @router.post("/planificar/pendientes") 
@@ -56,14 +65,21 @@ async def planificar_pendientes_endpoint(
 
     ordenes_ids = body.ordenes_ids if body else None
 
-    return await planificar_pendientes(
-        repo_orden,
-        repo_operario,
-        repo_maquinaria,
-        repo_planificacion,
-        db,
-        ordenes_ids
-    )
+    try:
+        return await planificar_pendientes(
+            repo_orden,
+            repo_operario,
+            repo_maquinaria,
+            repo_planificacion,
+            db,
+            ordenes_ids
+        )
+    except PlanificacionException as e:
+        logger.error(f"Error de Planificación (pendientes): {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error inesperado en planificar_pendientes_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al procesar la planificación. Por favor, intente con menos órdenes.")
 
 @router.get("/planificacion")
 async def obtener_planificacion(db = Depends(get_db)):

@@ -15,7 +15,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, Filter, Clock, AlertCircle, CheckCircle2, Check, ChevronsUpDown, Search } from "lucide-react"
+import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, Search } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 
 interface PlanningSelectionModalProps {
@@ -166,18 +166,38 @@ export function PlanningSelectionModal({
 
                 {/* Content Area */}
                 <div className="flex-1 overflow-hidden bg-gray-50 flex flex-col">
-                    <div className="flex-1 overflow-auto p-4 sm:p-6">
-                        <div className="bg-white border rounded-lg shadow-sm">
-                            <PlanningListTable
-                                data={filteredOrders}
-                                selectedIds={selectedIds}
-                                onSelectionChange={setSelectedIds}
-                                isLoading={isLoading}
-                                onRowClick={() => { }}
-                                onDataChange={onDataRefresh}
-                                hideStatus={true}
-                                highlightedIds={initialSelectedIds}
-                            />
+                    <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col gap-4">
+                        {selectedIds.length > 30 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 flex gap-4 items-start shrink-0 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                                <div className="bg-amber-100 p-2 rounded-full shrink-0">
+                                    <AlertTriangle className="w-6 h-6 text-amber-600" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <h4 className="font-bold text-amber-800 text-sm">
+                                        Atención: Lote grande de órdenes ({selectedIds.length})
+                                    </h4>
+                                    <p className="text-xs text-amber-700/90 leading-relaxed max-w-[800px]">
+                                        Estás intentando planificar un gran volumen de procesos simultáneamente. Nuestro planificador inteligente evalúa matemáticamente todas las combinaciones posibles de máquinas, operarios y turnos. Procesar tantas órdenes juntas puede exceder el límite de tiempo de cálculo interno y resultar en error.
+                                    </p>
+                                    <p className="text-xs font-semibold text-amber-800 mt-2">
+                                        Recomendación: Planificar en lotes más pequeños (ej. agrupando por sectores o prioridades urgentes) para un resultado eficiente y seguro.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                        <div className="bg-white border rounded-lg shadow-sm flex-1 min-h-0 relative overflow-hidden flex flex-col">
+                            <div className="absolute inset-0 overflow-auto">
+                                <PlanningListTable
+                                    data={filteredOrders}
+                                    selectedIds={selectedIds}
+                                    onSelectionChange={setSelectedIds}
+                                    isLoading={isLoading}
+                                    onRowClick={() => { }}
+                                    onDataChange={onDataRefresh}
+                                    hideStatus={true}
+                                    highlightedIds={initialSelectedIds}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>

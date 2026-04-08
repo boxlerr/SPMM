@@ -37,12 +37,13 @@ async def get_estadisticas(db=Depends(get_db)):
             JOIN prioridad p ON ot.id_prioridad = p.id
             WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
             AND ot.fecha_prometida < GETDATE()
+            AND ot.fecha_prometida > '1950-01-01'
+            AND ot.fecha_prometida IS NOT NULL
             AND NOT EXISTS (
                 SELECT 1 FROM orden_trabajo_proceso otp 
                 WHERE otp.id_orden_trabajo = ot.id 
                 AND otp.id_estado > 1
             )
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
         """))
         retrasadas = retrasadas.scalar()
         
@@ -60,7 +61,6 @@ async def get_estadisticas(db=Depends(get_db)):
                 WHERE otp.id_orden_trabajo = ot.id 
                 AND otp.id_estado > 1
             )
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
         """))
         en_proceso = en_proceso.scalar()
         
@@ -72,13 +72,12 @@ async def get_estadisticas(db=Depends(get_db)):
             JOIN sector s ON ot.id_sector = s.id
             JOIN prioridad p ON ot.id_prioridad = p.id
             WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-            AND ot.fecha_prometida >= GETDATE() 
+            AND (ot.fecha_prometida >= GETDATE() OR ot.fecha_prometida IS NULL OR ot.fecha_prometida <= '1950-01-01')
             AND NOT EXISTS (
                 SELECT 1 FROM orden_trabajo_proceso otp 
                 WHERE otp.id_orden_trabajo = ot.id 
                 AND otp.id_estado > 1
             )
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
         """))
         pendientes = pendientes.scalar()
         
@@ -121,7 +120,7 @@ async def get_ordenes_criticas(db=Depends(get_db)):
             WHERE (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
             AND ot.fecha_prometida <= DATEADD(day, 7, GETDATE())
             AND ot.fecha_prometida >= GETDATE()
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
+            AND ot.fecha_prometida > '1950-01-01'
             ORDER BY ot.fecha_prometida ASC
         """)
         
@@ -160,7 +159,7 @@ async def get_timeline_entregas(db=Depends(get_db)):
             WHERE (fecha_entrega IS NULL OR fecha_entrega = '1950-01-01')
             AND fecha_prometida >= GETDATE()
             AND fecha_prometida <= DATEADD(day, 7, GETDATE())
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
+            AND fecha_prometida > '1950-01-01'
             GROUP BY CAST(fecha_prometida AS DATE)
             ORDER BY fecha ASC
         """)
@@ -188,7 +187,6 @@ async def get_clientes_mayor_volumen(db=Depends(get_db)):
             SELECT TOP 5 c.nombre as cliente, COUNT(ot.id) as cantidad
             FROM orden_trabajo ot
             JOIN cliente c ON ot.id_cliente = c.id
-            WHERE EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
             GROUP BY c.nombre
             ORDER BY cantidad DESC
         """)
@@ -216,7 +214,6 @@ async def get_distribucion_prioridades(db=Depends(get_db)):
             SELECT p.descripcion as prioridad, COUNT(ot.id) as cantidad
             FROM orden_trabajo ot
             JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
             GROUP BY p.descripcion
             ORDER BY 
                 CASE 
@@ -256,7 +253,6 @@ async def get_top_articulos(db=Depends(get_db)):
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             WHERE ot.fecha_entrega IS NOT NULL AND ot.fecha_entrega > '1950-01-01'
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
             GROUP BY a.descripcion
             ORDER BY cantidad DESC
         """)
@@ -288,7 +284,6 @@ async def get_tiempo_promedio(db=Depends(get_db)):
                 FROM orden_trabajo ot
                 LEFT JOIN orden_trabajo_proceso otp ON ot.id = otp.id_orden_trabajo
                 WHERE ot.fecha_entrega IS NOT NULL AND ot.fecha_entrega > '1950-01-01'
-                AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
                 GROUP BY ot.id
             ) AS tiempos_por_orden
             WHERE tiempo_total > 0
@@ -323,7 +318,6 @@ async def get_ordenes_por_prioridad(prioridad: str, db=Depends(get_db)):
             JOIN prioridad p ON ot.id_prioridad = p.id
             LEFT JOIN cliente c ON ot.id_cliente = c.id
             WHERE p.descripcion = :prioridad
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
         """)
         
         result = await db.execute(query, {"prioridad": prioridad})
@@ -390,9 +384,9 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
         else:
             return {"success": False, "error": "Estado no válido"}
         
-        # Add planificacion filter to all except completed (consistent with get_estadisticas)
-        if estado_lower != "completadas":
-            where_clause += " AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)"
+        # Add planificacion filter to all except completed (removed per user request)
+        # if estado_lower != "completadas":
+        #    where_clause += " AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)"
         
         query = text(f"""
             SELECT 
@@ -518,7 +512,6 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
             LEFT JOIN cliente c ON ot.id_cliente = c.id
             WHERE ot.fecha_prometida >= :fecha_inicio AND ot.fecha_prometida < :fecha_fin
             AND (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
-            AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)
             ORDER BY ot.id ASC
         """)
         

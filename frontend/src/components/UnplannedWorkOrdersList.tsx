@@ -12,7 +12,11 @@ import {
     Calendar,
     Package,
     CheckCircle2,
-    AlertTriangle
+    AlertTriangle,
+    FileText,
+    Settings,
+    MessageSquare,
+    PlusCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +26,7 @@ import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
+import { AddProcessRow } from "./planning/AddProcessRow";
 import { API_URL } from "@/config";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -568,55 +573,122 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                     </td>
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
-                                                    <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={16} className="px-4 py-4">
-                                                            <div className="space-y-3">
-                                                                <div className="text-xs text-gray-600">
-                                                                    <span className="font-bold text-gray-800">Observaciones: </span>
-                                                                    {order.observaciones || order.detalle || "Sin observaciones adicionales"}
-                                                                </div>
-                                                                <OrderFiles orderId={order.id} />
-                                                                {/* Process Sub-Table */}
-                                                                {order.procesos && order.procesos.length > 0 ? (
-                                                                    <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
-                                                                        <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-2 font-bold border-b border-gray-200">
-                                                                            <div>#</div>
-                                                                            <div>Proceso</div>
-                                                                            <div>Estado</div>
-                                                                            <div className="text-center">Min. Est.</div>
-                                                                            <div className="text-center text-blue-700">Min. Real</div>
-                                                                            <div>Operario</div>
+                                                    <tr className="bg-gray-50/20 border-b">
+                                                        <td colSpan={16} className="px-4 py-3 md:px-6 md:py-4">
+                                                            <div className="flex flex-col gap-4 w-full max-w-[1200px]">
+                                                                {/* Grid layout for meta info - More compact columns */}
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                                    {/* Observaciones Panel - Smaller min-height, compact header */}
+                                                                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col md:col-span-1 lg:col-span-2">
+                                                                        <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center gap-2">
+                                                                            <MessageSquare className="w-3.5 h-3.5 text-gray-400" />
+                                                                            <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Observaciones</span>
                                                                         </div>
-                                                                        {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                                            <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
-                                                                                <div className="text-gray-500 font-mono">{proc.orden}</div>
-                                                                                <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
-                                                                                <div>
-                                                                                    <Badge className={cn(
-                                                                                        "text-[10px] shadow-none font-medium",
-                                                                                        proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
-                                                                                        proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
-                                                                                        "bg-gray-100 text-gray-800 border-gray-200"
+                                                                        <div className="p-3 text-xs text-gray-600 leading-relaxed min-h-[50px]">
+                                                                            {order.observaciones || order.detalle ? (
+                                                                                <div className="whitespace-pre-wrap">{order.observaciones || order.detalle}</div>
+                                                                            ) : (
+                                                                                <span className="text-gray-400 italic">Sin observaciones.</span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Archivos Panel - Compact layout */}
+                                                                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                                                                        <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center gap-2">
+                                                                            <FileText className="w-3.5 h-3.5 text-gray-400" />
+                                                                            <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Archivos</span>
+                                                                        </div>
+                                                                        <div className="p-2">
+                                                                            <OrderFiles orderId={order.id} />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Proceso Panel - Tighter headers and rows */}
+                                                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                                                                    <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Settings className="w-3.5 h-3.5 text-gray-400" />
+                                                                            <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Producción</span>
+                                                                        </div>
+                                                                        {order.procesos && order.procesos.length > 0 && (
+                                                                            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                                                                {order.procesos.length} PASOS
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    
+                                                                    <div className="flex flex-col">
+                                                                        {order.procesos && order.procesos.length > 0 ? (
+                                                                            <>
+                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[30px_3fr_100px_80px_80px_2fr] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
+                                                                                    <div>#</div>
+                                                                                    <div>Proceso</div>
+                                                                                    <div>Estado</div>
+                                                                                    <div className="text-center">Min. Est.</div>
+                                                                                    <div className="text-center">Min. Real</div>
+                                                                                    <div>Operario</div>
+                                                                                </div>
+                                                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
+                                                                                    <div key={`${order.id}-${proc.proceso.id}`} className={cn(
+                                                                                        "grid grid-cols-[30px_3fr_100px_80px_80px_2fr] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
+                                                                                        pIdx === order.procesos!.length - 1 && "border-b-0"
                                                                                     )}>
-                                                                                        {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
-                                                                                    </Badge>
+                                                                                        <div className="text-gray-300 font-mono text-[10px]">{pIdx + 1}</div>
+                                                                                        <div className="font-semibold text-xs text-gray-800 truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                                                                        <div>
+                                                                                            <Badge className={cn(
+                                                                                                "text-[9px] px-1.5 py-0 shadow-none font-bold uppercase leading-tight",
+                                                                                                proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-700 border-green-200" :
+                                                                                                proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-700 border-blue-200" :
+                                                                                                "bg-gray-100 text-gray-500 border-gray-200"
+                                                                                            )}>
+                                                                                                {proc.estado_proceso?.id === 3 ? "OK" : proc.estado_proceso?.id === 2 ? "Producc." : "Pend."}
+                                                                                            </Badge>
+                                                                                        </div>
+                                                                                        <div className="text-center text-gray-500 tabular-nums text-[10px]">{proc.tiempo_proceso || "-"}</div>
+                                                                                        <div className="text-center font-bold text-blue-600 tabular-nums text-[10px]">
+                                                                                            {proc.inicio_real && proc.fin_real
+                                                                                                ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)}`
+                                                                                                : proc.inicio_real ? "..." : "-"
+                                                                                            }
+                                                                                        </div>
+                                                                                        <div className="text-gray-500 text-[10px] font-medium truncate flex items-center gap-1.5 border-l border-gray-100 pl-2 h-4">
+                                                                                            {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                                <div className="bg-gray-50/50 border-t border-gray-100">
+                                                                                    <AddProcessRow 
+                                                                                        orderId={order.id} 
+                                                                                        onProcessAdded={() => onDataChange && onDataChange()} 
+                                                                                    />
                                                                                 </div>
-                                                                                <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
-                                                                                <div className="text-center font-bold text-blue-700 text-xs">
-                                                                                    {proc.inicio_real && proc.fin_real
-                                                                                        ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)} min`
-                                                                                        : proc.inicio_real ? "En curso..." : "-"
-                                                                                    }
+                                                                            </>
+                                                                        ) : (
+                                                                            <div className="p-4 flex items-center justify-between bg-white">
+                                                                                <div className="flex items-center gap-3">
+                                                                                    <div className="bg-blue-50 p-2 rounded-full">
+                                                                                        <PlusCircle className="w-4 h-4 text-blue-500" />
+                                                                                    </div>
+                                                                                    <div className="flex flex-col">
+                                                                                        <span className="text-xs font-bold text-gray-700">Sin procesos configurados</span>
+                                                                                        <span className="text-[10px] text-gray-400">Agregue los pasos para iniciar la producción.</span>
+                                                                                    </div>
                                                                                 </div>
-                                                                                <div className="text-gray-700 text-xs font-medium truncate">
-                                                                                    {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
+                                                                                <div className="w-auto">
+                                                                                    <AddProcessRow 
+                                                                                        orderId={order.id} 
+                                                                                        onProcessAdded={() => onDataChange && onDataChange()} 
+                                                                                        isCentered={false}
+                                                                                        label="Configurar ahora"
+                                                                                    />
                                                                                 </div>
                                                                             </div>
-                                                                        ))}
+                                                                        )}
                                                                     </div>
-                                                                ) : (
-                                                                    <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
-                                                                )}
+                                                                </div>
                                                             </div>
                                                         </td>
                                                     </tr>

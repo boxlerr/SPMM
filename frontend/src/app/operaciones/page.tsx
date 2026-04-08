@@ -706,7 +706,10 @@ export default function OperacionesPage() {
 
       toast.dismiss();
 
-      if (!response.ok) throw new Error("Error al calcular planificación");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Error al calcular planificación");
+      }
 
       const results = await response.json();
 
