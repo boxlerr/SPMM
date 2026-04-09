@@ -28,6 +28,75 @@ IF NOT EXISTS (SELECT 1 FROM dbo.prioridad WHERE descripcion = 'SIN PRIORIDAD')
 
 # --- QUERIES DE SINCRONIZACIÓN ---
 
+QUERY_SYNC_CLIENTES = """
+MERGE dbo.cliente AS tgt
+USING (
+    SELECT 
+        idCliente AS id_viejo,
+        LTRIM(RTRIM(Descripcion)) AS nombre,
+        LTRIM(RTRIM(fantasia)) AS fantasia,
+        LTRIM(RTRIM(abreviatura)) AS abreviatura,
+        LTRIM(RTRIM(direccion)) AS direccion,
+        LTRIM(RTRIM(localidad)) AS localidad,
+        LTRIM(RTRIM(cuit)) AS cuit,
+        LTRIM(RTRIM(telefono)) AS telefono,
+        LTRIM(RTRIM(celular)) AS celular,
+        LTRIM(RTRIM(mail)) AS mail,
+        LTRIM(RTRIM(web)) AS web,
+        LTRIM(RTRIM(obs)) AS obs
+    FROM metalurgica_db.dbo.cliente
+) AS src ON tgt.id_viejo = src.id_viejo
+WHEN MATCHED AND (
+    ISNULL(tgt.nombre,'') <> ISNULL(src.nombre,'') OR
+    ISNULL(tgt.fantasia,'') <> ISNULL(src.fantasia,'') OR
+    ISNULL(tgt.abreviatura,'') <> ISNULL(src.abreviatura,'') OR
+    ISNULL(tgt.direccion,'') <> ISNULL(src.direccion,'') OR
+    ISNULL(tgt.localidad,'') <> ISNULL(src.localidad,'') OR
+    ISNULL(tgt.cuit,'') <> ISNULL(src.cuit,'') OR
+    ISNULL(tgt.telefono,'') <> ISNULL(src.telefono,'') OR
+    ISNULL(tgt.celular,'') <> ISNULL(src.celular,'') OR
+    ISNULL(tgt.mail,'') <> ISNULL(src.mail,'') OR
+    ISNULL(tgt.web,'') <> ISNULL(src.web,'') OR
+    ISNULL(tgt.obs,'') <> ISNULL(src.obs,'')
+) THEN UPDATE SET
+    tgt.nombre = src.nombre,
+    tgt.fantasia = src.fantasia,
+    tgt.abreviatura = src.abreviatura,
+    tgt.direccion = src.direccion,
+    tgt.localidad = src.localidad,
+    tgt.cuit = src.cuit,
+    tgt.telefono = src.telefono,
+    tgt.celular = src.celular,
+    tgt.mail = src.mail,
+    tgt.web = src.web,
+    tgt.obs = src.obs
+WHEN NOT MATCHED THEN
+    INSERT (id_viejo, nombre, fantasia, abreviatura, direccion, localidad, cuit, telefono, celular, mail, web, obs)
+    VALUES (src.id_viejo, src.nombre, src.fantasia, src.abreviatura, src.direccion, src.localidad, src.cuit, src.telefono, src.celular, src.mail, src.web, src.obs);
+"""
+
+QUERY_SYNC_ARTICULOS_CATALOG = """
+MERGE dbo.articulo AS tgt
+USING (
+    SELECT 
+        LTRIM(RTRIM(Idarticulo)) AS cod_articulo,
+        LTRIM(RTRIM(descripcion)) AS descripcion,
+        LTRIM(RTRIM(abreviatura)) AS abreviatura
+    FROM metalurgica_db.dbo.articulo
+    WHERE Idarticulo IS NOT NULL AND Idarticulo <> ''
+) AS src ON tgt.cod_articulo = src.cod_articulo
+WHEN MATCHED AND (
+    ISNULL(tgt.descripcion,'') <> ISNULL(src.descripcion,'') OR
+    ISNULL(tgt.abreviatura,'') <> ISNULL(src.abreviatura,'')
+) THEN UPDATE SET
+    tgt.descripcion = src.descripcion,
+    tgt.abreviatura = src.abreviatura
+WHEN NOT MATCHED THEN
+    INSERT (cod_articulo, descripcion, abreviatura)
+    VALUES (src.cod_articulo, src.descripcion, src.abreviatura);
+"""
+
+
 QUERY_SYNC_OTS = """
 DECLARE @id_articulo_nodef int = (SELECT TOP 1 id FROM dbo.articulo   WHERE cod_articulo='NO-DEF');
 DECLARE @id_sector_nodef   int = (SELECT TOP 1 id FROM dbo.sector     WHERE nombre='SIN SECTOR');
@@ -40,6 +109,7 @@ WITH src AS (
       id_prioridad = COALESCE(p.id, @id_prio_nodef),
       id_sector    = COALESCE(s.id, @id_sector_nodef),
       id_articulo  = COALESCE(a.id, @id_articulo_nodef),
+      id_cliente   = c.id,
       fecha_orden      = v.fecha,
       fecha_entrada    = v.fechaentrada,
       fecha_prometida  = v.fechaprometida,
@@ -72,6 +142,7 @@ WITH src AS (
     LEFT JOIN dbo.prioridad p ON p.descripcion = LTRIM(RTRIM(v.prioridad))
     LEFT JOIN dbo.sector    s ON s.nombre      = LTRIM(RTRIM(v.sector))
     LEFT JOIN dbo.articulo  a ON a.cod_articulo= LTRIM(RTRIM(v.idarticulo))
+    LEFT JOIN dbo.cliente   c ON c.id_viejo    = v.idcliente
     WHERE v.fecha >= :fecha_desde
       AND (:incluir_terminadas = 1 OR (v.fechaentrega = '1950-01-01' AND v.finalizadototal = 0 AND v.finalizadoparcial = 0 AND v.ttotal = 0 AND v.remitido = 0))
 )
@@ -82,6 +153,7 @@ WHEN MATCHED AND (
     OR ISNULL(tgt.id_prioridad,0)     <> ISNULL(src.id_prioridad,0)
     OR ISNULL(tgt.id_sector,0)        <> ISNULL(src.id_sector,0)
     OR ISNULL(tgt.id_articulo,0)      <> ISNULL(src.id_articulo,0)
+    OR ISNULL(tgt.id_cliente,0)       <> ISNULL(src.id_cliente,0)
     OR ISNULL(tgt.fecha_orden,'1900-01-01')     <> ISNULL(src.fecha_orden,'1900-01-01')
     OR ISNULL(tgt.fecha_entrada,'1900-01-01')   <> ISNULL(src.fecha_entrada,'1900-01-01')
     OR ISNULL(tgt.fecha_prometida,'1900-01-01') <> ISNULL(src.fecha_prometida,'1900-01-01')
@@ -116,6 +188,7 @@ THEN UPDATE SET
       tgt.id_prioridad    = src.id_prioridad,
       tgt.id_sector       = src.id_sector,
       tgt.id_articulo     = src.id_articulo,
+      tgt.id_cliente      = src.id_cliente,
       tgt.fecha_orden     = src.fecha_orden,
       tgt.fecha_entrada   = src.fecha_entrada,
       tgt.fecha_prometida = src.fecha_prometida,
@@ -145,8 +218,8 @@ THEN UPDATE SET
       tgt.tercerizado_total = src.tercerizado_total,
       tgt.tercerizado_parcial = src.tercerizado_parcial
 WHEN NOT MATCHED THEN
-    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial)
-    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial);
+    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, id_cliente, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial)
+    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.id_cliente, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial);
 """
 
 QUERY_SYNC_PROCESO_CATALOG = """
@@ -248,24 +321,31 @@ async def run_sync():
             await session.execute(text(QUERY_SEED_SECTOR))
             await session.execute(text(QUERY_SEED_PRIORIDAD))
             
-            # 2. Sincronizar OTs (Desde 2025 por defecto, o personalizable)
+            # 2. Sincronizar Catálogos (Clientes y Artículos) antes que las OTs
+            logger.info("Actualizando catálogo de clientes...")
+            await session.execute(text(QUERY_SYNC_CLIENTES))
+
+            logger.info("Actualizando catálogo de artículos...")
+            await session.execute(text(QUERY_SYNC_ARTICULOS_CATALOG))
+            
+            # 3. Sincronizar OTs (Desde 2025 por defecto, o personalizable)
             fecha_desde = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-01')
             logger.info(f"Sincronizando Ordenes de Trabajo desde {fecha_desde}...")
             await session.execute(text(QUERY_SYNC_OTS), {"fecha_desde": fecha_desde, "incluir_terminadas": 0})
             
-            # 3. Sincronizar Catálogo de Procesos
+            # 4. Sincronizar Catálogo de Procesos
             logger.info("Actualizando catálogo de procesos...")
             await session.execute(text(QUERY_SYNC_PROCESO_CATALOG))
             
-            # 4. Sincronizar Procesos por OT
+            # 5. Sincronizar Procesos por OT
             logger.info("Sincronizando procesos por OT...")
             await session.execute(text(QUERY_SYNC_OT_PROCESOS))
             
-            # 5. Sincronizar Materias Primas por OT
+            # 6. Sincronizar Materias Primas por OT
             logger.info("Sincronizando materias primas por OT...")
             await session.execute(text(QUERY_SYNC_MATERIA_PRIMA))
             
-            # 6. Actualizar Stock de Piezas
+            # 7. Actualizar Stock de Piezas
             logger.info("Actualizando stock actual de piezas...")
             await session.execute(text(QUERY_MERGE_PIEZA))
             
