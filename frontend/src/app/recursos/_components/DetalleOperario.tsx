@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { User, Phone, Activity, Calendar, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench, Trash2, Plus } from "lucide-react";
+import { User, Phone, Activity, Calendar, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench, Trash2, Plus, Briefcase } from "lucide-react";
 import { Operario, ProcesoSkill } from "../_types";
 import { PlanificacionItem } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -449,6 +449,11 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       <span className="ml-auto text-gray-900">{operario.email}</span>
                     </div>
                   )}
+                  <div className="flex items-center gap-3 text-gray-700">
+                    <Briefcase className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium">Rango:</span>
+                    <span className="ml-auto text-gray-900 font-semibold">{operario.categoria}</span>
+                  </div>
                 </div>
 
                 <Separator />
@@ -476,15 +481,14 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                         <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
                         <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
                           <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
-                            <span className="truncate pr-2">Habilidades Principales</span>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 rounded-full hover:bg-blue-100 text-blue-600 shrink-0"
+                            <span className="truncate pr-2">SKILLS 1</span>
+                            <div
+                              role="button"
+                              className="h-7 w-7 p-0 rounded-full hover:bg-blue-100 text-blue-600 shrink-0 flex items-center justify-center cursor-pointer"
                               onClick={(e) => { e.stopPropagation(); setAddingPrimarySkill(true); }}
                             >
                               <Plus className="h-4 w-4" />
-                            </Button>
+                            </div>
                           </div>
                         </AccordionTrigger>
                         <AccordionContent className="pt-0 pb-3 ml-1">
@@ -535,7 +539,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             ))}
                           </div>
                           {(!operario.skills || !operario.skills.some(s => s.nivel === 1)) && !addingPrimarySkill && (
-                            <p className="text-sm text-gray-500 italic py-2 text-center">No hay habilidades principales</p>
+                             <p className="text-sm text-gray-500 italic py-2 text-center">No hay SKILLS 1</p>
                           )}
                         </AccordionContent>
                       </AccordionItem>
@@ -544,15 +548,14 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                         <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
                         <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
                           <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
-                            <span className="truncate pr-2">Habilidades Secundarias</span>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 w-7 p-0 rounded-full hover:bg-slate-200 text-slate-600 shrink-0"
+                            <span className="truncate pr-2">SKILLS 2</span>
+                            <div
+                              role="button"
+                              className="h-7 w-7 p-0 rounded-full hover:bg-slate-200 text-slate-600 shrink-0 flex items-center justify-center cursor-pointer"
                               onClick={(e) => { e.stopPropagation(); setAddingSecondarySkill(true); }}
                             >
                               <Plus className="h-4 w-4" />
-                            </Button>
+                            </div>
                           </div>
                         </AccordionTrigger>
                         <AccordionContent className="pt-0 pb-3 ml-1">
@@ -603,7 +606,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             ))}
                           </div>
                           {(!operario.skills || !operario.skills.some(s => s.nivel === 2)) && !addingSecondarySkill && (
-                            <p className="text-sm text-gray-500 italic py-2 text-center">No hay habilidades secundarias</p>
+                            <p className="text-sm text-gray-500 italic py-2 text-center">No hay SKILLS 2</p>
                           )}
                         </AccordionContent>
                       </AccordionItem>

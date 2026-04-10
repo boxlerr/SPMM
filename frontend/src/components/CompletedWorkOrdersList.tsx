@@ -260,8 +260,8 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
 
                     {/* Desktop Table View */}
                     <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full">
-                        <div className="w-full overflow-x-auto">
-                            <table className="w-full min-w-[1000px] text-sm text-left">
+                        <div className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
+                            <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                                     <tr>
                                         <th className="w-10 px-3 py-3"></th>

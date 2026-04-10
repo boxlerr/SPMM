@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
@@ -12,6 +13,31 @@ interface LayoutWrapperProps {
 
 export default function LayoutWrapper({ children }: LayoutWrapperProps) {
   const pathname = usePathname();
+
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      // Si la tecla Ctrl está presionada
+      if (e.ctrlKey) {
+        // Buscar el contenedor scrollable más cercano con nuestra clase específica
+        const target = e.target as HTMLElement;
+        const scrollContainer = target.closest('.scrollbar-horizontal-visible');
+        
+        if (scrollContainer) {
+          // Prevenir el zoom del navegador
+          e.preventDefault();
+          // Desplazar horizontalmente (deltaY suele ser el scroll vertical de la rueda)
+          scrollContainer.scrollLeft += e.deltaY;
+        }
+      }
+    };
+
+    // Registrar el evento con { passive: false } para poder usar e.preventDefault()
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    
+    return () => {
+      window.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
 
   // No mostrar sidebar ni topbar en la página de login
   if (pathname === "/login") {

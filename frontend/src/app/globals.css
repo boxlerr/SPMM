@@ -153,3 +153,39 @@
     @apply bg-background text-foreground;
  }
 }
+
+@layer utilities {
+  .scrollbar-horizontal-visible {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f8fafc;
+  }
+
+  .scrollbar-horizontal-visible::-webkit-scrollbar {
+    height: 10px;
+    display: block !important;
+  }
+
+  .scrollbar-horizontal-visible::-webkit-scrollbar-track {
+    background: #f8fafc;
+    border-radius: 4px;
+    margin: 0 10px;
+  }
+
+  .scrollbar-horizontal-visible::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 4px;
+    border: 2px solid #f8fafc;
+  }
+
+  .scrollbar-horizontal-visible::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
+
+  .scrollbar-top {
+    transform: rotateX(180deg);
+  }
+
+  .scrollbar-top > * {
+    transform: rotateX(180deg);
+  }
+}

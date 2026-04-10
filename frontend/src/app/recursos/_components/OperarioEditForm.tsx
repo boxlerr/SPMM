@@ -374,7 +374,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                         <div className="space-y-4">
                             <div>
                                 <div className="flex items-center justify-between mb-2">
-                                    <Label className="text-gray-700">Habilidades Principales</Label>
+                                    <Label className="text-gray-700">SKILLS 1</Label>
                                     <Button
                                         type="button"
                                         variant="outline"
@@ -382,11 +382,11 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                                         className="h-7 text-xs"
                                         onClick={() => setPrimarySkills([...primarySkills, ""])}
                                     >
-                                        + Añadir Principal
+                                        + Añadir SKILLS 1
                                     </Button>
                                 </div>
                                 <div className="flex flex-col gap-3">
-                                    {primarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay habilidades principales</p>}
+                                    {primarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay SKILLS 1</p>}
                                     {primarySkills.map((skillId, idx) => (
                                         <div key={`param-${idx}`} className="flex gap-2 items-center">
                                             <Select value={skillId || "none"} onValueChange={(val) => handlePrimaryChange(idx, val)}>
@@ -418,7 +418,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
                             <div>
                                 <div className="flex items-center justify-between mb-2">
-                                    <Label className="text-gray-700">Habilidades Secundarias</Label>
+                                    <Label className="text-gray-700">SKILLS 2</Label>
                                     <Button
                                         type="button"
                                         variant="outline"
@@ -426,11 +426,11 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                                         className="h-7 text-xs"
                                         onClick={() => setSecondarySkills([...secondarySkills, ""])}
                                     >
-                                        + Añadir Secundaria
+                                        + Añadir SKILLS 2
                                     </Button>
                                 </div>
                                 <div className="flex flex-col gap-3">
-                                    {secondarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay habilidades secundarias</p>}
+                                    {secondarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay SKILLS 2</p>}
                                     {secondarySkills.map((skillId, idx) => (
                                         <div key={`sec-${idx}`} className="flex gap-2 items-center">
                                             <Select value={skillId || "none"} onValueChange={(val) => handleSecondaryChange(idx, val)}>

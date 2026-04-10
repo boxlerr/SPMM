@@ -342,7 +342,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
             <h3 className="text-sm font-semibold">Habilidades del Operario</h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Habilidad Principal</Label>
+                <Label>SKILLS 1</Label>
                 <Select value={primarySkill || "none"} onValueChange={setPrimarySkill}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar" />
@@ -356,7 +356,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Habilidades Secundarias (hasta 2)</Label>
+                <Label>SKILLS 2 (hasta 2)</Label>
                 <div className="flex flex-col gap-2">
                   <Select
                     value={secondarySkills[0] || "none"}
