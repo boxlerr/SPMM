@@ -140,10 +140,18 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
             const newTime = currentTime + (item.tiempo_proceso_display || 0);
             operatorTimeMap.set(opKey, newTime);
 
+            const op = operarios.find(o => (o.id === item.id_operario) || (`${o.nombre} ${o.apellido}`.trim().toLowerCase() === item.operator_name_display.toLowerCase()));
+            const resStart = op?.hora_inicio || "09:00";
+            const resEnd = op?.hora_fin || "18:00";
+            const [sh, sm] = resStart.split(':').map(Number);
+            const [eh, em] = resEnd.split(':').map(Number);
+            const totalMins = (eh * 60 + em) - (sh * 60 + sm);
+
             grouped.push({
                 ...item,
                 acumulado: newTime,
-                dias_ocupados: (newTime / 495).toFixed(2), // 8.25 hours = 495 mins
+                dias_ocupados: (newTime / (totalMins || 495)).toFixed(2),
+                jornada_mins: totalMins || 495
             });
         });
 
@@ -189,7 +197,7 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-500 font-medium px-2 py-1 bg-white rounded-lg border border-gray-100 shadow-sm self-end mb-1">
                     <Clock className="h-3.5 w-3.5 text-blue-500" />
-                    <span>Jornada: 8.25hs</span>
+                    <span>Jornada: {selectedOperator !== "all" ? (processedData[0]?.jornada_mins / 60).toFixed(2) + "hs" : "Variable"}</span>
                 </div>
             </div>
 

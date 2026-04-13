@@ -39,6 +39,8 @@ export interface Resource {
     type: "operario" | "maquina";
     skills?: string[];
     ranges?: number[];
+    hora_inicio?: string;
+    hora_fin?: string;
 }
 
 export interface WorkOrder {

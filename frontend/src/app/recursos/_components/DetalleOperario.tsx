@@ -454,6 +454,13 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     <span className="font-medium">Rango:</span>
                     <span className="ml-auto text-gray-900 font-semibold">{operario.categoria}</span>
                   </div>
+                  <div className="flex items-center gap-3 text-gray-700">
+                    <Clock className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium">Horario:</span>
+                    <span className="ml-auto text-gray-900">
+                      {operario.hora_inicio || "09:00"} - {operario.hora_fin || "18:00"}
+                    </span>
+                  </div>
                 </div>
 
                 <Separator />

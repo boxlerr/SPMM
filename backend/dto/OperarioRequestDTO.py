@@ -21,6 +21,8 @@ class OperarioRequestDTO(BaseModel):
     celular: Optional[str] = Field(None, max_length=50)
     dni: Optional[str] = Field(None, max_length=20)
     email: Optional[str] = Field(None, max_length=150)
+    hora_inicio: Optional[str] = "09:00"
+    hora_fin: Optional[str] = "18:00"
 
     class Config:
         json_schema_extra = {

@@ -40,6 +40,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     celular: "",
     dni: "", // usaremos este campo para enviar CUIL/CUIT al backend
     email: "",
+    hora_inicio: "09:00",
+    hora_fin: "18:00",
   });
 
   const [sectores, setSectores] = useState<string[]>([]);
@@ -62,6 +64,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         celular: data.celular || "",
         dni: data.dni || "",
         email: (data as any)?.email || "",
+        hora_inicio: (data as any)?.hora_inicio || "09:00",
+        hora_fin: (data as any)?.hora_fin || "18:00",
       });
       setPrimarySkill(data.skills?.find(s => s.nivel === 1)?.id_proceso?.toString() || "");
       setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
@@ -77,6 +81,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         celular: "",
         dni: "",
         email: "",
+        hora_inicio: "09:00",
+        hora_fin: "18:00",
       });
       setPrimarySkill("");
       setSecondarySkills([]);
@@ -207,7 +213,9 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         (data.fecha_ingreso || "") !== (payload.fecha_ingreso || "") ||
         (originalTelefono || "") !== (payload.telefono || "") ||
         (originalCelular || "") !== (payload.celular || "") ||
-        (originalDni || "") !== (payload.dni || "");
+        (originalDni || "") !== (payload.dni || "") ||
+        ((data as any).hora_inicio || "09:00") !== (payload.hora_inicio || "09:00") ||
+        ((data as any).hora_fin || "18:00") !== (payload.hora_fin || "18:00");
 
       const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
         method: "PUT",
@@ -408,6 +416,21 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
               <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="persona@empresa.com" />
               {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
             </div>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold">Horario de Trabajo</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Hora de Inicio</Label>
+                <Input type="time" value={formData.hora_inicio} onChange={(e) => setFormData({ ...formData, hora_inicio: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Hora de Fin</Label>
+                <Input type="time" value={formData.hora_fin} onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">El planificador utilizará estas horas para organizar las tareas de este operario.</p>
           </div>
         </div>
         <DialogFooter>

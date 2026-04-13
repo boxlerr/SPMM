@@ -1,4 +1,4 @@
-import type { WorkOrder, GanttTask, Priority, PlanificacionItem, Status } from "./types"
+import type { WorkOrder, GanttTask, Priority, PlanificacionItem, Status, Resource } from "./types"
 
 export const WORK_HOURS = {
   start: 9,
@@ -82,34 +82,29 @@ export function formatTime(hour: number): string {
   return `${hour.toString().padStart(2, "0")}:00`
 }
 
-export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, date: string): number {
-  const resourceTasks = tasks.filter((task) => task.resourceId === resourceId)
+function parseTime(timeStr?: string): { h: number; m: number } {
+  if (!timeStr) return { h: 9, m: 0 };
+  const [h, m] = timeStr.split(':').map(Number);
+  return { h: isNaN(h) ? 9 : h, m: isNaN(m) ? 0 : m };
+}
 
+export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, date: string, resource?: Resource): number {
+  const resourceTasks = tasks.filter((task) => task.resourceId === resourceId)
   const targetDateStr = date
 
+  // Use resource-specific hours if available, otherwise global defaults
+  const resStart = parseTime(resource?.hora_inicio || '09:00');
+  const resEnd = parseTime(resource?.hora_fin || '18:00');
+
   return resourceTasks.reduce((total, task) => {
-    // Check if task overlaps with this day
-    const taskStart = new Date(`${task.startDate}T${task.startTime}`)
-
-    // Calculate task end date based on duration if not explicitly provided or if it differs
-    // For simplicity in this context, we'll rely on the task's start/end dates and times if they are consistent
-    // But since we know we have issues with multi-day tasks, let's be precise.
-
-    // However, the current data structure might have startDate and endDate.
-    // Let's assume task.startDate and task.endDate are correct "YYYY-MM-DD" strings.
-
     if (task.startDate > targetDateStr || task.endDate < targetDateStr) {
       return total
     }
 
-    // Calculate overlap for this specific day
-    // Work hours for the day
-    const workStart = new Date(`${targetDateStr}T${WORK_HOURS.start.toString().padStart(2, '0')}:00:00`)
-    const workEnd = new Date(`${targetDateStr}T${WORK_HOURS.end.toString().padStart(2, '0')}:00:00`)
+    // Work hours for the day for THIS resource
+    const workStart = new Date(`${targetDateStr}T${resStart.h.toString().padStart(2, '0')}:${resStart.m.toString().padStart(2, '0')}:00`)
+    const workEnd = new Date(`${targetDateStr}T${resEnd.h.toString().padStart(2, '0')}:${resEnd.m.toString().padStart(2, '0')}:00`)
 
-    // Task start/end for this specific day
-    // If task starts before today, effective start is workStart
-    // If task starts today, effective start is task.startTime
     let effectiveStart = workStart
     if (task.startDate === targetDateStr) {
       const [h, m] = task.startTime.split(':').map(Number)
@@ -117,8 +112,6 @@ export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, da
       if (effectiveStart < workStart) effectiveStart = workStart
     }
 
-    // If task ends after today, effective end is workEnd
-    // If task ends today, effective end is task.endTime
     let effectiveEnd = workEnd
     if (task.endDate === targetDateStr) {
       const [h, m] = task.endTime.split(':').map(Number)
@@ -135,19 +128,21 @@ export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, da
   }, 0)
 }
 
-export function isOverloaded(load: number): boolean {
-  return load > WORK_HOURS.total
+export function isOverloaded(load: number, resource?: Resource): boolean {
+  const resStart = parseTime(resource?.hora_inicio || '09:00');
+  const resEnd = parseTime(resource?.hora_fin || '18:00');
+  const totalWorkHours = (resEnd.h + resEnd.m / 60) - (resStart.h + resStart.m / 60);
+  return load > totalWorkHours;
 }
 
 
 
 export function convertPlanificacionToGanttTasks(
-  data: PlanificacionItem[]
+  data: PlanificacionItem[],
+  resources?: Resource[]
 ): GanttTask[] {
   const initialTasks = data.map((item) => {
-    // Use creado_en as the base date, defaulting to now if missing (though it should be there)
     const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
-    // console.log(`Task ${item.id}: creado_en=${item.creado_en}, baseDate=${baseDate}, inicio_min=${item.inicio_min}`);
     const normalizedBaseDate = new Date(baseDate);
     normalizedBaseDate.setHours(9, 0, 0, 0);
 
@@ -161,7 +156,6 @@ export function convertPlanificacionToGanttTasks(
 
     const durationHours = (item.fin_min - item.inicio_min) / 60;
 
-    // Determine priority based on weight if available, or default
     let priority: Priority = "normal";
     if (item.prioridad_peso && item.prioridad_peso > 10) priority = "urgente";
     if (item.prioridad_peso && item.prioridad_peso > 20) priority = "critica";
@@ -173,11 +167,7 @@ export function convertPlanificacionToGanttTasks(
       workOrderNumber: item.pedido_externo?.toString() || item.orden_id.toString(),
       quantity: item.cantidad,
       cantidad_entregada: item.cantidad_entregada,
-      resourceId: (() => {
-
-        const rid = item.id_operario ? item.id_operario.toString() : "unassigned";
-        return rid;
-      })(),
+      resourceId: item.id_operario ? item.id_operario.toString() : "unassigned",
       resourceName: item.nombre_operario ? `${item.nombre_operario} ${item.apellido_operario || ''}`.trim() : "Sin Asignar",
       resourceType: "operario" as const,
       process: item.nombre_proceso,
@@ -198,15 +188,14 @@ export function convertPlanificacionToGanttTasks(
       client: item.cliente,
     };
 
-    console.log(`Converted Task ${task.id}: resourceId=${task.resourceId}, start=${task.startDate} ${task.startTime}`);
     return task;
   });
 
-  return levelResources(initialTasks);
+  return levelResources(initialTasks, resources);
 }
 
-function levelResources(tasks: GanttTask[]): GanttTask[] {
-  // Group tasks by resource
+function levelResources(tasks: GanttTask[], resources?: Resource[]): GanttTask[] {
+  const resourceMap = resources ? Object.fromEntries(resources.map(r => [r.id, r])) : {};
   const tasksByResource: Record<string, GanttTask[]> = {};
   tasks.forEach(task => {
     if (!tasksByResource[task.resourceId]) {
@@ -217,9 +206,13 @@ function levelResources(tasks: GanttTask[]): GanttTask[] {
 
   const leveledTasks: GanttTask[] = [];
 
-  // Process each resource
   Object.values(tasksByResource).forEach(resourceTasks => {
-    // Sort tasks by their original start time (and then by ID to be deterministic)
+    if (resourceTasks.length === 0) return;
+    const resourceId = resourceTasks[0].resourceId;
+    const resource = resourceMap[resourceId];
+    const resStart = parseTime(resource?.hora_inicio || '09:00');
+    const resEnd = parseTime(resource?.hora_fin || '18:00');
+
     resourceTasks.sort((a, b) => {
       const dateA = new Date(`${a.startDate}T${a.startTime}`);
       const dateB = new Date(`${b.startDate}T${b.startTime}`);
@@ -234,33 +227,26 @@ function levelResources(tasks: GanttTask[]): GanttTask[] {
     resourceTasks.forEach(task => {
       let start = new Date(`${task.startDate}T${task.startTime}`);
 
-      // Clamp start time to work hours
-      const startHour = start.getHours();
-      if (startHour < WORK_HOURS.start) {
-        start.setHours(WORK_HOURS.start, 0, 0, 0);
-      } else if (startHour >= WORK_HOURS.end) {
+      // Clamp start time to resource work hours
+      const currentMin = start.getHours() * 60 + start.getMinutes();
+      const resStartMin = resStart.h * 60 + resStart.m;
+      const resEndMin = resEnd.h * 60 + resEnd.m;
+
+      if (currentMin < resStartMin) {
+        start.setHours(resStart.h, resStart.m, 0, 0);
+      } else if (currentMin >= resEndMin) {
         start.setDate(start.getDate() + 1);
-        start.setHours(WORK_HOURS.start, 0, 0, 0);
+        start.setHours(resStart.h, resStart.m, 0, 0);
       }
 
-      // Ensure start is on a working day
       while (start.getDay() === 0 || start.getDay() === 6) {
         start.setDate(start.getDate() + 1);
-        start.setHours(WORK_HOURS.start, 0, 0, 0);
+        start.setHours(resStart.h, resStart.m, 0, 0);
       }
 
-      // If this task starts before the previous one ends, push it forward
       if (nextAvailableTime && start < nextAvailableTime) {
         start = new Date(nextAvailableTime);
       }
-
-      // Calculate end time based on duration (in minutes)
-      // We need the original duration in minutes to be precise
-      // But we only have duration in hours in the task object (and it might be rounded)
-      // Ideally we should carry the duration in minutes.
-      // Let's use the original duration if available, or estimate from hours.
-      // In convertPlanificacionToGanttTasks we have originalInicioMin and originalFinMin.
-      // We can use (originalFinMin - originalInicioMin)
 
       let durationMinutes = 0;
       if (task.originalFinMin !== undefined && task.originalInicioMin !== undefined) {
@@ -269,26 +255,14 @@ function levelResources(tasks: GanttTask[]): GanttTask[] {
         durationMinutes = task.duration * 60;
       }
 
-      // Recalculate end time using addWorkMinutes logic (but relative to the new start)
-      // Wait, addWorkMinutes adds minutes to a base date.
-      // Here we have a start date and we want to add duration minutes *respecting work hours*.
+      const end = addDurationToDate(start, durationMinutes, resource);
 
-      // We can reuse addWorkMinutes logic but we need to adapt it.
-      // addWorkMinutes assumes we are adding to a base date.
-      // Actually, addWorkMinutes logic is: given a date, add N minutes of work time.
-      // So we can use a helper function `addDurationToDate`.
-
-      const end = addDurationToDate(start, durationMinutes);
-
-      // Update task properties
       task.startDate = formatDate(start);
       task.startTime = formatTimeFromDate(start);
       task.endDate = formatDate(end);
       task.endTime = formatTimeFromDate(end);
 
-      // Update next available time
       nextAvailableTime = end;
-
       leveledTasks.push(task);
     });
   });
@@ -296,58 +270,43 @@ function levelResources(tasks: GanttTask[]): GanttTask[] {
   return leveledTasks;
 }
 
-function addDurationToDate(startDate: Date, minutesToAdd: number): Date {
-  // Similar to addWorkMinutes but starts from an arbitrary date/time
-
+function addDurationToDate(startDate: Date, minutesToAdd: number, resource?: Resource): Date {
   let currentDate = new Date(startDate);
   let minutesRemaining = minutesToAdd;
 
+  const resStart = parseTime(resource?.hora_inicio || '09:00');
+  const resEnd = parseTime(resource?.hora_fin || '18:00');
+  const workStartMinutes = resStart.h * 60 + resStart.m;
+  const workEndMinutes = resEnd.h * 60 + resEnd.m;
+
   while (minutesRemaining > 0) {
-    // Check if current time is within work hours
     const currentHour = currentDate.getHours();
     const currentMinute = currentDate.getMinutes();
     const currentTotalMinutes = currentHour * 60 + currentMinute;
 
-    const workStartMinutes = WORK_HOURS.start * 60;
-    const workEndMinutes = WORK_HOURS.end * 60;
-
-    // If before work hours, move to start
     if (currentTotalMinutes < workStartMinutes) {
-      currentDate.setHours(WORK_HOURS.start, 0, 0, 0);
+      currentDate.setHours(resStart.h, resStart.m, 0, 0);
       continue;
     }
 
-    // If after work hours, move to next day start
     if (currentTotalMinutes >= workEndMinutes) {
       currentDate.setDate(currentDate.getDate() + 1);
-      currentDate.setHours(WORK_HOURS.start, 0, 0, 0);
-      // Skip weekends
+      currentDate.setHours(resStart.h, resStart.m, 0, 0);
       while (currentDate.getDay() === 0 || currentDate.getDay() === 6) {
         currentDate.setDate(currentDate.getDate() + 1);
       }
       continue;
     }
 
-    // We are in work hours. Calculate how much we can fit in this day.
     const minutesAvailableToday = workEndMinutes - currentTotalMinutes;
 
     if (minutesRemaining <= minutesAvailableToday) {
-      // It fits today
       currentDate.setMinutes(currentDate.getMinutes() + minutesRemaining);
       minutesRemaining = 0;
     } else {
-      // It overflows today
-      // Add what we can
-      // Actually, we just move to next day start and subtract what we "used"
-      // But we need to advance the currentDate to end of day?
-      // No, effectively the task segment ends at workEndMinutes, and resumes next day.
-      // So we just subtract minutesAvailableToday from minutesRemaining
-      // And set currentDate to next day start.
-
       minutesRemaining -= minutesAvailableToday;
       currentDate.setDate(currentDate.getDate() + 1);
-      currentDate.setHours(WORK_HOURS.start, 0, 0, 0);
-      // Skip weekends
+      currentDate.setHours(resStart.h, resStart.m, 0, 0);
       while (currentDate.getDay() === 0 || currentDate.getDay() === 6) {
         currentDate.setDate(currentDate.getDate() + 1);
       }

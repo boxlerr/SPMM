@@ -112,100 +112,122 @@ export default function OperacionesPage() {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      // Fetch Planificacion
-      const planResponse = await fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() });
-      if (planResponse.status === 401) {
-        if (typeof window !== 'undefined') window.location.href = '/login';
-        return;
-      }
-      if (!planResponse.ok) {
-        const errText = await planResponse.text().catch(() => "Unknown error");
-        throw new Error(`Error fetching planificacion (${planResponse.status}): ${errText}`);
-      }
-      const planData: PlanificacionItem[] = await planResponse.json();
 
-      // Parse rangos_permitidos if it comes as a string or array of strings
-      const parsedPlanData = planData.map(item => {
-        let ranges = item.rangos_permitidos;
+      let mappedResources: Resource[] = [];
 
-        if (typeof ranges === 'string') {
-          try {
-            ranges = JSON.parse(ranges);
-          } catch (e) {
-            ranges = [];
-          }
+      // 1. Fetch Operarios
+      try {
+        const opResponse = await fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() });
+        if (opResponse.status === 401) {
+          if (typeof window !== "undefined") window.location.href = "/login";
+          return;
         }
 
-        // Handle case where it's an array of strings (e.g. ["4", "10"] or ["'[4, 10]'"])
-        if (Array.isArray(ranges) && ranges.length > 0 && typeof ranges[0] === 'string') {
-          try {
-            // If the first element looks like a JSON array, parse it (e.g. ["'[4, 10]'"])
-            if ((ranges[0] as string).trim().startsWith('[')) {
-              ranges = JSON.parse(ranges[0] as string);
-            } else {
-              // Otherwise assume it's ["4", "10"] and convert to numbers
-              ranges = (ranges as unknown as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
+        if (opResponse.ok) {
+          const opData = await opResponse.json();
+          const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
+          const filteredOps = allOps.filter((op: any) => op.sector?.toUpperCase() !== "PRUEBAS");
+          setRawOperarios(filteredOps);
+
+          mappedResources = filteredOps.map((op: any) => ({
+            id: op.id.toString(),
+            name: op.nombre + " " + op.apellido,
+            type: "operario",
+            skills: [],
+            ranges: op.rangos ? op.rangos.map((r: any) => (typeof r === "object" ? r.id : r)) : [],
+            hora_inicio: op.hora_inicio || "09:00",
+            hora_fin: op.hora_fin || "18:00",
+          }));
+          setResources(mappedResources);
+        } else {
+          console.error("Error fetching operarios:", opResponse.status);
+        }
+      } catch (error) {
+        console.error("Failed to fetch operarios:", error);
+      }
+
+      // 2. Fetch Planificacion
+      try {
+        const planResponse = await fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() });
+        if (planResponse.status === 401) {
+          if (typeof window !== "undefined") window.location.href = "/login";
+          return;
+        }
+        if (planResponse.ok) {
+          const planData: PlanificacionItem[] = await planResponse.json();
+
+          const parsedPlanData = planData.map((item) => {
+            let ranges = item.rangos_permitidos;
+            if (typeof ranges === "string") {
+              try {
+                ranges = JSON.parse(ranges);
+              } catch (e) {
+                ranges = [];
+              }
             }
-          } catch (e) {
-            console.error("Error parsing ranges array:", ranges);
-            ranges = [];
-          }
+
+            if (Array.isArray(ranges) && ranges.length > 0 && typeof ranges[0] === "string") {
+              try {
+                if ((ranges[0] as string).trim().startsWith("[")) {
+                  ranges = JSON.parse(ranges[0] as string);
+                } else {
+                  ranges = (ranges as unknown as string[]).map((r: string) => parseInt(r, 10)).filter((n: number) => !isNaN(n));
+                }
+              } catch (e) {
+                console.error("Error parsing ranges array:", ranges);
+                ranges = [];
+              }
+            }
+
+            return {
+              ...item,
+              rangos_permitidos: Array.isArray(ranges) ? ranges : [],
+            };
+          });
+
+          setRawPlanificacion(parsedPlanData);
+          const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData, mappedResources);
+          setTasks(ganttTasks);
+        } else {
+          console.error("Error fetching planificacion:", planResponse.status);
         }
-
-        return {
-          ...item,
-          rangos_permitidos: Array.isArray(ranges) ? ranges : []
-        };
-      });
-
-      setRawPlanificacion(parsedPlanData);
-
-      const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData);
-      setTasks(ganttTasks);
-
-      // Fetch Operarios
-      const opResponse = await fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() });
-      if (opResponse.status === 401) { if (typeof window !== 'undefined') window.location.href = '/login'; return; }
-      if (opResponse.ok) {
-        const opData = await opResponse.json();
-        const allOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
-        // Filter out PRUEBAS if needed, matching RecursosPage logic
-        const filteredOps = allOps.filter((op: any) => op.sector?.toUpperCase() !== "PRUEBAS");
-        setRawOperarios(filteredOps);
-
-        const mappedResources: Resource[] = filteredOps.map((op: any) => ({
-          id: op.id.toString(),
-          name: op.nombre + " " + op.apellido,
-          type: "operario",
-          skills: [], // We use ranges for qualification now
-          ranges: op.rangos ? op.rangos.map((r: any) => typeof r === 'object' ? r.id : r) : []
-        }));
-        setResources(mappedResources);
-      } else {
-        console.error("Error fetching operarios:", opResponse.status);
+      } catch (error) {
+        console.error("Failed to fetch planificacion:", error);
       }
 
-      // Fetch Maquinarias (For enrichment)
-      const maqResponse = await fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() });
-      if (maqResponse.status === 401) { if (typeof window !== 'undefined') window.location.href = '/login'; return; }
-      if (maqResponse.ok) {
-        const maqData = await maqResponse.json();
-        const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
-        setRawMaquinarias(list);
+      // 3. Fetch Maquinarias
+      try {
+        const maqResponse = await fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() });
+        if (maqResponse.status === 401) {
+          if (typeof window !== "undefined") window.location.href = "/login";
+          return;
+        }
+        if (maqResponse.ok) {
+          const maqData = await maqResponse.json();
+          const list = Array.isArray(maqData.data) ? maqData.data : (Array.isArray(maqData) ? maqData : []);
+          setRawMaquinarias(list);
+        }
+      } catch (error) {
+        console.error("Error fetching maquinarias:", error);
       }
 
-      // Fetch Ordenes (NEW)
-      const ordenesResponse = await fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() });
-      if (ordenesResponse.status === 401) { if (typeof window !== 'undefined') window.location.href = '/login'; return; }
-      if (ordenesResponse.ok) {
-        const ordenesData = await ordenesResponse.json();
-        // The API returns the list directly or {data: [...] } depending on standardization.
-        // Based on OrdenTrabajoService.listarOrdenes returning a list, ordenesData should be the array.
-        const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
-        setOrdenesTrabajo(ordenesList);
+      // 4. Fetch Ordenes
+      try {
+        const ordenesResponse = await fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() });
+        if (ordenesResponse.status === 401) {
+          if (typeof window !== "undefined") window.location.href = "/login";
+          return;
+        }
+        if (ordenesResponse.ok) {
+          const ordenesData = await ordenesResponse.json();
+          const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
+          setOrdenesTrabajo(ordenesList);
+        }
+      } catch (error) {
+        console.error("Error fetching ordenes:", error);
       }
-    } catch (error) {
-      console.error("Error loading Gantt data:", error);
+    } catch (globalError) {
+      console.error("Critical error in fetchData:", globalError);
     } finally {
       setIsLoading(false);
     }
@@ -353,7 +375,7 @@ export default function OperacionesPage() {
       return item;
     });
 
-    const newGanttTasks = convertPlanificacionToGanttTasks(updatedRawPlanificacion);
+    const newGanttTasks = convertPlanificacionToGanttTasks(updatedRawPlanificacion, resources);
 
     setRawPlanificacion(updatedRawPlanificacion);
     setTasks(newGanttTasks);
@@ -708,7 +730,8 @@ export default function OperacionesPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Error al calcular planificación");
+        toast.error(errorData.detail || "Error al calcular planificación");
+        return;
       }
 
       const results = await response.json();
@@ -796,7 +819,6 @@ export default function OperacionesPage() {
       setIsPreviewOpen(true);
 
     } catch (error) {
-      console.error("Error planning:", error);
       toast.error("Error al calcular la planificación");
     }
   };
@@ -814,7 +836,10 @@ export default function OperacionesPage() {
         }),
       });
 
-      if (!response.ok) throw new Error("Error al guardar planificación");
+      if (!response.ok) {
+        toast.error("Error al guardar planificación");
+        return;
+      }
 
       toast.success("Planificación guardada exitosamente");
       setIsPreviewOpen(false);
@@ -824,7 +849,6 @@ export default function OperacionesPage() {
       await fetchData();
 
     } catch (error) {
-      console.error("Error confirming plan:", error);
       toast.error("Error al guardar la planificación");
     } finally {
       setIsConfirmingPlan(false);

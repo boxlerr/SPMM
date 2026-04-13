@@ -18,6 +18,8 @@ export interface Operario {
   fecha_nacimiento?: string;
   fecha_ingreso?: string;
   email?: string;
+  hora_inicio?: string;
+  hora_fin?: string;
   skills?: ProcesoSkill[];
 }
 

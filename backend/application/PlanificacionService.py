@@ -310,6 +310,9 @@ def _crear_variables_y_dominios(
         if not operarios_validos:
             logger.warning(f"Proceso {proc_id} sin operarios válidos; usando dummy")
             operarios_validos = [DUMMY_OP_ID]
+        
+        if DUMMY_OP_ID not in operarios_validos:
+            operarios_validos.append(DUMMY_OP_ID)
 
         # Variable de operario
         op_var = model.NewIntVarFromDomain(
@@ -406,6 +409,9 @@ def _crear_variables_y_dominios(
         if not maqs_validas:
              # Safety net
              maqs_validas = [DUMMY_MAQ_ID]
+             
+        if DUMMY_MAQ_ID not in maqs_validas:
+             maqs_validas.append(DUMMY_MAQ_ID)
 
         maq_var = model.NewIntVarFromDomain(
             cp_model.Domain.FromValues(maqs_validas),

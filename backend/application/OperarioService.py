@@ -1,3 +1,4 @@
+from datetime import time
 from backend.domain.Operario import Operario
 from backend.dto.OperarioRequestDTO import OperarioRequestDTO
 from backend.infrastructure.OperarioRepository import OperarioRepository
@@ -46,6 +47,8 @@ class OperarioService:
                 celular=operario_dto.celular,
                 dni=operario_dto.dni,
                 email=operario_dto.email,
+                hora_inicio=time.fromisoformat(operario_dto.hora_inicio) if operario_dto.hora_inicio else time(9, 0),
+                hora_fin=time.fromisoformat(operario_dto.hora_fin) if operario_dto.hora_fin else time(18, 0),
                 procesos_skill=procesos_skill,
             )
 
@@ -97,6 +100,8 @@ class OperarioService:
                     "celular": o.celular,
                     "dni": o.dni,
                     "email": o.email,
+                    "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "09:00",
+                    "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "18:00",
                     "rangos": [r.id_rango for r in o.rangos],
                     "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
                 }
@@ -132,6 +137,8 @@ class OperarioService:
                     "celular": o.celular,
                     "dni": o.dni,
                     "email": o.email,
+                    "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "09:00",
+                    "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "18:00",
                     "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
                 },
                 errorDescription=""
@@ -148,6 +155,11 @@ class OperarioService:
 
             if skills_data is not None:
                 pass # validations removed
+
+            if "hora_inicio" in nueva_data and isinstance(nueva_data["hora_inicio"], str):
+                nueva_data["hora_inicio"] = time.fromisoformat(nueva_data["hora_inicio"])
+            if "hora_fin" in nueva_data and isinstance(nueva_data["hora_fin"], str):
+                nueva_data["hora_fin"] = time.fromisoformat(nueva_data["hora_fin"])
 
             actualizado = await self.repository.update(id, nueva_data)
 
