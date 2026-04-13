@@ -110,44 +110,59 @@ async def obtener_planificacion(db = Depends(get_db)):
     from datetime import datetime, timedelta
     
     def convertir_minutos_a_fecha(minutos_acumulados: int):
-        ahora = datetime.now()
-        inicio_base = ahora
-        if inicio_base.hour < 7:
-            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-        elif inicio_base.hour >= 17:
-            inicio_base = inicio_base + timedelta(days=1)
-            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-        
-        while inicio_base.weekday() >= 5: # 5=Sab, 6=Dom
-            inicio_base += timedelta(days=1)
-            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+        from backend.infrastructure.ConfigRepository import ConfigRepository
+        config_repo = ConfigRepository()
+        blocked_dates = set(config_repo.get_blocked_dates())
 
-        tiempo_actual = inicio_base
+        ahora = datetime.now()
+        inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
+        
+        def avanzar_a_dia_valido(fecha):
+            while True:
+                wd = fecha.weekday()
+                is_blocked = fecha.strftime("%Y-%m-%d") in blocked_dates
+                if wd == 6 or is_blocked: 
+                    fecha += timedelta(days=1)
+                else:
+                    break
+            return fecha
+
+        tiempo_actual = avanzar_a_dia_valido(inicio_base)
         minutos_restantes = minutos_acumulados
 
         while minutos_restantes > 0:
-            fin_jornada = tiempo_actual.replace(hour=17, minute=0, second=0, microsecond=0)
-            if tiempo_actual >= fin_jornada:
-                tiempo_actual += timedelta(days=1)
-                tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
-                while tiempo_actual.weekday() >= 5:
-                    tiempo_actual += timedelta(days=1)
-                    tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
-                continue
-
-            minutos_disponibles_hoy = (fin_jornada - tiempo_actual).total_seconds() / 60
+            wd = tiempo_actual.weekday()
             
-            if minutos_restantes <= minutos_disponibles_hoy:
-                tiempo_actual += timedelta(minutes=minutos_restantes)
-                minutos_restantes = 0
+            if wd < 5:
+                capacidad_hoy = 555
+            elif wd == 5:
+                capacidad_hoy = 300
             else:
-                tiempo_actual += timedelta(minutes=minutos_disponibles_hoy)
-                minutos_restantes -= minutos_disponibles_hoy
+                capacidad_hoy = 0
+
+            if capacidad_hoy == 0:
                 tiempo_actual += timedelta(days=1)
-                tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
-                while tiempo_actual.weekday() >= 5:
-                    tiempo_actual += timedelta(days=1)
-                    tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
+                tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
+                continue
+                
+            if minutos_restantes >= capacidad_hoy:
+                minutos_restantes -= capacidad_hoy
+                tiempo_actual += timedelta(days=1)
+                tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
+            else:
+                if wd < 5:
+                    if minutos_restantes <= 120:
+                        tiempo_actual += timedelta(minutes=minutos_restantes)
+                    elif minutos_restantes <= 285:
+                        tiempo_actual += timedelta(minutes=minutos_restantes + 15)
+                    else:
+                        tiempo_actual += timedelta(minutes=minutos_restantes + 105)
+                elif wd == 5:
+                    tiempo_actual += timedelta(minutes=minutos_restantes)
+                
+                minutos_restantes = 0
+        
+        return tiempo_actual.isoformat()
         
         return tiempo_actual.isoformat()
 

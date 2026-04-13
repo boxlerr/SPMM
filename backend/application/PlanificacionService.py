@@ -26,13 +26,13 @@ import re
 import unicodedata
 
 ##Variables:
-MIN_LABORAL_DIA = 495
-MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 2775
+MIN_LABORAL_DIA = 555
+MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 3075
 
 TRAMOS_LV_LAB = [
     (0, 120),
     (120, 285),
-    (285, 495),
+    (285, 555),
 ]
 
 TRAMOS_SAB_LAB = [
@@ -774,9 +774,8 @@ def _agregar_funcion_objetivo(
 
 def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
     """
-    Convierte minutos de trabajo (desde 'ahora') a una fecha real,
-    respetando la capacidad diaria definida (MIN_LABORAL_DIA) y calendario.
-    Sábados son laborables (300 min), Domingos no.
+    Convierte minutos de trabajo lógicos a una fecha real del calendario físico.
+    Alineado a jornada física de 07:00 a 18:00 con 105 minutos muertos.
     """
     from datetime import timedelta
     
@@ -785,79 +784,53 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
     blocked_dates = set(config_repo.get_blocked_dates())
 
     ahora = ahora_ref if ahora_ref else datetime.now()
-    inicio_base = ahora
+    inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
     
-    # 1. Ajustar inicio si cae fuera de horario (antes de 7 o despues de 17)
-    if inicio_base.hour < 7:
-        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-    elif inicio_base.hour >= 17:
-        inicio_base = inicio_base + timedelta(days=1)
-        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-    
-    # Helper para avanzar a un día válido (CHECK BLOCKED HERE)
     def avanzar_a_dia_valido(fecha):
         while True:
             wd = fecha.weekday()
             is_blocked = fecha.strftime("%Y-%m-%d") in blocked_dates
-            # Domingo (6) O Bloqueado -> Saltar
             if wd == 6 or is_blocked: 
                 fecha += timedelta(days=1)
-                fecha = fecha.replace(hour=7, minute=0, second=0, microsecond=0)
             else:
                 break
         return fecha
 
-    # 2. Asegurar que el día de inicio es válido
     tiempo_actual = avanzar_a_dia_valido(inicio_base)
     minutos_restantes = minutos_acumulados
 
-    # Minutos por dia laboral (7 a 17 = 10 horas = 600 min)
     while minutos_restantes > 0:
         wd = tiempo_actual.weekday()
         
-        # Determinar capacidad máxima de hoy
-        if wd < 5: # Lun-Vie
-            capacidad_hoy = MIN_LABORAL_DIA # 495
-        elif wd == 5: # Sab
+        if wd < 5:
+            capacidad_hoy = 555
+        elif wd == 5:
             capacidad_hoy = 300
         else:
-            capacidad_hoy = 0 # No debería pasar
+            capacidad_hoy = 0
             
-        # Hora fin jornada basado en capacidad?
-        # El visualizador usaba 17:00 fijo. Esto es aproximado.
-        # Si capacity=495, fin es 15:15.
-        # Si visualizamos hasta las 17:00, distorsionamos la linea de tiempo del solver.
-        # Probemos alinear con 17:00 (600m) para Lun-Vie y ajustar?
-        # Mejor usar capacidad real para descontar minutos.
-        
-        # Definir inicio jornada hoy
-        hora_inicio_jornada = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
-        
-        if tiempo_actual < hora_inicio_jornada:
-             tiempo_actual = hora_inicio_jornada
-
-        # Fin de jornada
-        fin_jornada = hora_inicio_jornada + timedelta(minutes=capacidad_hoy)
-        
-        if tiempo_actual >= fin_jornada:
+        if capacidad_hoy == 0:
             tiempo_actual += timedelta(days=1)
-            tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             continue
-
-        minutos_disponibles_hoy = (fin_jornada - tiempo_actual).total_seconds() / 60
-        
-        if minutos_restantes <= minutos_disponibles_hoy:
-            tiempo_actual += timedelta(minutes=minutos_restantes)
-            minutos_restantes = 0
-        else:
-            tiempo_actual += timedelta(minutes=minutos_disponibles_hoy)
-            minutos_restantes -= minutos_disponibles_hoy
-            # Avanzar al proximo dia laboral
+            
+        if minutos_restantes >= capacidad_hoy:
+            minutos_restantes -= capacidad_hoy
             tiempo_actual += timedelta(days=1)
-            tiempo_actual = tiempo_actual.replace(hour=7, minute=0, second=0, microsecond=0)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
-    
+        else:
+            if wd < 5:
+                if minutos_restantes <= 120:
+                    tiempo_actual += timedelta(minutes=minutos_restantes)
+                elif minutos_restantes <= 285:
+                    tiempo_actual += timedelta(minutes=minutos_restantes + 15)
+                else:
+                    tiempo_actual += timedelta(minutes=minutos_restantes + 105)
+            elif wd == 5:
+                tiempo_actual += timedelta(minutes=minutos_restantes)
+                
+            minutos_restantes = 0
+            
     return tiempo_actual.isoformat()
 
 
