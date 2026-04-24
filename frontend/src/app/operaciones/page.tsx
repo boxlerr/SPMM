@@ -72,8 +72,10 @@ export default function OperacionesPage() {
   // Selective Planning State
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false)
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]) // Used for confirmation
+  const [planningRange, setPlanningRange] = useState<{ fecha_desde?: string, fecha_hasta?: string }>({}) // Used for confirmation
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [previewResults, setPreviewResults] = useState<any[]>([])
+  const [excedentesResults, setExcedentesResults] = useState<any[]>([])
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
@@ -708,11 +710,12 @@ export default function OperacionesPage() {
     }
   };
 
-  const handlePlanSelection = async (ids: number[]) => {
+  const handlePlanSelection = async (ids: number[], range: { fecha_desde?: string, fecha_hasta?: string } = {}) => {
     if (ids.length === 0) return;
 
-    // Set selected IDs locally so we know what to verify/save later
+    // Set selected IDs and range locally so we know what to verify/save later
     setSelectedOrderIds(ids);
+    setPlanningRange(range);
 
     // Call API for preview
     try {
@@ -722,7 +725,9 @@ export default function OperacionesPage() {
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
           ordenes_ids: ids,
-          preview: true
+          preview: true,
+          fecha_desde: range.fecha_desde,
+          fecha_hasta: range.fecha_hasta,
         }),
       });
 
@@ -734,12 +739,19 @@ export default function OperacionesPage() {
         return;
       }
 
-      const results = await response.json();
+      const responseData = await response.json();
+
+      // Backend ahora devuelve {planificados, excedentes}; mantenemos compat con array crudo por si acaso
+      const planificadosRaw: any[] = Array.isArray(responseData)
+        ? responseData
+        : (responseData.planificados || []);
+      const excedentesRaw: any[] = Array.isArray(responseData)
+        ? []
+        : (responseData.excedentes || []);
 
       // Enrich results with Client and Article info
       const now = new Date();
-      // Enrich results with Client, Article info, Names and Dates
-      const enrichedResults = results.map((res: any) => {
+      const enrich = (res: any) => {
         const order = ordenesTrabajo.find(o => o.id === res.orden_id);
         const operario = rawOperarios.find(op => op.id === res.id_operario);
         const maquina = rawMaquinarias.find(m => m.id === res.id_maquinaria);
@@ -776,9 +788,13 @@ export default function OperacionesPage() {
           all_finalized: order?.procesos?.every(p => p.estado_proceso.id === 3) && (order?.procesos?.length || 0) > 0,
           any_process_started: order?.procesos?.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3)
         };
-      });
+      };
+
+      const enrichedResults = planificadosRaw.map(enrich);
+      const enrichedExcedentes = excedentesRaw.map(enrich);
 
       setPreviewResults(enrichedResults);
+      setExcedentesResults(enrichedExcedentes);
 
       // Calculate current operator loads for the WEEK of the FIRST PLANNED ITEM
       const loads: Record<number, { current: number, new: number }> = {};
@@ -823,16 +839,38 @@ export default function OperacionesPage() {
     }
   };
 
-  const handleConfirmPlan = async (manualPlan?: any[]) => {
+  const handleConfirmPlan = async (manualPlanOrForzar?: any[] | { forzarOrdenIds: number[] }) => {
     try {
       setIsConfirmingPlan(true);
+
+      // Distinguir entre el caso "manual plan" (array) y el nuevo "decisiones de excedentes" ({forzarOrdenIds})
+      let manualPlan: any[] | undefined = undefined;
+      let forzarOrdenIds: number[] | undefined = undefined;
+      if (Array.isArray(manualPlanOrForzar)) {
+        manualPlan = manualPlanOrForzar;
+      } else if (manualPlanOrForzar && Array.isArray(manualPlanOrForzar.forzarOrdenIds)) {
+        forzarOrdenIds = manualPlanOrForzar.forzarOrdenIds;
+      }
+
+      // Filtrar las órdenes que el usuario decidió descartar (eran excedentes y no fueron forzadas)
+      let finalOrdenIds = selectedOrderIds;
+      if (forzarOrdenIds !== undefined) {
+        const excedentesOrdenIds = new Set(excedentesResults.map((r: any) => r.orden_id));
+        const forzarSet = new Set(forzarOrdenIds);
+        // Mantener: las que ya estaban planificadas (no excedentes) + las que el usuario forzó
+        finalOrdenIds = selectedOrderIds.filter(id => !excedentesOrdenIds.has(id) || forzarSet.has(id));
+      }
+
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({
-          ordenes_ids: selectedOrderIds,
+          ordenes_ids: finalOrdenIds,
           preview: false,
-          plan: manualPlan || undefined
+          plan: manualPlan,
+          fecha_desde: planningRange.fecha_desde,
+          fecha_hasta: planningRange.fecha_hasta,
+          forzar_ordenes_ids: forzarOrdenIds,
         }),
       });
 
@@ -844,6 +882,8 @@ export default function OperacionesPage() {
       toast.success("Planificación guardada exitosamente");
       setIsPreviewOpen(false);
       setSelectedOrderIds([]);
+      setPlanningRange({});
+      setExcedentesResults([]);
 
       // Refresh data
       await fetchData();
@@ -1344,6 +1384,7 @@ export default function OperacionesPage() {
         }}
         onConfirm={handleConfirmPlan}
         results={previewResults}
+        excedentes={excedentesResults}
         operatorLoads={operatorLoads}
         isConfirming={isConfirmingPlan}
         availableOperators={rawOperarios}

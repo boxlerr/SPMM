@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:\\\\Users\\\\agust\\\\OneDrive\\\\Escritorio\\\\SPMM\" log --oneline --all)",
+      "Bash(find \"C:\\\\Users\\\\agust\\\\OneDrive\\\\Escritorio\\\\SPMM/backend\" -name \"*.py\" -type f -exec grep -l \"blocked_dates\\\\|fecha_bloqueada\\\\|dias_no_laborales\" {} \\\\;)",
+      "Bash(xargs grep *)"
+    ]
+  }
+}

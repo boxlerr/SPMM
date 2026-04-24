@@ -40,9 +40,14 @@ TRAMOS_SAB_LAB = [
 ]
 # ------------------------------------------------------------------
 #Funcion para ventanas semanales en tiempo.
-def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str]):
+def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None):
+    """
+    Construye las ventanas horarias del horizonte.
+    Si `fecha_hasta` viene, limita el horizonte a (fecha_hasta - start_date) días INCLUSIVE.
+    Si no, usa num_semanas * 7 días (comportamiento previo).
+    """
     ventanas = []
-    
+
     current_date = start_date
     # Find next Monday to align with generic week structure if needed? 
     # Actually, the logic below 'semana * MIN_LABORAL_SEMANA' assumes generic weeks starting Mon.
@@ -53,7 +58,11 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
     # Re-writing to be day-based instead of generic week based is safer for specific dates.
     
     # Calculate total days needed roughly
-    total_days = num_semanas * 7
+    if fecha_hasta is not None:
+        # Rango cerrado: contar días desde start_date hasta fecha_hasta inclusive
+        total_days = max(1, (fecha_hasta - start_date).days + 1)
+    else:
+        total_days = num_semanas * 7
     
     accumulated_minutes = 0
     
@@ -258,6 +267,7 @@ def _crear_variables_y_dominios(
 
     inicio_vars, fin_vars, intervalo_vars = {}, {}, {}
     operario_vars, maq_vars = {}, {}
+    presente_vars = {}
     dur_map = {}
 
     op_to_rango = {op_id: r_id for (op_id, r_id) in operarios}
@@ -288,6 +298,9 @@ def _crear_variables_y_dominios(
         end   = model.NewIntVar(0, H, f"end_{orden_id}_{secuencia}")
         itv   = model.NewIntervalVar(start, dur, end, f"int_{orden_id}_{secuencia}")
         dur_map[(orden_id, secuencia)] = dur
+
+        # Booleano de presencia: 1 = el proceso entra en el plan, 0 = excedente
+        presente_vars[(orden_id, secuencia)] = model.NewBoolVar(f"pres_{orden_id}_{secuencia}")
 
         # ----------------- Operarios válidos -----------------
         if op_skill_levels:
@@ -437,13 +450,15 @@ def _crear_variables_y_dominios(
         maq_to_familia,
         op_domain_vals,
         maq_domain_vals,
+        presente_vars,
     )
 
 
-def _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars):
+def _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars, presente_vars=None):
     """
     Asegura que, dentro de una misma orden de trabajo,
-    los procesos respeten su secuencia.
+    los procesos respeten su secuencia. Si se pasan presente_vars,
+    la restricción solo se enforza cuando ambos procesos están presentes.
     """
     for orden_id in set(p[0] for p in procesos_norm):
         procs = [p for p in procesos_norm if p[0] == orden_id]
@@ -451,7 +466,27 @@ def _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars
         for i in range(len(procs) - 1):
             act = procs[i]
             sig = procs[i + 1]
-            model.Add(inicio_vars[(orden_id, sig[2])] >= fin_vars[(orden_id, act[2])])
+            key_a = (orden_id, act[2])
+            key_b = (orden_id, sig[2])
+            if presente_vars is not None:
+                model.Add(inicio_vars[key_b] >= fin_vars[key_a]).OnlyEnforceIf(
+                    [presente_vars[key_a], presente_vars[key_b]]
+                )
+            else:
+                model.Add(inicio_vars[key_b] >= fin_vars[key_a])
+
+
+def _agregar_cadena_presencia(model, procesos_norm, presente_vars):
+    """
+    Si un proceso N de una orden no está presente, los procesos N+1, N+2... tampoco.
+    presente_{n+1} <= presente_n
+    """
+    for orden_id in set(p[0] for p in procesos_norm):
+        procs = sorted([p for p in procesos_norm if p[0] == orden_id], key=lambda x: x[2])
+        for i in range(len(procs) - 1):
+            key_a = (orden_id, procs[i][2])
+            key_b = (orden_id, procs[i + 1][2])
+            model.Add(presente_vars[key_b] <= presente_vars[key_a])
 
 
 def _agregar_no_solape_operarios(
@@ -461,17 +496,28 @@ def _agregar_no_solape_operarios(
     fin_vars,
     dur_map,
     operario_vars,
+    presente_vars=None,
 ):
     """
     Añade restricciones de no solapamiento por operario
-    usando intervalos opcionales.
+    usando intervalos opcionales. Si presente_vars está, el intervalo
+    solo participa si el proceso está presente.
     """
     for op_id in REAL_OP_IDS:
         pres_intervals = []
         for (orden_id, secuencia), op_var in operario_vars.items():
-            pres = model.NewBoolVar(f"pres_{orden_id}_{secuencia}_op{op_id}")
-            model.Add(op_var == op_id).OnlyEnforceIf(pres)
-            model.Add(op_var != op_id).OnlyEnforceIf(pres.Not())
+            es_op = model.NewBoolVar(f"esop_{orden_id}_{secuencia}_op{op_id}")
+            model.Add(op_var == op_id).OnlyEnforceIf(es_op)
+            model.Add(op_var != op_id).OnlyEnforceIf(es_op.Not())
+
+            if presente_vars is not None:
+                # pres = es_op AND presente
+                pres = model.NewBoolVar(f"usaop_{orden_id}_{secuencia}_op{op_id}")
+                presente = presente_vars[(orden_id, secuencia)]
+                model.AddBoolAnd([es_op, presente]).OnlyEnforceIf(pres)
+                model.AddBoolOr([es_op.Not(), presente.Not()]).OnlyEnforceIf(pres.Not())
+            else:
+                pres = es_op
 
             start = inicio_vars[(orden_id, secuencia)]
             end   = fin_vars[(orden_id, secuencia)]
@@ -494,10 +540,12 @@ def _agregar_no_solape_maquinas(
     fin_vars,
     dur_map,
     maq_vars,
+    presente_vars=None,
 ):
     """
     Añade restricciones de no solapamiento por maquinaria
-    usando intervalos opcionales.
+    usando intervalos opcionales. Si presente_vars está, el intervalo
+    solo participa si el proceso está presente.
     """
     for m_id in REAL_MAQ_IDS:
         pres_intervals = []
@@ -509,9 +557,17 @@ def _agregar_no_solape_maquinas(
 
             maq_var = maq_vars[(orden_id, secuencia)]
 
-            pres = model.NewBoolVar(f"mpres_{orden_id}_{secuencia}_m{m_id}")
-            model.Add(maq_var == m_id).OnlyEnforceIf(pres)
-            model.Add(maq_var != m_id).OnlyEnforceIf(pres.Not())
+            es_m = model.NewBoolVar(f"esm_{orden_id}_{secuencia}_m{m_id}")
+            model.Add(maq_var == m_id).OnlyEnforceIf(es_m)
+            model.Add(maq_var != m_id).OnlyEnforceIf(es_m.Not())
+
+            if presente_vars is not None:
+                pres = model.NewBoolVar(f"usam_{orden_id}_{secuencia}_m{m_id}")
+                presente = presente_vars[(orden_id, secuencia)]
+                model.AddBoolAnd([es_m, presente]).OnlyEnforceIf(pres)
+                model.AddBoolOr([es_m.Not(), presente.Not()]).OnlyEnforceIf(pres.Not())
+            else:
+                pres = es_m
 
             start = inicio_vars[(orden_id, secuencia)]
             end   = fin_vars[(orden_id, secuencia)]
@@ -651,7 +707,11 @@ def _agregar_funcion_objetivo(
     PENAL_DUMMY,
     PENAL_DUMMY_MAQ,
     H,
+    presente_vars=None,
 ):
+    # Pesos de prioridad para excedentes (más agresivo: prio 1 vale 100x prio 5)
+    PESO_EXCED_POR_PRIO = {1: 10000, 2: 5000, 3: 1000, 4: 300, 5: 100}
+    W_FUERA = 100_000_000
     """
     Construye la lista total_obj con todos los términos de la función objetivo
     y la añade al modelo.
@@ -738,19 +798,43 @@ def _agregar_funcion_objetivo(
         model.AddMaxEquality(lateness, [diff, 0])
 
         mult = atraso_mult_por_prioridad.get(peso_prioridad, 200)
-        total_obj.append((lateness, mult))
+
+        presente = presente_vars[(orden_id, secuencia)] if presente_vars is not None else None
+
+        # Helpers para gatear términos por presente
+        def _gate_int(var, ub, name):
+            if presente is None:
+                return var
+            eff = model.NewIntVar(0, ub, name)
+            model.Add(eff == var).OnlyEnforceIf(presente)
+            model.Add(eff == 0).OnlyEnforceIf(presente.Not())
+            return eff
+
+        def _gate_bool(b, name):
+            if presente is None:
+                return b
+            eff = model.NewBoolVar(name)
+            model.AddBoolAnd([b, presente]).OnlyEnforceIf(eff)
+            model.AddBoolOr([b.Not(), presente.Not()]).OnlyEnforceIf(eff.Not())
+            return eff
+
+        late_eff = _gate_int(lateness, H * 10, f"late_eff_{orden_id}_{secuencia}")
+        total_obj.append((late_eff, mult))
 
         base_prior = model.NewIntVar(0, 10000, f"base_{orden_id}_{secuencia}")
         model.Add(base_prior == (6 - min(peso_prioridad, 5)) * 100)
-        total_obj.append((base_prior, 1))
+        base_eff = _gate_int(base_prior, 10000, f"base_eff_{orden_id}_{secuencia}")
+        total_obj.append((base_eff, 1))
 
-        total_obj.append((inicio_vars[(orden_id, secuencia)], 1))
+        ini_eff = _gate_int(inicio_vars[(orden_id, secuencia)], H, f"ini_eff_{orden_id}_{secuencia}")
+        total_obj.append((ini_eff, 1))
 
-        # Penalizaciones por dummy
-        total_obj.append((pick_dummy, PENAL_DUMMY))
-        #total_obj.append((pick_dummy_maq, PENAL_DUMMY_MAQ))
+        # Penalizaciones por dummy (solo si presente)
+        pd_eff = _gate_bool(pick_dummy, f"pd_eff_{orden_id}_{secuencia}")
+        total_obj.append((pd_eff, PENAL_DUMMY))
         if usa_maquina:
-            total_obj.append((pick_dummy_maq, PENAL_DUMMY_MAQ))
+            pdm_eff = _gate_bool(pick_dummy_maq, f"pdm_eff_{orden_id}_{secuencia}")
+            total_obj.append((pdm_eff, PENAL_DUMMY_MAQ))
 
 
         # Penalización por sobre-cualificación en tareas básicas
@@ -767,7 +851,15 @@ def _agregar_funcion_objetivo(
             tmp = model.NewIntVar(0, 2, f"tmp_over_{orden_id}_{secuencia}")
             model.Add(tmp == not_b1 + not_b2)
             model.Add(is_over >= tmp - 1)
-            total_obj.append((is_over, PENAL_OVERQUAL))
+            over_eff = _gate_bool(is_over, f"over_eff_{orden_id}_{secuencia}")
+            total_obj.append((over_eff, PENAL_OVERQUAL))
+
+        # --- Término dominante: excedente ---
+        if presente is not None:
+            peso_exced = PESO_EXCED_POR_PRIO.get(peso_prioridad, 100)
+            ausente = model.NewBoolVar(f"ausente_{orden_id}_{secuencia}")
+            model.Add(ausente == 1 - presente)
+            total_obj.append((ausente, W_FUERA * peso_exced))
 
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
@@ -834,9 +926,10 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
+    Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
     """
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -848,6 +941,11 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
 
             inicio_m = solver.Value(inicio_vars[(orden_id, secuencia)])
             fin_m = solver.Value(fin_vars[(orden_id, secuencia)])
+
+            if presente_vars is not None:
+                excedente = (solver.Value(presente_vars[(orden_id, secuencia)]) == 0)
+            else:
+                excedente = False
 
             resultados.append({
                 "orden_id": orden_id,
@@ -869,72 +967,108 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 ),
                 "sin_asignar": (op_id == DUMMY_OP_ID),
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
-                # Fechas estimadas reales - USANDO REFERENCIA FIJA
+                "excedente": excedente,
                 "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m, start_time_ref),
                 "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m, start_time_ref),
             })
-        
-        # 🔹 ORDENAR RESULTADOS POR ORDEN Y SECUENCIA PARA EVITAR CONFUSIÓN EN UI
+
         resultados.sort(key=lambda x: (x["orden_id"], x["secuencia"]))
     else:
-        logger.warning("No se encontró solución.")
+        logger.warning(f"No se encontró solución. status={status}")
         raise PlanificacionException("No se pudo generar una planificación viable con las restricciones actuales.")
 
     return resultados
 
-def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas):
+def _split_resultados(resultados: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    Separa la lista cruda del solver en (planificados, excedentes).
+    Los excedentes son procesos que el solver marcó con presente=0 (no entran en el horizonte).
+    """
+    planificados, excedentes = [], []
+    for r in resultados:
+        if r.get("excedente"):
+            excedentes.append(r)
+        else:
+            planificados.append(r)
+    return planificados, excedentes
+
+
+def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None):
     """
     Obliga a que cada proceso:
     - empiece dentro de una ventana laboral
     - termine antes de que esa ventana cierre
+    Si presente_vars está, solo aplica cuando el proceso está presente.
+    Si un proceso NO entra en ninguna ventana del horizonte → presente = 0.
     """
 
     for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
-        start = inicio_vars[(orden_id, secuencia)]
-        dur = dur_map[(orden_id, secuencia)]
+        key = (orden_id, secuencia)
+        start = inicio_vars[key]
+        dur = dur_map[key]
 
-        # Un booleano por ventana
+        # Un booleano por ventana donde el proceso podría caber
         en_ventana = []
 
         for idx, (v_ini, v_fin) in enumerate(ventanas):
-            b = model.NewBoolVar(f"vent_{orden_id}_{secuencia}_{idx}")
+            if dur > (v_fin - v_ini):
+                continue  # No cabe en esta ventana → no la considero
 
+            b = model.NewBoolVar(f"vent_{orden_id}_{secuencia}_{idx}")
             # Si b == 1 → el proceso está dentro de esta ventana
             model.Add(start >= v_ini).OnlyEnforceIf(b)
             model.Add(start < v_fin).OnlyEnforceIf(b)
-
             en_ventana.append(b)
 
-        # Debe estar en EXACTAMENTE una ventana
-        model.Add(sum(en_ventana) == 1)
+        if presente_vars is not None:
+            presente = presente_vars[key]
+            if en_ventana:
+                # Si presente=1 → cae en exactamente una ventana
+                # Si presente=0 → no cae en ninguna
+                model.Add(sum(en_ventana) == 1).OnlyEnforceIf(presente)
+                model.Add(sum(en_ventana) == 0).OnlyEnforceIf(presente.Not())
+            else:
+                # Ningún tramo lo aloja → forzosamente excedente
+                model.Add(presente == 0)
+        else:
+            # Modo legacy: requiere caber en exactamente una ventana
+            if en_ventana:
+                model.Add(sum(en_ventana) == 1)
 
 # ------------------------------------------------------------
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None):
     model = cp_model.CpModel()
-    
+
     # Init Config
     config_repo = ConfigRepository()
     blocked_dates = config_repo.get_blocked_dates()
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
-    
-    # Determine start date (Logic similar to conversion)
+
+    # Determine start date
     ahora = datetime.now()
-    inicio_base = ahora
-    if inicio_base.hour < 7:
-        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-    elif inicio_base.hour >= 17:
-        inicio_base = inicio_base + timedelta(days=1)
-        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-    
-    # Skip weekends for start
-    while inicio_base.weekday() >= 5: 
+    if fecha_desde is None or fecha_desde <= ahora.date():
+        # Default: hoy con ajuste por hora
+        inicio_base = ahora
+        if inicio_base.hour < 7:
+            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+        elif inicio_base.hour >= 17:
+            inicio_base = inicio_base + timedelta(days=1)
+            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    else:
+        # fecha_desde futura: arrancar 07:00 de ese día
+        inicio_base = datetime.combine(fecha_desde, time(7, 0))
+
+    # Saltar fin de semana y días bloqueados desde el candidato
+    blocked_set = set(blocked_dates)
+    while inicio_base.weekday() >= 5 or inicio_base.strftime("%Y-%m-%d") in blocked_set:
         inicio_base += timedelta(days=1)
         inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-        
+
     start_date = inicio_base.date()
+    logger.info(f"PLANIFICADOR: start_date efectivo = {start_date} (fecha_desde solicitada = {fecha_desde})")
 
 
     # ---- Parámetros ----
@@ -993,6 +1127,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         maq_to_familia,
         op_domain_vals,
         maq_domain_vals,
+        presente_vars,
     ) = _crear_variables_y_dominios(
         model,
         procesos_norm,
@@ -1003,15 +1138,16 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
     )
 
     # ---- Restricciones ----
-    _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars)
-    _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars)
-    _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars)
+    _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars, presente_vars=presente_vars)
+    _agregar_cadena_presencia(model, procesos_norm, presente_vars)
+    _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars, presente_vars=presente_vars)
+    _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars, presente_vars=presente_vars)
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
-    ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates)
-    #ventanas = construir_ventanas_semanales()
+    ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta)
+    logger.info(f"PLANIFICADOR: ventanas generadas = {len(ventanas)} (fecha_hasta={fecha_hasta})")
 
     # ---- Restricciones de ventanas horarias ----
     _agregar_ventanas_horarias(
@@ -1019,9 +1155,10 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         procesos_norm,
         inicio_vars,
         dur_map,
-        ventanas
+        ventanas,
+        presente_vars=presente_vars,
     )
-    
+
     # ---- Función objetivo ----
     _agregar_funcion_objetivo(
         model,
@@ -1040,19 +1177,19 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         PENAL_DUMMY,
         PENAL_DUMMY_MAQ,
         H,
+        presente_vars=presente_vars,
     )
 
 
     # ---- Resolver ----
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 30
+    solver.parameters.max_time_in_seconds = 60
     solver.parameters.num_search_workers = 8
     solver.parameters.log_search_progress = False
 
     status = solver.Solve(model)
 
-    # Capturamos el 'ahora' una sola vez para que todas las conversiones sean consistentes
-    ahora_ref = datetime.now()
+    ahora_ref = inicio_base
 
     # ---- Extraer resultados ----
     resultados = _extraer_resultados(
@@ -1066,7 +1203,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias):
         op_to_rango,
         DUMMY_OP_ID,
         DUMMY_MAQ_ID,
-        ahora_ref
+        ahora_ref,
+        presente_vars=presente_vars,
     )
 
     return resultados
@@ -1193,8 +1331,13 @@ async def planificar(
     preview: bool = False,
     plan: list[dict] | None = None,
     repo_skill: OperarioProcesoSkillRepository | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    forzar_ordenes_ids: list[int] | None = None,
 ):
-    
+    logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
+    forzar_set = set(forzar_ordenes_ids or [])
+
     # 🔹 Inyectar repo de skills si no viene
     if not repo_skill:
         repo_skill = OperarioProcesoSkillRepository(db)
@@ -1300,18 +1443,30 @@ async def planificar(
     # -------------------------------
     # Ejecutar el solver en otro hilo
     # -------------------------------
+    # Si el usuario forzó órdenes excedentes en el confirm, re-corremos el solver
+    # SIN cota superior de horizonte para que entren todas, y marcamos las forzadas.
+    effective_fecha_hasta = None if (not preview and forzar_set) else fecha_hasta
+
     resultados = await asyncio.to_thread(
         _resolver_planificacion,
         procesos_para_solver,
         operarios,
-        maquinarias
+        maquinarias,
+        fecha_desde,
+        effective_fecha_hasta,
     )
 
-    if preview:
-        return resultados
+    planificados, excedentes = _split_resultados(resultados)
 
-    # Insertar resultados
-    return await repo_planificacion.insertar_planificacion_lote(resultados)
+    if preview:
+        return {"planificados": planificados, "excedentes": excedentes}
+
+    # Marcar como forzado_fuera_rango los procesos cuyas órdenes el usuario decidió forzar
+    for r in planificados:
+        r["forzado_fuera_rango"] = (r["orden_id"] in forzar_set)
+
+    saved = await repo_planificacion.insertar_planificacion_lote(planificados)
+    return {"planificados": saved, "excedentes": excedentes}
 
 async def planificar_pendientes(
         repo_orden,
@@ -1320,9 +1475,11 @@ async def planificar_pendientes(
         repo_planificacion,
         db,
         ordenes_ids: list[int] | None = None,
-        repo_skill: OperarioProcesoSkillRepository | None = None
+        repo_skill: OperarioProcesoSkillRepository | None = None,
+        fecha_desde: date | None = None,
+        fecha_hasta: date | None = None,
     ):
-        logger.info("Service - Planificación de procesos pendientes.")
+        logger.info(f"Service - Planificación de procesos pendientes. rango: desde={fecha_desde} hasta={fecha_hasta}")
         
         if not repo_skill:
             repo_skill = OperarioProcesoSkillRepository(db)
@@ -1383,7 +1540,11 @@ async def planificar_pendientes(
             _resolver_planificacion,
             procesos_para_solver,
             operarios,
-            maquinarias
+            maquinarias,
+            fecha_desde,
+            fecha_hasta,
         )
 
-        return await repo_planificacion.insertar_planificacion_lote(resultados)
+        planificados, excedentes = _split_resultados(resultados)
+        saved = await repo_planificacion.insertar_planificacion_lote(planificados)
+        return {"planificados": saved, "excedentes": excedentes}

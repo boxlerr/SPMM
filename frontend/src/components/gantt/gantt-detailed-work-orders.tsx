@@ -340,6 +340,7 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                                             className={cn(
                                                                                 "absolute h-12 rounded-xl text-xs text-white flex items-center px-3 cursor-grab active:cursor-grabbing hover:scale-[1.02] transition-all shadow-md border border-white/20 overflow-hidden z-10 group/task",
                                                                                 STATUS_GRADIENTS[task.status] || STATUS_GRADIENTS["nuevo"],
+                                                                                task.forzadoFueraRango && "ring-2 ring-amber-400 ring-offset-1 border-dashed border-amber-300",
                                                                                 draggedTask === task.id && "opacity-50 grayscale blur-[1px] scale-95"
                                                                             )}
                                                                             style={{
@@ -355,6 +356,12 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                                         >
                                                                             {/* Glass Shine Effect */}
                                                                             <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover/task:opacity-100 transition-opacity duration-300" />
+
+                                                                            {task.forzadoFueraRango && (
+                                                                                <div className="absolute top-0.5 right-1 z-20 bg-amber-500 text-white text-[8px] font-bold px-1 rounded-sm leading-tight pointer-events-none shadow-sm">
+                                                                                    FZ
+                                                                                </div>
+                                                                            )}
 
                                                                             {/* Content */}
                                                                             <div className="flex flex-col leading-tight pointer-events-none relative z-10 w-full">
@@ -374,6 +381,11 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                                                                                 <span>•</span>
                                                                                 <span className="font-mono">{task.startTime} - {task.endTime}</span>
                                                                             </div>
+                                                                            {task.forzadoFueraRango && (
+                                                                                <p className="text-[11px] text-amber-300 font-semibold mt-1 border-t border-gray-700 pt-1">
+                                                                                    ⚠ Forzado fuera del rango planificado
+                                                                                </p>
+                                                                            )}
                                                                             {task.notes && (
                                                                                 <p className="text-xs text-gray-400 italic mt-1 border-t border-gray-700 pt-1">
                                                                                     "{task.notes}"

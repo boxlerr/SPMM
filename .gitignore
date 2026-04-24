@@ -23,6 +23,10 @@ htmlcov/
 dist/
 build/
 
+# Node
+node_modules/
+**/node_modules/
+
 # Editores y SO
 .vscode/
 .idea/

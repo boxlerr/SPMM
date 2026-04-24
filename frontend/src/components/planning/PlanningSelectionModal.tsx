@@ -6,6 +6,11 @@ import { WorkOrder } from "@/lib/types"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar as CalendarUI } from "@/components/ui/calendar"
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
+import type { DateRange } from "react-day-picker"
+import { API_URL } from "@/config"
 
 import {
     Select,
@@ -15,14 +20,19 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, Search } from "lucide-react"
+import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
+
+export interface PlanningRange {
+    fecha_desde?: string  // "YYYY-MM-DD"
+    fecha_hasta?: string  // "YYYY-MM-DD"
+}
 
 interface PlanningSelectionModalProps {
     isOpen: boolean
     onClose: () => void
     unplannedOrders: WorkOrder[]
-    onPlan: (selectedIds: number[]) => void
+    onPlan: (selectedIds: number[], range: PlanningRange) => void
     isLoading?: boolean
 
     onDataRefresh?: () => void
@@ -59,6 +69,31 @@ export function PlanningSelectionModal({
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState)
     const [dateSort, setDateSort] = useState<'DEFAULT' | 'OLDEST_FIRST' | 'NEWEST_FIRST'>('DEFAULT')
     const [clientSearchTerm, setClientSearchTerm] = useState('')
+
+    // Date range state
+    const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
+    const [blockedDates, setBlockedDates] = useState<Date[]>([])
+    const [datePopoverOpen, setDatePopoverOpen] = useState(false)
+
+    // Fetch blocked dates when modal opens (to display in calendar)
+    useEffect(() => {
+        if (!isOpen) return
+        const getAuthHeaders = (): HeadersInit => {
+            if (typeof window === 'undefined') return {}
+            const token = localStorage.getItem('access_token')
+            return token ? { 'Authorization': `Bearer ${token}` } : {}
+        }
+        fetch(`${API_URL}/config/availability`, { headers: getAuthHeaders() })
+            .then(r => r.ok ? r.json() : { blocked_dates: [] })
+            .then(data => {
+                const dates = (data.blocked_dates || []).map((d: string) => {
+                    const [y, m, day] = d.split('-').map(Number)
+                    return new Date(y, m - 1, day)
+                })
+                setBlockedDates(dates)
+            })
+            .catch(() => { /* silencioso: si falla, solo no se pintan en rojo */ })
+    }, [isOpen])
 
     // Derived lists
     const uniqueClients = Array.from(new Set(unplannedOrders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort()
@@ -123,7 +158,7 @@ export function PlanningSelectionModal({
 
                 {/* Header with Integrated Stats */}
                 <DialogHeader className="px-6 py-4 border-b flex flex-row items-center justify-between shrink-0">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 flex-wrap">
                         <DialogTitle className="text-xl">Planificar Órdenes</DialogTitle>
                         {estimatedTime && (
                             <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-3 py-1 text-sm font-medium">
@@ -144,6 +179,102 @@ export function PlanningSelectionModal({
                                 Deseleccionar todas
                             </Button>
                         )}
+
+                        {/* Date Range Picker */}
+                        <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={cn(
+                                        "h-8 gap-2 font-normal",
+                                        !dateRange?.from && "text-slate-500"
+                                    )}
+                                    title="Definir desde y hasta qué día planificar"
+                                >
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    {dateRange?.from ? (
+                                        dateRange.to ? (
+                                            <span className="text-xs">
+                                                {format(dateRange.from, "d MMM", { locale: es })} – {format(dateRange.to, "d MMM yyyy", { locale: es })}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs">
+                                                Desde {format(dateRange.from, "d MMM yyyy", { locale: es })}
+                                            </span>
+                                        )
+                                    ) : (
+                                        <span className="text-xs">Rango de fechas</span>
+                                    )}
+                                    {dateRange?.from && (
+                                        <span
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                setDateRange(undefined)
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.stopPropagation()
+                                                    setDateRange(undefined)
+                                                }
+                                            }}
+                                            className="ml-1 hover:text-red-600 inline-flex items-center"
+                                            aria-label="Limpiar rango"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </span>
+                                    )}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                                <div className="p-3 border-b text-xs text-slate-600 bg-slate-50">
+                                    Seleccione el rango de días en los que se distribuirán las órdenes.
+                                    Los días <span className="text-red-600 font-medium">no laborables</span> (configurados en Disponibilidad) se omitirán automáticamente.
+                                </div>
+                                <CalendarUI
+                                    mode="range"
+                                    selected={dateRange}
+                                    onSelect={setDateRange}
+                                    numberOfMonths={2}
+                                    locale={es}
+                                    disabled={{ before: new Date() }}
+                                    modifiers={{ blocked: blockedDates }}
+                                    modifiersStyles={{
+                                        blocked: {
+                                            backgroundColor: "#fee2e2",
+                                            color: "#ef4444",
+                                            textDecoration: "line-through"
+                                        }
+                                    }}
+                                />
+                                <div className="flex justify-between items-center p-3 border-t bg-slate-50">
+                                    <span className="text-xs text-slate-500">
+                                        {dateRange?.from && dateRange?.to
+                                            ? `${Math.round((dateRange.to.getTime() - dateRange.from.getTime()) / 86400000) + 1} días`
+                                            : "Sin rango definido"}
+                                    </span>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setDateRange(undefined)}
+                                            className="h-7 text-xs"
+                                        >
+                                            Limpiar
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            onClick={() => setDatePopoverOpen(false)}
+                                            className="h-7 text-xs"
+                                        >
+                                            Listo
+                                        </Button>
+                                    </div>
+                                </div>
+                            </PopoverContent>
+                        </Popover>
                     </div>
                 </DialogHeader>
 
@@ -234,7 +365,11 @@ export function PlanningSelectionModal({
                                 return;
                             }
 
-                            onPlan(selectedIds)
+                            const range: PlanningRange = {
+                                fecha_desde: dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined,
+                                fecha_hasta: dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined,
+                            }
+                            onPlan(selectedIds, range)
                         }}
                         disabled={selectedIds.length === 0 || isLoading}
                         className="bg-blue-600 hover:bg-blue-700 gap-2"

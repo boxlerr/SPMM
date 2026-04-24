@@ -15,11 +15,31 @@ class PlanificacionRepository:
     def __init__(self, db):
         self.db = db  # AsyncSession
 
+    async def _ensure_columns(self):
+        """Self-healing: agrega columnas nuevas si no existen (idempotente en MSSQL)."""
+        ensure_sql = text("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE Name = 'forzado_fuera_rango' AND Object_ID = Object_ID('planificacion')
+            )
+            BEGIN
+                ALTER TABLE planificacion ADD forzado_fuera_rango BIT NOT NULL DEFAULT 0;
+            END
+        """)
+        try:
+            await self.db.execute(ensure_sql)
+            await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.warning(f"Repository - No se pudo asegurar columna forzado_fuera_rango: {e}")
+
     async def insertar_planificacion_lote(self, resultados: list):
         """
         Inserta múltiples registros de planificación dentro de un mismo lote.
         Genera un ID único y una descripción automática del lote.
         """
+
+        await self._ensure_columns()
 
         id_lote = str(uuid.uuid4())
         descripcion_lote = f"Planificación {datetime.now():%B %Y}".capitalize()
@@ -34,13 +54,13 @@ class PlanificacionRepository:
                 orden_id, proceso_id, id_operario, id_rango_operario, id_maquinaria,
                 sin_maquinaria, inicio_min, fin_min, duracion_min, prioridad_peso,
                 fecha_prometida, sin_asignar, nombre_proceso, rangos_permitidos,
-                id_planificacion_lote, descripcion_lote, creado_en
+                id_planificacion_lote, descripcion_lote, creado_en, forzado_fuera_rango
             )
             VALUES (
                 :orden_id, :proceso_id, :id_operario, :id_rango_operario, :id_maquinaria,
                 :sin_maquinaria, :inicio_min, :fin_min, :duracion_min, :prioridad_peso,
                 :fecha_prometida, :sin_asignar, :nombre_proceso, :rangos_permitidos,
-                :id_planificacion_lote, :descripcion_lote, :creado_en
+                :id_planificacion_lote, :descripcion_lote, :creado_en, :forzado_fuera_rango
             )
         """)
 
@@ -55,7 +75,7 @@ class PlanificacionRepository:
                     "sin_maquinaria": r.get("sin_maquinaria", False),
                     "inicio_min": r["inicio_min"],
                     "fin_min": r["fin_min"],
-                    "duracion_min": r["duracion_min"], 
+                    "duracion_min": r["duracion_min"],
                     "prioridad_peso": r["prioridad_peso"],
                     "fecha_prometida": r.get("fecha_prometida"),
                     "sin_asignar": r.get("sin_asignar", False),
@@ -64,6 +84,7 @@ class PlanificacionRepository:
                     "id_planificacion_lote": id_lote,
                     "descripcion_lote": descripcion_lote,
                     "creado_en": datetime.now(),
+                    "forzado_fuera_rango": bool(r.get("forzado_fuera_rango", False)),
                 }
 
                 await self.db.execute(insert_query, params)

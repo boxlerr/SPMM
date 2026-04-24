@@ -49,8 +49,9 @@ interface PlanningPreviewModalProps {
     isOpen: boolean;
     onClose: () => void;
     onBack?: () => void;
-    onConfirm: () => void;
+    onConfirm: (payload?: any) => void;
     results: PlanificacionResult[];
+    excedentes?: PlanificacionResult[];
     operatorLoads?: Record<number, number>; // Current load in minutes
     isConfirming: boolean;
     availableOperators: any[]; // Resource[] or any
@@ -63,6 +64,7 @@ export function PlanningPreviewModal({
     onBack,
     onConfirm,
     results,
+    excedentes = [],
     operatorLoads = {},
     isConfirming,
     availableOperators = [],
@@ -72,6 +74,35 @@ export function PlanningPreviewModal({
     // Local state for edits
     const [editedResults, setEditedResults] = React.useState<Record<string, PlanificacionResult>>({});
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
+    // Decisión por orden excedente: true = forzar (incluir igual), false = descartar (default)
+    const [forzarOrdenIds, setForzarOrdenIds] = React.useState<Set<number>>(new Set());
+
+    // Reiniciar decisiones cuando cambian los excedentes (nueva planificación)
+    React.useEffect(() => {
+        setForzarOrdenIds(new Set());
+    }, [excedentes]);
+
+    const excedentesPorOrden = React.useMemo(() => {
+        const groups: Record<number, PlanificacionResult[]> = {};
+        for (const item of excedentes) {
+            if (!groups[item.orden_id]) groups[item.orden_id] = [];
+            groups[item.orden_id].push(item);
+        }
+        return groups;
+    }, [excedentes]);
+
+    const toggleForzar = (ordenId: number) => {
+        setForzarOrdenIds(prev => {
+            const next = new Set(prev);
+            if (next.has(ordenId)) next.delete(ordenId);
+            else next.add(ordenId);
+            return next;
+        });
+    };
+
+    const handleConfirmWithDecisions = () => {
+        onConfirm({ forzarOrdenIds: Array.from(forzarOrdenIds) });
+    };
 
     const handleConfirmWithEdits = () => {
         // Merge original results with edits
@@ -268,6 +299,65 @@ export function PlanningPreviewModal({
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         <ScrollArea className="flex-1">
                             <div className="min-w-[1000px] p-0">
+                                {excedentes.length > 0 && (
+                                    <div className="m-4 border border-amber-300 bg-amber-50 rounded-lg overflow-hidden">
+                                        <div className="px-4 py-3 bg-amber-100/70 border-b border-amber-200 flex items-center gap-2">
+                                            <AlertTriangle className="w-5 h-5 text-amber-700" />
+                                            <div>
+                                                <div className="font-semibold text-amber-900">
+                                                    {Object.keys(excedentesPorOrden).length} órden(es) no entran en el rango seleccionado
+                                                </div>
+                                                <div className="text-xs text-amber-700">
+                                                    Decidí qué hacer con cada una. Por defecto se descartan (quedan disponibles para una próxima planificación).
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="divide-y divide-amber-200">
+                                            {Object.entries(excedentesPorOrden).map(([oidStr, items]) => {
+                                                const oid = parseInt(oidStr);
+                                                const first = items[0];
+                                                const forzar = forzarOrdenIds.has(oid);
+                                                return (
+                                                    <div key={oid} className="px-4 py-3 flex items-center justify-between gap-4 bg-white/60">
+                                                        <div className="flex flex-col min-w-0">
+                                                            <div className="text-sm font-medium text-gray-800 truncate">
+                                                                #{oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
+                                                            </div>
+                                                            <div className="text-xs text-gray-500 mt-0.5">
+                                                                {items.length} proceso(s) excedente(s)
+                                                                {first.fecha_prometida && ` · Prometida ${formatDate(first.fecha_prometida)}`}
+                                                                <span className="ml-2">
+                                                                    <Badge variant="outline" className="border-gray-300 text-gray-700 text-[10px]">
+                                                                        {getPriorityLabel(first.id_prioridad, first.prioridad_descripcion)}
+                                                                    </Badge>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex gap-2 shrink-0">
+                                                            <Button
+                                                                size="sm"
+                                                                variant={forzar ? "outline" : "default"}
+                                                                className={!forzar ? "bg-gray-700 hover:bg-gray-800 text-white" : "border-gray-300 text-gray-700"}
+                                                                onClick={() => { if (forzar) toggleForzar(oid); }}
+                                                            >
+                                                                Descartar
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant={forzar ? "default" : "outline"}
+                                                                className={forzar ? "bg-amber-600 hover:bg-amber-700 text-white" : "border-amber-400 text-amber-800 hover:bg-amber-100"}
+                                                                onClick={() => { if (!forzar) toggleForzar(oid); }}
+                                                            >
+                                                                Forzar
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <table className="w-full text-sm text-left border-collapse">
                                     <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm">
                                         <tr>
@@ -554,7 +644,7 @@ export function PlanningPreviewModal({
                     <Button variant="outline" onClick={onBack} disabled={isConfirming} className="border-gray-300 text-gray-700 hover:bg-gray-50">
                         Volver
                     </Button>
-                    <Button onClick={handleConfirmWithEdits} disabled={isConfirming || results.length === 0} className="bg-blue-600 hover:bg-blue-700 shadow-md px-6">
+                    <Button onClick={handleConfirmWithDecisions} disabled={isConfirming || (results.length === 0 && excedentes.length === 0)} className="bg-blue-600 hover:bg-blue-700 shadow-md px-6">
                         {isConfirming ? (
                             <span className="flex items-center gap-2">
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

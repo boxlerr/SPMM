@@ -25,3 +25,4 @@ class Planificacion(Base):
     creado_en = Column(DateTime, default=datetime.datetime.utcnow)
     id_planificacion_lote = Column(UNIQUEIDENTIFIER, default=uuid.uuid4)
     descripcion_lote = Column(NVARCHAR(255))
+    forzado_fuera_rango = Column(Boolean, default=False)

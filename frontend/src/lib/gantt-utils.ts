@@ -186,6 +186,7 @@ export function convertPlanificacionToGanttTasks(
       isDelayed: false,
       allowedRanges: item.rangos_permitidos || [],
       client: item.cliente,
+      forzadoFueraRango: !!item.forzado_fuera_rango,
     };
 
     return task;

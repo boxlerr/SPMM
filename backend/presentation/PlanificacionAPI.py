@@ -32,6 +32,9 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     ordenes_ids = body.ordenes_ids if body else None
     preview_mode = body.preview if body else False
     manual_plan = body.plan if body else None
+    fecha_desde = body.fecha_desde if body else None
+    fecha_hasta = body.fecha_hasta if body else None
+    forzar_ordenes_ids = body.forzar_ordenes_ids if body else None
 
     try:
         resultados = await planificar(
@@ -40,9 +43,12 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             repo_maquinaria,
             repo_planificacion,
             db,
-            ordenes_ids, 
+            ordenes_ids,
             preview=preview_mode,
-            plan=manual_plan
+            plan=manual_plan,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+            forzar_ordenes_ids=forzar_ordenes_ids,
         )
         return resultados
     except PlanificacionException as e:
@@ -64,6 +70,8 @@ async def planificar_pendientes_endpoint(
     repo_planificacion = PlanificacionRepository(db)
 
     ordenes_ids = body.ordenes_ids if body else None
+    fecha_desde = body.fecha_desde if body else None
+    fecha_hasta = body.fecha_hasta if body else None
 
     try:
         return await planificar_pendientes(
@@ -72,7 +80,9 @@ async def planificar_pendientes_endpoint(
             repo_maquinaria,
             repo_planificacion,
             db,
-            ordenes_ids
+            ordenes_ids,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
         )
     except PlanificacionException as e:
         logger.error(f"Error de Planificación (pendientes): {str(e)}")

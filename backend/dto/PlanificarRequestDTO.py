@@ -1,8 +1,19 @@
 # backend/dto/PlanificarRequestDTO.py
-from pydantic import BaseModel
+from datetime import date
+from pydantic import BaseModel, model_validator
 from typing import List, Optional
 
 class PlanificarRequestDTO(BaseModel):
     ordenes_ids: Optional[List[int]] = None
     preview: Optional[bool] = False
     plan: Optional[List[dict]] = None
+    fecha_desde: Optional[date] = None
+    fecha_hasta: Optional[date] = None
+    # Órdenes que el usuario decide forzar dentro del horizonte aunque no entren (paso 7)
+    forzar_ordenes_ids: Optional[List[int]] = None
+
+    @model_validator(mode="after")
+    def _validar_rango(self):
+        if self.fecha_desde and self.fecha_hasta and self.fecha_hasta < self.fecha_desde:
+            raise ValueError("fecha_hasta no puede ser anterior a fecha_desde")
+        return self

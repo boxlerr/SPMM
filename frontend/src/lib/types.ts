@@ -31,6 +31,7 @@ export interface GanttTask {
     originalFinMin?: number;
     dbId?: number;
     allowedRanges?: number[];
+    forzadoFueraRango?: boolean;
 }
 
 export interface Resource {
@@ -162,4 +163,5 @@ export interface PlanificacionItem {
     fecha_inicio_estimada?: string;
     fecha_fin_estimada?: string;
     secuencia?: number;
+    forzado_fuera_rango?: boolean;
 }
