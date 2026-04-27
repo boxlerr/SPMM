@@ -67,3 +67,5 @@ El backend expone `GET /health` que retorna:
 }
 ```
 Este endpoint tiene `Cache-Control: no-store` para asegurar que la petición llegue siempre al servidor.
+
+update planificar fechas que queiras
