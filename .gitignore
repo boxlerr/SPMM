@@ -36,3 +36,6 @@ Thumbs.db
 
 .agents
 .agent/
+
+# MCP config (contiene credenciales)
+.mcp.json

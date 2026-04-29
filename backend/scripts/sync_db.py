@@ -115,6 +115,7 @@ WITH src AS (
       fecha_prometida  = v.fechaprometida,
       fecha_entrega    = CASE WHEN v.fechaentrega = '1950-01-01' THEN NULL ELSE v.fechaentrega END,
       unidades          = v.cantidad,
+      cantidad_entregada = ISNULL(v.cantidadE, 0),
       reclamo           = ISNULL(v.reclamo, 0),
       revisada          = ISNULL(v.revisada, 0),
       finalizadoparcial = ISNULL(v.finalizadoparcial, 0),
@@ -144,7 +145,6 @@ WITH src AS (
     LEFT JOIN dbo.articulo  a ON a.cod_articulo= LTRIM(RTRIM(v.idarticulo))
     LEFT JOIN dbo.cliente   c ON c.id_viejo    = v.idcliente
     WHERE v.fecha >= :fecha_desde
-      AND (:incluir_terminadas = 1 OR (v.fechaentrega = '1950-01-01' AND v.finalizadototal = 0 AND v.finalizadoparcial = 0 AND v.ttotal = 0 AND v.remitido = 0))
 )
 MERGE dbo.orden_trabajo AS tgt
 USING src ON tgt.id_otvieja = src.id_otvieja
@@ -159,6 +159,7 @@ WHEN MATCHED AND (
     OR ISNULL(tgt.fecha_prometida,'1900-01-01') <> ISNULL(src.fecha_prometida,'1900-01-01')
     OR ISNULL(tgt.fecha_entrega,'1900-01-01')   <> ISNULL(src.fecha_entrega,'1900-01-01')
     OR ISNULL(tgt.unidades,0)         <> ISNULL(src.unidades,0)
+    OR ISNULL(tgt.cantidad_entregada,0) <> ISNULL(src.cantidad_entregada,0)
     OR ISNULL(tgt.reclamo,0)           <> ISNULL(src.reclamo,0)
     OR ISNULL(tgt.revisada,0)          <> ISNULL(src.revisada,0)
     OR ISNULL(tgt.finalizadoparcial,0) <> ISNULL(src.finalizadoparcial,0)
@@ -194,6 +195,7 @@ THEN UPDATE SET
       tgt.fecha_prometida = src.fecha_prometida,
       tgt.fecha_entrega   = src.fecha_entrega,
       tgt.unidades        = src.unidades,
+      tgt.cantidad_entregada = src.cantidad_entregada,
       tgt.reclamo           = src.reclamo,
       tgt.revisada          = src.revisada,
       tgt.finalizadoparcial = src.finalizadoparcial,
@@ -218,8 +220,8 @@ THEN UPDATE SET
       tgt.tercerizado_total = src.tercerizado_total,
       tgt.tercerizado_parcial = src.tercerizado_parcial
 WHEN NOT MATCHED THEN
-    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, id_cliente, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial)
-    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.id_cliente, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial);
+    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, id_cliente, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, cantidad_entregada, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial)
+    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.id_cliente, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.cantidad_entregada, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial);
 """
 
 QUERY_SYNC_PROCESO_CATALOG = """
@@ -303,12 +305,44 @@ MERGE dbo.pieza AS T
 USING (
     SELECT
         LTRIM(RTRIM(mp.idpieza)) AS cod_pieza,
+        MAX(ISNULL(mp.descripcion, '')) AS descripcion,
+        CAST(MAX(ISNULL(mp.costo, 0)) AS DECIMAL(18,2)) AS unitario,
+        MAX(ISNULL(NULLIF(LTRIM(RTRIM(mp.un)), ''), 'UN')) AS unidad,
         CAST(MAX(ISNULL(mp.cantstk, 0)) AS DECIMAL(18,2)) AS stockactual
     FROM metalurgica_db.dbo.otrabajoMprimas mp
+    WHERE mp.idpieza IS NOT NULL AND LTRIM(RTRIM(mp.idpieza)) <> ''
     GROUP BY LTRIM(RTRIM(mp.idpieza))
 ) AS S ON T.cod_pieza = S.cod_pieza
 WHEN MATCHED AND ISNULL(T.stockactual, 0) <> ISNULL(S.stockactual, 0)
-THEN UPDATE SET T.stockactual = S.stockactual;
+THEN UPDATE SET T.stockactual = S.stockactual
+WHEN NOT MATCHED THEN
+    INSERT (cod_pieza, descripcion, unitario, unidad, stockactual)
+    VALUES (S.cod_pieza, S.descripcion, S.unitario, S.unidad, S.stockactual);
+"""
+
+# --- Marca como finalizadas las OTs en SMPP que ya no son "pendientes" en legacy.
+# Usa la regla estricta del sistema viejo: una OT es pendiente sólo si
+# finalizadototal=0 AND suspendida=0 AND remitido=0 AND cantidad>0
+# AND cantidad>cantidadE AND cantidad>cantidadfinalizado
+# Si una OT en SMPP no cumple estas condiciones en el legacy, la marcamos finalizada
+# (no se borra para preservar planificación, piezas y procesos asociados).
+QUERY_FINALIZE_ZOMBIES = """
+UPDATE tgt
+SET tgt.finalizadototal = 1
+FROM dbo.orden_trabajo tgt
+LEFT JOIN metalurgica_db.dbo.otrabajo v ON v.idot = tgt.id_otvieja
+WHERE tgt.id_otvieja IS NOT NULL
+  AND ISNULL(tgt.finalizadototal, 0) = 0
+  AND (
+    v.idot IS NULL
+    OR ISNULL(v.finalizadototal, 0) = 1
+    OR ISNULL(v.suspendida, 0) = 1
+    OR ISNULL(v.remitido, 0) = 1
+    OR v.fechaentrega <> '1950-01-01'
+    OR ISNULL(v.cantidad, 0) <= 0
+    OR v.cantidad <= ISNULL(v.cantidadE, 0)
+    OR v.cantidad <= ISNULL(v.cantidadfinalizado, 0)
+  );
 """
 
 async def run_sync():
@@ -328,26 +362,33 @@ async def run_sync():
             logger.info("Actualizando catálogo de artículos...")
             await session.execute(text(QUERY_SYNC_ARTICULOS_CATALOG))
             
-            # 3. Sincronizar OTs (Desde 2025 por defecto, o personalizable)
+            # 3. Sincronizar OTs (TODAS las del rango, finalizadas y pendientes,
+            #    para que los flags se actualicen correctamente).
             fecha_desde = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-01')
             logger.info(f"Sincronizando Ordenes de Trabajo desde {fecha_desde}...")
-            await session.execute(text(QUERY_SYNC_OTS), {"fecha_desde": fecha_desde, "incluir_terminadas": 0})
-            
-            # 4. Sincronizar Catálogo de Procesos
+            await session.execute(text(QUERY_SYNC_OTS), {"fecha_desde": fecha_desde})
+
+            # 4. Marcar como finalizadas las OTs zombies (las que en legacy
+            #    ya no son pendientes pero quedaron activas en SMPP).
+            logger.info("Marcando zombies (OTs ya entregadas/suspendidas/remitidas en legacy)...")
+            await session.execute(text(QUERY_FINALIZE_ZOMBIES))
+
+            # 5. Sincronizar Catálogo de Procesos
             logger.info("Actualizando catálogo de procesos...")
             await session.execute(text(QUERY_SYNC_PROCESO_CATALOG))
-            
-            # 5. Sincronizar Procesos por OT
+
+            # 6. Sincronizar Procesos por OT
             logger.info("Sincronizando procesos por OT...")
             await session.execute(text(QUERY_SYNC_OT_PROCESOS))
-            
-            # 6. Sincronizar Materias Primas por OT
+
+            # 7. Actualizar / insertar catálogo de Piezas (debe correr ANTES de las MPs por OT,
+            #    para que los inserts de orden_trabajo_pieza puedan resolver el id_pieza).
+            logger.info("Actualizando catálogo y stock de piezas...")
+            await session.execute(text(QUERY_MERGE_PIEZA))
+
+            # 8. Sincronizar Materias Primas por OT
             logger.info("Sincronizando materias primas por OT...")
             await session.execute(text(QUERY_SYNC_MATERIA_PRIMA))
-            
-            # 7. Actualizar Stock de Piezas
-            logger.info("Actualizando stock actual de piezas...")
-            await session.execute(text(QUERY_MERGE_PIEZA))
             
             await session.commit()
             logger.info("Sincronización completada exitosamente.")
