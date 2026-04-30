@@ -331,11 +331,13 @@ WHEN NOT MATCHED THEN
 """
 
 # --- Marca como finalizadas las OTs en SMPP que ya no son "pendientes" en legacy.
-# Usa la regla estricta del sistema viejo: una OT es pendiente sólo si
-# finalizadototal=0 AND suspendida=0 AND remitido=0 AND cantidad>0
-# AND cantidad>cantidadE AND cantidad>cantidadfinalizado
-# Si una OT en SMPP no cumple estas condiciones en el legacy, la marcamos finalizada
-# (no se borra para preservar planificación, piezas y procesos asociados).
+# Usa exactamente la NEGACION de la regla estricta del sistema viejo:
+#   pendiente <=> finalizadototal=0 AND suspendida=0 AND remitido=0
+#                 AND cantidad>0 AND cantidad>cantidadE AND cantidad>cantidadfinalizado
+# OJO: NO se usa `fechaentrega <> '1950-01-01'` como criterio de zombie. En legacy ese
+# campo se carga con la fecha *proyectada* de entrega y puede tener valor incluso si la
+# OT sigue activa (caso real: idot=14445, cantidad=2, cantidadE=1, finalizadototal=0,
+# fechaentrega=2026-01-23 → es pendiente, no zombie).
 QUERY_FINALIZE_ZOMBIES = """
 UPDATE tgt
 SET tgt.finalizadototal = 1
@@ -348,7 +350,6 @@ WHERE tgt.id_otvieja IS NOT NULL
     OR ISNULL(v.finalizadototal, 0) = 1
     OR ISNULL(v.suspendida, 0) = 1
     OR ISNULL(v.remitido, 0) = 1
-    OR v.fechaentrega <> '1950-01-01'
     OR ISNULL(v.cantidad, 0) <= 0
     OR v.cantidad <= ISNULL(v.cantidadE, 0)
     OR v.cantidad <= ISNULL(v.cantidadfinalizado, 0)

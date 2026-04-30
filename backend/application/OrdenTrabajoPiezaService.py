@@ -62,7 +62,12 @@ class OrdenTrabajoPiezaService:
         logger.info("Service - Listar OrdenTrabajoPiezas.")
         data = await self.repository.find_all()
         return ResponseDTO(status=True, data=jsonable_encoder(data))
-    
+
+    async def listarPorOrdenTrabajo(self, id_orden_trabajo: int):
+        logger.info(f"Service - Listar OrdenTrabajoPiezas por OT {id_orden_trabajo}.")
+        data = await self.repository.find_by_id_orden_trabajo(id_orden_trabajo)
+        return ResponseDTO(status=True, data=jsonable_encoder(data))
+
     async def obtenerOrdenTrabajoPiezaPorId(self, id: int):
         logger.info(f"Service - Obtener OrdenTrabajoPieza ID: {id}")
         data = await self.repository.find_by_id(id)

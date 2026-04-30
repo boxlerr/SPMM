@@ -34,7 +34,6 @@ WHERE tgt.id_otvieja IS NOT NULL
     OR ISNULL(v.finalizadototal, 0) = 1
     OR ISNULL(v.suspendida, 0)      = 1
     OR ISNULL(v.remitido, 0)        = 1
-    OR v.fechaentrega <> '1950-01-01'
     OR ISNULL(v.cantidad, 0) <= 0
     OR v.cantidad <= ISNULL(v.cantidadE, 0)
     OR v.cantidad <= ISNULL(v.cantidadfinalizado, 0)
@@ -53,8 +52,7 @@ WHERE tgt.id_otvieja IS NOT NULL
 --     OR ISNULL(v.finalizadototal, 0) = 1
 --     OR ISNULL(v.suspendida, 0)      = 1
 --     OR ISNULL(v.remitido, 0)        = 1
---     OR v.fechaentrega <> '1950-01-01'
---     OR ISNULL(v.cantidad, 0) <= 0
+-- --     OR ISNULL(v.cantidad, 0) <= 0
 --     OR v.cantidad <= ISNULL(v.cantidadE, 0)
 --     OR v.cantidad <= ISNULL(v.cantidadfinalizado, 0)
 --   );

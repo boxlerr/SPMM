@@ -804,6 +804,7 @@ function _PlanningListTable({
                                     )}
                                 </th>
                                 <th className="w-10 px-4 py-3"></th>
+                                <th className="w-12 px-3 py-3 font-bold text-gray-500 text-center" title="Número de fila">#</th>
                                 <th
                                     className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('id_otvieja')}
@@ -919,13 +920,13 @@ function _PlanningListTable({
                         <tbody>
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
-                                    <td colSpan={16} className="px-3 py-8 text-center text-gray-500">
+                                    <td colSpan={17} className="px-3 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
 
                             ) : (
-                                sortedData.map((item) => (
+                                sortedData.map((item, index) => (
                                     <React.Fragment key={item.id}>
                                         <tr
                                             onClick={() => onRowClick(item)}
@@ -957,6 +958,7 @@ function _PlanningListTable({
                                                     )}
                                                 </button>
                                             </td>
+                                            <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
                                             <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
                                             <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrada', item.fecha_entrada); }}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrada' ? (
@@ -1162,7 +1164,7 @@ function _PlanningListTable({
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={16} className="px-4 py-4">
+                                                <td colSpan={17} className="px-4 py-4">
                                                     {renderDetails(item)}
                                                 </td>
                                             </tr>

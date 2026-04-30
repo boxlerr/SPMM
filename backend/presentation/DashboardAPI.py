@@ -18,86 +18,74 @@ async def get_db():
 
 @router.get("/estadisticas")
 async def get_estadisticas(db=Depends(get_db)):
-    """Obtiene estadísticas generales de órdenes de trabajo"""
+    """Obtiene estadísticas generales de órdenes de trabajo.
+
+    Reglas de los 4 buckets (mutuamente excluyentes y exhaustivos):
+      - Completadas:  finalizadototal = 1
+      - En Curso:     finalizadototal != 1 AND existe algún proceso con id_estado > 1
+      - Retrasadas:   finalizadototal != 1 AND sin proceso iniciado AND fecha_prometida < HOY
+      - Pendientes:   finalizadototal != 1 AND sin proceso iniciado AND (fecha_prometida >= HOY o sin fecha)
+
+    El total real de OTs en SMPP debe coincidir con la suma de los 4 buckets.
+    Para evitar inconsistencias en el dashboard se calcula todo en una sola query
+    con SUM(CASE WHEN ...) — más rápido y atómico que 4 queries separadas, y
+    no depende de INNER JOIN con catálogos (articulo / sector / prioridad).
+    """
     try:
-        # Total de órdenes
-        total_ordenes = await db.execute(text("SELECT COUNT(*) FROM orden_trabajo"))
-        total_ordenes = total_ordenes.scalar()
-        
-        # Completadas: finalizadototal = 1
-        completadas = await db.execute(text("SELECT COUNT(*) FROM orden_trabajo WHERE finalizadototal = 1"))
-        completadas = completadas.scalar()
-        
-        # Retrasadas: finalizadototal != 1, fecha_prometida < hoy, Y NO tienen procesos iniciados
-        retrasadas = await db.execute(text("""
-            SELECT COUNT(ot.id) 
+        query = text("""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN ISNULL(ot.finalizadototal, 0) = 1 THEN 1 ELSE 0 END) AS completadas,
+                SUM(CASE
+                        WHEN ISNULL(ot.finalizadototal, 0) = 0
+                         AND EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
+                                     WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
+                        THEN 1 ELSE 0 END) AS en_proceso,
+                SUM(CASE
+                        WHEN ISNULL(ot.finalizadototal, 0) = 0
+                         AND NOT EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
+                                         WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
+                         AND ot.fecha_prometida IS NOT NULL
+                         AND ot.fecha_prometida > '1950-01-01'
+                         AND ot.fecha_prometida < CAST(GETDATE() AS DATE)
+                        THEN 1 ELSE 0 END) AS retrasadas,
+                SUM(CASE
+                        WHEN ISNULL(ot.finalizadototal, 0) = 0
+                         AND NOT EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
+                                         WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
+                         AND (ot.fecha_prometida IS NULL
+                              OR ot.fecha_prometida <= '1950-01-01'
+                              OR ot.fecha_prometida >= CAST(GETDATE() AS DATE))
+                        THEN 1 ELSE 0 END) AS pendientes,
+                SUM(CASE WHEN ot.fecha_orden >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS creadas_hoy
             FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN sector s ON ot.id_sector = s.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-            AND ot.fecha_prometida < GETDATE()
-            AND ot.fecha_prometida > '1950-01-01'
-            AND ot.fecha_prometida IS NOT NULL
-            AND NOT EXISTS (
-                SELECT 1 FROM orden_trabajo_proceso otp 
-                WHERE otp.id_orden_trabajo = ot.id 
-                AND otp.id_estado > 1
-            )
-        """))
-        retrasadas = retrasadas.scalar()
-        
-        # En Proceso (En Curso): finalizadototal != 1, tiene procesos iniciados (estado > 1)
-        # NOTA: Incluye órdenes retrasadas si ya iniciaron
-        en_proceso = await db.execute(text("""
-            SELECT COUNT(ot.id) 
-            FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN sector s ON ot.id_sector = s.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-            AND EXISTS (
-                SELECT 1 FROM orden_trabajo_proceso otp 
-                WHERE otp.id_orden_trabajo = ot.id 
-                AND otp.id_estado > 1
-            )
-        """))
-        en_proceso = en_proceso.scalar()
-        
-        # Pendientes: finalizadototal != 1, fecha_prometida >= HOY, NO tiene procesos iniciados
-        pendientes = await db.execute(text("""
-            SELECT COUNT(ot.id) 
-            FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN sector s ON ot.id_sector = s.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-            AND (ot.fecha_prometida >= GETDATE() OR ot.fecha_prometida IS NULL OR ot.fecha_prometida <= '1950-01-01')
-            AND NOT EXISTS (
-                SELECT 1 FROM orden_trabajo_proceso otp 
-                WHERE otp.id_orden_trabajo = ot.id 
-                AND otp.id_estado > 1
-            )
-        """))
-        pendientes = pendientes.scalar()
-        
-        # Calcular porcentajes
-        # Usamos la suma de las partes para asegurar que los porcentajes sumen 100%
-        # y sean consistentes con lo que se muestra en el dashboard
-        total = completadas + en_proceso + pendientes + retrasadas
-        total = max(total, 1)
-        
+        """)
+        result = await db.execute(query)
+        row = result.mappings().first() or {}
+
+        total = int(row.get("total") or 0)
+        completadas = int(row.get("completadas") or 0)
+        en_proceso = int(row.get("en_proceso") or 0)
+        retrasadas = int(row.get("retrasadas") or 0)
+        pendientes = int(row.get("pendientes") or 0)
+        creadas_hoy = int(row.get("creadas_hoy") or 0)
+
+        # Los porcentajes se calculan sobre el total real (los 4 buckets ya cubren todo).
+        denom = max(total, 1)
+
         data = {
+            "total": total,
             "completadas": completadas,
             "en_proceso": en_proceso,
             "pendientes": pendientes,
             "retrasadas": retrasadas,
-            "porcentaje_completadas": round((completadas / total) * 100, 1),
-            "porcentaje_en_proceso": round((en_proceso / total) * 100, 1),
-            "porcentaje_pendientes": round((pendientes / total) * 100, 1),
-            "porcentaje_retrasadas": round((retrasadas / total) * 100, 1),
+            "creadas_hoy": creadas_hoy,
+            "porcentaje_completadas": round((completadas / denom) * 100, 1),
+            "porcentaje_en_proceso": round((en_proceso / denom) * 100, 1),
+            "porcentaje_pendientes": round((pendientes / denom) * 100, 1),
+            "porcentaje_retrasadas": round((retrasadas / denom) * 100, 1),
         }
-        
+
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en estadisticas: {e}")
@@ -252,7 +240,7 @@ async def get_top_articulos(db=Depends(get_db)):
             SELECT TOP 5 a.descripcion as articulo, SUM(ot.unidades) as cantidad
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
-            WHERE ot.fecha_entrega IS NOT NULL AND ot.fecha_entrega > '1950-01-01'
+            WHERE ISNULL(ot.finalizadototal, 0) = 1
             GROUP BY a.descripcion
             ORDER BY cantidad DESC
         """)
@@ -283,7 +271,7 @@ async def get_tiempo_promedio(db=Depends(get_db)):
                 SELECT ot.id, SUM(ISNULL(otp.tiempo_proceso, 0)) as tiempo_total
                 FROM orden_trabajo ot
                 LEFT JOIN orden_trabajo_proceso otp ON ot.id = otp.id_orden_trabajo
-                WHERE ot.fecha_entrega IS NOT NULL AND ot.fecha_entrega > '1950-01-01'
+                WHERE ISNULL(ot.finalizadototal, 0) = 1
                 GROUP BY ot.id
             ) AS tiempos_por_orden
             WHERE tiempo_total > 0

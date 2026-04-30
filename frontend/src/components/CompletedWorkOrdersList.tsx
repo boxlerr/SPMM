@@ -265,6 +265,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                                     <tr>
                                         <th className="w-10 px-3 py-3"></th>
+                                        <th className="w-12 px-3 py-3 font-bold text-gray-500 text-center" title="Número de fila">#</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id_otvieja')}>
                                             <div className="flex items-center">OT<SortIcon column="id_otvieja" /></div>
                                         </th>
@@ -297,12 +298,12 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                 <tbody>
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={15} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={16} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes completadas."}
                                             </td>
                                         </tr>
                                     ) : (
-                                        sortedOrders.map((order) => (
+                                        sortedOrders.map((order, index) => (
                                             <React.Fragment key={order.id}>
                                                 <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
                                                     <td className="px-4 py-3">
@@ -317,6 +318,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                             )}
                                                         </button>
                                                     </td>
+                                                    <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
                                                     <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
                                                     <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
                                                     <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
@@ -352,7 +354,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={15} className="px-4 py-4">
+                                                        <td colSpan={16} className="px-4 py-4">
                                                             <div className="space-y-3">
                                                                 <div className="text-xs text-gray-600">
                                                                     <span className="font-bold text-gray-800">Observaciones: </span>

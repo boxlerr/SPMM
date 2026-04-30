@@ -236,6 +236,30 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     })
                     .catch(err => console.error("Error fetching files:", err));
 
+                // Fetch existing materias primas (orden_trabajo_pieza JOIN pieza)
+                fetch(`${API_URL}/ordenes-trabajo-piezas?id_orden_trabajo=${orderToEdit.id}`, { headers: getAuthHeaders() })
+                    .then(async (res) => {
+                        if (!res.ok) return;
+                        const data = await res.json();
+                        if (!data.status || !Array.isArray(data.data)) return;
+                        const mapped: MateriaPrimaItem[] = data.data.map((p: any) => ({
+                            id: p.id?.toString() || Math.random().toString(36).substr(2, 9),
+                            codigo: p.cod_pieza || "",
+                            descripcion: p.descripcion || "",
+                            cantidad: p.cantidad?.toString() || "0",
+                            unidad: p.unidad || "",
+                            disponible: p.disponible?.toString() || "0",
+                            en_produccion: "",
+                            observaciones: "",
+                            precio: p.unitario?.toString() || "0",
+                            c_usado: p.cantusada?.toString() || "0",
+                            utilizado: false,
+                            cortes: "",
+                        }));
+                        setMateriasPrimas(mapped);
+                    })
+                    .catch(err => console.error("Error fetching materias primas:", err));
+
             } else {
                 // Reset if new
                 resetForm();
@@ -344,11 +368,19 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     };
 
     const validateForm = () => {
+        // OTs sincronizadas desde legacy: solo validamos fecha_prometida, lo demás está bloqueado.
+        const legacyOT = !!orderToEdit?.id_otvieja;
+        if (legacyOT) {
+            if (!generalData.fecha_prometida) {
+                toast.error("La fecha prometida es obligatoria");
+                setActiveTab("general");
+                return false;
+            }
+            return true;
+        }
+
         if (!generalData.cliente_id || !generalData.descripcion || !generalData.prioridad_id || !generalData.articulo_id) {
             toast.error("Por favor completa los campos obligatorios en la pestaña General");
-            // If we are not in General tab, maybe switch to it? 
-            // The user wants free navigation, so we just alert.
-            // Optionally we can switch activeTab to "general" to show the user where the error is.
             setActiveTab("general");
             return false;
         }
@@ -378,6 +410,9 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         if (activeTab === "procesos") setActiveTab("materias");
         else if (activeTab === "materias") setActiveTab("general");
     }
+
+    // OT proveniente del sistema legacy: solo se puede editar fecha_prometida.
+    const isLegacyOT = !!orderToEdit?.id_otvieja;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -618,6 +653,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     </DialogHeader>
 
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+                        {isLegacyOT && (
+                            <div className="mx-6 mt-4 px-4 py-3 bg-amber-50 border border-amber-300 rounded-lg flex items-start gap-3">
+                                <div className="text-amber-600 text-lg leading-none mt-0.5">⚠️</div>
+                                <div className="flex-1 text-sm">
+                                    <div className="font-semibold text-amber-900">OT del sistema viejo</div>
+                                    <div className="text-amber-800">Esta orden se sincroniza desde el sistema legacy. Solo se puede modificar la <b>fecha prometida</b>; el resto se actualiza automáticamente desde la base original.</div>
+                                </div>
+                            </div>
+                        )}
                         <div className="flex-1 overflow-y-auto p-6 relative">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                                 <TabsList className="grid w-full grid-cols-3 mb-8 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
@@ -647,32 +691,32 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         
                                         <div className="space-y-1.5">
                                             <Label htmlFor="id_otvieja" className="text-[11px] font-bold text-blue-600 uppercase">Nº OT Vieja</Label>
-                                            <Input id="id_otvieja" value={generalData.id_otvieja} onChange={(e) => setGeneralData({ ...generalData, id_otvieja: e.target.value })} className="h-8 text-sm border-blue-200 focus:ring-blue-500 font-mono font-bold" placeholder="No especificado" />
+                                            <Input id="id_otvieja" disabled={isLegacyOT} value={generalData.id_otvieja} onChange={(e) => setGeneralData({ ...generalData, id_otvieja: e.target.value })} className="h-8 text-sm border-blue-200 focus:ring-blue-500 font-mono font-bold" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="n_pedido" className="text-[11px] font-bold text-gray-500 uppercase">N° Pedido</Label>
-                                            <Input id="n_pedido" value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="n_pedido" disabled={isLegacyOT} value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="n_ped_l" className="text-[11px] font-bold text-gray-500 uppercase">N° Ped L</Label>
-                                            <Input id="n_ped_l" value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="n_ped_l" disabled={isLegacyOT} value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="prioridad" className="text-[11px] font-bold text-gray-400 uppercase">Prioridad <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
 
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="cliente" className="text-[11px] font-bold text-gray-400 uppercase">Cliente <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="sector" className="text-[11px] font-bold text-gray-400 uppercase">Sector <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="subsector" className="text-[11px] font-bold text-gray-400 uppercase">SubSector</Label>
-                                            <Input id="subsector" value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="subsector" disabled={isLegacyOT} value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
                                         {/* Section: Logistics & Quantities */}
@@ -684,25 +728,25 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                         <div className="space-y-1.5">
                                             <Label htmlFor="cantidad" className="text-[11px] font-bold text-gray-400 uppercase">Cant Fabricar</Label>
-                                            <Input id="cantidad" type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-8 text-sm font-bold text-blue-700" />
+                                            <Input id="cantidad" disabled={isLegacyOT} type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-8 text-sm font-bold text-blue-700" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="cantidad_entregada" className="text-[11px] font-bold text-gray-400 uppercase">Cant Entregada</Label>
-                                            <Input id="cantidad_entregada" type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="cantidad_entregada" disabled={isLegacyOT} type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="requerido_por" className="text-[11px] font-bold text-gray-400 uppercase">Requerido por</Label>
-                                            <Input id="requerido_por" value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="requerido_por" disabled={isLegacyOT} value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="aprobado_por" className="text-[11px] font-bold text-gray-400 uppercase">Aprobado por</Label>
-                                            <Input id="aprobado_por" value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="aprobado_por" disabled={isLegacyOT} value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
                                         {/* Product Full Width */}
                                         <div className="md:col-span-4 space-y-1.5">
                                             <Label htmlFor="articulo" className="text-[11px] font-bold text-gray-400 uppercase">Producto / Artículo <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="No especificado" className="h-8" />
                                         </div>
 
                                         {/* Section: Dates */}
@@ -714,76 +758,76 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_orden" className="text-[11px] font-bold text-gray-400 uppercase">Fecha Orden</Label>
-                                            <Input id="fecha_orden" type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="fecha_orden" disabled={isLegacyOT} type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_entrada" className="text-[11px] font-bold text-gray-400 uppercase">Fecha Entrada</Label>
-                                            <Input id="fecha_entrada" type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="fecha_entrada" disabled={isLegacyOT} type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_prometida" className="text-[11px] font-bold text-blue-600 uppercase font-black">F. Prometida</Label>
-                                            <Input id="fecha_prometida" type="date" value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className="h-8 text-sm border-blue-200" />
+                                            <Input id="fecha_prometida" type="date" value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className={cn("h-8 text-sm border-blue-200", isLegacyOT && "ring-2 ring-blue-300 ring-offset-1 bg-blue-50/40")} />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_entrega" className="text-[11px] font-bold text-gray-400 uppercase">F. Entrega Real</Label>
-                                            <Input id="fecha_entrega" type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="fecha_entrega" disabled={isLegacyOT} type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-8 text-sm" />
                                         </div>
 
                                         <div className="space-y-1.5">
                                             <Label htmlFor="f_disp_material" className="text-[11px] font-bold text-gray-400 uppercase">F. Disp Mat</Label>
-                                            <Input id="f_disp_material" type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="f_disp_material" disabled={isLegacyOT} type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="md:col-span-3 space-y-1.5">
                                             <Label htmlFor="remitos_salida" className="text-[11px] font-bold text-gray-400 uppercase">Remitos Salida</Label>
-                                            <Input id="remitos_salida" value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="remitos_salida" disabled={isLegacyOT} value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
                                         {/* Section: Flags (Compact) */}
                                         <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-2.5 p-3 border border-gray-100 rounded-xl bg-gray-50/30 mt-2">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="fabricacion" checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> 
+                                                <Checkbox id="fabricacion" disabled={isLegacyOT} checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Fabricación</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="reparacion" checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> 
+                                                <Checkbox id="reparacion" disabled={isLegacyOT} checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Reparación</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="stock" checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> 
+                                                <Checkbox id="stock" disabled={isLegacyOT} checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Stock</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="interno" checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> 
+                                                <Checkbox id="interno" disabled={isLegacyOT} checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Interno</span>
                                             </Label>
                                             
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="tercerizado_total" checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> 
+                                                <Checkbox id="tercerizado_total" disabled={isLegacyOT} checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Terc. Total</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="tercerizado_parcial" checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> 
+                                                <Checkbox id="tercerizado_parcial" disabled={isLegacyOT} checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Terc. Parcial</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="email" checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> 
+                                                <Checkbox id="email" disabled={isLegacyOT} checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Email</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-orange-50 px-2 py-1 rounded border border-transparent transition-colors text-orange-600 font-bold w-full h-9">
-                                                <Checkbox id="reclamo" className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> 
+                                                <Checkbox id="reclamo" disabled={isLegacyOT} className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> 
                                                 <span className="text-xs uppercase">Reclamo</span>
                                             </Label>
                                             
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-red-50 px-2 py-1 rounded border border-transparent transition-colors text-red-600 font-bold w-full h-9">
-                                                <Checkbox id="suspendida" className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> 
+                                                <Checkbox id="suspendida" disabled={isLegacyOT} className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> 
                                                 <span className="text-xs uppercase">Suspendida</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-9">
-                                                <Checkbox id="finalizadoparcial" checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> 
+                                                <Checkbox id="finalizadoparcial" disabled={isLegacyOT} checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> 
                                                 <span className="text-xs text-gray-800 font-bold">Fin. Parcial</span>
                                             </Label>
                                             <Label className="md:col-span-2 flex items-center space-x-2 bg-green-50 px-2 py-1 rounded border border-green-200 cursor-pointer hover:bg-green-100 transition-colors w-full h-9">
-                                                <Checkbox id="finalizadototal" checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> 
+                                                <Checkbox id="finalizadototal" disabled={isLegacyOT} checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> 
                                                 <span className="text-xs font-bold text-green-700 uppercase tracking-tighter truncate">Entrega Completa (Total)</span>
                                             </Label>
                                         </div>
@@ -791,19 +835,19 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         {/* Status block (Row 7) */}
                                         <div className="md:col-span-4 flex items-center justify-between gap-4 py-2 border-t border-gray-100 mt-1">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="tiene_plano" checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> 
+                                                <Checkbox id="tiene_plano" disabled={isLegacyOT} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Tiene Plano</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="programada" checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 
+                                                <Checkbox id="programada" disabled={isLegacyOT} checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Programada</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="en_proceso" checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> 
+                                                <Checkbox id="en_proceso" disabled={isLegacyOT} checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">En Proceso</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="revisada" checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> 
+                                                <Checkbox id="revisada" disabled={isLegacyOT} checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Revisada</span>
                                             </Label>
                                         </div>
@@ -811,25 +855,25 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         {/* Textareas (Compact Row 8) */}
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="descripcion" className="text-[11px] font-bold text-gray-600 uppercase">Info Gral / Descripción *</Label>
-                                            <Textarea id="descripcion" value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" required />
+                                            <Textarea id="descripcion" disabled={isLegacyOT} value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" required />
                                         </div>
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="nota_taller" className="text-[11px] font-bold text-gray-600 uppercase">Nota de Taller</Label>
-                                            <Textarea id="nota_taller" value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
+                                            <Textarea id="nota_taller" disabled={isLegacyOT} value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
                                         </div>
                                         
                                         <div className="md:col-span-4 grid grid-cols-3 gap-3">
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_1" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 1</Label>
-                                                <Input id="nota_1" value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
+                                                <Input id="nota_1" disabled={isLegacyOT} value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_2" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 2</Label>
-                                                <Input id="nota_2" value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
+                                                <Input id="nota_2" disabled={isLegacyOT} value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_3" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 3</Label>
-                                                <Input id="nota_3" value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
+                                                <Input id="nota_3" disabled={isLegacyOT} value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                         </div>
                                     </div>
@@ -851,7 +895,11 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                 type="file"
                                                 multiple
                                                 accept="image/*,.pdf"
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                                disabled={isLegacyOT}
+                                                className={cn(
+                                                    "absolute inset-0 w-full h-full opacity-0 z-10",
+                                                    isLegacyOT ? "cursor-not-allowed" : "cursor-pointer"
+                                                )}
                                                 onChange={(e) => {
                                                     if (e.target.files) {
                                                         const newFiles = Array.from(e.target.files);
@@ -913,18 +961,20 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                                 <span className="text-xs text-gray-400">Existente</span>
                                                             </div>
                                                         </div>
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            onClick={() => {
-                                                                setDeletedFileIds(prev => [...prev, file.id]);
-                                                                setExistingFiles(prev => prev.filter(f => f.id !== file.id));
-                                                            }}
-                                                            className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </Button>
+                                                        {!isLegacyOT && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                onClick={() => {
+                                                                    setDeletedFileIds(prev => [...prev, file.id]);
+                                                                    setExistingFiles(prev => prev.filter(f => f.id !== file.id));
+                                                                }}
+                                                                className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </Button>
+                                                        )}
                                                     </div>
                                                 ))}
 
@@ -970,26 +1020,28 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                             </div>
                                         </div>
 
-                                        {/* Upper Form */}
-                                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-gray-50/50 p-4 rounded-xl border border-gray-100 items-end">
-                                            <div className="md:col-span-5 space-y-1.5">
-                                                <Label className="text-xs font-semibold text-gray-600">M. Primas</Label>
-                                                <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={materiasPrimasForm.articulo_id} onValueChange={(val) => setMateriasPrimasForm({ ...materiasPrimasForm, articulo_id: val })} placeholder="Seleccione material" />
+                                        {/* Upper Form (oculto si la OT viene del legacy) */}
+                                        {!isLegacyOT && (
+                                            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-gray-50/50 p-4 rounded-xl border border-gray-100 items-end">
+                                                <div className="md:col-span-5 space-y-1.5">
+                                                    <Label className="text-xs font-semibold text-gray-600">M. Primas</Label>
+                                                    <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={materiasPrimasForm.articulo_id} onValueChange={(val) => setMateriasPrimasForm({ ...materiasPrimasForm, articulo_id: val })} placeholder="Seleccione material" />
+                                                </div>
+                                                <div className="md:col-span-2 space-y-1.5">
+                                                    <Label className="text-xs font-semibold text-gray-600">Cantidad</Label>
+                                                    <Input type="number" value={materiasPrimasForm.cantidad} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, cantidad: e.target.value })} className="h-9" placeholder="1" />
+                                                </div>
+                                                <div className="md:col-span-4 space-y-1.5">
+                                                    <Label className="text-xs font-semibold text-gray-600">Obs.</Label>
+                                                    <Input value={materiasPrimasForm.observaciones} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, observaciones: e.target.value })} className="h-9" placeholder="Observaciones..." />
+                                                </div>
+                                                <div className="md:col-span-1">
+                                                    <Button type="button" onClick={handleAddMateriaPrima} className="w-full h-9 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200">
+                                                        Agregar
+                                                    </Button>
+                                                </div>
                                             </div>
-                                            <div className="md:col-span-2 space-y-1.5">
-                                                <Label className="text-xs font-semibold text-gray-600">Cantidad</Label>
-                                                <Input type="number" value={materiasPrimasForm.cantidad} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, cantidad: e.target.value })} className="h-9" placeholder="1" />
-                                            </div>
-                                            <div className="md:col-span-4 space-y-1.5">
-                                                <Label className="text-xs font-semibold text-gray-600">Obs.</Label>
-                                                <Input value={materiasPrimasForm.observaciones} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, observaciones: e.target.value })} className="h-9" placeholder="Observaciones..." />
-                                            </div>
-                                            <div className="md:col-span-1">
-                                                <Button type="button" onClick={handleAddMateriaPrima} className="w-full h-9 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200">
-                                                    Agregar
-                                                </Button>
-                                            </div>
-                                        </div>
+                                        )}
 
                                         {/* Table */}
                                         <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
@@ -1030,23 +1082,25 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                                 <td className="px-3 py-2 text-gray-500">{mp.precio}</td>
                                                                 <td className="px-3 py-2 text-gray-500">{mp.c_usado}</td>
                                                                 <td className="px-3 py-2 text-center">
-                                                                    <Checkbox checked={mp.utilizado} onCheckedChange={(c) => {
+                                                                    <Checkbox disabled={isLegacyOT} checked={mp.utilizado} onCheckedChange={(c) => {
                                                                         const copy = [...materiasPrimas];
                                                                         copy[index].utilizado = !!c;
                                                                         setMateriasPrimas(copy);
                                                                     }} />
                                                                 </td>
                                                                 <td className="px-3 py-2">
-                                                                    <Input className="h-7 w-20 text-xs text-center" value={mp.cortes} onChange={(e) => {
+                                                                    <Input disabled={isLegacyOT} className="h-7 w-20 text-xs text-center" value={mp.cortes} onChange={(e) => {
                                                                         const copy = [...materiasPrimas];
                                                                         copy[index].cortes = e.target.value;
                                                                         setMateriasPrimas(copy);
                                                                     }} />
                                                                 </td>
                                                                 <td className="px-2 py-2 text-center">
-                                                                    <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveMateriaPrima(mp.id)} className="h-7 w-7 p-0 text-gray-400 hover:text-red-500">
-                                                                        <Trash2 className="w-4 h-4" />
-                                                                    </Button>
+                                                                    {!isLegacyOT && (
+                                                                        <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveMateriaPrima(mp.id)} className="h-7 w-7 p-0 text-gray-400 hover:text-red-500">
+                                                                            <Trash2 className="w-4 h-4" />
+                                                                        </Button>
+                                                                    )}
                                                                 </td>
                                                             </tr>
                                                         ))
@@ -1057,7 +1111,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                         {/* Bottom Control */}
                                         <div className="flex items-center space-x-2 mt-2 pt-4 border-t border-gray-100">
-                                            <Checkbox id="no_lleva_mp" checked={materiasPrimasForm.no_lleva} onCheckedChange={(c) => setMateriasPrimasForm({ ...materiasPrimasForm, no_lleva: !!c })} />
+                                            <Checkbox id="no_lleva_mp" disabled={isLegacyOT} checked={materiasPrimasForm.no_lleva} onCheckedChange={(c) => setMateriasPrimasForm({ ...materiasPrimasForm, no_lleva: !!c })} />
                                             <Label htmlFor="no_lleva_mp" className="text-sm font-medium text-gray-700 cursor-pointer uppercase">NO LLEVA MATERIAS PRIMAS</Label>
                                         </div>
                                     </div>
@@ -1070,14 +1124,16 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                             <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
                                             <p className="text-sm text-gray-500">Define la secuencia de procesos para esta orden (Opcional)</p>
                                         </div>
-                                        <Button
-                                            type="button"
-                                            onClick={handleAddProcess}
-                                            className="bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 shadow-sm"
-                                        >
-                                            <Plus className="w-4 h-4 mr-2" />
-                                            Agregar Proceso
-                                        </Button>
+                                        {!isLegacyOT && (
+                                            <Button
+                                                type="button"
+                                                onClick={handleAddProcess}
+                                                className="bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 shadow-sm"
+                                            >
+                                                <Plus className="w-4 h-4 mr-2" />
+                                                Agregar Proceso
+                                            </Button>
+                                        )}
                                     </div>
 
                                     <div className="space-y-4">
@@ -1100,21 +1156,24 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                                 </div>
                                                                 <h4 className="font-semibold text-gray-900">Proceso #{index + 1}</h4>
                                                             </div>
-                                                            <Button
-                                                                type="button"
-                                                                variant="ghost"
-                                                                size="sm"
-                                                                onClick={() => handleRemoveProcess(process.id)}
-                                                                className="text-gray-400 hover:text-red-500 hover:bg-red-50"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </Button>
+                                                            {!isLegacyOT && (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    onClick={() => handleRemoveProcess(process.id)}
+                                                                    className="text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </Button>
+                                                            )}
                                                         </div>
 
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                                                             <div className="space-y-1.5 md:col-span-1">
                                                                 <Label className="text-xs font-medium text-gray-500">Tipo de Proceso *</Label>
                                                                 <SearchableSelect
+                                                                    disabled={isLegacyOT}
                                                                     options={procesosOptions.map(p => ({ value: p.id.toString(), label: p.nombre }))}
                                                                     value={process.proceso_id}
                                                                     onValueChange={(val) => handleProcessChange(process.id, "proceso_id", val)}
@@ -1125,6 +1184,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                                 <Label className="text-xs font-medium text-gray-500">Tiempo (Minutos) *</Label>
                                                                 <Input
                                                                     type="number"
+                                                                    disabled={isLegacyOT}
                                                                     placeholder="Ej: 60"
                                                                     value={process.tiempo_proceso}
                                                                     onChange={(e) => handleProcessChange(process.id, "tiempo_proceso", e.target.value)}

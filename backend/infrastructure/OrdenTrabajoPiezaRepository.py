@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
+from backend.domain.Pieza import Pieza
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
 
@@ -49,6 +50,32 @@ class OrdenTrabajoPiezaRepository:
         except Exception as e:
             logger.error(f"Repository - Error real en find_all: {e}")
             raise InfrastructureException("Error al listar OrdenTrabajoPieza.") from e
+
+    async def find_by_id_orden_trabajo(self, id_orden_trabajo: int):
+        try:
+            logger.info(f"Repository - Buscar OrdenTrabajoPieza por id_orden_trabajo {id_orden_trabajo}.")
+            query = (
+                select(
+                    OrdenTrabajoPieza.id,
+                    OrdenTrabajoPieza.id_orden_trabajo,
+                    OrdenTrabajoPieza.id_pieza,
+                    OrdenTrabajoPieza.cantidad,
+                    OrdenTrabajoPieza.unidad,
+                    OrdenTrabajoPieza.pedido,
+                    OrdenTrabajoPieza.disponible,
+                    OrdenTrabajoPieza.cantusada,
+                    Pieza.cod_pieza,
+                    Pieza.descripcion,
+                    Pieza.unitario,
+                )
+                .join(Pieza, Pieza.id == OrdenTrabajoPieza.id_pieza)
+                .where(OrdenTrabajoPieza.id_orden_trabajo == id_orden_trabajo)
+            )
+            result = await self.db.execute(query)
+            return [dict(row) for row in result.mappings().all()]
+        except Exception as e:
+            logger.error(f"Repository - Error real en find_by_id_orden_trabajo: {e}")
+            raise InfrastructureException("Error al buscar OrdenTrabajoPieza por OT.") from e
 
     async def find_by_id(self, id: int):
         try:

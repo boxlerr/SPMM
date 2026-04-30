@@ -355,6 +355,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                                     <tr>
                                         <th className="w-10 px-3 py-3"></th>
+                                        <th className="w-12 px-3 py-3 font-bold text-gray-500 text-center" title="Número de fila">#</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('id_otvieja')}>
                                             <div className="flex items-center">OT<SortIcon column="id_otvieja" /></div>
                                         </th>
@@ -388,12 +389,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 <tbody>
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={16} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={17} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes pendientes."}
                                             </td>
                                         </tr>
                                     ) : (
-                                        sortedOrders.map((order) => (
+                                        sortedOrders.map((order, index) => (
                                             <React.Fragment key={order.id}>
                                                 <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
                                                     <td className="px-4 py-3">
@@ -408,6 +409,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             )}
                                                         </button>
                                                     </td>
+                                                    <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
                                                     <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
                                                     <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(order.id, 'fecha_entrada', order.fecha_entrada); }}>
                                                         {editingOrder?.id === order.id && editingOrder.field === 'fecha_entrada' ? (
@@ -574,7 +576,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50/20 border-b">
-                                                        <td colSpan={16} className="px-4 py-3 md:px-6 md:py-4">
+                                                        <td colSpan={17} className="px-4 py-3 md:px-6 md:py-4">
                                                             <div className="flex flex-col gap-4 w-full max-w-[1200px]">
                                                                 {/* Grid layout for meta info - More compact columns */}
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

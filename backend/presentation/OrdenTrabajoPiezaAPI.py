@@ -31,9 +31,11 @@ async def eliminar_ot_pieza(id: int, db=Depends(get_db)):
 
 
 @router.get("/ordenes-trabajo-piezas")
-async def listar_ot_piezas(db=Depends(get_db)):
-    logger.info("API - Inicio GET /ordenes-trabajo-piezas")
+async def listar_ot_piezas(id_orden_trabajo: int | None = None, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /ordenes-trabajo-piezas (id_orden_trabajo={id_orden_trabajo})")
     service = OrdenTrabajoPiezaService(db)
+    if id_orden_trabajo is not None:
+        return await service.listarPorOrdenTrabajo(id_orden_trabajo)
     return await service.listarOrdenTrabajoPiezas()
 
 
