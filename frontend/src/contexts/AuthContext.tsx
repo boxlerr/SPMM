@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertDialog,
@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { API_URL } from '../config';
+import { isTokenExpired, msUntilExpiry } from '@/lib/jwt';
 
 interface User {
   id_usuario: number;
@@ -35,6 +36,23 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Endpoints públicos: aunque devuelvan 401, no significa "sesión expirada".
+// Por ejemplo /auth/login devuelve 401 con credenciales inválidas y no debe disparar el popup.
+const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/forgot-password', '/auth/reset-password'];
+
+function isApiUrl(url: string): boolean {
+  if (!url) return false;
+  // API_URL puede ser absoluta (https://...) o relativa (/api). Cubrimos ambos.
+  if (API_URL.startsWith('/')) {
+    return url.startsWith(API_URL) || url.includes(API_URL + '/') || url.startsWith(`${window.location.origin}${API_URL}`);
+  }
+  return url.startsWith(API_URL);
+}
+
+function isPublicAuthPath(url: string): boolean {
+  return PUBLIC_AUTH_PATHS.some((p) => url.includes(p));
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -42,7 +60,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionExpired, setSessionExpired] = useState(false);
   const router = useRouter();
 
-  // Cargar usuario del localStorage al iniciar
+  // `tokenRef` mantiene siempre el token actual para que el interceptor de fetch
+  // (instalado una sola vez) lo lea sin recrearse cada vez que cambia.
+  const tokenRef = useRef<string | null>(null);
+
+  const notifySessionExpired = useCallback(() => {
+    setSessionExpired(true);
+  }, []);
+
+  // ---- 1) Carga inicial: validar exp del token guardado ---------------------
   useEffect(() => {
     const initAuth = () => {
       try {
@@ -50,12 +76,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const storedUser = localStorage.getItem('user');
 
         if (storedToken && storedUser) {
-          setToken(storedToken);
-          setUser(JSON.parse(storedUser));
+          if (isTokenExpired(storedToken)) {
+            // Token vencido o corrupto: lo borramos antes de montar nada
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('user');
+          } else {
+            setToken(storedToken);
+            tokenRef.current = storedToken;
+            setUser(JSON.parse(storedUser));
+          }
         }
       } catch (error) {
         console.error('Error al cargar sesión:', error);
-        // Limpiar localStorage si hay error
         localStorage.removeItem('access_token');
         localStorage.removeItem('user');
       } finally {
@@ -66,44 +98,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
   }, []);
 
-  // Control de inactividad (3 horas)
+  // ---- 2) Interceptor global de fetch: dispara popup en 401 a la API --------
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const originalFetch = window.fetch;
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.toString() : (input as Request).url;
+
+      const response = await originalFetch(input, init);
+
+      try {
+        if (
+          response.status === 401 &&
+          isApiUrl(url) &&
+          !isPublicAuthPath(url) &&
+          tokenRef.current  // sólo notificamos si creíamos estar autenticados
+        ) {
+          notifySessionExpired();
+        }
+      } catch (e) {
+        // Nunca rompemos el response por culpa del interceptor
+        console.warn('Error en interceptor de fetch:', e);
+      }
+
+      return response;
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [notifySessionExpired]);
+
+  // ---- 3) Timer atado al `exp` real del JWT ---------------------------------
+  // Cuando el token vence (según su claim `exp`), disparamos el popup, sin esperar
+  // a que el usuario haga un fetch que vuelva 401.
+  useEffect(() => {
+    if (!token) return;
+    const remainingMs = msUntilExpiry(token);
+    if (remainingMs == null) return;
+
+    if (remainingMs <= 0) {
+      notifySessionExpired();
+      return;
+    }
+
+    const id = setTimeout(() => {
+      notifySessionExpired();
+    }, remainingMs);
+
+    return () => clearTimeout(id);
+  }, [token, notifySessionExpired]);
+
+  // ---- 4) Inactividad: complementa al timer de exp --------------------------
   useEffect(() => {
     if (!token) return;
 
-    // 8 horas en milisegundos
     const INACTIVITY_TIMEOUT = 8 * 60 * 60 * 1000;
     let timeoutId: NodeJS.Timeout;
 
     const resetTimer = () => {
       if (timeoutId) clearTimeout(timeoutId);
-
       timeoutId = setTimeout(() => {
-        // Si hay un token y no ha expirado la sesión ya
-        if (token && !sessionExpired) {
+        if (tokenRef.current && !sessionExpired) {
           notifySessionExpired();
         }
       }, INACTIVITY_TIMEOUT);
     };
 
-    // Eventos que reinician el contador
     const events = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart', 'click'];
 
-    // Iniciar timer
     resetTimer();
+    events.forEach((event) => window.addEventListener(event, resetTimer));
 
-    // Agregar listeners
-    events.forEach(event => {
-      window.addEventListener(event, resetTimer);
-    });
-
-    // Cleanup
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
-      events.forEach(event => {
-        window.removeEventListener(event, resetTimer);
-      });
+      events.forEach((event) => window.removeEventListener(event, resetTimer));
     };
-  }, [token, sessionExpired]);
+  }, [token, sessionExpired, notifySessionExpired]);
 
   const login = async (username: string, password: string) => {
     try {
@@ -120,13 +194,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.status && data.data) {
         const { access_token, ...userData } = data.data;
 
-        // Guardar en localStorage
         localStorage.setItem('access_token', access_token);
         localStorage.setItem('user', JSON.stringify(userData));
 
-        // Actualizar estado
         setToken(access_token);
+        tokenRef.current = access_token;
         setUser(userData);
+        setSessionExpired(false);
 
         return { success: true };
       } else {
@@ -145,21 +219,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
-    // Limpiar localStorage
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
 
-    // Limpiar estado
     setToken(null);
+    tokenRef.current = null;
     setUser(null);
     setSessionExpired(false);
 
-    // Redirigir a login
     router.push('/login');
-  };
-
-  const notifySessionExpired = () => {
-    setSessionExpired(true);
   };
 
   return (
