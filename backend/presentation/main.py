@@ -20,6 +20,7 @@ from backend.presentation.ClienteAPI import router as cliente_router
 from backend.presentation.ConfigAPI import router as config_router
 from backend.presentation.PiezaAPI import router as pieza_router
 from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
+from backend.presentation.RangoAPI import router as rango_router
 from backend.presentation.ws_routes import router as ws_router, get_ws_manager
 from backend.application.event_bus import EventBus
 from backend.infrastructure.notifications.handlers import NotificationHandlers
@@ -98,6 +99,7 @@ app.include_router(config_router, tags=["configuracion"], dependencies=protected
 
 app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
 app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)
+app.include_router(rango_router, tags=["rangos"], dependencies=protected_deps)
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion
 app.add_exception_handler(InfrastructureException, infrastructure_handler)

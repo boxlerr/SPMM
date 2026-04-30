@@ -7,11 +7,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search } from "lucide-react";
+import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search, Target, MapPin } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import OperarioForm from "./_components/OperarioForm";
 import MaquinaForm from "./_components/MaquinaForm";
 import ProcesoForm from "./_components/ProcesoForm";
+import CatalogoSimple from "./_components/CatalogoSimple";
 import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
 import CambiarEstado from "./_components/CambiarEstado";
@@ -32,7 +33,7 @@ export default function RecursosPage() {
   const { addNotification } = useNotifications();
   const { showToast } = useToast();
 
-  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos">("operarios");
+  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos" | "rangos" | "sectores">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
   const [procesos, setProcesos] = useState<Proceso[]>([]);
@@ -230,20 +231,24 @@ export default function RecursosPage() {
           Administración de Recursos
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
-          <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
-            <Plus className="h-4 w-4 mr-2" />
-            {tabActiva === "operarios" ? "Nuevo Operario" : tabActiva === "maquinas" ? "Nueva Maquinaria" : "Nuevo Proceso"}
-          </Button>
-          <Button
-            onClick={tabActiva === "operarios" ? fetchOperarios : tabActiva === "maquinas" ? fetchMaquinas : fetchProcesos}
-            disabled={api.loading}
-            variant="outline"
-            size="sm"
-            className="w-full sm:w-auto"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${api.loading ? "animate-spin" : ""}`} />
-            Actualizar
-          </Button>
+          {(tabActiva === "operarios" || tabActiva === "maquinas" || tabActiva === "procesos") && (
+            <>
+              <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
+                <Plus className="h-4 w-4 mr-2" />
+                {tabActiva === "operarios" ? "Nuevo Operario" : tabActiva === "maquinas" ? "Nueva Maquinaria" : "Nuevo Proceso"}
+              </Button>
+              <Button
+                onClick={tabActiva === "operarios" ? fetchOperarios : tabActiva === "maquinas" ? fetchMaquinas : fetchProcesos}
+                disabled={api.loading}
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${api.loading ? "animate-spin" : ""}`} />
+                Actualizar
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -277,6 +282,22 @@ export default function RecursosPage() {
         >
           <Layers className="h-4 w-4 sm:mr-2" />
           <span className="hidden xs:inline">Procesos</span>
+        </Button>
+        <Button
+          variant={tabActiva === "rangos" ? "default" : "outline"}
+          onClick={() => setTabActiva("rangos")}
+          className={`flex-1 ${tabActiva === "rangos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+        >
+          <Target className="h-4 w-4 sm:mr-2" />
+          <span className="hidden xs:inline">Rangos</span>
+        </Button>
+        <Button
+          variant={tabActiva === "sectores" ? "default" : "outline"}
+          onClick={() => setTabActiva("sectores")}
+          className={`flex-1 ${tabActiva === "sectores" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+        >
+          <MapPin className="h-4 w-4 sm:mr-2" />
+          <span className="hidden xs:inline">Sectores</span>
         </Button>
       </div>
 
@@ -571,6 +592,28 @@ export default function RecursosPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* TABLA DE RANGOS */}
+      {tabActiva === "rangos" && (
+        <CatalogoSimple
+          resource="rangos"
+          singular="Rango"
+          titulo="Rangos"
+          descripcion="Gestión de rangos (categorías de operarios, máquinas y procesos)."
+          icon={<Target className="h-5 w-5 text-muted-foreground" />}
+        />
+      )}
+
+      {/* TABLA DE SECTORES */}
+      {tabActiva === "sectores" && (
+        <CatalogoSimple
+          resource="sectores"
+          singular="Sector"
+          titulo="Sectores"
+          descripcion="Gestión de sectores del taller (donde se asignan las OTs)."
+          icon={<MapPin className="h-5 w-5 text-muted-foreground" />}
+        />
       )}
 
       {/* DIÁLOGOS */}
