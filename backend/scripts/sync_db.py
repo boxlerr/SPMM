@@ -145,6 +145,16 @@ WITH src AS (
     LEFT JOIN dbo.articulo  a ON a.cod_articulo= LTRIM(RTRIM(v.idarticulo))
     LEFT JOIN dbo.cliente   c ON c.id_viejo    = v.idcliente
     WHERE v.fecha >= :fecha_desde
+       OR (
+            -- También traer OTs viejas que sigan pendientes en legacy (regla estricta).
+            -- Cubre casos como la OT 10380 (2023) que sigue activa.
+            ISNULL(v.finalizadototal, 0) = 0
+        AND ISNULL(v.suspendida, 0)      = 0
+        AND ISNULL(v.remitido, 0)        = 0
+        AND ISNULL(v.cantidad, 0) > 0
+        AND v.cantidad > ISNULL(v.cantidadE, 0)
+        AND v.cantidad > ISNULL(v.cantidadfinalizado, 0)
+       )
 )
 MERGE dbo.orden_trabajo AS tgt
 USING src ON tgt.id_otvieja = src.id_otvieja
