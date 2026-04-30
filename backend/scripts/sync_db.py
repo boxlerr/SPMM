@@ -138,7 +138,9 @@ WITH src AS (
       stock              = 0,
       interno            = 0,
       tercerizado_total  = ISNULL(v.ttotal, 0),
-      tercerizado_parcial = ISNULL(v.tparcial, 0)
+      tercerizado_parcial = ISNULL(v.tparcial, 0),
+      fc                  = ISNULL(v.fc, 0),
+      ttt1                = ISNULL(v.ttt1, 0)
     FROM metalurgica_db.dbo.otrabajo v
     LEFT JOIN dbo.prioridad p ON p.descripcion = LTRIM(RTRIM(v.prioridad))
     LEFT JOIN dbo.sector    s ON s.nombre      = LTRIM(RTRIM(v.sector))
@@ -146,14 +148,17 @@ WITH src AS (
     LEFT JOIN dbo.cliente   c ON c.id_viejo    = v.idcliente
     WHERE v.fecha >= :fecha_desde
        OR (
-            -- También traer OTs viejas que sigan pendientes en legacy (regla estricta).
-            -- Cubre casos como la OT 10380 (2023) que sigue activa.
-            ISNULL(v.finalizadototal, 0) = 0
-        AND ISNULL(v.suspendida, 0)      = 0
-        AND ISNULL(v.remitido, 0)        = 0
-        AND ISNULL(v.cantidad, 0) > 0
-        AND v.cantidad > ISNULL(v.cantidadE, 0)
-        AND v.cantidad > ISNULL(v.cantidadfinalizado, 0)
+            -- Regla OFICIAL del sistema legacy (la que usa Jorge, el creador).
+            -- Trae cualquier OT que sea "pendiente" según el viejo, sin importar la fecha.
+            -- Diferencia clave con la regla estricta vieja: NO usa `remitido`. En el legacy,
+            -- `remitido=1` solo indica que se generó un remito parcial; la OT sigue activa
+            -- hasta que `fechaentrega` deje de ser '1950-01-01'.
+                ISNULL(v.fc, 0)                  <> 1
+            AND v.fechaentrega                    = '1950-01-01'
+            AND v.fecha                           > '2021-01-01'
+            AND ISNULL(v.cantidade, 0)           < ISNULL(v.cantidad, 0)
+            AND ISNULL(v.ttt1, 0)                <> 1
+            AND ISNULL(v.suspendida, 0)           = 0
        )
 )
 MERGE dbo.orden_trabajo AS tgt
@@ -193,6 +198,8 @@ WHEN MATCHED AND (
     OR ISNULL(tgt.interno,0)           <> ISNULL(src.interno,0)
     OR ISNULL(tgt.tercerizado_total,0) <> ISNULL(src.tercerizado_total,0)
     OR ISNULL(tgt.tercerizado_parcial,0) <> ISNULL(src.tercerizado_parcial,0)
+    OR ISNULL(tgt.fc,0)                <> ISNULL(src.fc,0)
+    OR ISNULL(tgt.ttt1,0)              <> ISNULL(src.ttt1,0)
 )
 THEN UPDATE SET
       tgt.observaciones   = src.observaciones,
@@ -228,10 +235,12 @@ THEN UPDATE SET
       tgt.stock             = src.stock,
       tgt.interno           = src.interno,
       tgt.tercerizado_total = src.tercerizado_total,
-      tgt.tercerizado_parcial = src.tercerizado_parcial
+      tgt.tercerizado_parcial = src.tercerizado_parcial,
+      tgt.fc                = src.fc,
+      tgt.ttt1              = src.ttt1
 WHEN NOT MATCHED THEN
-    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, id_cliente, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, cantidad_entregada, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial)
-    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.id_cliente, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.cantidad_entregada, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial);
+    INSERT (id_otvieja, observaciones, id_prioridad, id_sector, id_articulo, id_cliente, fecha_orden, fecha_entrada, fecha_prometida, fecha_entrega, unidades, cantidad_entregada, reclamo, revisada, finalizadoparcial, finalizadototal, programada, en_proceso, suspendida, email, tiene_plano, n_ped_l, n_pedido, subsector, requerido_por, aprobado_por, remitos_salida, f_disp_material, fabricacion, reparacion, sin_cargo, stock, interno, tercerizado_total, tercerizado_parcial, fc, ttt1)
+    VALUES (src.id_otvieja, src.observaciones, src.id_prioridad, src.id_sector, src.id_articulo, src.id_cliente, src.fecha_orden, src.fecha_entrada, src.fecha_prometida, src.fecha_entrega, src.unidades, src.cantidad_entregada, src.reclamo, src.revisada, src.finalizadoparcial, src.finalizadototal, src.programada, src.en_proceso, src.suspendida, src.email, src.tiene_plano, src.n_ped_l, src.n_pedido, src.subsector, src.requerido_por, src.aprobado_por, src.remitos_salida, src.f_disp_material, src.fabricacion, src.reparacion, src.sin_cargo, src.stock, src.interno, src.tercerizado_total, src.tercerizado_parcial, src.fc, src.ttt1);
 """
 
 QUERY_SYNC_PROCESO_CATALOG = """
@@ -331,13 +340,19 @@ WHEN NOT MATCHED THEN
 """
 
 # --- Marca como finalizadas las OTs en SMPP que ya no son "pendientes" en legacy.
-# Usa exactamente la NEGACION de la regla estricta del sistema viejo:
-#   pendiente <=> finalizadototal=0 AND suspendida=0 AND remitido=0
-#                 AND cantidad>0 AND cantidad>cantidadE AND cantidad>cantidadfinalizado
-# OJO: NO se usa `fechaentrega <> '1950-01-01'` como criterio de zombie. En legacy ese
-# campo se carga con la fecha *proyectada* de entrega y puede tener valor incluso si la
-# OT sigue activa (caso real: idot=14445, cantidad=2, cantidadE=1, finalizadototal=0,
-# fechaentrega=2026-01-23 → es pendiente, no zombie).
+# Regla OFICIAL del sistema viejo (la que usa Jorge, su creador):
+#   pendiente <=> fc<>1
+#              AND fechaentrega='1950-01-01'
+#              AND fecha>'2021-01-01'
+#              AND cantidade<cantidad
+#              AND ttt1<>1
+#              AND suspendida=0
+# Una OT es "zombie" cuando NO cumple esa regla → la marcamos finalizadototal=1.
+# Notas importantes:
+#   * NO se chequea `remitido`. En legacy `remitido=1` solo indica un remito parcial;
+#     la OT sigue activa hasta que `fechaentrega` deje de ser '1950-01-01'.
+#   * `fc=1` saca del circuito (probablemente "facturada cerrada" o "fuera de circuito").
+#   * `ttt1=1` indica una variante de tercerizado que no debe estar en el listado de pendientes.
 QUERY_FINALIZE_ZOMBIES = """
 UPDATE tgt
 SET tgt.finalizadototal = 1
@@ -346,14 +361,32 @@ LEFT JOIN metalurgica_db.dbo.otrabajo v ON v.idot = tgt.id_otvieja
 WHERE tgt.id_otvieja IS NOT NULL
   AND ISNULL(tgt.finalizadototal, 0) = 0
   AND (
-    v.idot IS NULL
-    OR ISNULL(v.finalizadototal, 0) = 1
+       v.idot IS NULL
+    OR ISNULL(v.fc, 0)         = 1
+    OR v.fechaentrega         <> '1950-01-01'
+    OR ISNULL(v.cantidade, 0) >= ISNULL(v.cantidad, 0)
+    OR ISNULL(v.ttt1, 0)       = 1
     OR ISNULL(v.suspendida, 0) = 1
-    OR ISNULL(v.remitido, 0) = 1
-    OR ISNULL(v.cantidad, 0) <= 0
-    OR v.cantidad <= ISNULL(v.cantidadE, 0)
-    OR v.cantidad <= ISNULL(v.cantidadfinalizado, 0)
+    OR v.fecha                <= '2021-01-01'
   );
+"""
+
+# --- Reactivar OTs que fueron mal-zombificadas: en SMPP están finalizadototal=1
+# pero en legacy SIGUEN siendo pendientes según la regla oficial. Esto puede pasar
+# si el usuario (o un cron previo con bug) las marcó por error.
+QUERY_REACTIVATE_FALSE_ZOMBIES = """
+UPDATE tgt
+SET tgt.finalizadototal = 0
+FROM dbo.orden_trabajo tgt
+INNER JOIN metalurgica_db.dbo.otrabajo v ON v.idot = tgt.id_otvieja
+WHERE tgt.id_otvieja IS NOT NULL
+  AND ISNULL(tgt.finalizadototal, 0) = 1
+  AND ISNULL(v.fc, 0)         <> 1
+  AND v.fechaentrega           = '1950-01-01'
+  AND v.fecha                  > '2021-01-01'
+  AND ISNULL(v.cantidade, 0)  < ISNULL(v.cantidad, 0)
+  AND ISNULL(v.ttt1, 0)       <> 1
+  AND ISNULL(v.suspendida, 0)  = 0;
 """
 
 async def run_sync():
@@ -379,10 +412,17 @@ async def run_sync():
             logger.info(f"Sincronizando Ordenes de Trabajo desde {fecha_desde}...")
             await session.execute(text(QUERY_SYNC_OTS), {"fecha_desde": fecha_desde})
 
-            # 4. Marcar como finalizadas las OTs zombies (las que en legacy
-            #    ya no son pendientes pero quedaron activas en SMPP).
-            logger.info("Marcando zombies (OTs ya entregadas/suspendidas/remitidas en legacy)...")
-            await session.execute(text(QUERY_FINALIZE_ZOMBIES))
+            # 4a. Reactivar las que estaban marcadas finalizadas pero en legacy
+            #     siguen pendientes (caso típico: cron viejo con bug, edición manual).
+            logger.info("Reactivando falsos zombies (pendientes en legacy marcadas como finalizadas en SMPP)...")
+            result_react = await session.execute(text(QUERY_REACTIVATE_FALSE_ZOMBIES))
+            logger.info(f"  -> Reactivadas: {result_react.rowcount}")
+
+            # 4b. Marcar como finalizadas las OTs zombies (en legacy ya no son pendientes
+            #     según la regla oficial pero quedaron activas en SMPP).
+            logger.info("Marcando zombies (OTs ya cerradas/entregadas/suspendidas/fc=1 en legacy)...")
+            result_zomb = await session.execute(text(QUERY_FINALIZE_ZOMBIES))
+            logger.info(f"  -> Marcadas como finalizadas: {result_zomb.rowcount}")
 
             # 5. Sincronizar Catálogo de Procesos
             logger.info("Actualizando catálogo de procesos...")
