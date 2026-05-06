@@ -285,6 +285,8 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('unidades')}>
                                             <div className="flex items-center justify-center">Cant.<SortIcon column="unidades" /></div>
                                         </th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tenía procesos cargados?">Proceso</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tenía plano cargado?">Plano</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Entregado</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrega')}>
                                             <div className="flex items-center">F. Entrega<SortIcon column="fecha_entrega" /></div>
@@ -298,7 +300,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                 <tbody>
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={16} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={18} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes completadas."}
                                             </td>
                                         </tr>
@@ -326,6 +328,22 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                     <td className="px-3 py-3 font-medium text-gray-900 min-w-[400px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}</td>
                                                     <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
                                                     <td className="px-3 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
+                                                    {/* Proceso: Sí (verde) si tenía procesos cargados. */}
+                                                    <td className="px-3 py-3 text-center">
+                                                        {(order.procesos && order.procesos.length > 0) ? (
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                                                        )}
+                                                    </td>
+                                                    {/* Plano: Sí (verde) si tenía plano cargado. */}
+                                                    <td className="px-3 py-3 text-center">
+                                                        {Number(order.tiene_plano) === 1 ? (
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                                                        )}
+                                                    </td>
                                                     <td className="px-3 py-3 text-center">
                                                         <span className="text-xs font-bold text-green-700">
                                                             {order.cantidad_entregada || 0} / {order.unidades || 0}
@@ -354,7 +372,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={16} className="px-4 py-4">
+                                                        <td colSpan={18} className="px-4 py-4">
                                                             <div className="space-y-3">
                                                                 <div className="text-xs text-gray-600">
                                                                     <span className="font-bold text-gray-800">Observaciones: </span>

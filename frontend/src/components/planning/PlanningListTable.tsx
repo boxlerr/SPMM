@@ -877,6 +877,12 @@ function _PlanningListTable({
                                 <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
                                     Material
                                 </th>
+                                <th className="px-4 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene procesos cargados?">
+                                    Proceso
+                                </th>
+                                <th className="px-4 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene plano cargado?">
+                                    Plano
+                                </th>
                                 {!hideStatus && (
                                     <th
                                         className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
@@ -920,7 +926,7 @@ function _PlanningListTable({
                         <tbody>
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
-                                    <td colSpan={17} className="px-3 py-8 text-center text-gray-500">
+                                    <td colSpan={19} className="px-3 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
@@ -1065,6 +1071,22 @@ function _PlanningListTable({
                                                     </Badge>
                                                 )}
                                             </td>
+                                            {/* Proceso: Sí (verde) si tiene procesos cargados. */}
+                                            <td className="px-4 py-3 text-center">
+                                                {(item.procesos && item.procesos.length > 0) ? (
+                                                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                ) : (
+                                                    <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                                                )}
+                                            </td>
+                                            {/* Plano: Sí (verde) si tiene_plano==1. */}
+                                            <td className="px-4 py-3 text-center">
+                                                {Number(item.tiene_plano) === 1 ? (
+                                                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                ) : (
+                                                    <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                                                )}
+                                            </td>
                                             {!hideStatus && (
                                                 <td className="px-4 py-3 text-center">
                                                     {renderStatusBadge(getOrderStatus(item))}
@@ -1164,7 +1186,7 @@ function _PlanningListTable({
                                         </tr>
                                         {expandedOrderIds.includes(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={17} className="px-4 py-4">
+                                                <td colSpan={19} className="px-4 py-4">
                                                     {renderDetails(item)}
                                                 </td>
                                             </tr>

@@ -379,6 +379,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                             <div className="flex items-center justify-center">Prioridad<SortIcon column="prioridad" /></div>
                                         </th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Material</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene procesos cargados?">Proceso</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene plano cargado?">Plano</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Entrega</th>
                                         <th className="px-3 py-3 font-bold text-gray-600">F. Prometida</th>
                                         <th className="px-3 py-3 font-bold text-gray-600">Aprobado x</th>
@@ -389,7 +391,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 <tbody>
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={17} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={19} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes pendientes."}
                                             </td>
                                         </tr>
@@ -499,6 +501,22 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             </Badge>
                                                         )}
                                                     </td>
+                                                    {/* Proceso: Sí (verde) si tiene al menos un proceso cargado, No (gris) si no. */}
+                                                    <td className="px-3 py-3 text-center">
+                                                        {(order.procesos && order.procesos.length > 0) ? (
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                                                        )}
+                                                    </td>
+                                                    {/* Plano: Sí (verde) si tiene_plano==1, No (gris) si no. */}
+                                                    <td className="px-3 py-3 text-center">
+                                                        {Number(order.tiene_plano) === 1 ? (
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                                                        )}
+                                                    </td>
                                                     <td className="px-4 py-3 text-center">
                                                         <span className={cn(
                                                             "text-xs font-bold",
@@ -576,7 +594,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50/20 border-b">
-                                                        <td colSpan={17} className="px-4 py-3 md:px-6 md:py-4">
+                                                        <td colSpan={19} className="px-4 py-3 md:px-6 md:py-4">
                                                             <div className="flex flex-col gap-4 w-full max-w-[1200px]">
                                                                 {/* Grid layout for meta info - More compact columns */}
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

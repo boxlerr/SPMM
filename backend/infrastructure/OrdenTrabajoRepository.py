@@ -596,7 +596,20 @@ class OrdenTrabajoRepository:
                 joinedload(OrdenTrabajo.articulo),
                 joinedload(OrdenTrabajo.sector),
                 joinedload(OrdenTrabajo.cliente),
-                joinedload(OrdenTrabajo.prioridad)
+                joinedload(OrdenTrabajo.prioridad),
+                # Cargar procesos eager para que el frontend pueda filtrar por
+                # "OTs con procesos" sin obtener listas vacías (procesos undefined).
+                # Bug previo: find_unplanned no cargaba procesos -> el filtro
+                # showWithProcessesOnly descartaba todas las OTs porque order.procesos
+                # llegaba vacío en el JSON. Resultado: la pantalla "No Planificadas"
+                # mostraba 113 mientras el Planificador (que sí los cargaba) mostraba 138.
+                joinedload(OrdenTrabajo.procesos).options(
+                    joinedload(OrdenTrabajoProceso.proceso),
+                    joinedload(OrdenTrabajoProceso.estado_proceso)
+                ),
+                # Cargar planos eager para que el frontend pueda mostrar el badge
+                # "Plano: Sí/No" en la fila de cada OT sin queries N+1.
+                joinedload(OrdenTrabajo.planos)
             )
             
             result = await self.db.execute(query)
