@@ -344,7 +344,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {isEditing ? (
-            <div className="flex-1 flex flex-col p-4 md:p-6 overflow-y-auto bg-white items-center justify-start md:justify-center">
+            <div className="flex-1 flex flex-col p-4 md:p-6 overflow-y-auto bg-white items-stretch justify-start">
               <OperarioEditForm
                 data={operario}
                 cleanUrl={API_URL.replace(/\/$/, "")}
@@ -458,7 +458,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     <Clock className="h-4 w-4 text-gray-400" />
                     <span className="font-medium">Horario:</span>
                     <span className="ml-auto text-gray-900">
-                      {operario.hora_inicio || "09:00"} - {operario.hora_fin || "18:00"}
+                      {operario.hora_inicio || "07:00"} - {operario.hora_fin || "16:00"}
                     </span>
                   </div>
                 </div>

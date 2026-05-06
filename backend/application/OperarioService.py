@@ -100,8 +100,8 @@ class OperarioService:
                     "celular": o.celular,
                     "dni": o.dni,
                     "email": o.email,
-                    "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "09:00",
-                    "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "18:00",
+                    "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "07:00",
+                    "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "16:00",
                     "rangos": [r.id_rango for r in o.rangos],
                     "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
                 }
@@ -137,8 +137,8 @@ class OperarioService:
                     "celular": o.celular,
                     "dni": o.dni,
                     "email": o.email,
-                    "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "09:00",
-                    "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "18:00",
+                    "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "07:00",
+                    "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "16:00",
                     "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
                 },
                 errorDescription=""

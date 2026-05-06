@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { capitalizeName } from "@/lib/utils";
-import { User, Briefcase, Phone, Wrench } from "lucide-react";
+import { User, Briefcase, Phone, Wrench, Clock } from "lucide-react";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -39,6 +39,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         celular: "",
         dni: "",
         email: "",
+        hora_inicio: "07:00",
+        hora_fin: "16:00",
     });
 
     const [sectores, setSectores] = useState<string[]>([]);
@@ -61,6 +63,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 celular: data.celular || "",
                 dni: data.dni || "",
                 email: (data as any)?.email || "",
+                hora_inicio: (data as any)?.hora_inicio || "07:00",
+                hora_fin: (data as any)?.hora_fin || "16:00",
             });
             setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
             setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
@@ -76,6 +80,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 celular: "",
                 dni: "",
                 email: "",
+                hora_inicio: "07:00",
+                hora_fin: "16:00",
             });
             setPrimarySkills([]);
             setSecondarySkills([]);
@@ -195,6 +201,8 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 (originalTelefono || "") !== (payload.telefono || "") ||
                 (originalCelular || "") !== (payload.celular || "") ||
                 (originalDni || "") !== (payload.dni || "") ||
+                ((data as any).hora_inicio || "07:00") !== (payload.hora_inicio || "07:00") ||
+                ((data as any).hora_fin || "16:00") !== (payload.hora_fin || "16:00") ||
                 JSON.stringify(data.skills?.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
@@ -261,39 +269,31 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
     return (
         <div className="flex flex-col w-full">
-            <div className="border-b pb-4 mb-6 shrink-0">
-                <h2 className="text-2xl font-bold tracking-tight text-gray-900">Modificar Datos</h2>
-                <p className="text-sm text-muted-foreground mt-1">Actualiza la información personal y laboral del operario.</p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Personal Info */}
-                <div className="bg-white rounded-lg border shadow-sm p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center">
-                            <User className="h-5 w-5 text-blue-600" />
+                <div className="bg-white rounded-lg border shadow-sm p-4">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+                            <User className="h-4 w-4 text-blue-600" />
                         </div>
-                        <div>
-                            <h3 className="text-lg font-semibold text-gray-900">Información Personal</h3>
-                            <p className="text-sm text-gray-500">Datos de identificación básica</p>
-                        </div>
+                        <h3 className="text-base font-semibold text-gray-900">Información Personal</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
                             <Label className="text-gray-700">Nombre *</Label>
                             <Input value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} placeholder="Ej.: Juan" className="bg-gray-50/50" />
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                             <Label className="text-gray-700">Apellido *</Label>
                             <Input value={formData.apellido} onChange={(e) => setFormData({ ...formData, apellido: e.target.value })} placeholder="Ej.: Pérez" className="bg-gray-50/50" />
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                             <Label className="text-gray-700">DNI / CUIL / CUIT</Label>
                             <Input value={formData.dni} onChange={(e) => setFormData({ ...formData, dni: e.target.value })} placeholder="Ej.: 20123456789" className="bg-gray-50/50" />
                             {errors.dni && <p className="text-xs text-destructive">{errors.dni}</p>}
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                             <Label className="text-gray-700">Fecha de Nacimiento *</Label>
                             <Input type="date" value={formData.fecha_nacimiento} onChange={(e) => setFormData({ ...formData, fecha_nacimiento: e.target.value })} required className="bg-gray-50/50" />
                             {errors.fecha_nacimiento && <p className="text-xs text-destructive">{errors.fecha_nacimiento}</p>}
@@ -302,19 +302,16 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 </div>
 
                 {/* Labor Info */}
-                <div className="bg-white rounded-lg border shadow-sm p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="h-10 w-10 rounded-full bg-orange-50 flex items-center justify-center">
-                            <Briefcase className="h-5 w-5 text-orange-600" />
+                <div className="bg-white rounded-lg border shadow-sm p-4">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-8 w-8 rounded-full bg-orange-50 flex items-center justify-center shrink-0">
+                            <Briefcase className="h-4 w-4 text-orange-600" />
                         </div>
-                        <div>
-                            <h3 className="text-lg font-semibold text-gray-900">Información Laboral</h3>
-                            <p className="text-sm text-gray-500">Detalles del puesto y asignación</p>
-                        </div>
+                        <h3 className="text-base font-semibold text-gray-900">Información Laboral</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
                             <Label className="text-gray-700">Sector *</Label>
                             <Select value={formData.sector} onValueChange={(v) => setFormData({ ...formData, sector: v })}>
                                 <SelectTrigger className="bg-gray-50/50">
@@ -332,7 +329,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                             </Select>
                             {errors.sector && <p className="text-xs text-destructive">{errors.sector}</p>}
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                             <Label className="text-gray-700">Categoría (Rango) *</Label>
                             <Select value={formData.categoria} onValueChange={(v) => setFormData({ ...formData, categoria: v })}>
                                 <SelectTrigger className="bg-gray-50/50">
@@ -350,7 +347,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                             </Select>
                             {errors.categoria && <p className="text-xs text-destructive">{errors.categoria}</p>}
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-1.5 sm:col-span-2">
                             <Label className="text-gray-700">Fecha de Ingreso *</Label>
                             <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} required className="bg-gray-50/50" />
                             {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
@@ -358,20 +355,65 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     </div>
                 </div>
 
-                {/* Skills Info */}
-                <div className="bg-white rounded-lg border shadow-sm p-6 col-span-1 md:col-span-2 xl:col-span-1">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="h-10 w-10 rounded-full bg-purple-50 flex items-center justify-center">
-                            <Wrench className="h-5 w-5 text-purple-600" />
+                {/* Contact Info */}
+                <div className="bg-white rounded-lg border shadow-sm p-4">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-8 w-8 rounded-full bg-green-50 flex items-center justify-center shrink-0">
+                            <Phone className="h-4 w-4 text-green-600" />
                         </div>
-                        <div>
-                            <h3 className="text-lg font-semibold text-gray-900">Habilidades</h3>
-                            <p className="text-sm text-gray-500">Procesos asignados al operario</p>
-                        </div>
+                        <h3 className="text-base font-semibold text-gray-900">Información de Contacto</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-6">
-                        <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                            <Label className="text-gray-700">Teléfono</Label>
+                            <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} placeholder="Ej.: 42332492" className="bg-gray-50/50" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label className="text-gray-700">Celular</Label>
+                            <Input value={formData.celular} onChange={(e) => setFormData({ ...formData, celular: e.target.value })} placeholder="Ej.: 1127486366" className="bg-gray-50/50" />
+                        </div>
+                        <div className="space-y-1.5 sm:col-span-2">
+                            <Label className="text-gray-700">Email (opcional)</Label>
+                            <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="Ej.: persona@empresa.com" className="bg-gray-50/50" />
+                            {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Schedule Info */}
+                <div className="bg-white rounded-lg border shadow-sm p-4">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-8 w-8 rounded-full bg-amber-50 flex items-center justify-center shrink-0">
+                            <Clock className="h-4 w-4 text-amber-600" />
+                        </div>
+                        <h3 className="text-base font-semibold text-gray-900">Horario de Trabajo</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                            <Label className="text-gray-700">Hora de Inicio</Label>
+                            <Input type="time" value={formData.hora_inicio} onChange={(e) => setFormData({ ...formData, hora_inicio: e.target.value })} className="bg-gray-50/50" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label className="text-gray-700">Hora de Fin</Label>
+                            <Input type="time" value={formData.hora_fin} onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })} className="bg-gray-50/50" />
+                        </div>
+                        <p className="text-xs text-muted-foreground sm:col-span-2">El planificador usará estas horas para organizar las tareas del operario.</p>
+                    </div>
+                </div>
+
+                {/* Skills Info */}
+                <div className="bg-white rounded-lg border shadow-sm p-4 md:col-span-2">
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className="h-8 w-8 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
+                            <Wrench className="h-4 w-4 text-purple-600" />
+                        </div>
+                        <h3 className="text-base font-semibold text-gray-900">Habilidades</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
                             <div>
                                 <div className="flex items-center justify-between mb-2">
                                     <Label className="text-gray-700">SKILLS 1</Label>
@@ -414,8 +456,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                                 </div>
                             </div>
 
-                            <hr className="my-2" />
+                        </div>
 
+                        <div>
                             <div>
                                 <div className="flex items-center justify-between mb-2">
                                     <Label className="text-gray-700">SKILLS 2</Label>
@@ -461,34 +504,6 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     </div>
                 </div>
 
-                {/* Contact Info */}
-                <div className="bg-white rounded-lg border shadow-sm p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="h-10 w-10 rounded-full bg-green-50 flex items-center justify-center">
-                            <Phone className="h-5 w-5 text-green-600" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-semibold text-gray-900">Información de Contacto</h3>
-                            <p className="text-sm text-gray-500">Canales de comunicación</p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <Label className="text-gray-700">Teléfono</Label>
-                            <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} placeholder="Ej.: 42332492" className="bg-gray-50/50" />
-                        </div>
-                        <div className="space-y-2">
-                            <Label className="text-gray-700">Celular</Label>
-                            <Input value={formData.celular} onChange={(e) => setFormData({ ...formData, celular: e.target.value })} placeholder="Ej.: 1127486366" className="bg-gray-50/50" />
-                        </div>
-                        <div className="space-y-2 col-span-1 md:col-span-2">
-                            <Label className="text-gray-700">Email (opcional)</Label>
-                            <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="Ej.: persona@empresa.com" className="bg-gray-50/50" />
-                            {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <div className="flex justify-end gap-2 mt-8 pt-4 border-t">

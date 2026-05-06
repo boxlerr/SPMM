@@ -40,8 +40,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     celular: "",
     dni: "", // usaremos este campo para enviar CUIL/CUIT al backend
     email: "",
-    hora_inicio: "09:00",
-    hora_fin: "18:00",
+    hora_inicio: "07:00",
+    hora_fin: "16:00",
   });
 
   const [sectores, setSectores] = useState<string[]>([]);
@@ -64,8 +64,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         celular: data.celular || "",
         dni: data.dni || "",
         email: (data as any)?.email || "",
-        hora_inicio: (data as any)?.hora_inicio || "09:00",
-        hora_fin: (data as any)?.hora_fin || "18:00",
+        hora_inicio: (data as any)?.hora_inicio || "07:00",
+        hora_fin: (data as any)?.hora_fin || "16:00",
       });
       setPrimarySkill(data.skills?.find(s => s.nivel === 1)?.id_proceso?.toString() || "");
       setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
@@ -214,8 +214,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         (originalTelefono || "") !== (payload.telefono || "") ||
         (originalCelular || "") !== (payload.celular || "") ||
         (originalDni || "") !== (payload.dni || "") ||
-        ((data as any).hora_inicio || "09:00") !== (payload.hora_inicio || "09:00") ||
-        ((data as any).hora_fin || "18:00") !== (payload.hora_fin || "18:00");
+        ((data as any).hora_inicio || "07:00") !== (payload.hora_inicio || "07:00") ||
+        ((data as any).hora_fin || "16:00") !== (payload.hora_fin || "16:00");
 
       const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
         method: "PUT",

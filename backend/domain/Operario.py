@@ -29,8 +29,8 @@ class Operario(Base):
     celular = Column(String(50), nullable=True)
     dni = Column(String(20), nullable=True)
     email = Column(String(100), nullable=True)
-    hora_inicio = Column(Time, nullable=False, default="09:00:00")
-    hora_fin = Column(Time, nullable=False, default="18:00:00")
+    hora_inicio = Column(Time, nullable=False, default="07:00:00")
+    hora_fin = Column(Time, nullable=False, default="16:00:00")
     #cant_hs_trabajadas = Column(Integer, nullable=False, default=0)
     #dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
 
