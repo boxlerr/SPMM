@@ -264,6 +264,16 @@ export default function OperacionesPage() {
 
 
   const isOrderDelivered = (order: WorkOrder) => {
+    // Una OT está "entregada / finalizada" si:
+    //   (a) el cron la marcó finalizadototal=1 (regla oficial del legacy: cantidade>=cantidad,
+    //       fc=1, suspendida=1, etc.) — esto es el caso más común. El cron NO siempre setea
+    //       fecha_entrega porque en el legacy esa fecha queda en '1950-01-01' (sentinel)
+    //       hasta que se facture, así que no podemos depender solo de fecha_entrega.
+    //   (b) o tiene fecha_entrega real (>1950).
+    // Bug previo: solo se chequeaba (b), por eso el modal Planificador mostraba 208 OTs
+    // cuando la lista "No Planificadas" mostraba 165 — las 43 de diferencia eran OTs ya
+    // finalizadas (finalizadototal=1) pero con fecha_entrega NULL.
+    if (Number(order.finalizadototal) === 1) return true;
     if (!order.fecha_entrega) return false;
     const deliveryDate = new Date(order.fecha_entrega);
     return deliveryDate.getFullYear() > 1950;
