@@ -20,6 +20,9 @@ export interface Operario {
   email?: string;
   hora_inicio?: string;
   hora_fin?: string;
+  dias_trabajo?: string;
+  min_desayuno?: number;
+  min_almuerzo?: number;
   skills?: ProcesoSkill[];
 }
 

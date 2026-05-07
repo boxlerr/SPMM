@@ -41,6 +41,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         email: "",
         hora_inicio: "07:00",
         hora_fin: "16:00",
+        dias_trabajo: "MON,TUE,WED,THU,FRI",
+        min_desayuno: 15,
+        min_almuerzo: 30,
     });
 
     const [sectores, setSectores] = useState<string[]>([]);
@@ -65,6 +68,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 email: (data as any)?.email || "",
                 hora_inicio: (data as any)?.hora_inicio || "07:00",
                 hora_fin: (data as any)?.hora_fin || "16:00",
+                dias_trabajo: (data as any)?.dias_trabajo || "MON,TUE,WED,THU,FRI",
+                min_desayuno: (data as any)?.min_desayuno ?? 15,
+                min_almuerzo: (data as any)?.min_almuerzo ?? 30,
             });
             setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
             setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
@@ -82,6 +88,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 email: "",
                 hora_inicio: "07:00",
                 hora_fin: "16:00",
+                dias_trabajo: "MON,TUE,WED,THU,FRI",
+                min_desayuno: 15,
+                min_almuerzo: 30,
             });
             setPrimarySkills([]);
             setSecondarySkills([]);
@@ -203,6 +212,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 (originalDni || "") !== (payload.dni || "") ||
                 ((data as any).hora_inicio || "07:00") !== (payload.hora_inicio || "07:00") ||
                 ((data as any).hora_fin || "16:00") !== (payload.hora_fin || "16:00") ||
+                ((data as any).dias_trabajo || "MON,TUE,WED,THU,FRI") !== (payload.dias_trabajo || "MON,TUE,WED,THU,FRI") ||
+                (((data as any).min_desayuno ?? 15)) !== (payload.min_desayuno ?? 15) ||
+                (((data as any).min_almuerzo ?? 30)) !== (payload.min_almuerzo ?? 30) ||
                 JSON.stringify(data.skills?.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
@@ -241,7 +253,10 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         onSuccess();
     };
 
-    const disabled = !formData.nombre || !formData.apellido || !formData.sector || !formData.categoria || !formData.fecha_nacimiento || !formData.fecha_ingreso;
+    const baseDisabled = !formData.nombre || !formData.apellido || !formData.sector || !formData.categoria;
+    const disabled = isCreating
+        ? baseDisabled || !formData.fecha_nacimiento || !formData.fecha_ingreso
+        : baseDisabled;
 
     const handlePrimaryChange = (index: number, val: string) => {
         const newSkills = [...primarySkills];
@@ -399,7 +414,107 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                             <Label className="text-gray-700">Hora de Fin</Label>
                             <Input type="time" value={formData.hora_fin} onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })} className="bg-gray-50/50" />
                         </div>
-                        <p className="text-xs text-muted-foreground sm:col-span-2">El planificador usará estas horas para organizar las tareas del operario.</p>
+
+                        <div className="space-y-1.5 sm:col-span-2">
+                            <Label className="text-gray-700">Días de Trabajo</Label>
+                            <div className="flex flex-wrap gap-2">
+                                {[
+                                    { code: "MON", label: "Lun" },
+                                    { code: "TUE", label: "Mar" },
+                                    { code: "WED", label: "Mié" },
+                                    { code: "THU", label: "Jue" },
+                                    { code: "FRI", label: "Vie" },
+                                    { code: "SAT", label: "Sáb" },
+                                    { code: "SUN", label: "Dom" },
+                                ].map(({ code, label }) => {
+                                    const dias = formData.dias_trabajo.split(",").filter(Boolean);
+                                    const activo = dias.includes(code);
+                                    return (
+                                        <button
+                                            key={code}
+                                            type="button"
+                                            onClick={() => {
+                                                const orden = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+                                                const next = activo
+                                                    ? dias.filter((d) => d !== code)
+                                                    : [...dias, code];
+                                                const ordenado = orden.filter((d) => next.includes(d));
+                                                setFormData({ ...formData, dias_trabajo: ordenado.join(",") });
+                                            }}
+                                            className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${activo
+                                                ? "bg-amber-100 border-amber-300 text-amber-900"
+                                                : "bg-gray-50/50 border-gray-200 text-gray-600 hover:bg-gray-100"
+                                                }`}
+                                        >
+                                            {label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <Label className="text-gray-700">Desayuno (min)</Label>
+                            <Input
+                                type="number"
+                                min={0}
+                                max={240}
+                                value={formData.min_desayuno}
+                                onChange={(e) => setFormData({ ...formData, min_desayuno: Number(e.target.value || 0) })}
+                                className="bg-gray-50/50"
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label className="text-gray-700">Almuerzo (min)</Label>
+                            <Input
+                                type="number"
+                                min={0}
+                                max={240}
+                                value={formData.min_almuerzo}
+                                onChange={(e) => setFormData({ ...formData, min_almuerzo: Number(e.target.value || 0) })}
+                                className="bg-gray-50/50"
+                            />
+                        </div>
+
+                        {(() => {
+                            const toMin = (h: string) => {
+                                if (!h) return null;
+                                const [hh, mm] = h.split(":").map(Number);
+                                if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+                                return hh * 60 + mm;
+                            };
+                            const ini = toMin(formData.hora_inicio);
+                            const fin = toMin(formData.hora_fin);
+                            const dias = formData.dias_trabajo.split(",").filter(Boolean).length;
+                            if (ini === null || fin === null || fin <= ini) {
+                                return (
+                                    <p className="text-xs text-destructive sm:col-span-2">
+                                        Configurá una hora de inicio menor a la hora de fin.
+                                    </p>
+                                );
+                            }
+                            const reales = Math.max(
+                                0,
+                                fin - ini - (formData.min_desayuno || 0) - (formData.min_almuerzo || 0)
+                            );
+                            const hh = Math.floor(reales / 60);
+                            const mm = reales % 60;
+                            const semana = reales * dias;
+                            const semHh = Math.floor(semana / 60);
+                            const semMm = semana % 60;
+                            return (
+                                <p className="text-xs text-muted-foreground sm:col-span-2">
+                                    Horas reales por día: <span className="font-semibold text-gray-800">{hh}h {mm.toString().padStart(2, "0")}min</span>
+                                    {" · "}
+                                    Total semanal: <span className="font-semibold text-gray-800">{semHh}h {semMm.toString().padStart(2, "0")}min</span>
+                                    {" "}({dias} {dias === 1 ? "día" : "días"})
+                                </p>
+                            );
+                        })()}
+
+                        <p className="text-xs text-muted-foreground sm:col-span-2">
+                            El planificador usará estos datos a partir de la próxima fase.
+                        </p>
                     </div>
                 </div>
 

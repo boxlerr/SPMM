@@ -31,8 +31,11 @@ class Operario(Base):
     email = Column(String(100), nullable=True)
     hora_inicio = Column(Time, nullable=False, default="07:00:00")
     hora_fin = Column(Time, nullable=False, default="16:00:00")
-    #cant_hs_trabajadas = Column(Integer, nullable=False, default=0)
-    #dias_trabajo = Column(String(50), nullable=True)  # ej.: "Lun-Vie"
+    # Días laborables del operario. Formato CSV con códigos en inglés:
+    # MON,TUE,WED,THU,FRI,SAT,SUN. Default L-V.
+    dias_trabajo = Column(String(50), nullable=False, default="MON,TUE,WED,THU,FRI")
+    min_desayuno = Column(Integer, nullable=False, default=15)
+    min_almuerzo = Column(Integer, nullable=False, default=30)
 
     rangos = relationship("OperarioRango", back_populates="operario")
     procesos_skill = relationship("OperarioProcesoSkill", back_populates="operario", cascade="all, delete-orphan")

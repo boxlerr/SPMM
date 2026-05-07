@@ -23,6 +23,10 @@ class OperarioRequestDTO(BaseModel):
     email: Optional[str] = Field(None, max_length=150)
     hora_inicio: Optional[str] = "07:00"
     hora_fin: Optional[str] = "16:00"
+    # CSV con códigos en inglés: MON,TUE,WED,THU,FRI,SAT,SUN
+    dias_trabajo: Optional[str] = "MON,TUE,WED,THU,FRI"
+    min_desayuno: Optional[int] = 15
+    min_almuerzo: Optional[int] = 30
 
     class Config:
         json_schema_extra = {

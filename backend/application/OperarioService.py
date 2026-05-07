@@ -1,5 +1,39 @@
 from datetime import time
 from backend.domain.Operario import Operario
+
+
+_DIAS_VALIDOS = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"}
+
+
+def _normalizar_dias_trabajo(valor):
+    """
+    Normaliza un valor de dias_trabajo a una cadena CSV con códigos válidos.
+    Acepta lista o string. Si no se pueden extraer días válidos, devuelve None
+    para que el caller decida si usar el default.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, str):
+        items = [v.strip().upper() for v in valor.split(",") if v.strip()]
+    else:
+        items = [str(v).strip().upper() for v in valor if str(v).strip()]
+    items = [d for d in items if d in _DIAS_VALIDOS]
+    if not items:
+        return None
+    # Preservar orden semanal canónico, sin duplicados.
+    orden = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+    return ",".join(d for d in orden if d in items)
+
+
+def _validar_pausa(valor, default):
+    """Convierte a int, recorta a [0, 240] minutos. Devuelve default si inválido."""
+    if valor is None:
+        return default
+    try:
+        n = int(valor)
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(240, n))
 from backend.dto.OperarioRequestDTO import OperarioRequestDTO
 from backend.infrastructure.OperarioRepository import OperarioRepository
 from backend.commons.ResponseDTO import ResponseDTO
@@ -47,8 +81,11 @@ class OperarioService:
                 celular=operario_dto.celular,
                 dni=operario_dto.dni,
                 email=operario_dto.email,
-                hora_inicio=time.fromisoformat(operario_dto.hora_inicio) if operario_dto.hora_inicio else time(9, 0),
-                hora_fin=time.fromisoformat(operario_dto.hora_fin) if operario_dto.hora_fin else time(18, 0),
+                hora_inicio=time.fromisoformat(operario_dto.hora_inicio) if operario_dto.hora_inicio else time(7, 0),
+                hora_fin=time.fromisoformat(operario_dto.hora_fin) if operario_dto.hora_fin else time(16, 0),
+                dias_trabajo=_normalizar_dias_trabajo(operario_dto.dias_trabajo) or "MON,TUE,WED,THU,FRI",
+                min_desayuno=_validar_pausa(operario_dto.min_desayuno, 15),
+                min_almuerzo=_validar_pausa(operario_dto.min_almuerzo, 30),
                 procesos_skill=procesos_skill,
             )
 
@@ -102,6 +139,9 @@ class OperarioService:
                     "email": o.email,
                     "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "07:00",
                     "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "16:00",
+                    "dias_trabajo": getattr(o, "dias_trabajo", None) or "MON,TUE,WED,THU,FRI",
+                    "min_desayuno": getattr(o, "min_desayuno", None) if getattr(o, "min_desayuno", None) is not None else 15,
+                    "min_almuerzo": getattr(o, "min_almuerzo", None) if getattr(o, "min_almuerzo", None) is not None else 30,
                     "rangos": [r.id_rango for r in o.rangos],
                     "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
                 }
@@ -139,6 +179,9 @@ class OperarioService:
                     "email": o.email,
                     "hora_inicio": o.hora_inicio.strftime("%H:%M") if o.hora_inicio else "07:00",
                     "hora_fin": o.hora_fin.strftime("%H:%M") if o.hora_fin else "16:00",
+                    "dias_trabajo": getattr(o, "dias_trabajo", None) or "MON,TUE,WED,THU,FRI",
+                    "min_desayuno": getattr(o, "min_desayuno", None) if getattr(o, "min_desayuno", None) is not None else 15,
+                    "min_almuerzo": getattr(o, "min_almuerzo", None) if getattr(o, "min_almuerzo", None) is not None else 30,
                     "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
                 },
                 errorDescription=""
@@ -160,6 +203,18 @@ class OperarioService:
                 nueva_data["hora_inicio"] = time.fromisoformat(nueva_data["hora_inicio"])
             if "hora_fin" in nueva_data and isinstance(nueva_data["hora_fin"], str):
                 nueva_data["hora_fin"] = time.fromisoformat(nueva_data["hora_fin"])
+
+            if "dias_trabajo" in nueva_data:
+                normalizados = _normalizar_dias_trabajo(nueva_data["dias_trabajo"])
+                if normalizados is None:
+                    # valor inválido: no actualizar para evitar dejar al operario sin días
+                    nueva_data.pop("dias_trabajo")
+                else:
+                    nueva_data["dias_trabajo"] = normalizados
+            if "min_desayuno" in nueva_data:
+                nueva_data["min_desayuno"] = _validar_pausa(nueva_data["min_desayuno"], 15)
+            if "min_almuerzo" in nueva_data:
+                nueva_data["min_almuerzo"] = _validar_pausa(nueva_data["min_almuerzo"], 30)
 
             actualizado = await self.repository.update(id, nueva_data)
 
