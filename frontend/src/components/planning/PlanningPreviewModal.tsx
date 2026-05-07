@@ -43,6 +43,10 @@ interface PlanificacionResult {
     prioridad_descripcion?: string;
     all_finalized?: boolean;
     any_process_started?: boolean;
+    // Diagnóstico de excedentes (Fase 3 - mejora 1)
+    excedente?: boolean;
+    motivo_excedente?: string;
+    motivo_descripcion?: string;
 }
 
 interface PlanningPreviewModalProps {
@@ -317,40 +321,84 @@ export function PlanningPreviewModal({
                                                 const oid = parseInt(oidStr);
                                                 const first = items[0];
                                                 const forzar = forzarOrdenIds.has(oid);
+
+                                                // Resumen de motivos de los procesos excedentes
+                                                const PRIORIDAD_MOTIVO: Record<string, number> = {
+                                                    proceso_largo: 1,
+                                                    sin_operario: 2,
+                                                    sin_maquina: 3,
+                                                    capacidad_insuficiente: 4,
+                                                    secuencia_bloqueada: 5,
+                                                };
+                                                const ETIQUETA_MOTIVO: Record<string, string> = {
+                                                    proceso_largo: "Proceso no fragmentable",
+                                                    sin_operario: "Sin operario compatible",
+                                                    sin_maquina: "Sin máquina compatible",
+                                                    capacidad_insuficiente: "Capacidad insuficiente",
+                                                    secuencia_bloqueada: "Secuencia bloqueada",
+                                                };
+                                                const COLOR_MOTIVO: Record<string, string> = {
+                                                    proceso_largo: "bg-rose-100 text-rose-800 border-rose-200",
+                                                    sin_operario: "bg-orange-100 text-orange-800 border-orange-200",
+                                                    sin_maquina: "bg-orange-100 text-orange-800 border-orange-200",
+                                                    capacidad_insuficiente: "bg-amber-100 text-amber-800 border-amber-200",
+                                                    secuencia_bloqueada: "bg-gray-100 text-gray-700 border-gray-200",
+                                                };
+                                                const motivoPrincipal = items
+                                                    .map((it: any) => it.motivo_excedente)
+                                                    .filter(Boolean)
+                                                    .sort((a: string, b: string) => (PRIORIDAD_MOTIVO[a] || 99) - (PRIORIDAD_MOTIVO[b] || 99))[0];
+                                                const descripcionPrincipal = motivoPrincipal
+                                                    ? items.find((it: any) => it.motivo_excedente === motivoPrincipal)?.motivo_descripcion
+                                                    : null;
                                                 return (
-                                                    <div key={oid} className="px-4 py-3 flex items-center justify-between gap-4 bg-white/60">
-                                                        <div className="flex flex-col min-w-0">
-                                                            <div className="text-sm font-medium text-gray-800 truncate">
-                                                                #{oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
+                                                    <div key={oid} className="px-4 py-3 bg-white/60">
+                                                        <div className="flex items-center justify-between gap-4">
+                                                            <div className="flex flex-col min-w-0 flex-1">
+                                                                <div className="text-sm font-medium text-gray-800 truncate">
+                                                                    #{oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
+                                                                </div>
+                                                                <div className="text-xs text-gray-500 mt-0.5">
+                                                                    {items.length} proceso(s) excedente(s)
+                                                                    {first.fecha_prometida && ` · Prometida ${formatDate(first.fecha_prometida)}`}
+                                                                    <span className="ml-2">
+                                                                        <Badge variant="outline" className="border-gray-300 text-gray-700 text-[10px]">
+                                                                            {getPriorityLabel(first.id_prioridad, first.prioridad_descripcion)}
+                                                                        </Badge>
+                                                                    </span>
+                                                                </div>
                                                             </div>
-                                                            <div className="text-xs text-gray-500 mt-0.5">
-                                                                {items.length} proceso(s) excedente(s)
-                                                                {first.fecha_prometida && ` · Prometida ${formatDate(first.fecha_prometida)}`}
-                                                                <span className="ml-2">
-                                                                    <Badge variant="outline" className="border-gray-300 text-gray-700 text-[10px]">
-                                                                        {getPriorityLabel(first.id_prioridad, first.prioridad_descripcion)}
-                                                                    </Badge>
-                                                                </span>
+                                                            <div className="flex gap-2 shrink-0">
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant={forzar ? "outline" : "default"}
+                                                                    className={!forzar ? "bg-gray-700 hover:bg-gray-800 text-white whitespace-nowrap" : "border-gray-300 text-gray-700 whitespace-nowrap"}
+                                                                    onClick={() => { if (forzar) toggleForzar(oid); }}
+                                                                >
+                                                                    Descartar
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant={forzar ? "default" : "outline"}
+                                                                    className={forzar ? "bg-amber-600 hover:bg-amber-700 text-white whitespace-nowrap" : "border-amber-400 text-amber-800 hover:bg-amber-100 whitespace-nowrap"}
+                                                                    onClick={() => { if (!forzar) toggleForzar(oid); }}
+                                                                >
+                                                                    Forzar
+                                                                </Button>
                                                             </div>
                                                         </div>
-                                                        <div className="flex gap-2 shrink-0">
-                                                            <Button
-                                                                size="sm"
-                                                                variant={forzar ? "outline" : "default"}
-                                                                className={!forzar ? "bg-gray-700 hover:bg-gray-800 text-white" : "border-gray-300 text-gray-700"}
-                                                                onClick={() => { if (forzar) toggleForzar(oid); }}
-                                                            >
-                                                                Descartar
-                                                            </Button>
-                                                            <Button
-                                                                size="sm"
-                                                                variant={forzar ? "default" : "outline"}
-                                                                className={forzar ? "bg-amber-600 hover:bg-amber-700 text-white" : "border-amber-400 text-amber-800 hover:bg-amber-100"}
-                                                                onClick={() => { if (!forzar) toggleForzar(oid); }}
-                                                            >
-                                                                Forzar
-                                                            </Button>
-                                                        </div>
+                                                        {motivoPrincipal && (
+                                                            <div className="mt-2 flex items-start gap-2 flex-wrap">
+                                                                <Badge variant="outline" className={`text-[10px] shrink-0 ${COLOR_MOTIVO[motivoPrincipal] || "border-gray-300 text-gray-700"}`}>
+                                                                    {ETIQUETA_MOTIVO[motivoPrincipal] || motivoPrincipal}
+                                                                </Badge>
+                                                                {descripcionPrincipal && (
+                                                                    <span className="text-xs text-gray-600 leading-snug flex-1 min-w-0">
+                                                                        {descripcionPrincipal}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             })}

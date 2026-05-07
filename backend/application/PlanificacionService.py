@@ -26,21 +26,50 @@ import re
 import unicodedata
 
 ##Variables:
-MIN_LABORAL_DIA = 555
-MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 3075
+# Jornada física L-V: 07:00 a 16:00 (9 hs). Pausas: 15' desayuno + 30' almuerzo = 45' muertos.
+# Tiempo laboral real = 8h 15min = 495 min/día.
+MIN_LABORAL_DIA = 495
+MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA  # Sólo L-V por defecto = 2475
 
+# Fase 3: capacidades extras opcionales habilitadas bajo demanda
+HE_MIN_DIA = 120        # 2 hs extra al final del día (16:00 a 18:00) cuando permitir_he
+SAB_MIN_DIA = 300       # 5 hs corridas el sábado (07:00 a 12:00) cuando permitir_sabado
+
+# Tramos en minutos laborales (espacio comprimido del solver).
+# Las pausas físicas se aplican en _convertir_minutos_a_fecha, no acá.
 TRAMOS_LV_LAB = [
-    (0, 120),
-    (120, 285),
-    (285, 555),
+    (0, 120),    # 07:00 - 09:00
+    (120, 285),  # 09:15 - 12:00 (post-desayuno)
+    (285, 495),  # 12:30 - 16:00 (post-almuerzo)
 ]
 
-TRAMOS_SAB_LAB = [
-    (0, 300),
-]
+# Sábado off por defecto. Se mantiene la constante por compatibilidad,
+# pero no genera capacidad en el solver.
+TRAMOS_SAB_LAB = []
+
+
+def _capacidad_dia(weekday: int, permitir_he: bool, permitir_sabado: bool) -> int:
+    """Capacidad del timeline global por día calendario (en minutos comprimidos)."""
+    if weekday < 5:
+        return MIN_LABORAL_DIA + (HE_MIN_DIA if permitir_he else 0)
+    if weekday == 5:
+        return SAB_MIN_DIA if permitir_sabado else 0
+    return 0
+
+
+def _tramos_dia_global(weekday: int, permitir_he: bool, permitir_sabado: bool):
+    """Tramos globales (default, dummy) en el día. Devuelve lista [(ini, fin)]."""
+    if weekday < 5:
+        tramos = list(TRAMOS_LV_LAB)
+        if permitir_he:
+            tramos.append((MIN_LABORAL_DIA, MIN_LABORAL_DIA + HE_MIN_DIA))
+        return tramos
+    if weekday == 5 and permitir_sabado:
+        return [(0, SAB_MIN_DIA)]
+    return []
 # ------------------------------------------------------------------
 #Funcion para ventanas semanales en tiempo.
-def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None):
+def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None, permitir_he: bool = False, permitir_sabado: bool = False):
     """
     Construye las ventanas horarias del horizonte.
     Si `fecha_hasta` viene, limita el horizonte a (fecha_hasta - start_date) días INCLUSIVE.
@@ -103,17 +132,9 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
         day_str = current_iter_date.strftime("%Y-%m-%d")
         weekday = current_iter_date.weekday() # 0=Mon, 6=Sun
         
-        # Determine schedule for this day
-        tramos = []
-        if weekday < 5: # Mon-Fri
-            tramos = TRAMOS_LV_LAB # [(0, 120), ...] relative to day start
-            day_capacity = MIN_LABORAL_DIA
-        elif weekday == 5: # Sat
-            tramos = TRAMOS_SAB_LAB
-            day_capacity = 300 # Approx
-        else:
-            tramos = [] # Sun
-            day_capacity = 0
+        # Determine schedule for this day (con flags Fase 3)
+        tramos = _tramos_dia_global(weekday, permitir_he, permitir_sabado)
+        day_capacity = _capacidad_dia(weekday, permitir_he, permitir_sabado)
             
         # CHECK BLOCKING
         if day_str in blocked_dates:
@@ -199,15 +220,122 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
              # Add segments for this day
              for ini, fin in tramos:
                  ventanas.append((current_base_minutes + ini, current_base_minutes + fin))
-             
-             # Advance base minutes
-             day_duration = MIN_LABORAL_DIA if weekday < 5 else 300
-             current_base_minutes += day_duration
+
+             # Advance base minutes (sólo si el día aporta capacidad)
+             current_base_minutes += day_capacity
         
         # Advance calendar
         current_iter_date += timedelta(days=1)
         
     return ventanas
+
+
+# Mapeo weekday() (0..6) → código que usamos en dias_trabajo del operario
+_WEEKDAY_TO_CODE = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI", 5: "SAT", 6: "SUN"}
+
+
+def _jornada_real_min(horario: dict) -> int:
+    """
+    Devuelve los minutos laborales reales que aporta un operario en un día,
+    truncados al máximo del solver (MIN_LABORAL_DIA = 495).
+    """
+    hi = horario.get("hora_inicio")
+    hf = horario.get("hora_fin")
+    if hi is None or hf is None:
+        return 0
+    inicio = hi.hour * 60 + hi.minute
+    fin = hf.hour * 60 + hf.minute
+    if fin <= inicio:
+        return 0
+    bruto = fin - inicio
+    pausas = int(horario.get("min_desayuno") or 0) + int(horario.get("min_almuerzo") or 0)
+    real = max(0, bruto - pausas)
+    return min(real, MIN_LABORAL_DIA)
+
+
+def _tramos_para_jornada(jornada_min: int) -> list[tuple[int, int]]:
+    """
+    Adapta TRAMOS_LV_LAB a una jornada de 'jornada_min' minutos truncando
+    el último tramo. Mantiene los breakpoints de pausas estándar (120, 285).
+    Si la jornada es muy corta, recorta tramos enteros.
+    """
+    if jornada_min <= 0:
+        return []
+    tramos = []
+    for ini, fin in TRAMOS_LV_LAB:
+        if jornada_min <= ini:
+            break
+        tramos.append((ini, min(fin, jornada_min)))
+    return tramos
+
+
+def construir_ventanas_por_operario(
+    horarios_por_operario: dict,
+    start_date: date,
+    blocked_dates: list[str],
+    fecha_hasta: date | None = None,
+    num_semanas: int = 1,
+    permitir_he: bool = False,
+    permitir_sabado: bool = False,
+):
+    """
+    Para cada operario devuelve sus ventanas en el timeline comprimido global.
+
+    El timeline global avanza la capacidad del día (495 + HE opcional en L-V,
+    300 en sábado si se permite, 0 si no). Cada operario ve sólo los tramos
+    que le corresponden según su jornada base, sus días de trabajo y los flags.
+
+    Reglas Fase 3:
+        - Si `permitir_he` está activo, los operarios con jornada base = 495
+          reciben un tramo extra (495, 615) en L-V (16:00-18:00).
+        - Si `permitir_sabado` está activo, todos los operarios reciben un
+          tramo (0, 300) el sábado, ignorando si tienen SAT en `dias_trabajo`
+          (es una orden global por urgencia).
+
+    Returns: dict[op_id, list[(ini, fin)]]
+    """
+    if fecha_hasta is not None:
+        total_days = max(1, (fecha_hasta - start_date).days + 1)
+    else:
+        total_days = num_semanas * 7
+
+    blocked_set = set(blocked_dates)
+    out = {op_id: [] for op_id in horarios_por_operario.keys()}
+    cur = start_date
+    base = 0
+
+    for _ in range(total_days):
+        wd = cur.weekday()
+        day_str = cur.strftime("%Y-%m-%d")
+        bloqueado = day_str in blocked_set
+        codigo = _WEEKDAY_TO_CODE[wd]
+
+        capacidad = _capacidad_dia(wd, permitir_he, permitir_sabado)
+        if bloqueado or capacidad == 0:
+            cur += timedelta(days=1)
+            continue
+
+        if wd < 5:
+            for op_id, horario in horarios_por_operario.items():
+                if codigo not in horario["dias_trabajo"]:
+                    continue
+                jornada = _jornada_real_min(horario)
+                tramos = _tramos_para_jornada(jornada)
+                for ini, fin in tramos:
+                    out[op_id].append((base + ini, base + fin))
+                # HE: solo operarios con jornada completa estandar acceden al tramo extra
+                if permitir_he and jornada >= MIN_LABORAL_DIA:
+                    out[op_id].append((base + MIN_LABORAL_DIA, base + MIN_LABORAL_DIA + HE_MIN_DIA))
+        elif wd == 5 and permitir_sabado:
+            # Sábado de urgencia: todos los operarios disponibles, 5 hs corridas
+            for op_id in horarios_por_operario.keys():
+                out[op_id].append((base, base + SAB_MIN_DIA))
+
+        base += capacidad
+        cur += timedelta(days=1)
+
+    return out
+
 
 # ------------------------------------------------------------
 # Helpers del solver
@@ -864,25 +992,34 @@ def _agregar_funcion_objetivo(
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
 
-def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
+def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, permitir_he: bool = False, permitir_sabado: bool = False):
     """
     Convierte minutos de trabajo lógicos a una fecha real del calendario físico.
-    Alineado a jornada física de 07:00 a 18:00 con 105 minutos muertos.
+    Jornada física L-V: 07:00 a 16:00 (9 hs).
+    Pausas: 15' desayuno tras tramo 1, 30' almuerzo tras tramo 2.
+    Tiempo laboral real = 495 min/día. Sábado y domingo off por defecto.
+
+    Fase 3:
+        - permitir_he: agrega 120 min extra al final del día L-V (16:00-18:00).
+          Capacidad L-V = 615, sin pausas adicionales en el tramo HE.
+        - permitir_sabado: agrega 5 hs al sábado (07:00-12:00, sin pausas).
+          Capacidad sábado = 300.
     """
     from datetime import timedelta
-    
+
     # Load blocked dates first
     config_repo = ConfigRepository()
     blocked_dates = set(config_repo.get_blocked_dates())
 
     ahora = ahora_ref if ahora_ref else datetime.now()
     inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
-    
+
     def avanzar_a_dia_valido(fecha):
         while True:
             wd = fecha.weekday()
             is_blocked = fecha.strftime("%Y-%m-%d") in blocked_dates
-            if wd == 6 or is_blocked: 
+            cap = _capacidad_dia(wd, permitir_he, permitir_sabado)
+            if is_blocked or cap == 0:
                 fecha += timedelta(days=1)
             else:
                 break
@@ -893,40 +1030,40 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
 
     while minutos_restantes > 0:
         wd = tiempo_actual.weekday()
-        
-        if wd < 5:
-            capacidad_hoy = 555
-        elif wd == 5:
-            capacidad_hoy = 300
-        else:
-            capacidad_hoy = 0
-            
+        capacidad_hoy = _capacidad_dia(wd, permitir_he, permitir_sabado)
+
         if capacidad_hoy == 0:
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             continue
-            
+
         if minutos_restantes >= capacidad_hoy:
             minutos_restantes -= capacidad_hoy
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
         else:
             if wd < 5:
+                # Tramos físicos L-V (con HE si aplica)
                 if minutos_restantes <= 120:
                     tiempo_actual += timedelta(minutes=minutos_restantes)
                 elif minutos_restantes <= 285:
                     tiempo_actual += timedelta(minutes=minutos_restantes + 15)
+                elif minutos_restantes <= MIN_LABORAL_DIA:
+                    tiempo_actual += timedelta(minutes=minutos_restantes + 45)
                 else:
-                    tiempo_actual += timedelta(minutes=minutos_restantes + 105)
-            elif wd == 5:
+                    # tramo HE (495..615): 16:00 + (min - 495)
+                    # físicamente: 7:00 + 495 + 45 (pausas) + (min - 495) = 7:00 + min + 45
+                    tiempo_actual += timedelta(minutes=minutos_restantes + 45)
+            else:
+                # Sábado: sin pausas, 7:00 + min
                 tiempo_actual += timedelta(minutes=minutos_restantes)
-                
+
             minutos_restantes = 0
-            
+
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, permitir_he: bool = False, permitir_sabado: bool = False):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
@@ -968,8 +1105,8 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "sin_asignar": (op_id == DUMMY_OP_ID),
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
                 "excedente": excedente,
-                "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m, start_time_ref),
-                "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m, start_time_ref),
+                "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m, start_time_ref, permitir_he, permitir_sabado),
+                "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m, start_time_ref, permitir_he, permitir_sabado),
             })
 
         resultados.sort(key=lambda x: (x["orden_id"], x["secuencia"]))
@@ -978,6 +1115,183 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
         raise PlanificacionException("No se pudo generar una planificación viable con las restricciones actuales.")
 
     return resultados
+
+def _max_tramo_disponible(permitir_he: bool, permitir_sabado: bool) -> tuple[int, str]:
+    """
+    Devuelve (minutos, etiqueta) del tramo individual más grande disponible
+    según los flags activos. Sirve para diagnóstico de procesos no fragmentables.
+    """
+    candidatos = [(120, "mañana L-V"), (165, "mediodía L-V"), (210, "tarde L-V")]
+    if permitir_he:
+        candidatos.append((120, "HE L-V"))
+    if permitir_sabado:
+        candidatos.append((300, "sábado"))
+    candidatos.sort(reverse=True)
+    return candidatos[0]
+
+
+def _fmt_dur(min_total: int) -> str:
+    h, m = divmod(int(min_total), 60)
+    if h and m:
+        return f"{h}h {m:02d}min"
+    if h:
+        return f"{h}h"
+    return f"{m}min"
+
+
+def _anotar_motivos_excedentes(resultados: list[dict], permitir_he: bool, permitir_sabado: bool) -> None:
+    """
+    Mutates `resultados` in place: añade `motivo_excedente` y `motivo_descripcion`
+    a cada item con `excedente=True`.
+
+    Categorías (por prioridad de detección):
+        - sin_operario: ningún operario tiene rango/skill compatible.
+        - sin_maquina: ningún equipo compatible con el proceso.
+        - proceso_largo: la duración supera la ventana individual más grande.
+        - secuencia_bloqueada: el proceso anterior de la misma orden no entró.
+        - capacidad_insuficiente: default cuando no aplica nada de lo anterior.
+    """
+    max_tramo, etiqueta_tramo = _max_tramo_disponible(permitir_he, permitir_sabado)
+
+    excedentes_por_orden: dict = {}
+    for r in resultados:
+        if not r.get("excedente"):
+            continue
+        excedentes_por_orden.setdefault(r["orden_id"], []).append(r)
+
+    for orden_id, items in excedentes_por_orden.items():
+        items.sort(key=lambda x: x.get("secuencia") or 0)
+        for r in items:
+            dur = int(r.get("duracion_min") or 0)
+            sin_op = bool(r.get("sin_asignar"))
+            sin_maq = bool(r.get("sin_maquinaria"))
+
+            if sin_op:
+                r["motivo_excedente"] = "sin_operario"
+                r["motivo_descripcion"] = (
+                    "No hay operario con el rango o skill requerido para este proceso."
+                )
+                continue
+
+            if sin_maq:
+                r["motivo_excedente"] = "sin_maquina"
+                r["motivo_descripcion"] = (
+                    "No hay máquina compatible con el proceso."
+                )
+                continue
+
+            if dur > max_tramo:
+                desc = (
+                    f"El proceso dura {_fmt_dur(dur)} y la ventana individual más grande "
+                    f"disponible es de {_fmt_dur(max_tramo)} ({etiqueta_tramo}). "
+                    f"No se puede partir entre tramos en el modelo actual."
+                )
+                # Si todavía hay flags por habilitar, aclarar si ayudarían o no
+                tramo_he = 120
+                tramo_sab = 300
+                if not permitir_he and dur <= max(max_tramo, tramo_he):
+                    pass  # no ayuda
+                if not permitir_sabado and dur <= tramo_sab:
+                    desc += " Habilitar sábados (5 hs) podría alcanzar."
+                elif (not permitir_he) and (not permitir_sabado) and dur > tramo_sab:
+                    desc += " Habilitar HE/sábado no resolvería este caso (proceso > 5 hs)."
+                r["motivo_excedente"] = "proceso_largo"
+                r["motivo_descripcion"] = desc
+                continue
+
+            anteriores_excedentes = [
+                x for x in items
+                if (x.get("secuencia") or 0) < (r.get("secuencia") or 0)
+            ]
+            if anteriores_excedentes:
+                ant = anteriores_excedentes[-1]
+                nombre_ant = ant.get("nombre_proceso") or "anterior"
+                r["motivo_excedente"] = "secuencia_bloqueada"
+                r["motivo_descripcion"] = (
+                    f"El proceso anterior de la orden ({nombre_ant.strip()}, "
+                    f"sec. #{ant.get('secuencia')}) no entró en el plan."
+                )
+                continue
+
+            r["motivo_excedente"] = "capacidad_insuficiente"
+            r["motivo_descripcion"] = (
+                "Los recursos disponibles están saturados en el rango del horizonte. "
+                "Habilitar HE o sábado podría ayudar."
+            )
+
+
+def _construir_sugerencia(
+    excedentes: list[dict],
+    horarios_por_operario: dict | None,
+    permitir_he: bool,
+    permitir_sabado: bool,
+) -> dict | None:
+    """
+    Detector Fase 3: si entre los excedentes hay procesos con prioridad <= 2 (urgentes),
+    construye una sugerencia para el usuario explicando cuánta capacidad extra
+    podría obtener habilitando HE y/o sábado.
+
+    Sólo emite sugerencia mientras existan flags todavía OFF que puedan ayudar.
+    Devuelve None si no aplica.
+    """
+    if not excedentes:
+        return None
+
+    urgentes = [e for e in excedentes if (e.get("prioridad_peso") or 99) <= 2]
+    if not urgentes:
+        return None
+
+    minutos_faltantes = sum(int(e.get("duracion_min") or 0) for e in urgentes)
+    cantidad_urgentes = len(urgentes)
+
+    # Capacidad extra por día y semana que aporta cada flag (estimación global).
+    # Asumimos que en promedio los operarios elegibles para HE son los que tienen
+    # jornada base >= 495. Si no tenemos horarios cargados, usamos 1 operario como cota inferior
+    # informativa (la UI puede multiplicar por la cantidad real luego).
+    if horarios_por_operario:
+        n_ops_he = sum(
+            1 for h in horarios_por_operario.values()
+            if _jornada_real_min(h) >= MIN_LABORAL_DIA
+        )
+        n_ops_sab = len(horarios_por_operario)
+    else:
+        n_ops_he = 1
+        n_ops_sab = 1
+
+    # Asumimos 5 días L-V por semana para HE
+    he_min_semana = HE_MIN_DIA * 5 * n_ops_he
+    sab_min_semana = SAB_MIN_DIA * n_ops_sab
+
+    opciones = []
+    if not permitir_he and he_min_semana > 0:
+        opciones.append({
+            "tipo": "he",
+            "descripcion": f"Habilitar 2 hs extras diarias L-V ({n_ops_he} operario{'s' if n_ops_he != 1 else ''} con jornada completa)",
+            "capacidad_extra_min_semana": he_min_semana,
+        })
+    if not permitir_sabado and sab_min_semana > 0:
+        opciones.append({
+            "tipo": "sabado",
+            "descripcion": f"Habilitar sábados con 5 hs ({n_ops_sab} operario{'s' if n_ops_sab != 1 else ''})",
+            "capacidad_extra_min_semana": sab_min_semana,
+        })
+    if (not permitir_he) and (not permitir_sabado) and (he_min_semana + sab_min_semana) > 0:
+        opciones.append({
+            "tipo": "ambos",
+            "descripcion": "Habilitar HE y sábados",
+            "capacidad_extra_min_semana": he_min_semana + sab_min_semana,
+        })
+
+    if not opciones:
+        return None
+
+    return {
+        "motivo": f"{cantidad_urgentes} urgencia{'s' if cantidad_urgentes != 1 else ''} no entran en el plan estándar",
+        "minutos_faltantes": minutos_faltantes,
+        "cantidad_urgentes_excedentes": cantidad_urgentes,
+        "opciones": opciones,
+    }
+
 
 def _split_resultados(resultados: list[dict]) -> tuple[list[dict], list[dict]]:
     """
@@ -995,6 +1309,7 @@ def _split_resultados(resultados: list[dict]) -> tuple[list[dict], list[dict]]:
 
 def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None):
     """
+    Variante legacy (ventanas globales para todos). Conservada por compatibilidad.
     Obliga a que cada proceso:
     - empiece dentro de una ventana laboral
     - termine antes de que esa ventana cierre
@@ -1035,11 +1350,79 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
             if en_ventana:
                 model.Add(sum(en_ventana) == 1)
 
+
+def _agregar_ventanas_horarias_por_operario(
+    model,
+    procesos_norm,
+    inicio_vars,
+    dur_map,
+    operario_vars,
+    op_domain_vals,
+    ventanas_por_op,
+    ventanas_default,
+    DUMMY_OP_ID,
+    presente_vars=None,
+):
+    """
+    Igual que `_agregar_ventanas_horarias` pero con ventanas distintas por operario.
+
+    Para cada proceso crea un booleano por (op_id_candidato, ventana_del_operario)
+    donde la duración del proceso entra. Si ese booleano = 1, fuerza:
+        - el operario asignado coincide con op_id_candidato
+        - el inicio cae dentro de esa ventana
+
+    Restricciones:
+        - presente=1 → exactamente UN booleano activo
+        - presente=0 → ningún booleano activo
+        - sin presente → exactamente UN booleano activo (modo legacy)
+
+    El operario dummy usa `ventanas_default` (capacidad estándar), de modo que
+    los procesos sin operario válido siempre tienen al menos una ventana viable
+    y no se fuerza infactibilidad.
+    """
+    for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
+        key = (orden_id, secuencia)
+        start = inicio_vars[key]
+        dur = dur_map[key]
+        op_var = operario_vars[key]
+        candidatos = op_domain_vals.get(key, [])
+
+        en_ventana_total = []
+
+        for op_id in candidatos:
+            if op_id == DUMMY_OP_ID:
+                vents = ventanas_default
+            else:
+                vents = ventanas_por_op.get(op_id, [])
+
+            for idx, (v_ini, v_fin) in enumerate(vents):
+                if dur > (v_fin - v_ini):
+                    continue
+
+                b = model.NewBoolVar(f"vent_{orden_id}_{secuencia}_op{op_id}_{idx}")
+                # b == 1 implica que el operario es op_id y el inicio cae en esta ventana
+                model.Add(op_var == op_id).OnlyEnforceIf(b)
+                model.Add(start >= v_ini).OnlyEnforceIf(b)
+                model.Add(start < v_fin).OnlyEnforceIf(b)
+                en_ventana_total.append(b)
+
+        if presente_vars is not None:
+            presente = presente_vars[key]
+            if en_ventana_total:
+                model.Add(sum(en_ventana_total) == 1).OnlyEnforceIf(presente)
+                model.Add(sum(en_ventana_total) == 0).OnlyEnforceIf(presente.Not())
+            else:
+                # Sin combinaciones viables → excedente forzoso
+                model.Add(presente == 0)
+        else:
+            if en_ventana_total:
+                model.Add(sum(en_ventana_total) == 1)
+
 # ------------------------------------------------------------
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, horarios_por_operario: dict | None = None, permitir_he: bool = False, permitir_sabado: bool = False):
     model = cp_model.CpModel()
 
     # Init Config
@@ -1146,18 +1529,58 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
-    ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta)
-    logger.info(f"PLANIFICADOR: ventanas generadas = {len(ventanas)} (fecha_hasta={fecha_hasta})")
-
-    # ---- Restricciones de ventanas horarias ----
-    _agregar_ventanas_horarias(
-        model,
-        procesos_norm,
-        inicio_vars,
-        dur_map,
-        ventanas,
-        presente_vars=presente_vars,
+    ventanas_default = construir_ventanas_semanales(
+        num_semanas, start_date, blocked_dates,
+        fecha_hasta=fecha_hasta,
+        permitir_he=permitir_he,
+        permitir_sabado=permitir_sabado,
     )
+
+    if horarios_por_operario:
+        ventanas_por_op = construir_ventanas_por_operario(
+            horarios_por_operario,
+            start_date,
+            blocked_dates,
+            fecha_hasta=fecha_hasta,
+            num_semanas=num_semanas,
+            permitir_he=permitir_he,
+            permitir_sabado=permitir_sabado,
+        )
+        # Operarios sin horario explícito (raros) → usan ventanas estándar
+        for op_id in REAL_OP_IDS:
+            if op_id not in ventanas_por_op:
+                ventanas_por_op[op_id] = list(ventanas_default)
+
+        total_vents = sum(len(v) for v in ventanas_por_op.values())
+        logger.info(
+            f"PLANIFICADOR: ventanas por operario = {total_vents} totales "
+            f"({len(ventanas_por_op)} operarios), default = {len(ventanas_default)} "
+            f"(fecha_hasta={fecha_hasta})"
+        )
+
+        _agregar_ventanas_horarias_por_operario(
+            model,
+            procesos_norm,
+            inicio_vars,
+            dur_map,
+            operario_vars,
+            op_domain_vals,
+            ventanas_por_op,
+            ventanas_default,
+            DUMMY_OP_ID,
+            presente_vars=presente_vars,
+        )
+    else:
+        # Fallback: sin horarios cargados, usamos las ventanas globales (modo Fase 1)
+        logger.info(f"PLANIFICADOR: ventanas globales = {len(ventanas_default)} (sin horarios por operario)")
+        _agregar_ventanas_horarias(
+            model,
+            procesos_norm,
+            inicio_vars,
+            dur_map,
+            ventanas_default,
+            presente_vars=presente_vars,
+        )
 
     # ---- Función objetivo ----
     _agregar_funcion_objetivo(
@@ -1205,6 +1628,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         DUMMY_MAQ_ID,
         ahora_ref,
         presente_vars=presente_vars,
+        permitir_he=permitir_he,
+        permitir_sabado=permitir_sabado,
     )
 
     return resultados
@@ -1334,6 +1759,8 @@ async def planificar(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
     forzar_ordenes_ids: list[int] | None = None,
+    permitir_he: bool = False,
+    permitir_sabado: bool = False,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
     forzar_set = set(forzar_ordenes_ids or [])
@@ -1357,7 +1784,8 @@ async def planificar(
         ordenes = await repo_orden.find_with_procesos()
 
     operarios = await repo_operario.find_with_rangos()
-    
+    horarios_por_operario = await repo_operario.find_horarios_por_operario()
+
     # Cargar maquinarias (con rangos)
     maquinarias_orm = await repo_maquinaria.find_with_rangos()
     maquinarias = []
@@ -1454,19 +1882,40 @@ async def planificar(
         maquinarias,
         fecha_desde,
         effective_fecha_hasta,
+        horarios_por_operario,
+        permitir_he,
+        permitir_sabado,
     )
 
+    _anotar_motivos_excedentes(resultados, permitir_he, permitir_sabado)
     planificados, excedentes = _split_resultados(resultados)
 
+    # Fase 3: si quedan urgencias en excedentes y NO se permitieron HE/sábado todavía,
+    # construimos una sugerencia para que el usuario decida.
+    sugerencia = None
+    if not (permitir_he and permitir_sabado):
+        sugerencia = _construir_sugerencia(
+            excedentes,
+            horarios_por_operario,
+            permitir_he,
+            permitir_sabado,
+        )
+
     if preview:
-        return {"planificados": planificados, "excedentes": excedentes}
+        resp = {"planificados": planificados, "excedentes": excedentes}
+        if sugerencia:
+            resp["sugerencia"] = sugerencia
+        return resp
 
     # Marcar como forzado_fuera_rango los procesos cuyas órdenes el usuario decidió forzar
     for r in planificados:
         r["forzado_fuera_rango"] = (r["orden_id"] in forzar_set)
 
     saved = await repo_planificacion.insertar_planificacion_lote(planificados)
-    return {"planificados": saved, "excedentes": excedentes}
+    resp = {"planificados": saved, "excedentes": excedentes}
+    if sugerencia:
+        resp["sugerencia"] = sugerencia
+    return resp
 
 async def planificar_pendientes(
         repo_orden,
@@ -1478,12 +1927,14 @@ async def planificar_pendientes(
         repo_skill: OperarioProcesoSkillRepository | None = None,
         fecha_desde: date | None = None,
         fecha_hasta: date | None = None,
+        permitir_he: bool = False,
+        permitir_sabado: bool = False,
     ):
         logger.info(f"Service - Planificación de procesos pendientes. rango: desde={fecha_desde} hasta={fecha_hasta}")
-        
+
         if not repo_skill:
             repo_skill = OperarioProcesoSkillRepository(db)
-        
+
         mapa_skills = await repo_skill.get_map_por_proceso()
 
         # 🔹 SOLO órdenes con procesos pendientes
@@ -1494,6 +1945,7 @@ async def planificar_pendientes(
             return []
 
         operarios = await repo_operario.find_with_rangos()
+        horarios_por_operario = await repo_operario.find_horarios_por_operario()
 
         maquinarias_orm = await repo_maquinaria.find_with_rangos()
         #maquinarias = [
@@ -1543,8 +1995,25 @@ async def planificar_pendientes(
             maquinarias,
             fecha_desde,
             fecha_hasta,
+            horarios_por_operario,
+            permitir_he,
+            permitir_sabado,
         )
 
+        _anotar_motivos_excedentes(resultados, permitir_he, permitir_sabado)
         planificados, excedentes = _split_resultados(resultados)
+
+        sugerencia = None
+        if not (permitir_he and permitir_sabado):
+            sugerencia = _construir_sugerencia(
+                excedentes,
+                horarios_por_operario,
+                permitir_he,
+                permitir_sabado,
+            )
+
         saved = await repo_planificacion.insertar_planificacion_lote(planificados)
-        return {"planificados": saved, "excedentes": excedentes}
+        resp = {"planificados": saved, "excedentes": excedentes}
+        if sugerencia:
+            resp["sugerencia"] = sugerencia
+        return resp

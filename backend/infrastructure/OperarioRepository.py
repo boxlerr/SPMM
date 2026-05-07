@@ -108,3 +108,34 @@ class OperarioRepository:
         except Exception as e:
             print(f"Error en find_with_rangos: {e}")
             raise
+
+    async def find_horarios_por_operario(self):
+        """
+        Devuelve dict[id_operario, dict_horario] con:
+            - hora_inicio (time)
+            - hora_fin (time)
+            - dias_trabajo (set de codigos: MON,TUE,WED,THU,FRI,SAT,SUN)
+            - min_desayuno (int)
+            - min_almuerzo (int)
+        Sólo incluye operarios con disponible=True.
+        Usado por el solver para armar ventanas por operario.
+        """
+        try:
+            result = await self.db.execute(select(Operario).where(Operario.disponible == True))
+            operarios = result.scalars().all()
+            horarios = {}
+            for o in operarios:
+                dias_raw = (o.dias_trabajo or "MON,TUE,WED,THU,FRI")
+                dias = {d.strip().upper() for d in dias_raw.split(",") if d.strip()}
+                horarios[o.id] = {
+                    "hora_inicio": o.hora_inicio,
+                    "hora_fin": o.hora_fin,
+                    "dias_trabajo": dias,
+                    "min_desayuno": int(o.min_desayuno) if o.min_desayuno is not None else 15,
+                    "min_almuerzo": int(o.min_almuerzo) if o.min_almuerzo is not None else 30,
+                }
+            return horarios
+
+        except Exception as e:
+            logger.error(f"Repository - Error en find_horarios_por_operario: {e}")
+            raise InfrastructureException("Error al cargar horarios de operarios.") from e

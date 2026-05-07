@@ -35,6 +35,8 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     fecha_desde = body.fecha_desde if body else None
     fecha_hasta = body.fecha_hasta if body else None
     forzar_ordenes_ids = body.forzar_ordenes_ids if body else None
+    permitir_he = bool(body.permitir_he) if body else False
+    permitir_sabado = bool(body.permitir_sabado) if body else False
 
     try:
         resultados = await planificar(
@@ -49,6 +51,8 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
             forzar_ordenes_ids=forzar_ordenes_ids,
+            permitir_he=permitir_he,
+            permitir_sabado=permitir_sabado,
         )
         return resultados
     except PlanificacionException as e:
@@ -72,6 +76,8 @@ async def planificar_pendientes_endpoint(
     ordenes_ids = body.ordenes_ids if body else None
     fecha_desde = body.fecha_desde if body else None
     fecha_hasta = body.fecha_hasta if body else None
+    permitir_he = bool(body.permitir_he) if body else False
+    permitir_sabado = bool(body.permitir_sabado) if body else False
 
     try:
         return await planificar_pendientes(
@@ -83,6 +89,8 @@ async def planificar_pendientes_endpoint(
             ordenes_ids,
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
+            permitir_he=permitir_he,
+            permitir_sabado=permitir_sabado,
         )
     except PlanificacionException as e:
         logger.error(f"Error de Planificación (pendientes): {str(e)}")
@@ -131,7 +139,7 @@ async def obtener_planificacion(db = Depends(get_db)):
             while True:
                 wd = fecha.weekday()
                 is_blocked = fecha.strftime("%Y-%m-%d") in blocked_dates
-                if wd == 6 or is_blocked: 
+                if wd >= 5 or is_blocked:
                     fecha += timedelta(days=1)
                 else:
                     break
@@ -142,11 +150,9 @@ async def obtener_planificacion(db = Depends(get_db)):
 
         while minutos_restantes > 0:
             wd = tiempo_actual.weekday()
-            
+
             if wd < 5:
-                capacidad_hoy = 555
-            elif wd == 5:
-                capacidad_hoy = 300
+                capacidad_hoy = 495
             else:
                 capacidad_hoy = 0
 
@@ -154,26 +160,21 @@ async def obtener_planificacion(db = Depends(get_db)):
                 tiempo_actual += timedelta(days=1)
                 tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
                 continue
-                
+
             if minutos_restantes >= capacidad_hoy:
                 minutos_restantes -= capacidad_hoy
                 tiempo_actual += timedelta(days=1)
                 tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             else:
-                if wd < 5:
-                    if minutos_restantes <= 120:
-                        tiempo_actual += timedelta(minutes=minutos_restantes)
-                    elif minutos_restantes <= 285:
-                        tiempo_actual += timedelta(minutes=minutos_restantes + 15)
-                    else:
-                        tiempo_actual += timedelta(minutes=minutos_restantes + 105)
-                elif wd == 5:
+                if minutos_restantes <= 120:
                     tiempo_actual += timedelta(minutes=minutos_restantes)
-                
+                elif minutos_restantes <= 285:
+                    tiempo_actual += timedelta(minutes=minutos_restantes + 15)
+                else:
+                    tiempo_actual += timedelta(minutes=minutos_restantes + 45)
+
                 minutos_restantes = 0
-        
-        return tiempo_actual.isoformat()
-        
+
         return tiempo_actual.isoformat()
 
     results = []

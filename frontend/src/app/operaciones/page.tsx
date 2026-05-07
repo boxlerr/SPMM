@@ -31,6 +31,7 @@ import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/ty
 import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
 import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
+import { OvertimeSuggestionModal, type SugerenciaPayload, type SugerenciaAccion } from "@/components/planning/OvertimeSuggestionModal"
 import {
   Select,
   SelectContent,
@@ -80,6 +81,13 @@ export default function OperacionesPage() {
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
+
+  // Fase 3: HE / sábado bajo demanda
+  const [sugerencia, setSugerencia] = useState<SugerenciaPayload | null>(null)
+  const [permitirHe, setPermitirHe] = useState(false)
+  const [permitirSabado, setPermitirSabado] = useState(false)
+  const [isSuggestionOpen, setIsSuggestionOpen] = useState(false)
+  const [isReplanningSuggestion, setIsReplanningSuggestion] = useState(false)
 
   const [isOperatorsModalOpen, setIsOperatorsModalOpen] = useState(false)
   const [selectedOperatorForModal, setSelectedOperatorForModal] = useState<Operario | null>(null)
@@ -710,12 +718,22 @@ export default function OperacionesPage() {
     }
   };
 
-  const handlePlanSelection = async (ids: number[], range: { fecha_desde?: string, fecha_hasta?: string } = {}) => {
+  const handlePlanSelection = async (
+    ids: number[],
+    range: { fecha_desde?: string, fecha_hasta?: string } = {},
+    flags: { permitir_he?: boolean; permitir_sabado?: boolean } = {},
+    opts: { keepSuggestionFlow?: boolean } = {}
+  ) => {
     if (ids.length === 0) return;
 
     // Set selected IDs and range locally so we know what to verify/save later
     setSelectedOrderIds(ids);
     setPlanningRange(range);
+
+    const heActivo = !!flags.permitir_he;
+    const sabActivo = !!flags.permitir_sabado;
+    setPermitirHe(heActivo);
+    setPermitirSabado(sabActivo);
 
     // Call API for preview
     try {
@@ -728,6 +746,8 @@ export default function OperacionesPage() {
           preview: true,
           fecha_desde: range.fecha_desde,
           fecha_hasta: range.fecha_hasta,
+          permitir_he: heActivo,
+          permitir_sabado: sabActivo,
         }),
       });
 
@@ -830,13 +850,53 @@ export default function OperacionesPage() {
 
       setOperatorLoads(calculatedLoads);
 
-      // Close selection modal and open preview
+      // Close selection modal
       setIsSelectionModalOpen(false);
-      setIsPreviewOpen(true);
+
+      // Fase 3: si hay sugerencia y todavía no se habilitaron ambos flags, mostrar modal
+      const sugerenciaPayload = !Array.isArray(responseData) ? responseData.sugerencia : null;
+      if (sugerenciaPayload && !(heActivo && sabActivo) && !opts.keepSuggestionFlow) {
+        setSugerencia(sugerenciaPayload as SugerenciaPayload);
+        setIsSuggestionOpen(true);
+        setIsReplanningSuggestion(false);
+      } else {
+        setSugerencia(null);
+        setIsSuggestionOpen(false);
+        setIsPreviewOpen(true);
+      }
 
     } catch (error) {
       toast.error("Error al calcular la planificación");
     }
+  };
+
+  const handleSugerenciaResolver = async (accion: SugerenciaAccion) => {
+    if (accion.tipo === "cancelar") {
+      setIsSuggestionOpen(false);
+      setSugerencia(null);
+      // Reset flags
+      setPermitirHe(false);
+      setPermitirSabado(false);
+      return;
+    }
+    if (accion.tipo === "aceptar_parcial") {
+      setIsSuggestionOpen(false);
+      setSugerencia(null);
+      setIsPreviewOpen(true);
+      return;
+    }
+    // accion.tipo === "habilitar"
+    // Acumulativo: una vez habilitado un flag, no se desactiva al elegir otra opción
+    setIsReplanningSuggestion(true);
+    await handlePlanSelection(
+      selectedOrderIds,
+      planningRange,
+      {
+        permitir_he: permitirHe || accion.permitir_he,
+        permitir_sabado: permitirSabado || accion.permitir_sabado,
+      },
+    );
+    setIsReplanningSuggestion(false);
   };
 
   const handleConfirmPlan = async (manualPlanOrForzar?: any[] | { forzarOrdenIds: number[] }) => {
@@ -871,6 +931,8 @@ export default function OperacionesPage() {
           fecha_desde: planningRange.fecha_desde,
           fecha_hasta: planningRange.fecha_hasta,
           forzar_ordenes_ids: forzarOrdenIds,
+          permitir_he: permitirHe,
+          permitir_sabado: permitirSabado,
         }),
       });
 
@@ -884,6 +946,9 @@ export default function OperacionesPage() {
       setSelectedOrderIds([]);
       setPlanningRange({});
       setExcedentesResults([]);
+      setPermitirHe(false);
+      setPermitirSabado(false);
+      setSugerencia(null);
 
       // Refresh data
       await fetchData();
@@ -1389,6 +1454,13 @@ export default function OperacionesPage() {
         isConfirming={isConfirmingPlan}
         availableOperators={rawOperarios}
         availableMachines={rawMaquinarias}
+      />
+
+      <OvertimeSuggestionModal
+        isOpen={isSuggestionOpen}
+        sugerencia={sugerencia}
+        onResolver={handleSugerenciaResolver}
+        isReplanning={isReplanningSuggestion}
       />
       {activeTab === "lista_planificacion" && (
         <ConfirmationDialog
