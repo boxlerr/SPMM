@@ -100,6 +100,12 @@ function _PlanningListTable({
     const [searchTerm, setSearchTerm] = React.useState("");
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
 
+    // Estado del scroll horizontal para mostrar/ocultar el gradient fade dinámicamente.
+    // Cuando el usuario llega al final del scroll (no hay más columnas a la derecha),
+    // ocultamos el fade para que no engañe diciendo "hay más".
+    const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const [showRightFade, setShowRightFade] = React.useState(true);
+
     const toggleRow = (orderId: number) => {
         setExpandedOrderIds(prev =>
             prev.includes(orderId)
@@ -165,13 +171,16 @@ function _PlanningListTable({
 
         const start = addWorkMinutes(normalizedBaseDate, item.inicio_min);
 
-        return new Intl.DateTimeFormat('es-AR', {
-            weekday: 'short',
-            day: '2-digit',
-            month: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        }).format(start);
+        // Formato compacto y legible: "Jue 07/05 09:00".
+        // Antes el Intl daba "jue., 07/05, 09:00" con comas que cortaban feo cuando
+        // se truncaba. Construyo manualmente para mantener todo en una sola línea.
+        const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+        const dia = dias[start.getDay()];
+        const dd = String(start.getDate()).padStart(2, '0');
+        const mm = String(start.getMonth() + 1).padStart(2, '0');
+        const hh = String(start.getHours()).padStart(2, '0');
+        const mi = String(start.getMinutes()).padStart(2, '0');
+        return `${dia} ${dd}/${mm} ${hh}:${mi}`;
     };
 
 
@@ -279,6 +288,27 @@ function _PlanningListTable({
             }
         });
     }, [filteredData, sortConfig]);
+
+    // Observa el scroll horizontal del contenedor de la tabla y actualiza `showRightFade`:
+    //   true  → hay más columnas a la derecha → mostrar el gradient fade
+    //   false → llegó al final → ocultar el gradient (no engaña al usuario)
+    React.useEffect(() => {
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        const updateFade = () => {
+            const remaining = el.scrollWidth - el.scrollLeft - el.clientWidth;
+            // Margen de 2px para evitar parpadeo por subpixel rendering.
+            setShowRightFade(remaining > 2);
+        };
+        updateFade();
+        el.addEventListener('scroll', updateFade, { passive: true });
+        const ro = new ResizeObserver(updateFade);
+        ro.observe(el);
+        return () => {
+            el.removeEventListener('scroll', updateFade);
+            ro.disconnect();
+        };
+    }, [sortedData.length]);
 
     type SortColumn = 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega';
 
@@ -540,7 +570,7 @@ function _PlanningListTable({
                                                         onClick={(e) => e.stopPropagation()}
                                                     />
                                                 ) : (
-                                                    <span className="group-hover:text-amber-950 transition-colors truncate max-w-[110px] block">
+                                                    <span className="group-hover:text-amber-950 transition-colors whitespace-nowrap block">
                                                         {getScheduledStart(item.id, proc.proceso.id)}
                                                     </span>
                                                 )}
@@ -791,7 +821,7 @@ function _PlanningListTable({
 
             {/* Desktop Table View (>= md) */}
             <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
-                <div className="w-full overflow-x-auto pt-4 scrollbar-horizontal-visible scrollbar-top">
+                <div ref={scrollContainerRef} className="w-full overflow-x-auto pt-4 scrollbar-horizontal-visible scrollbar-top">
                     <table className="w-full min-w-[1600px] text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                             <tr>
@@ -1201,10 +1231,13 @@ function _PlanningListTable({
                         </tbody>
                     </table>
                 </div>
-                {/* Gradient fade en el borde derecho para indicar que la tabla tiene
-                    más columnas que requieren scroll horizontal. pointer-events-none
-                    para que no bloquee el scroll del usuario. */}
-                <div className="pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent" />
+                {/* Gradient fade en el borde derecho — solo se muestra cuando hay
+                    más contenido scrolleable a la derecha. Cuando el usuario llega al
+                    final, `showRightFade` pasa a false y el gradient desaparece con
+                    una transición suave de opacidad. */}
+                <div
+                    className={`pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
+                />
             </Card >
         </div >
     );

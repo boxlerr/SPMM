@@ -26,7 +26,7 @@ import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
 import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
 import { toast } from "sonner"
-import { convertPlanificacionToGanttTasks, calculateWorkingMinutes } from "@/lib/gantt-utils"
+import { convertPlanificacionToGanttTasks, calculateWorkingMinutes, addWorkMinutes } from "@/lib/gantt-utils"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
 import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
@@ -38,6 +38,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { API_URL } from "@/config"
 
 const getAuthHeaders = (): HeadersInit => {
@@ -68,6 +70,11 @@ export default function OperacionesPage() {
 
   // History State
   const [selectedLoteId, setSelectedLoteId] = useState<string>("all")
+
+  // Fecha override seleccionada por el usuario desde el calendario del banner
+  // (vistas Semanal/Diaria). Si está seteada, gana sobre "hoy" y sobre "lote".
+  // Si es null, se usa la lógica vieja (lote seleccionado → fecha del lote, o hoy).
+  const [customRefDate, setCustomRefDate] = useState<Date | null>(null)
 
   // Selective Planning State
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false)
@@ -282,6 +289,31 @@ export default function OperacionesPage() {
   // Use filteredPlanificacion for deriving planned orders to reflect the history selection
   const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
   const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
+
+  // Set de fechas (YYYY-MM-DD) que tienen al menos un proceso planificado.
+  // Se usa en el calendario del banner para mostrar un punto rojo en esos días,
+  // así el usuario sabe de un vistazo en qué días hay trabajo cargado.
+  const plannedDates = React.useMemo(() => {
+    const set = new Set<string>();
+    filteredPlanificacion.forEach(p => {
+      if (!p.creado_en || typeof p.inicio_min !== 'number') return;
+      const base = new Date(p.creado_en);
+      base.setHours(9, 0, 0, 0);
+      const real = addWorkMinutes(base, p.inicio_min);
+      const key = `${real.getFullYear()}-${String(real.getMonth() + 1).padStart(2, '0')}-${String(real.getDate()).padStart(2, '0')}`;
+      set.add(key);
+    });
+    return set;
+  }, [filteredPlanificacion]);
+
+  // Lista de Date objects (uno por cada día con planificación) — react-day-picker
+  // espera un array de Dates como modificador, no un Set de strings.
+  const plannedDateObjects = React.useMemo(() => {
+    return Array.from(plannedDates).map(key => {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    });
+  }, [plannedDates]);
 
   // Calculate REALLY Unplanned Orders (excluding ALL planned orders from ANY batch AND delivered orders)
   const allPlannedIds = new Set(rawPlanificacion.map(p => p.orden_id));
@@ -1029,7 +1061,11 @@ export default function OperacionesPage() {
             su propio margin inferior implícito. Antes era py-8 que generaba un gap
             excesivo entre el header full-width y el card del body. */}
         <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : activeTab === 'work_orders' ? 'w-full px-2 sm:px-3 md:px-4 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 pt-4 pb-4 sm:pb-8'}`}>
-          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-3 sm:p-4' : 'p-6'}`}>
+          {/* Para `lista_planificacion` quitamos el padding del card (`p-0`) para que
+              la barra de sub-tabs (Planificadas | Semanal | ...) ocupe el ancho COMPLETO
+              y toque los bordes superior e izquierdo del card. El padding interno lo
+              maneja cada TabsContent abajo. */}
+          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-3 sm:p-4' : activeTab === 'lista_planificacion' ? 'p-0 overflow-hidden' : 'p-6'}`}>
             {/* Redundant header removed */}
 
             {activeTab === "operarios" && (
@@ -1069,7 +1105,7 @@ export default function OperacionesPage() {
             {activeTab === "work_orders" && <WorkOrdersListWrapper refreshTrigger={refreshTrigger} />}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
-                <div className="border-b px-2 sm:px-4 bg-gray-50/50 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                <div className="border-b px-4 sm:px-6 pt-2 bg-gray-50/50 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                   <TabsList className="bg-transparent p-0 h-auto flex flex-wrap gap-2 sm:gap-4 justify-start w-full xl:w-auto">
                     <TabsTrigger
                       value="general"
@@ -1175,7 +1211,7 @@ export default function OperacionesPage() {
                 </div>
 
                 <div className="flex-1 p-0">
-                  <TabsContent value="general" className="m-0 h-full px-0 py-2">
+                  <TabsContent value="general" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
                     {/* General: Show all that are NOT fully finalized */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -1198,17 +1234,91 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="semanal" className="m-0 h-full px-0 py-2">
-                    {/* Weekly: Filter by reference week based on selected Lote */}
+                  <TabsContent value="semanal" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
+                    {/* Weekly: Filter by reference week based on selected Lote.
+                        Bug previo: el código filtraba por `p.fecha_inicio_estimada` pero ese
+                        campo NO EXISTE en la tabla `planificacion`. Solo tiene `creado_en` +
+                        `inicio_min` (offset en minutos hábiles). La fecha real se calcula
+                        con `addWorkMinutes(creado_en@9am, inicio_min)` — misma lógica que
+                        usa el Gantt y `getScheduledStart` en PlanningListTable. */}
+                    {/* Banner clickeable: muestra la semana actual y permite cambiar la
+                        fecha de referencia desde un calendario popover. Los días con OTs
+                        planificadas aparecen marcados con un dot rojo, así el usuario
+                        sabe de un vistazo dónde hay trabajo cargado. Prioridad de fecha:
+                        1) customRefDate (si seteado), 2) lote del dropdown, 3) hoy. */}
+                    {(() => {
+                      let refDate = new Date();
+                      let etiqueta = "(semana actual)";
+                      if (customRefDate) {
+                        refDate = customRefDate;
+                        etiqueta = "(fecha personalizada)";
+                      } else if (selectedLoteId !== "all") {
+                        const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+                        if (lote) {
+                          refDate = new Date(lote.date);
+                          etiqueta = "(según lote seleccionado)";
+                        }
+                      }
+                      const day = refDate.getDay();
+                      const diff = refDate.getDate() - day + (day === 0 ? -6 : 1);
+                      const monday = new Date(refDate);
+                      monday.setDate(diff);
+                      const sunday = new Date(monday);
+                      sunday.setDate(monday.getDate() + 6);
+                      const fmt = (d: Date) => format(d, "d 'de' MMM", { locale: es });
+                      return (
+                        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+                          <CalendarClock className="h-4 w-4 text-blue-600 shrink-0" />
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button className="flex-1 text-left cursor-pointer hover:underline focus:outline-none focus:underline">
+                                <span className="font-semibold text-blue-900">Semana del {fmt(monday)} al {fmt(sunday)}</span>
+                                <span className="ml-2 text-blue-700/80">{etiqueta}</span>
+                                <span className="ml-2 text-xs text-blue-600">▼ click para cambiar</span>
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <CalendarPicker
+                                mode="single"
+                                selected={refDate}
+                                onSelect={(d) => d && setCustomRefDate(d)}
+                                modifiers={{ hasPlan: plannedDateObjects }}
+                                modifiersClassNames={{
+                                  hasPlan: "relative font-bold text-red-700 after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-red-600 after:rounded-full",
+                                }}
+                                locale={es}
+                              />
+                              <div className="border-t p-2 text-xs text-gray-600 flex items-center justify-between gap-2">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
+                                  Días con OTs planificadas
+                                </span>
+                                {customRefDate && (
+                                  <button
+                                    onClick={() => setCustomRefDate(null)}
+                                    className="text-blue-600 hover:underline font-medium"
+                                  >
+                                    Volver a hoy
+                                  </button>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      );
+                    })()}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
                         // 1. Check if fully finalized (exclude)
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
                         if (allFinalized) return false;
 
-                        // 2. Determine Reference Date
+                        // 2. Determine Reference Date.
+                        //    Prioridad: customRefDate (calendar override) > lote del dropdown > hoy.
                         let referenceDate = new Date();
-                        if (selectedLoteId !== "all") {
+                        if (customRefDate) {
+                          referenceDate = customRefDate;
+                        } else if (selectedLoteId !== "all") {
                           const lote = uniqueLotes.find(l => l.id === selectedLoteId);
                           if (lote) referenceDate = new Date(lote.date);
                         }
@@ -1230,16 +1340,17 @@ export default function OperacionesPage() {
 
                         const { start, end } = getWeekRange(referenceDate);
 
-                        // 4. Check if any process in this order is scheduled for this week
-                        // We must check 'filteredPlanificacion' to coincide with selected history
+                        // 4. Check if any process in this order is scheduled for this week.
+                        //    Calculamos la fecha real a partir de creado_en + inicio_min
+                        //    (minutos hábiles desde las 9:00 del día de creación del plan).
                         const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
-
-                        // If no processes for this order in this filter, skip
                         if (orderProcesses.length === 0) return false;
 
                         return orderProcesses.some(p => {
-                          if (!p.fecha_inicio_estimada) return false;
-                          const pDate = new Date(p.fecha_inicio_estimada);
+                          if (!p.creado_en || typeof p.inicio_min !== 'number') return false;
+                          const baseDate = new Date(p.creado_en);
+                          baseDate.setHours(9, 0, 0, 0);
+                          const pDate = addWorkMinutes(baseDate, p.inicio_min);
                           return pDate >= start && pDate <= end;
                         });
                       })}
@@ -1258,47 +1369,104 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="diaria" className="m-0 h-full px-0 py-2">
-                    {/* Daily: Filter by reference DAY based on selected Lote */}
+                  <TabsContent value="diaria" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
+                    {/* Daily: mismo bug que Semanal — usaba `fecha_inicio_estimada` que no
+                        existe. Acá calculamos pStart con `creado_en + inicio_min` y pEnd con
+                        `creado_en + fin_min` (o fallback a `inicio_min`). */}
+                    {/* Banner clickeable: misma lógica que en Semanal pero a nivel día. */}
+                    {(() => {
+                      let refDate = new Date();
+                      let etiqueta = "(hoy)";
+                      if (customRefDate) {
+                        refDate = customRefDate;
+                        etiqueta = "(fecha personalizada)";
+                      } else if (selectedLoteId !== "all") {
+                        const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+                        if (lote) {
+                          refDate = new Date(lote.date);
+                          etiqueta = "(según lote seleccionado)";
+                        }
+                      }
+                      const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+                      return (
+                        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+                          <CalendarClock className="h-4 w-4 text-blue-600 shrink-0" />
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button className="flex-1 text-left cursor-pointer hover:underline focus:outline-none focus:underline">
+                                <span className="font-semibold text-blue-900">
+                                  {capitalize(format(refDate, "EEEE d 'de' MMMM 'de' yyyy", { locale: es }))}
+                                </span>
+                                <span className="ml-2 text-blue-700/80">{etiqueta}</span>
+                                <span className="ml-2 text-xs text-blue-600">▼ click para cambiar</span>
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <CalendarPicker
+                                mode="single"
+                                selected={refDate}
+                                onSelect={(d) => d && setCustomRefDate(d)}
+                                modifiers={{ hasPlan: plannedDateObjects }}
+                                modifiersClassNames={{
+                                  hasPlan: "relative font-bold text-red-700 after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-red-600 after:rounded-full",
+                                }}
+                                locale={es}
+                              />
+                              <div className="border-t p-2 text-xs text-gray-600 flex items-center justify-between gap-2">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
+                                  Días con OTs planificadas
+                                </span>
+                                {customRefDate && (
+                                  <button
+                                    onClick={() => setCustomRefDate(null)}
+                                    className="text-blue-600 hover:underline font-medium"
+                                  >
+                                    Volver a hoy
+                                  </button>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      );
+                    })()}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
                         // 1. Check if fully finalized (exclude)
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
                         if (allFinalized) return false;
 
-                        // 2. Determine Reference Date
+                        // 2. Determine Reference Date.
+                        //    Prioridad: customRefDate (calendar override) > lote del dropdown > hoy.
                         let referenceDate = new Date();
-                        if (selectedLoteId !== "all") {
+                        if (customRefDate) {
+                          referenceDate = customRefDate;
+                        } else if (selectedLoteId !== "all") {
                           const lote = uniqueLotes.find(l => l.id === selectedLoteId);
                           if (lote) referenceDate = new Date(lote.date);
                         }
 
-
-
-                        // 3. Check if any process in this order is scheduled for this DAY
+                        // 3. Check if any process in this order overlaps with reference day.
                         const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
-
                         if (orderProcesses.length === 0) return false;
 
+                        const startOfDay = new Date(referenceDate);
+                        startOfDay.setHours(0, 0, 0, 0);
+                        const endOfDay = new Date(referenceDate);
+                        endOfDay.setHours(23, 59, 59, 999);
+
                         return orderProcesses.some(p => {
-                          if (!p.fecha_inicio_estimada) return false;
-                          const pStart = new Date(p.fecha_inicio_estimada);
-                          let pEnd: Date;
+                          if (!p.creado_en || typeof p.inicio_min !== 'number') return false;
+                          const baseDate = new Date(p.creado_en);
+                          baseDate.setHours(9, 0, 0, 0);
+                          const pStart = addWorkMinutes(baseDate, p.inicio_min);
+                          const finMinutes = (typeof p.fin_min === 'number' && p.fin_min > p.inicio_min)
+                            ? p.fin_min
+                            : p.inicio_min;
+                          const pEnd = addWorkMinutes(baseDate, finMinutes);
 
-                          if (p.fecha_fin_estimada) {
-                            pEnd = new Date(p.fecha_fin_estimada);
-                          } else {
-                            pEnd = new Date(pStart);
-                          }
-
-                          // Set reference range (Day start to Day end)
-                          const startOfDay = new Date(referenceDate);
-                          startOfDay.setHours(0, 0, 0, 0);
-
-                          const endOfDay = new Date(referenceDate);
-                          endOfDay.setHours(23, 59, 59, 999);
-
-                          // Check overlap: Task Start <= Day End AND Task End >= Day Start
+                          // Overlap: Task Start <= Day End AND Task End >= Day Start
                           return pStart <= endOfDay && pEnd >= startOfDay;
                         });
                       })}
@@ -1317,7 +1485,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="finalizadas" className="m-0 h-full px-0 py-2">
+                  <TabsContent value="finalizadas" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
                     {/* Finalizadas: Filter where ALL processes are status 3 (Finalizado) */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -1336,7 +1504,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="carga" className="m-0 h-full px-0 py-2">
+                  <TabsContent value="carga" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
                     <OperatorLoadTab
                       planificacion={filteredPlanificacion}
                       operarios={rawOperarios}
