@@ -28,6 +28,7 @@ interface PlanificacionResult {
     fecha_inicio_estimada?: string;
     fecha_fin_estimada?: string;
     // Enriched fields
+    id_otvieja?: number;
     cliente?: string;
     articulo?: string;
     codigo?: string;
@@ -321,7 +322,7 @@ export function PlanningPreviewModal({
                                                     <div key={oid} className="px-4 py-3 flex items-center justify-between gap-4 bg-white/60">
                                                         <div className="flex flex-col min-w-0">
                                                             <div className="text-sm font-medium text-gray-800 truncate">
-                                                                #{oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
+                                                                #{first.id_otvieja || oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
                                                             </div>
                                                             <div className="text-xs text-gray-500 mt-0.5">
                                                                 {items.length} proceso(s) excedente(s)
@@ -414,7 +415,7 @@ export function PlanningPreviewModal({
                                                                 {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                                             </button>
                                                         </td>
-                                                        <td className="px-4 py-3 font-medium text-inherit">#{ordenId}</td>
+                                                        <td className="px-4 py-3 font-medium text-inherit">#{firstItem.id_otvieja || ordenId}</td>
                                                         <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>
                                                         <td className="px-4 py-3 text-gray-500 italic">{firstItem.cliente || "-"}</td>
                                                         <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>

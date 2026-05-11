@@ -1,9 +1,20 @@
 import uuid
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from sqlalchemy import text
 
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
+
+# El backend puede correr en un servidor con TZ=UTC (cloud). Guardamos los
+# timestamps visibles al usuario en hora local de Argentina para evitar el
+# desfasaje de 3 horas al mostrarlos.
+_TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _ahora_ar() -> datetime:
+    """Hora actual en Argentina, como datetime naive (compatible con columna datetime de MSSQL)."""
+    return datetime.now(_TZ_AR).replace(tzinfo=None)
 
 
 class PlanificacionRepository:
@@ -42,7 +53,8 @@ class PlanificacionRepository:
         await self._ensure_columns()
 
         id_lote = str(uuid.uuid4())
-        descripcion_lote = f"Planificación {datetime.now():%B %Y}".capitalize()
+        ahora_ar = _ahora_ar()
+        descripcion_lote = f"Planificación {ahora_ar:%B %Y}".capitalize()
 
         logger.info(
             f"Repository - Insertando planificación: {len(resultados)} registros "
@@ -83,7 +95,7 @@ class PlanificacionRepository:
                     "rangos_permitidos": str(r.get("rangos_permitidos_proceso", [])),
                     "id_planificacion_lote": id_lote,
                     "descripcion_lote": descripcion_lote,
-                    "creado_en": datetime.now(),
+                    "creado_en": ahora_ar,
                     "forzado_fuera_rango": bool(r.get("forzado_fuera_rango", False)),
                 }
 
