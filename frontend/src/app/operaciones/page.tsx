@@ -18,7 +18,7 @@ import { OperatorLoadTab } from "./_components/OperatorLoadTab"
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { cn } from "@/lib/utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2 } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2, ChevronDown } from "lucide-react"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { usePanelContext } from "@/contexts/PanelContext"
@@ -1241,22 +1241,32 @@ export default function OperacionesPage() {
                         `inicio_min` (offset en minutos hábiles). La fecha real se calcula
                         con `addWorkMinutes(creado_en@9am, inicio_min)` — misma lógica que
                         usa el Gantt y `getScheduledStart` en PlanningListTable. */}
-                    {/* Banner clickeable: muestra la semana actual y permite cambiar la
-                        fecha de referencia desde un calendario popover. Los días con OTs
-                        planificadas aparecen marcados con un dot rojo, así el usuario
-                        sabe de un vistazo dónde hay trabajo cargado. Prioridad de fecha:
-                        1) customRefDate (si seteado), 2) lote del dropdown, 3) hoy. */}
+                    {/* Banner Semanal — rediseñado para verse pro:
+                          - Icono en cuadrito propio con fondo (jerarquía visual)
+                          - Label uppercase pequeño arriba ("Semana") + rango en grande
+                          - Badge con dot de color según origen (Hoy / Personalizada / Lote)
+                          - Botón explícito "Cambiar fecha" + "Volver a hoy" condicional */}
                     {(() => {
                       let refDate = new Date();
-                      let etiqueta = "(semana actual)";
+                      let badgeText = "Esta semana";
+                      // Paleta en sintonía con la marca (rojo) + estados:
+                      //   - Default (esta semana / hoy): verde teal (estado positivo, complementa al rojo)
+                      //   - Personalizada: ámbar (warm tone, complementario al rojo de marca)
+                      //   - Según lote: índigo (frío, distingue del rojo sin chocar)
+                      let badgeColor = "bg-teal-50 text-teal-700 ring-teal-200/80";
+                      let badgeDot = "bg-teal-500";
                       if (customRefDate) {
                         refDate = customRefDate;
-                        etiqueta = "(fecha personalizada)";
+                        badgeText = "Fecha personalizada";
+                        badgeColor = "bg-amber-50 text-amber-800 ring-amber-200/80";
+                        badgeDot = "bg-amber-500";
                       } else if (selectedLoteId !== "all") {
                         const lote = uniqueLotes.find(l => l.id === selectedLoteId);
                         if (lote) {
                           refDate = new Date(lote.date);
-                          etiqueta = "(según lote seleccionado)";
+                          badgeText = "Según lote";
+                          badgeColor = "bg-indigo-50 text-indigo-700 ring-indigo-200/80";
+                          badgeDot = "bg-indigo-500";
                         }
                       }
                       const day = refDate.getDay();
@@ -1266,44 +1276,74 @@ export default function OperacionesPage() {
                       const sunday = new Date(monday);
                       sunday.setDate(monday.getDate() + 6);
                       const fmt = (d: Date) => format(d, "d 'de' MMM", { locale: es });
+                      const year = monday.getFullYear();
+
                       return (
-                        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
-                          <CalendarClock className="h-4 w-4 text-blue-600 shrink-0" />
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button className="flex-1 text-left cursor-pointer hover:underline focus:outline-none focus:underline">
-                                <span className="font-semibold text-blue-900">Semana del {fmt(monday)} al {fmt(sunday)}</span>
-                                <span className="ml-2 text-blue-700/80">{etiqueta}</span>
-                                <span className="ml-2 text-xs text-blue-600">▼ click para cambiar</span>
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
-                              <CalendarPicker
-                                mode="single"
-                                selected={refDate}
-                                onSelect={(d) => d && setCustomRefDate(d)}
-                                modifiers={{ hasPlan: plannedDateObjects }}
-                                modifiersClassNames={{
-                                  hasPlan: "relative font-bold text-red-700 after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-red-600 after:rounded-full",
-                                }}
-                                locale={es}
-                              />
-                              <div className="border-t p-2 text-xs text-gray-600 flex items-center justify-between gap-2">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
-                                  Días con OTs planificadas
-                                </span>
-                                {customRefDate && (
-                                  <button
-                                    onClick={() => setCustomRefDate(null)}
-                                    className="text-blue-600 hover:underline font-medium"
-                                  >
-                                    Volver a hoy
-                                  </button>
-                                )}
+                        <div className="mb-5 rounded-xl border border-red-100/80 bg-gradient-to-br from-white via-rose-50/40 to-red-50/30 shadow-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
+                            {/* Icono + Info principal */}
+                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                              <div className="shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#DC143C] to-[#B01030] shadow-md shadow-red-500/25 ring-1 ring-white/20">
+                                <CalendarClock className="h-6 w-6 text-white" />
                               </div>
-                            </PopoverContent>
-                          </Popover>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-900/60">
+                                  Semana visualizada
+                                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${badgeDot}`} />
+                                    {badgeText}
+                                  </span>
+                                </div>
+                                <div className="mt-1 text-lg sm:text-xl font-bold text-slate-900 leading-tight tracking-tight">
+                                  {fmt(monday)}
+                                  <span className="mx-2 text-red-400/60 font-normal">→</span>
+                                  {fmt(sunday)}
+                                  <span className="ml-2 text-slate-400 font-normal text-base">{year}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Acciones */}
+                            <div className="flex items-center gap-2 shrink-0">
+                              {customRefDate && (
+                                <button
+                                  onClick={() => setCustomRefDate(null)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 hover:border-red-300 transition-colors"
+                                >
+                                  Volver a hoy
+                                </button>
+                              )}
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#DC143C] to-[#B01030] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 hover:brightness-110 active:scale-[0.98] transition-all">
+                                    <CalendarClock className="h-3.5 w-3.5" />
+                                    Cambiar fecha
+                                    <ChevronDown className="h-3.5 w-3.5 opacity-80" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0 border-red-100 shadow-xl shadow-red-500/10" align="end">
+                                  <div className="border-b border-red-100 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-2.5">
+                                    <p className="text-xs font-semibold text-red-900">Elegí una fecha</p>
+                                    <p className="text-[10px] text-red-700/70 mt-0.5">Los días con un punto tienen OTs planificadas</p>
+                                  </div>
+                                  <CalendarPicker
+                                    mode="single"
+                                    selected={refDate}
+                                    onSelect={(d) => d && setCustomRefDate(d)}
+                                    modifiers={{ hasPlan: plannedDateObjects }}
+                                    modifiersClassNames={{
+                                      hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
+                                    }}
+                                    locale={es}
+                                  />
+                                  <div className="border-t border-red-100 bg-rose-50/40 px-3 py-2 text-[11px] text-red-900/80 flex items-center gap-2">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-[#DC143C]" />
+                                    Días con OTs planificadas
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
                         </div>
                       );
                     })()}
@@ -1373,61 +1413,108 @@ export default function OperacionesPage() {
                     {/* Daily: mismo bug que Semanal — usaba `fecha_inicio_estimada` que no
                         existe. Acá calculamos pStart con `creado_en + inicio_min` y pEnd con
                         `creado_en + fin_min` (o fallback a `inicio_min`). */}
-                    {/* Banner clickeable: misma lógica que en Semanal pero a nivel día. */}
+                    {/* Banner Diaria — mismo lenguaje visual que Semanal. Muestra el día
+                        en grande (día de la semana + fecha) con badge de origen. */}
                     {(() => {
                       let refDate = new Date();
-                      let etiqueta = "(hoy)";
+                      let badgeText = "Hoy";
+                      // Misma paleta que el banner Semanal — consistencia visual.
+                      let badgeColor = "bg-teal-50 text-teal-700 ring-teal-200/80";
+                      let badgeDot = "bg-teal-500";
                       if (customRefDate) {
                         refDate = customRefDate;
-                        etiqueta = "(fecha personalizada)";
+                        const isToday = refDate.toDateString() === new Date().toDateString();
+                        if (!isToday) {
+                          badgeText = "Fecha personalizada";
+                          badgeColor = "bg-amber-50 text-amber-800 ring-amber-200/80";
+                          badgeDot = "bg-amber-500";
+                        }
                       } else if (selectedLoteId !== "all") {
                         const lote = uniqueLotes.find(l => l.id === selectedLoteId);
                         if (lote) {
                           refDate = new Date(lote.date);
-                          etiqueta = "(según lote seleccionado)";
+                          badgeText = "Según lote";
+                          badgeColor = "bg-indigo-50 text-indigo-700 ring-indigo-200/80";
+                          badgeDot = "bg-indigo-500";
                         }
                       }
                       const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+                      const diaSemana = capitalize(format(refDate, "EEEE", { locale: es }));
+                      const fechaCompleta = format(refDate, "d 'de' MMMM, yyyy", { locale: es });
+                      // Detectar si la fecha de referencia coincide con algún día que tiene OTs.
+                      const refKey = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}-${String(refDate.getDate()).padStart(2, '0')}`;
+                      const tieneOTs = plannedDates.has(refKey);
+
                       return (
-                        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
-                          <CalendarClock className="h-4 w-4 text-blue-600 shrink-0" />
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button className="flex-1 text-left cursor-pointer hover:underline focus:outline-none focus:underline">
-                                <span className="font-semibold text-blue-900">
-                                  {capitalize(format(refDate, "EEEE d 'de' MMMM 'de' yyyy", { locale: es }))}
-                                </span>
-                                <span className="ml-2 text-blue-700/80">{etiqueta}</span>
-                                <span className="ml-2 text-xs text-blue-600">▼ click para cambiar</span>
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="start">
-                              <CalendarPicker
-                                mode="single"
-                                selected={refDate}
-                                onSelect={(d) => d && setCustomRefDate(d)}
-                                modifiers={{ hasPlan: plannedDateObjects }}
-                                modifiersClassNames={{
-                                  hasPlan: "relative font-bold text-red-700 after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-red-600 after:rounded-full",
-                                }}
-                                locale={es}
-                              />
-                              <div className="border-t p-2 text-xs text-gray-600 flex items-center justify-between gap-2">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
-                                  Días con OTs planificadas
-                                </span>
-                                {customRefDate && (
-                                  <button
-                                    onClick={() => setCustomRefDate(null)}
-                                    className="text-blue-600 hover:underline font-medium"
-                                  >
-                                    Volver a hoy
-                                  </button>
-                                )}
+                        <div className="mb-5 rounded-xl border border-red-100/80 bg-gradient-to-br from-white via-rose-50/40 to-red-50/30 shadow-sm">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
+                            {/* Icono + Info principal */}
+                            <div className="flex items-center gap-4 flex-1 min-w-0">
+                              <div className="shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#DC143C] to-[#B01030] shadow-md shadow-red-500/25 ring-1 ring-white/20">
+                                <CalendarClock className="h-6 w-6 text-white" />
                               </div>
-                            </PopoverContent>
-                          </Popover>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-900/60">
+                                  Día visualizado
+                                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${badgeDot}`} />
+                                    {badgeText}
+                                  </span>
+                                  {tieneOTs && (
+                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200/80">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                      Con OTs planificadas
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="mt-1 text-lg sm:text-xl font-bold text-slate-900 leading-tight tracking-tight">
+                                  {diaSemana}
+                                  <span className="ml-2 text-slate-500 font-medium">{fechaCompleta}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Acciones */}
+                            <div className="flex items-center gap-2 shrink-0">
+                              {customRefDate && (
+                                <button
+                                  onClick={() => setCustomRefDate(null)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 hover:border-red-300 transition-colors"
+                                >
+                                  Volver a hoy
+                                </button>
+                              )}
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#DC143C] to-[#B01030] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 hover:brightness-110 active:scale-[0.98] transition-all">
+                                    <CalendarClock className="h-3.5 w-3.5" />
+                                    Cambiar fecha
+                                    <ChevronDown className="h-3.5 w-3.5 opacity-80" />
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0 border-red-100 shadow-xl shadow-red-500/10" align="end">
+                                  <div className="border-b border-red-100 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-2.5">
+                                    <p className="text-xs font-semibold text-red-900">Elegí una fecha</p>
+                                    <p className="text-[10px] text-red-700/70 mt-0.5">Los días con un punto tienen OTs planificadas</p>
+                                  </div>
+                                  <CalendarPicker
+                                    mode="single"
+                                    selected={refDate}
+                                    onSelect={(d) => d && setCustomRefDate(d)}
+                                    modifiers={{ hasPlan: plannedDateObjects }}
+                                    modifiersClassNames={{
+                                      hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
+                                    }}
+                                    locale={es}
+                                  />
+                                  <div className="border-t border-red-100 bg-rose-50/40 px-3 py-2 text-[11px] text-red-900/80 flex items-center gap-2">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-[#DC143C]" />
+                                    Días con OTs planificadas
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
                         </div>
                       );
                     })()}
