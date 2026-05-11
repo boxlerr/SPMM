@@ -932,9 +932,13 @@ export default function OperacionesPage() {
 
   return (
     <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
-      {/* Header normal (no sticky) */}
-      <div className="bg-white border-b border-gray-200 shadow-sm flex-shrink-0 w-full">
-        <div className="w-full mx-auto px-4 md:px-6 lg:px-8 py-6">
+      {/* Header normal (no sticky)
+          Antes: el header era full-width (border-b shadow-sm) y el card de abajo
+          estaba centrado con padding lateral, lo que los hacía verse desalineados.
+          Ahora ambos son cards con los MISMOS paddings laterales que el body container,
+          así sus bordes y contenidos quedan perfectamente alineados verticalmente. */}
+      <div className="flex-shrink-0 w-full px-2 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 flex items-center gap-3">
@@ -1020,7 +1024,10 @@ export default function OperacionesPage() {
       </div>
 
       <div className="flex-1 flex overflow-visible w-full">
-        <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : activeTab === 'work_orders' ? 'w-full px-2 sm:px-3 md:px-4 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-8'}`}>
+        {/* Padding-top reducido (pt-4) porque ahora el header también es un card con
+            su propio margin inferior implícito. Antes era py-8 que generaba un gap
+            excesivo entre el header full-width y el card del body. */}
+        <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : activeTab === 'work_orders' ? 'w-full px-2 sm:px-3 md:px-4 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 pt-4 pb-4 sm:pb-8'}`}>
           <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-3 sm:p-4' : 'p-6'}`}>
             {/* Redundant header removed */}
 
@@ -1167,7 +1174,7 @@ export default function OperacionesPage() {
                 </div>
 
                 <div className="flex-1 p-0">
-                  <TabsContent value="general" className="m-0 h-full p-4">
+                  <TabsContent value="general" className="m-0 h-full px-0 py-2">
                     {/* General: Show all that are NOT fully finalized */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -1190,7 +1197,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="semanal" className="m-0 h-full p-4">
+                  <TabsContent value="semanal" className="m-0 h-full px-0 py-2">
                     {/* Weekly: Filter by reference week based on selected Lote */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -1250,7 +1257,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="diaria" className="m-0 h-full p-4">
+                  <TabsContent value="diaria" className="m-0 h-full px-0 py-2">
                     {/* Daily: Filter by reference DAY based on selected Lote */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -1309,7 +1316,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="finalizadas" className="m-0 h-full p-4">
+                  <TabsContent value="finalizadas" className="m-0 h-full px-0 py-2">
                     {/* Finalizadas: Filter where ALL processes are status 3 (Finalizado) */}
                     <PlanningListTable
                       data={plannedOrdenes.filter(order => {
@@ -1328,7 +1335,7 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="carga" className="m-0 h-full p-4">
+                  <TabsContent value="carga" className="m-0 h-full px-0 py-2">
                     <OperatorLoadTab
                       planificacion={filteredPlanificacion}
                       operarios={rawOperarios}

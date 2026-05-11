@@ -790,7 +790,7 @@ function _PlanningListTable({
             </div>
 
             {/* Desktop Table View (>= md) */}
-            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full">
+            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
                 <div className="w-full overflow-x-auto pt-4 scrollbar-horizontal-visible scrollbar-top">
                     <table className="w-full min-w-[1600px] text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
@@ -824,7 +824,7 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group min-w-[200px]"
                                     onClick={() => handleSort('cliente')}
                                 >
                                     <div className="flex items-center">
@@ -923,7 +923,11 @@ function _PlanningListTable({
                                 </th>
                             </tr>
                         </thead>
-                        <tbody>
+                        {/* `[&_td]:align-middle` centra verticalmente todas las celdas de body.
+                            Antes cuando "INDUSTRIAS CERAMICAS LOURDES S.A." rompía en 3-4 líneas,
+                            el resto de las celdas (#, OT, fecha, código) se anclaban al top y la
+                            fila se veía desalineada. */}
+                        <tbody className="[&_td]:align-middle">
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
                                     <td colSpan={19} className="px-3 py-8 text-center text-gray-500">
@@ -1197,6 +1201,10 @@ function _PlanningListTable({
                         </tbody>
                     </table>
                 </div>
+                {/* Gradient fade en el borde derecho para indicar que la tabla tiene
+                    más columnas que requieren scroll horizontal. pointer-events-none
+                    para que no bloquee el scroll del usuario. */}
+                <div className="pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent" />
             </Card >
         </div >
     );
