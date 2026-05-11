@@ -20,7 +20,11 @@ class Settings:
     # JWT
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "480"))
+    # JWT vence en 30 días por default. Si el equipo está siempre en la oficina
+    # y la app es interna, mantener la sesión abierta evita la fricción de tener
+    # que loguearse cada turno. Se puede sobreescribir con env var en Render.
+    # (8h = 480, 1 día = 1440, 7 días = 10080, 30 días = 43200, 1 año = 525600)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "43200"))
     
     # Resend Email
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")

@@ -152,32 +152,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(id);
   }, [token, notifySessionExpired]);
 
-  // ---- 4) Inactividad: complementa al timer de exp --------------------------
-  useEffect(() => {
-    if (!token) return;
-
-    const INACTIVITY_TIMEOUT = 8 * 60 * 60 * 1000;
-    let timeoutId: NodeJS.Timeout;
-
-    const resetTimer = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        if (tokenRef.current && !sessionExpired) {
-          notifySessionExpired();
-        }
-      }, INACTIVITY_TIMEOUT);
-    };
-
-    const events = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart', 'click'];
-
-    resetTimer();
-    events.forEach((event) => window.addEventListener(event, resetTimer));
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      events.forEach((event) => window.removeEventListener(event, resetTimer));
-    };
-  }, [token, sessionExpired, notifySessionExpired]);
+  // ---- 4) Inactividad: DESHABILITADO ----------------------------------------
+  // Antes había un timer que disparaba "Sesión Expirada" tras 8h sin mover el mouse.
+  // En el taller la gente puede pasar horas sin tocar la PC y la sesión no debería
+  // caerse por eso. La caducidad real está controlada por:
+  //   - el `exp` del JWT (30 días por default, ver backend/core/config.py)
+  //   - el interceptor global de 401 (si el server rechaza el token por cualquier motivo)
+  //   - el botón "Cerrar sesión" del usuario
+  // Si en el futuro se quiere reactivar inactividad, restaurar este bloque
+  // desde el historial de git y ajustar INACTIVITY_TIMEOUT al valor deseado.
 
   const login = async (username: string, password: string) => {
     try {
