@@ -780,6 +780,7 @@ export default function OperacionesPage() {
 
         return {
           ...res,
+          id_otvieja: order?.id_otvieja,
           cliente: order?.cliente?.nombre || "N/A",
           articulo: order?.articulo?.descripcion || "N/A",
           codigo: order?.articulo?.cod_articulo || "",
