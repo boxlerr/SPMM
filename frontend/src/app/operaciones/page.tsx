@@ -1379,7 +1379,7 @@ export default function OperacionesPage() {
         onDataRefresh={fetchData}
         initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
         autoSelectAll={!isReplanning}
-        availableResourcesCount={rawOperarios.length}
+        availableOperarios={rawOperarios}
       />
       <AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}

@@ -38,7 +38,7 @@ interface PlanningSelectionModalProps {
     onDataRefresh?: () => void
     initialSelectedIds?: number[]
     autoSelectAll?: boolean
-    availableResourcesCount?: number
+    availableOperarios?: any[]
 }
 
 export function PlanningSelectionModal({
@@ -50,7 +50,7 @@ export function PlanningSelectionModal({
     onDataRefresh,
     initialSelectedIds = [],
     autoSelectAll = true,
-    availableResourcesCount = 1
+    availableOperarios = []
 }: PlanningSelectionModalProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
@@ -129,21 +129,53 @@ export function PlanningSelectionModal({
 
     // Calculate estimated workload
     const calculateEstimatedTime = () => {
+        if (selectedIds.length === 0) return null
+
         const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
         let totalMinutes = 0
+        let procesosConTiempo = 0
         selectedOrders.forEach(o => {
             o.procesos?.forEach(p => {
-                totalMinutes += p.tiempo_proceso || 0
+                if (p.tiempo_proceso && p.tiempo_proceso > 0) {
+                    procesosConTiempo++
+                    totalMinutes += p.tiempo_proceso
+                }
             })
         })
 
-        if (totalMinutes === 0) return null
+        // Si las OTs seleccionadas no tienen tiempos cargados, lo decimos
+        // explicitamente en lugar de ocultar el badge silenciosamente.
+        if (procesosConTiempo === 0) return "— (sin tiempos cargados)"
 
-        // Calculate time based on available resources
-        const resourceCount = Math.max(1, availableResourcesCount);
-        const effectiveMinutes = totalMinutes / resourceCount;
+        // Solo contamos operarios marcados como disponibles. Si el array no llega
+        // o queda vacio, caemos a 1 para no dividir por cero.
+        const operariosDisponibles = availableOperarios.filter(op => op?.disponible !== false)
+        const resourceCount = Math.max(1, operariosDisponibles.length)
+        const effectiveMinutes = totalMinutes / resourceCount
 
-        const MIN_LABORAL_DIA = 495 // 8.25 hours
+        // Jornada laboral promedio real de los operarios disponibles
+        // (hora_fin - hora_inicio - desayuno - almuerzo). Default 495 min (8.25h)
+        // si no hay datos cargados todavia.
+        const parseHHMM = (s?: string) => {
+            if (!s || typeof s !== 'string') return null
+            const [h, m] = s.split(':').map(Number)
+            if (isNaN(h) || isNaN(m)) return null
+            return h * 60 + m
+        }
+        const jornadasMin = operariosDisponibles
+            .map(op => {
+                const ini = parseHHMM(op?.hora_inicio)
+                const fin = parseHHMM(op?.hora_fin)
+                if (ini === null || fin === null || fin <= ini) return null
+                const desayuno = Number(op?.min_desayuno) || 0
+                const almuerzo = Number(op?.min_almuerzo) || 0
+                return Math.max(0, (fin - ini) - desayuno - almuerzo)
+            })
+            .filter((v): v is number => v !== null && v > 0)
+        const MIN_LABORAL_DIA = jornadasMin.length > 0
+            ? jornadasMin.reduce((a, b) => a + b, 0) / jornadasMin.length
+            : 495
+
         const days = (effectiveMinutes / MIN_LABORAL_DIA).toFixed(1)
         const hours = (effectiveMinutes / 60).toFixed(1)
 
