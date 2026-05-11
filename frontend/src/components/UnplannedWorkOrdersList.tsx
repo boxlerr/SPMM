@@ -349,7 +349,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                     </div>
 
                     {/* Desktop Table View */}
-                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full">
+                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
                         <div className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
                             <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
@@ -362,7 +362,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrada')}>
                                             <div className="flex items-center">F. Entrada<SortIcon column="fecha_entrada" /></div>
                                         </th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('cliente')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group min-w-[200px]" onClick={() => handleSort('cliente')}>
                                             <div className="flex items-center">Cliente<SortIcon column="cliente" /></div>
                                         </th>
                                         <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('codigo')}>
@@ -388,7 +388,11 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Acciones</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                {/* `[&_td]:align-middle` centra verticalmente las celdas de cada fila
+                                    para que cuando el nombre del cliente o el producto haga wrap a
+                                    varias líneas, el resto de las celdas (#, OT, fecha, código) no
+                                    queden ancladas al top. */}
+                                <tbody className="[&_td]:align-middle">
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
                                             <td colSpan={19} className="px-4 py-8 text-center text-gray-500">
@@ -719,6 +723,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 </tbody>
                             </table>
                         </div>
+                        {/* Gradient fade derecho — indica visualmente que hay más columnas por scroll. */}
+                        <div className="pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent" />
                     </Card>
                 </>
             )}
