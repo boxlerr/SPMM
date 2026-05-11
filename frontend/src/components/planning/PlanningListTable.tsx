@@ -825,12 +825,15 @@ function _PlanningListTable({
                     <table className="w-full min-w-[1600px] text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                             <tr>
-                                <th className="w-10 px-4 py-3">
+                                <th className="w-12 px-2 py-3">
                                     {onSelectionChange && (
-                                        <Checkbox
-                                            checked={sortedData.length > 0 && selectedIds.length === sortedData.length}
-                                            onCheckedChange={(checked) => handleSelectAll(!!checked)}
-                                        />
+                                        <label className="flex items-center justify-center w-full h-full py-1 cursor-pointer">
+                                            <Checkbox
+                                                className="h-5 w-5"
+                                                checked={sortedData.length > 0 && selectedIds.length === sortedData.length}
+                                                onCheckedChange={(checked) => handleSelectAll(!!checked)}
+                                            />
+                                        </label>
                                     )}
                                 </th>
                                 <th className="w-10 px-4 py-3"></th>
@@ -975,12 +978,15 @@ function _PlanningListTable({
                                                 getRowColor(item)
                                             )}
                                         >
-                                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                            <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
                                                 {onSelectionChange && (
-                                                    <Checkbox
-                                                        checked={selectedIds.includes(item.id)}
-                                                        onCheckedChange={(checked) => handleSelectRow(item.id, !!checked)}
-                                                    />
+                                                    <label className="flex items-center justify-center w-full h-full py-2 cursor-pointer">
+                                                        <Checkbox
+                                                            className="h-5 w-5"
+                                                            checked={selectedIds.includes(item.id)}
+                                                            onCheckedChange={(checked) => handleSelectRow(item.id, !!checked)}
+                                                        />
+                                                    </label>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3">
