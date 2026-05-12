@@ -78,12 +78,57 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
         }));
     };
 
+    /**
+     * Renderiza la etiqueta del trigger de un select como "Categoría: valor",
+     * con la categoría en gris claro y el valor en negrita cuando hay un filtro
+     * aplicado (no es "Todos"). Esto evita que al elegir, por ejemplo, Material →
+     * "Disponible" la palabra "Material" desaparezca y se pierda contexto.
+     */
+    const triggerLabel = (category: string, currentLabel: string, isDefault: boolean) => (
+        <span className="truncate">
+            <span className="text-slate-500 font-normal">{category}: </span>
+            <span className={cn(isDefault ? "text-slate-500 font-normal" : "font-semibold text-slate-800")}>
+                {currentLabel}
+            </span>
+        </span>
+    );
+
+    /** Diccionarios de etiquetas para mapear value → label legible. */
+    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin Stock" };
+    const PROMISED_LABELS: Record<string, string> = { ALL: "Todas", THIS_WEEK: "Esta semana", NEXT_2_WEEKS: "Próx. 2 semanas", THIS_MONTH: "Este mes" };
+    const BATCH_LABELS: Record<string, string> = { ALL: "Todos", SMALL: "Pequeño", MEDIUM: "Mediano", LARGE: "Grande" };
+
+    // Helper para no repetir el JSX de cada toggle (Procesos / Retrasadas / Reclamos).
+    // Acepta un color (verde/rojo/naranja) y un setter directo a la key del filtro.
+    const renderToggle = (
+        label: string,
+        active: boolean,
+        onToggle: () => void,
+        activeColor: string,
+    ) => (
+        <label className="flex items-center gap-1.5 cursor-pointer group select-none" onClick={onToggle}>
+            <div className={cn(
+                "w-7 h-3.5 rounded-full p-0.5 transition-colors",
+                active ? activeColor : "bg-slate-300"
+            )}>
+                <div className={cn(
+                    "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
+                    active ? "translate-x-3" : "translate-x-0"
+                )} />
+            </div>
+            <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">{label}</span>
+        </label>
+    );
+
     return (
-        <div className="px-4 py-3 bg-slate-50/80 rounded-xl border border-gray-100 shadow-sm space-y-3 mb-4 mt-2">
-            {/* Row 1: Unified Priority & Status Toggles */}
-            <div className="flex flex-wrap items-center gap-6">
+        <div className="px-4 py-3 bg-slate-50/80 rounded-xl border border-gray-100 shadow-sm space-y-2.5 mb-4 mt-2">
+            {/* Fila 1: prioridad + toggles + colores + limpiar (todo alineado a una sola línea con
+                separadores verticales para agrupar visualmente). Limpiar Filtros queda a la derecha
+                pero pegado al grupo Colores (no flotando con ml-auto que generaba un hueco enorme). */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                {/* Prioridad */}
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Prioridad:</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Prioridad</span>
                     <div className="flex bg-slate-200/50 p-0.5 rounded-lg border border-slate-200">
                         <button
                             onClick={() => setFilters(prev => ({ ...prev, priority: [] }))}
@@ -111,90 +156,73 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
 
                 <div className="hidden md:block h-5 w-px bg-slate-300" />
 
-                <div className="flex flex-wrap items-center gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setFilters(prev => ({ ...prev, showWithProcessesOnly: !prev.showWithProcessesOnly }))}>
-                        <div className={cn(
-                            "w-7 h-3.5 rounded-full p-0.5 transition-colors",
-                            filters.showWithProcessesOnly ? "bg-green-500" : "bg-slate-300"
-                        )}>
-                            <div className={cn(
-                                "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
-                                filters.showWithProcessesOnly ? "translate-x-3" : "translate-x-0"
-                            )} />
-                        </div>
-                        <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Procesos</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setFilters(prev => ({ ...prev, showDelayedOnly: !prev.showDelayedOnly }))}>
-                        <div className={cn(
-                            "w-7 h-3.5 rounded-full p-0.5 transition-colors",
-                            filters.showDelayedOnly ? "bg-red-500" : "bg-slate-300"
-                        )}>
-                            <div className={cn(
-                                "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
-                                filters.showDelayedOnly ? "translate-x-3" : "translate-x-0"
-                            )} />
-                        </div>
-                        <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Retrasadas</span>
-                    </label>
-
-                    <label className="flex items-center gap-2 cursor-pointer group" onClick={() => setFilters(prev => ({ ...prev, showClaimsOnly: !prev.showClaimsOnly }))}>
-                        <div className={cn(
-                            "w-7 h-3.5 rounded-full p-0.5 transition-colors",
-                            filters.showClaimsOnly ? "bg-orange-500" : "bg-slate-300"
-                        )}>
-                            <div className={cn(
-                                "w-2.5 h-2.5 bg-white rounded-full shadow-sm transition-transform",
-                                filters.showClaimsOnly ? "translate-x-3" : "translate-x-0"
-                            )} />
-                        </div>
-                        <span className="text-[11px] font-medium text-slate-600 group-hover:text-slate-900 transition-colors">Reclamos</span>
-                    </label>
-
-                    <div className="hidden md:block h-5 w-px bg-slate-300 mx-1" />
-
-                    {/* Color Legend */}
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <button className="flex items-center gap-1.5 px-2 py-1 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded border border-slate-200 transition-colors text-[10px] font-bold tracking-wide uppercase">
-                                <Info className="w-3 h-3" />
-                                Colores
-                            </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="end" className="w-[320px] p-3 text-xs shadow-xl border-slate-200" side="bottom" sideOffset={8}>
-                            <h4 className="font-bold text-slate-800 mb-2 uppercase text-[10px] tracking-wider pb-2 border-b border-slate-100">Leyenda de Estados</h4>
-                            <div className="space-y-2.5">
-                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-purple-200 border border-purple-300"></div> <span className="text-slate-600 font-medium">Tercerizado <span className="text-slate-400 font-normal">(Total/Parcial)</span></span></div>
-                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-orange-200 border border-orange-300"></div> <span className="text-slate-600 font-medium">En Producción</span></div>
-                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-emerald-300 border border-emerald-400"></div> <span className="text-slate-600 font-medium">Programada</span></div>
-                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-green-100 border border-green-200"></div> <span className="text-slate-600 font-medium">Material Disponible <span className="text-slate-400 font-normal">(Para Programar)</span></span></div>
-                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-yellow-100 border border-yellow-200"></div> <span className="text-slate-600 font-medium">Material pedido al Proveedor</span></div>
-                                <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-gray-100 border border-gray-200"></div> <span className="text-slate-600 font-medium">Completa para pedir Materiales <span className="text-slate-400 font-normal">(Sin Stock)</span></span></div>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
-
-                    {hasFiltersActive && (
-                        <button 
-                            onClick={() => setFilters(initialFilterState)}
-                            className="flex items-center gap-1.5 px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded border border-orange-200 transition-colors text-[10px] font-bold tracking-wide uppercase animate-in fade-in slide-in-from-right-1 duration-200 shadow-sm ml-auto"
-                        >
-                            <X className="w-3 h-3" />
-                            Limpiar Filtros
-                        </button>
-                    )}
+                {/* Toggles compactos en un solo grupo */}
+                <div className="flex items-center gap-3 px-2 py-1 bg-white/60 rounded-lg border border-slate-200/70">
+                    {renderToggle("Procesos", filters.showWithProcessesOnly,
+                        () => setFilters(prev => ({ ...prev, showWithProcessesOnly: !prev.showWithProcessesOnly })),
+                        "bg-green-500")}
+                    {renderToggle("Retrasadas", filters.showDelayedOnly,
+                        () => setFilters(prev => ({ ...prev, showDelayedOnly: !prev.showDelayedOnly })),
+                        "bg-red-500")}
+                    {renderToggle("Reclamos", filters.showClaimsOnly,
+                        () => setFilters(prev => ({ ...prev, showClaimsOnly: !prev.showClaimsOnly })),
+                        "bg-orange-500")}
                 </div>
+
+                <div className="hidden md:block h-5 w-px bg-slate-300" />
+
+                {/* Leyenda de colores */}
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <button className="flex items-center gap-1.5 px-2 py-1 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-700 rounded border border-slate-200 transition-colors text-[10px] font-bold tracking-wide uppercase">
+                            <Info className="w-3 h-3" />
+                            Colores
+                        </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-[320px] p-3 text-xs shadow-xl border-slate-200" side="bottom" sideOffset={8}>
+                        <h4 className="font-bold text-slate-800 mb-2 uppercase text-[10px] tracking-wider pb-2 border-b border-slate-100">Leyenda de Estados</h4>
+                        <div className="space-y-2.5">
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-purple-200 border border-purple-300"></div> <span className="text-slate-600 font-medium">Tercerizado <span className="text-slate-400 font-normal">(Total/Parcial)</span></span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-orange-200 border border-orange-300"></div> <span className="text-slate-600 font-medium">En Producción</span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-emerald-300 border border-emerald-400"></div> <span className="text-slate-600 font-medium">Programada</span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-green-100 border border-green-200"></div> <span className="text-slate-600 font-medium">Material Disponible <span className="text-slate-400 font-normal">(Para Programar)</span></span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-yellow-100 border border-yellow-200"></div> <span className="text-slate-600 font-medium">Material pedido al Proveedor</span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-gray-100 border border-gray-200"></div> <span className="text-slate-600 font-medium">Completa para pedir Materiales <span className="text-slate-400 font-normal">(Sin Stock)</span></span></div>
+                        </div>
+                    </PopoverContent>
+                </Popover>
+
+                {/* Limpiar filtros — pegado al lado derecho, sin hueco grande. */}
+                {hasFiltersActive && (
+                    <button
+                        onClick={() => setFilters(initialFilterState)}
+                        className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded border border-orange-200 transition-colors text-[10px] font-bold tracking-wide uppercase animate-in fade-in slide-in-from-right-1 duration-200 shadow-sm"
+                    >
+                        <X className="w-3 h-3" />
+                        Limpiar Filtros
+                    </button>
+                )}
             </div>
 
-            {/* Row 2: Symmetric Grid of All Selectors */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+            {/* Fila 2: selectores en flex-wrap. Cada uno tiene un ancho mínimo y máximo
+                consistentes para que NO se estiren a llenar columnas (eso generaba huecos
+                grandes en pantallas anchas). Quedan pegados uno al lado del otro con gap uniforme
+                y wrappan naturalmente cuando no entran. La clase `[&>*]:` aplica el sizing
+                a todos los hijos directos sin repetirlo en cada Select. */}
+            <div className="flex flex-wrap gap-2 [&>*]:flex-1 [&>*]:min-w-[160px] [&>*]:max-w-[200px]">
                 {/* Client Selector */}
                 <Popover>
                     <PopoverTrigger asChild>
                         <Button variant="outline" className="justify-between bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                            <span className="truncate">
-                                {filters.client.length === 0 ? "Cliente: Todos" : filters.client.length === 1 ? filters.client[0] : `${filters.client.length} Selecc.`}
-                            </span>
+                            {triggerLabel(
+                                "Cliente",
+                                filters.client.length === 0
+                                    ? "Todos"
+                                    : filters.client.length === 1
+                                        ? filters.client[0]
+                                        : `${filters.client.length} seleccionados`,
+                                filters.client.length === 0,
+                            )}
                             <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-40" />
                         </Button>
                     </PopoverTrigger>
@@ -242,43 +270,46 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
                     </PopoverContent>
                 </Popover>
 
-                <Select value={filters.sector} onValueChange={(v) => setFilters(prev => ({...prev, sector: v}))}>
-                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                        <SelectValue placeholder="Sector" />
-                    </SelectTrigger>
-                    <SelectContent><SelectItem value="ALL" className="text-xs">Sector: Todos</SelectItem>{uniqueSectors.map(s => (<SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>))}</SelectContent>
-                </Select>
-
-                <Select value={filters.material} onValueChange={(v) => setFilters(prev => ({...prev, material: v}))}>
-                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                        <SelectValue placeholder="Material" />
+                <Select value={filters.sector} onValueChange={(v) => setFilters(prev => ({ ...prev, sector: v }))}>
+                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
+                        {triggerLabel("Sector", filters.sector === "ALL" ? "Todos" : filters.sector, filters.sector === "ALL")}
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="ALL" className="text-xs">Material: Todos</SelectItem>
+                        <SelectItem value="ALL" className="text-xs">Todos</SelectItem>
+                        {uniqueSectors.map(s => (<SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>))}
+                    </SelectContent>
+                </Select>
+
+                <Select value={filters.material} onValueChange={(v) => setFilters(prev => ({ ...prev, material: v }))}>
+                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
+                        {triggerLabel("Material", MATERIAL_LABELS[filters.material] || "Todos", filters.material === "ALL")}
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="ALL" className="text-xs">Todos</SelectItem>
                         <SelectItem value="OK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-500" />Disponible</div></SelectItem>
                         <SelectItem value="PEDIDO" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" />Pedido</div></SelectItem>
                         <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />Sin Stock</div></SelectItem>
                     </SelectContent>
                 </Select>
 
-                <Select value={filters.promisedDate} onValueChange={(v) => setFilters(prev => ({...prev, promisedDate: v}))}>
-                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                        <SelectValue placeholder="Entrega" />
+                <Select value={filters.promisedDate} onValueChange={(v) => setFilters(prev => ({ ...prev, promisedDate: v }))}>
+                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
+                        {triggerLabel("Entrega", PROMISED_LABELS[filters.promisedDate] || "Todas", filters.promisedDate === "ALL")}
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="ALL" className="text-xs">Entrega: Todas</SelectItem>
+                        <SelectItem value="ALL" className="text-xs">Todas</SelectItem>
                         <SelectItem value="THIS_WEEK" className="text-xs">Esta semana</SelectItem>
                         <SelectItem value="NEXT_2_WEEKS" className="text-xs">Próx. 2 semanas</SelectItem>
                         <SelectItem value="THIS_MONTH" className="text-xs">Este mes</SelectItem>
                     </SelectContent>
                 </Select>
 
-                <Select value={filters.batchSize} onValueChange={(v) => setFilters(prev => ({...prev, batchSize: v}))}>
-                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                        <SelectValue placeholder="Unidades" />
+                <Select value={filters.batchSize} onValueChange={(v) => setFilters(prev => ({ ...prev, batchSize: v }))}>
+                    <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
+                        {triggerLabel("Lote", BATCH_LABELS[filters.batchSize] || "Todos", filters.batchSize === "ALL")}
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="ALL" className="text-xs">Lote: Todos</SelectItem>
+                        <SelectItem value="ALL" className="text-xs">Todos</SelectItem>
                         <SelectItem value="SMALL" className="text-xs">Pequeño (≤10)</SelectItem>
                         <SelectItem value="MEDIUM" className="text-xs">Mediano (11-50)</SelectItem>
                         <SelectItem value="LARGE" className="text-xs">Grande ({">"}50)</SelectItem>
@@ -288,27 +319,26 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
                 {/* Custom Date Range Filter */}
                 <Popover>
                     <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn(
-                            "justify-between bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal",
-                            (filters.dateFrom || filters.dateTo) ? "bg-slate-100 border-slate-300 font-semibold text-slate-800" : ""
-                        )}>
-                            <span className="truncate">
-                                {(() => {
-                                    if (!filters.dateFrom && !filters.dateTo) return "Fecha: Todas";
-                                    const formatStr = (d: string) => {
-                                        if (!d) return "";
-                                        const [y, m, day] = d.split('-');
-                                        return `${day}/${m}/${y.slice(2)}`;
-                                    };
-                                    if (filters.dateFrom && filters.dateTo) {
-                                        if (filters.dateFrom === filters.dateTo) return `Fecha: ${formatStr(filters.dateFrom)}`;
-                                        return `${formatStr(filters.dateFrom)} - ${formatStr(filters.dateTo)}`;
-                                    }
-                                    if (filters.dateFrom) return `Desde: ${formatStr(filters.dateFrom)}`;
-                                    if (filters.dateTo) return `Hasta: ${formatStr(filters.dateTo)}`;
-                                    return "Fecha: Filtrada";
-                                })()}
-                            </span>
+                        <Button variant="outline" className="justify-between bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
+                            {(() => {
+                                const isDefault = !filters.dateFrom && !filters.dateTo;
+                                const formatStr = (d: string) => {
+                                    if (!d) return "";
+                                    const [y, m, day] = d.split('-');
+                                    return `${day}/${m}/${y.slice(2)}`;
+                                };
+                                let value = "Todas";
+                                if (filters.dateFrom && filters.dateTo) {
+                                    value = filters.dateFrom === filters.dateTo
+                                        ? formatStr(filters.dateFrom)
+                                        : `${formatStr(filters.dateFrom)} → ${formatStr(filters.dateTo)}`;
+                                } else if (filters.dateFrom) {
+                                    value = `desde ${formatStr(filters.dateFrom)}`;
+                                } else if (filters.dateTo) {
+                                    value = `hasta ${formatStr(filters.dateTo)}`;
+                                }
+                                return triggerLabel("Fecha", value, isDefault);
+                            })()}
                             <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-40" />
                         </Button>
                     </PopoverTrigger>

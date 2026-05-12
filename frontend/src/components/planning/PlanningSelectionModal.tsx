@@ -138,18 +138,34 @@ export function PlanningSelectionModal({
         const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
         let totalMinutes = 0
         let procesosConTiempo = 0
+        let totalProcesos = 0
+        let otsSinProcesos = 0
         selectedOrders.forEach(o => {
-            o.procesos?.forEach(p => {
-                if (p.tiempo_proceso && p.tiempo_proceso > 0) {
-                    procesosConTiempo++
-                    totalMinutes += p.tiempo_proceso
-                }
-            })
+            const procs = o.procesos || []
+            if (procs.length === 0) {
+                otsSinProcesos++
+            } else {
+                totalProcesos += procs.length
+                procs.forEach(p => {
+                    if (p.tiempo_proceso && p.tiempo_proceso > 0) {
+                        procesosConTiempo++
+                        totalMinutes += p.tiempo_proceso
+                    }
+                })
+            }
         })
 
-        // Si las OTs seleccionadas no tienen tiempos cargados, lo decimos
-        // explicitamente en lugar de ocultar el badge silenciosamente.
-        if (procesosConTiempo === 0) return "— (sin tiempos cargados)"
+        // Distinguimos 3 escenarios para que el usuario sepa exactamente qué
+        // arreglar antes de planificar:
+        //   1) Ninguna de las OTs tiene procesos cargados → no se puede planificar.
+        //   2) Hay procesos cargados pero ninguno tiene tiempo → falta cargar tiempos.
+        //   3) Hay tiempos → calculamos estimación.
+        if (totalProcesos === 0) {
+            return `— (${otsSinProcesos} sin procesos cargados)`
+        }
+        if (procesosConTiempo === 0) {
+            return `— (procesos sin tiempo cargado)`
+        }
 
         // Solo contamos operarios marcados como disponibles. Si el array no llega
         // o queda vacio, caemos a 1 para no dividir por cero.
@@ -320,12 +336,21 @@ export function PlanningSelectionModal({
                 {/* Filter Toolbar Section - Symmetric & Compact */}
                 <div className="px-6 py-0 border-b bg-slate-50/80 shrink-0">
                     <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders}>
+                        {/* Misma estética que el resto de filtros: "Categoría: valor"
+                            con el valor en negrita cuando hay algo aplicado. */}
                         <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>
-                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal">
-                                <SelectValue placeholder="Ordenar" />
+                            <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
+                                <span className="truncate">
+                                    <span className="text-slate-500 font-normal">Orden: </span>
+                                    <span className={cn(
+                                        dateSort === "DEFAULT" ? "text-slate-500 font-normal" : "font-semibold text-slate-800"
+                                    )}>
+                                        {dateSort === "DEFAULT" ? "Defecto" : dateSort === "OLDEST_FIRST" ? "Más antiguos" : "Más recientes"}
+                                    </span>
+                                </span>
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="DEFAULT" className="text-xs">Orden: Defecto</SelectItem>
+                                <SelectItem value="DEFAULT" className="text-xs">Defecto</SelectItem>
                                 <SelectItem value="OLDEST_FIRST" className="text-xs">Más antiguos</SelectItem>
                                 <SelectItem value="NEWEST_FIRST" className="text-xs">Más recientes</SelectItem>
                             </SelectContent>

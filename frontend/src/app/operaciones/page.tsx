@@ -93,6 +93,8 @@ export default function OperacionesPage() {
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
+  /** Flag específico para "recalcular dentro de la vista previa" (no cerrar modal). */
+  const [isPreviewCalculating, setIsPreviewCalculating] = useState(false)
 
   const [isOperatorsModalOpen, setIsOperatorsModalOpen] = useState(false)
   const [selectedOperatorForModal, setSelectedOperatorForModal] = useState<Operario | null>(null)
@@ -885,6 +887,110 @@ export default function OperacionesPage() {
 
     } catch (error) {
       toast.error("Error al calcular la planificación");
+    }
+  };
+
+  /**
+   * Recalcula la planificación SIN cerrar el modal de vista previa. Lo usa el
+   * modal cuando el usuario:
+   *   - Agrega más OTs vía el popover "Agregar OTs"
+   *   - Toca el botón "Recalcular" (por si cambió disponibilidad de operarios,
+   *     forzó algún excedente, etc.)
+   *
+   * Usa el mismo rango (`planningRange`) que se eligió al abrir el modal y
+   * reusa la lógica de enrich de `handlePlanSelection`.
+   */
+  const handleRecalculatePreview = async (
+    ids: number[],
+    range: { fecha_desde?: string; fecha_hasta?: string },
+    forzarIds: number[] = [],
+  ) => {
+    if (ids.length === 0) {
+      toast.error("No hay OTs para recalcular.");
+      return;
+    }
+    setIsPreviewCalculating(true);
+    setSelectedOrderIds(ids);
+    setPlanningRange(range);
+
+    try {
+      const response = await fetch(`${API_URL}/planificar`, {
+        method: "POST",
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ordenes_ids: ids,
+          preview: true,
+          fecha_desde: range.fecha_desde,
+          fecha_hasta: range.fecha_hasta,
+          forzar_ordenes_ids: forzarIds.length > 0 ? forzarIds : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.detail || "Error al recalcular planificación");
+        return;
+      }
+
+      const responseData = await response.json();
+      const planificadosRaw: any[] = Array.isArray(responseData) ? responseData : (responseData.planificados || []);
+      const excedentesRaw: any[] = Array.isArray(responseData) ? [] : (responseData.excedentes || []);
+
+      const now = new Date();
+      const enrich = (res: any) => {
+        const order = ordenesTrabajo.find(o => o.id === res.orden_id);
+        const operario = rawOperarios.find(op => op.id === res.id_operario);
+        const maquina = rawMaquinarias.find(m => m.id === res.id_maquinaria);
+        const startMin = res.inicio_min !== undefined ? res.inicio_min : (res.start_time || 0);
+        const endMin = res.fin_min !== undefined ? res.fin_min : (res.end_time || 0);
+        const startDate = new Date(now.getTime() + startMin * 60000);
+        const endDate = new Date(now.getTime() + endMin * 60000);
+        const formatDateShort = (d: Date) => d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        return {
+          ...res,
+          id_otvieja: order?.id_otvieja,
+          cliente: order?.cliente?.nombre || "N/A",
+          articulo: order?.articulo?.descripcion || "N/A",
+          codigo: order?.articulo?.cod_articulo || "",
+          operario_nombre: operario ? `${operario.nombre} ${operario.apellido}` : null,
+          maquinaria_nombre: maquina ? maquina.nombre : null,
+          fecha_inicio_texto: formatDateShort(startDate),
+          fecha_fin_texto: formatDateShort(endDate),
+          fecha_prometida: order?.fecha_prometida || null,
+          fecha_entrada: order?.fecha_entrada || null,
+          unidades: order?.unidades || 0,
+          cantidad_entregada: order?.cantidad_entregada || 0,
+          estado_material: order?.estado_material || null,
+          id_prioridad: order?.id_prioridad,
+          prioridad_descripcion: order?.prioridad?.descripcion,
+          all_finalized: order?.procesos?.every(p => p.estado_proceso.id === 3) && (order?.procesos?.length || 0) > 0,
+          any_process_started: order?.procesos?.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3),
+        };
+      };
+
+      setPreviewResults(planificadosRaw.map(enrich));
+      setExcedentesResults(excedentesRaw.map(enrich));
+
+      // Distinguimos:
+      //   - "sin lugar" reales: OTs excedentes que el usuario NO forzó (decisión pendiente).
+      //   - "forzadas parciales": OTs que el usuario forzó pero el solver no pudo asignar todos
+      //     sus procesos (probablemente por falta de operario/máquina compatible o timeout).
+      // Sin esta distinción, el toast decía "X OTs sin lugar" aun después de forzar y eso
+      // confundía al usuario ("forzo y dice que están sin lugar?").
+      const planificadosCount = planificadosRaw.length;
+      const forcedSet = new Set(forzarIds);
+      const excedenteOrdenIds = Array.from(new Set(excedentesRaw.map(r => r.orden_id)));
+      const trueSinLugar = excedenteOrdenIds.filter(id => !forcedSet.has(id));
+      const forzadasParciales = excedenteOrdenIds.filter(id => forcedSet.has(id));
+
+      const parts = [`${planificadosCount} procesos planificados`];
+      if (trueSinLugar.length > 0) parts.push(`${trueSinLugar.length} OT(s) sin lugar`);
+      if (forzadasParciales.length > 0) parts.push(`${forzadasParciales.length} OT(s) forzada(s) con procesos sin asignar`);
+      toast.success(`Recalculado: ${parts.join(", ")}.`);
+    } catch (error) {
+      toast.error("Error al recalcular la planificación");
+    } finally {
+      setIsPreviewCalculating(false);
     }
   };
 
@@ -1685,6 +1791,11 @@ export default function OperacionesPage() {
         isConfirming={isConfirmingPlan}
         availableOperators={rawOperarios}
         availableMachines={rawMaquinarias}
+        unplannedOrders={ordersForPlanning}
+        selectedOrderIds={selectedOrderIds}
+        planningRange={planningRange}
+        onRecalculate={handleRecalculatePreview}
+        isCalculating={isPreviewCalculating}
       />
       {activeTab === "lista_planificacion" && (
         <ConfirmationDialog

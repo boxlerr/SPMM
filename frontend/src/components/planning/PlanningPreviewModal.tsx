@@ -3,12 +3,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import {
+    Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
+    ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
+    HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
+} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
+import type { WorkOrder } from "@/lib/types";
+import { toast } from "sonner";
+import { API_URL } from "@/config";
+
+const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('access_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
 
 interface PlanificacionResult {
     orden_id: number;
@@ -58,6 +73,17 @@ interface PlanningPreviewModalProps {
     isConfirming: boolean;
     availableOperators: any[]; // Resource[] or any
     availableMachines: any[];
+
+    /** OTs no planificadas disponibles para agregar al plan en vivo. */
+    unplannedOrders?: WorkOrder[];
+    /** IDs de OTs actualmente en el plan (para evitar mostrarlas como "agregables"). */
+    selectedOrderIds?: number[];
+    /** Rango de fechas elegido en el modal anterior (para recalcular con el mismo). */
+    planningRange?: { fecha_desde?: string; fecha_hasta?: string };
+    /** Recalcula el plan con un nuevo set de OTs + el mismo rango + las decisiones de forzar. */
+    onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[]) => void;
+    /** True mientras se está recalculando (para mostrar spinner). */
+    isCalculating?: boolean;
 }
 
 export function PlanningPreviewModal({
@@ -70,7 +96,12 @@ export function PlanningPreviewModal({
     operatorLoads = {},
     isConfirming,
     availableOperators = [],
-    availableMachines = []
+    availableMachines = [],
+    unplannedOrders = [],
+    selectedOrderIds = [],
+    planningRange = {},
+    onRecalculate,
+    isCalculating = false,
 }: PlanningPreviewModalProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -82,105 +113,347 @@ export function PlanningPreviewModal({
     // Decisión por orden excedente: true = forzar (incluir igual), false = descartar (default)
     const [forzarOrdenIds, setForzarOrdenIds] = React.useState<Set<number>>(new Set());
 
-    // Reiniciar decisiones cuando cambian los excedentes (nueva planificación)
+    // Reset decisiones de forzar SOLO cuando el modal se abre fresh — no en cada
+    // cambio de excedentes (porque ahora recalculamos en cada toggle y eso cambia
+    // `excedentes`, lo que borraría las decisiones del usuario).
     React.useEffect(() => {
-        setForzarOrdenIds(new Set());
-    }, [excedentes]);
+        if (isOpen) setForzarOrdenIds(new Set());
+    }, [isOpen]);
+
+    /**
+     * "Sticky" excedentes: los conservamos en estado local para sobrevivir al
+     * recálculo que se dispara al apretar Forzar. Cuando el backend recibe
+     * `forzar_ordenes_ids` no vacío, amplía el horizonte y devuelve `excedentes=[]`,
+     * con lo cual perderíamos de vista las OTs que NO forzamos. Mantenemos la
+     * última lista "real" (cuando forzar estaba vacío) y filtramos las forzadas
+     * para mostrar el resto.
+     */
+    const [stickyExcedentes, setStickyExcedentes] = React.useState<PlanificacionResult[]>([]);
+    React.useEffect(() => {
+        // Solo actualizamos la fuente de verdad cuando NO hay forzar activo, porque
+        // en ese caso el backend nos devuelve los excedentes "reales" respetando el horizonte.
+        if (forzarOrdenIds.size === 0) {
+            setStickyExcedentes(excedentes);
+        }
+    }, [excedentes, forzarOrdenIds.size]);
+
+    /** Excedentes a mostrar en el cartel amarillo: los sticky menos los que ya
+     *  fueron forzados (esos ahora están en la tabla "EN EL PLAN"). */
+    const displayedExcedentes = React.useMemo(
+        () => stickyExcedentes.filter(e => !forzarOrdenIds.has(e.orden_id)),
+        [stickyExcedentes, forzarOrdenIds]
+    );
 
     const excedentesPorOrden = React.useMemo(() => {
         const groups: Record<number, PlanificacionResult[]> = {};
-        for (const item of excedentes) {
+        for (const item of displayedExcedentes) {
             if (!groups[item.orden_id]) groups[item.orden_id] = [];
             groups[item.orden_id].push(item);
         }
         return groups;
-    }, [excedentes]);
+    }, [displayedExcedentes]);
 
-    const toggleForzar = (ordenId: number) => {
-        setForzarOrdenIds(prev => {
-            const next = new Set(prev);
-            if (next.has(ordenId)) next.delete(ordenId);
-            else next.add(ordenId);
-            return next;
-        });
+    /**
+     * OTs forzadas con procesos que el solver no pudo asignar.
+     * El backend puede devolver procesos como `excedente` aun con horizonte=None si:
+     *   - Ningún operario/máquina cumple los requisitos del proceso.
+     *   - El solver agotó su tiempo (60s) sin encontrar asignación.
+     * El usuario los completa manualmente en el desplegable de la OT.
+     */
+    const forcedPartialMap = React.useMemo(() => {
+        const map = new Map<number, { unfit: PlanificacionResult[]; fitCount: number; totalCount: number }>();
+        for (const oid of forzarOrdenIds) {
+            const unfit = excedentes.filter(e => e.orden_id === oid);
+            const fitCount = results.filter(r => r.orden_id === oid).length;
+            const totalCount = fitCount + unfit.length;
+            if (unfit.length > 0) {
+                map.set(oid, { unfit, fitCount, totalCount });
+            }
+        }
+        return map;
+    }, [forzarOrdenIds, excedentes, results]);
+
+    /** Catálogo de rangos cargado bajo demanda (al abrir el modal) para mostrar
+     *  nombres legibles en vez de IDs cuando explicamos los motivos de excedentes. */
+    const [rangosCatalog, setRangosCatalog] = React.useState<Array<{ id: number; nombre: string }>>([]);
+    React.useEffect(() => {
+        if (!isOpen) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(`${API_URL}/rangos`, { headers: getAuthHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const list = Array.isArray(data) ? data : (data?.data || []);
+                if (!cancelled) {
+                    setRangosCatalog(list.map((r: any) => ({ id: r.id, nombre: r.nombre })));
+                }
+            } catch {
+                // Silencioso: si falla, mostramos los IDs como fallback.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [isOpen]);
+
+    /** Mapea una lista de IDs de rango a una string con sus nombres legibles. */
+    const formatRangoIds = (ids: number[]): string => {
+        if (!ids || ids.length === 0) return "—";
+        return ids
+            .map(id => rangosCatalog.find(r => r.id === id)?.nombre || `#${id}`)
+            .join(", ");
     };
 
+    /**
+     * Diagnostica POR QUÉ un proceso quedó sin asignar (excedente de OT forzada).
+     * Esto le da al usuario un motivo accionable en vez de un error genérico.
+     */
+    const diagnoseUnfitProcess = (item: PlanificacionResult): { code: string; label: string; hint: string; rangos: number[] } => {
+        const rangos = item.rangos_permitidos_proceso || [];
+        if (rangos.length === 0) {
+            return {
+                code: "no_rango",
+                label: "Sin rango configurado",
+                hint: "Este proceso no tiene rango asignado en el sistema. Asignale uno en Recursos → Procesos para que el motor pueda elegir operario.",
+                rangos: [],
+            };
+        }
+        return {
+            code: "no_match",
+            label: "Sin operario/máquina compatible",
+            hint: `Ningún operario o máquina disponible cumple los requisitos. Rangos requeridos: ${formatRangoIds(rangos)}. Asigná operarios a estos rangos en Recursos → Operarios.`,
+            rangos,
+        };
+    };
+
+    /** Convierte un datetime-local (YYYY-MM-DDTHH:mm) a `inicio_min` relativo a ahora.
+     *  Se usa cuando el usuario asigna manualmente un proceso que quedó afuera. */
+    const datetimeToInicioMin = (dtStr: string): number => {
+        if (!dtStr) return 0;
+        const target = new Date(dtStr).getTime();
+        const now = Date.now();
+        return Math.max(0, Math.round((target - now) / 60000));
+    };
+
+    /** Devuelve true si el proceso "unfit" fue completado a mano por el usuario
+     *  (operario + maquinaria + horario). En ese caso lo incluimos en el plan al confirmar. */
+    const isUnfitManuallyAssigned = (item: PlanificacionResult): boolean => {
+        const key = `${item.orden_id}-${item.proceso_id}`;
+        const edit = editedResults[key];
+        if (!edit) return false;
+        return !!edit.id_operario && edit.id_operario > 0
+            && !!edit.id_maquinaria && edit.id_maquinaria > 0
+            && !!edit.fecha_inicio_estimada;
+    };
+
+    /**
+     * Calcula qué `ordenes_ids` mandar al backend en una recalculación.
+     *
+     * Lógica clave para evitar bug "fuerzo una y entran todas":
+     *   - Si `forced` está VACÍO → backend respeta horizonte → mandamos planificadas
+     *     + TODAS las excedentes conocidas (sticky) para que el solver vuelva a
+     *     evaluarlas dentro de ese horizonte.
+     *   - Si `forced` tiene algo → backend ampliará el horizonte (lo dropea por
+     *     completo). En ese caso solo mandamos planificadas + las EXACTAS que el
+     *     usuario eligió forzar. Si mandáramos también las no-forzadas, entrarían
+     *     en el plan sin querer (porque sin horizonte todo entra).
+     */
+    const buildOrdenIdsForRecalc = (forced: number[], extras: number[] = []) => {
+        const planned = Array.from(new Set(results.map(r => r.orden_id)));
+        if (forced.length > 0) {
+            return Array.from(new Set([...planned, ...forced, ...extras]));
+        }
+        const allExcedentes = Array.from(new Set(stickyExcedentes.map(e => e.orden_id)));
+        return Array.from(new Set([...planned, ...allExcedentes, ...extras]));
+    };
+
+    /** Toggle "Forzar" para una OT excedente. Además de marcar la decisión, dispara
+     *  un recálculo inmediato para que el usuario vea cómo impacta:
+     *   - Si la fuerza → la OT pasa a la tabla "EN EL PLAN" con operario/horario reales.
+     *   - Si la des-fuerza → vuelve a aparecer como excedente.
+     *  Sin esto, el usuario apretaba Forzar y "no pasaba nada visible" hasta confirmar. */
+    const toggleForzar = (ordenId: number) => {
+        const next = new Set(forzarOrdenIds);
+        const wasForzar = next.has(ordenId);
+        if (wasForzar) next.delete(ordenId);
+        else next.add(ordenId);
+        setForzarOrdenIds(next);
+
+        if (!onRecalculate) return;
+        const forcedArr = Array.from(next);
+        const mergedIds = buildOrdenIdsForRecalc(forcedArr);
+        onRecalculate(mergedIds, planningRange, forcedArr);
+    };
+
+    /**
+     * Al confirmar, decidimos entre dos rutas:
+     *
+     *  - **Modo forzar (default)**: si el usuario NO asignó manualmente ningún
+     *    proceso "unfit", se confirma como antes — el backend re-corre el solver
+     *    con `forzar_ordenes_ids` y guarda lo que pueda asignar automáticamente.
+     *    Los procesos que el solver no pudo ubicar quedan fuera (no se guardan).
+     *
+     *  - **Modo manual+forzar**: si el usuario asignó a mano al menos un proceso
+     *    unfit (operario+maquinaria+horario), armamos un `plan` manual que incluye:
+     *      • Procesos auto-asignados (con cualquier edit del usuario)
+     *      • Procesos unfit completamente asignados a mano
+     *    Los procesos unfit que el usuario NO completó se omiten (no se guardan).
+     *    Esto le da control total sin obligar a completar todo.
+     */
     const handleConfirmWithDecisions = () => {
-        onConfirm({ forzarOrdenIds: Array.from(forzarOrdenIds) });
+        // ¿Hay al menos un unfit completamente asignado a mano?
+        let anyManuallyAssigned = false;
+        for (const info of forcedPartialMap.values()) {
+            if (info.unfit.some(u => isUnfitManuallyAssigned(u))) {
+                anyManuallyAssigned = true;
+                break;
+            }
+        }
+
+        if (!anyManuallyAssigned) {
+            // Flujo original: el backend usa el solver con forzar_ordenes_ids.
+            onConfirm({ forzarOrdenIds: Array.from(forzarOrdenIds) });
+            return;
+        }
+
+        // Modo manual: armamos plan completo.
+        const manualPlan: any[] = [];
+
+        // 1. Procesos auto-asignados (con edits del usuario aplicados).
+        for (const r of results) {
+            const eff = getEffectiveItem(r);
+            manualPlan.push({
+                ...eff,
+                forzado_fuera_rango: forzarOrdenIds.has(r.orden_id),
+            });
+        }
+
+        // 2. Procesos unfit que el usuario completó a mano.
+        for (const info of forcedPartialMap.values()) {
+            for (const u of info.unfit) {
+                if (!isUnfitManuallyAssigned(u)) continue;
+                const eff = getEffectiveItem(u);
+                const inicioMin = datetimeToInicioMin(eff.fecha_inicio_estimada || "");
+                const finMin = inicioMin + (eff.duracion_min || 0);
+                manualPlan.push({
+                    ...eff,
+                    inicio_min: inicioMin,
+                    fin_min: finMin,
+                    sin_asignar: false,
+                    sin_maquinaria: false,
+                    forzado_fuera_rango: true,
+                });
+            }
+        }
+
+        (onConfirm as any)(manualPlan);
     };
 
     const handleConfirmWithEdits = () => {
-        // Merge original results with edits
-        // If an item has an edit, use it. Otherwise use original.
-        // We need to return a list of ALL items, including unchanged ones.
-        // BUT, we should only send back what the parent needs?
-        // Actually, the parent `handleConfirmPlanning` in page.tsx likely expects the modified list.
-        // Let's construct the final list.
-
+        // Devuelve al padre los resultados combinados (originales + edits del usuario).
         const finalResults = results.map(item => {
             const key = `${item.orden_id}-${item.proceso_id}`;
             return editedResults[key] || item;
         });
-
-        // We might need to pass this back?
-        // The prop `onConfirm` currently takes no args in the interface, 
-        // but in page.tsx it might be `handleConfirmPlanning` which uses `previewResults` state.
-        // If we modify `previewResults` here, we need a way to propagate it up.
-        // Since `onConfirm` is void, maybe we should have `onSave(results)`?
-        // Checking usage in page.tsx...
-        // If page.tsx relies on `previewResults` state, we can't change it from here unless we have a setter.
-        // However, usually one would pass the new data to onConfirm.
-        // Let's assume for now we just call onConfirm(), BUT we probably need to update the parent state first?
-        // Wait, `onConfirm` in page.tsx simply calls `savePlanning`.
-        // `savePlanning` uses `previewResults`.
-        // So we MUST update `previewResults` in the parent.
-        // But we don't have `setPreviewResults` prop.
-        // We probably need to change the interface or assume `onConfirm` can take data.
-        // Or, maybe `onConfirm` implies "Use what you have". 
-        // IF the parent doesn't know about `editedResults`, our edits are lost!
-        // FIX: We should probably accept `onConfirm: (results: PlanificacionResult[]) => void`.
-        // But for this "quick fix" based on the error "handleConfirmWithEdits is not defined",
-        // I will implement it to just call `onConfirm()` for now, 
-        // AND simpler: let's console log or TODO.
-        // Actually, looking at standard patterns, likely `onConfirm` SHOULD take arguments. 
-        // I will assume `onConfirm` can take the results, casting it if needed, or 
-        // if this is a strict fix, I will just defined the function to stop the crash.
-        // But to make it work...
-        // Let's look at `page.tsx` or similar if I could, but I'll stick to fixing THIS file.
-        // I'll make it call `onConfirm()` but also try to emit the change if possible.
-        // Actually, I'll update the prop type in a separate step if needed. 
-        // For now: Define the function.
-
-        // HACK: If the parent expects the data, we might need to pass it. 
-        // If `onConfirm` is just `() => void`, we are stuck.
-        // I'll assume for now `onConfirm` handles the "commit" and maybe we should have a `onUpdate` prop?
-        // Or maybe `setPreviewResults` was passed as `onUpdate`? unfortunately not in props.
-        // check `page.tsx`? No time. 
-        // I'll implement a basic version that assumes the parent might capture state elsewhere or 
-        // I'll just restore the function to fix the crash. 
-        // Realistically, to support edits, we need to pass data back.
-        // I will incorrectly call `onConfirm` with data (any cast) to be safe.
-        // (onConfirm as any)(finalResults);
-
-        // However, looking at the code I removed/saw, there was logic.
-        // Let's restore the logic I can infer or standard helpers.
-
-        // *CRITICAL*: I will emit the new results to `onConfirm` assuming it might accept them, 
-        // or effectively this modal simply DOES NOT support saving edits yet if the parent doesn't handle it.
-        // But at least I fix the crash.
-        // Checking the specific error: `handleConfirmWithEdits is not defined`.
-        // So just defining it fixes the crash.
-
-        // Refined implementation:
-        // We'll trust the prop `onConfirm` triggers the save.
-        // If we want to support edits, we probably need `onResultsChange`? 
-        // I will leave it as just calling `onConfirm()` for now, and maybe a TODO.
-        // But wait, there is `editedResults` state. 
-        // Likely the original code had a way to bubble this up.
-        // I will implement it to call `onConfirm` and hope for the best, 
-        // but likely `results` prop should have been updated? No, `results` is prop.
-        // I will compromise:
         (onConfirm as any)(finalResults);
+    };
+
+    // ---------- Estado nuevo: agregar OTs en vivo + recalcular ----------
+
+    /** OTs marcadas en el popover "Agregar OTs" (todavía no enviadas al solver). */
+    const [pendingAddIds, setPendingAddIds] = React.useState<Set<number>>(new Set());
+    const [addSearchTerm, setAddSearchTerm] = React.useState("");
+    const [addPopoverOpen, setAddPopoverOpen] = React.useState(false);
+    /** UI: orden expandida en el panel de excedentes para mostrar la explicación. */
+    const [expandedExcedenteId, setExpandedExcedenteId] = React.useState<number | null>(null);
+
+    // Limpiar selección "para agregar" cuando cambia el set de resultados (ya fueron incluidas).
+    React.useEffect(() => {
+        setPendingAddIds(new Set());
+    }, [results.length, isOpen]);
+
+    /** Lista de OTs disponibles para agregar: no están en el plan actual, no son excedentes,
+     *  y tienen al menos un proceso cargado (sin procesos el solver no las puede ubicar). */
+    const addableOrders = React.useMemo(() => {
+        const inPlanIds = new Set([
+            ...selectedOrderIds,
+            ...results.map(r => r.orden_id),
+            ...stickyExcedentes.map(e => e.orden_id),
+        ]);
+        return unplannedOrders.filter(o =>
+            !inPlanIds.has(o.id) &&
+            Array.isArray(o.procesos) && o.procesos.length > 0
+        );
+    }, [unplannedOrders, selectedOrderIds, results, stickyExcedentes]);
+
+    const filteredAddableOrders = React.useMemo(() => {
+        const term = addSearchTerm.toLowerCase();
+        if (!term) return addableOrders;
+        return addableOrders.filter(o =>
+            String(o.id_otvieja || o.id).includes(term) ||
+            (o.cliente?.nombre || "").toLowerCase().includes(term) ||
+            (o.articulo?.descripcion || "").toLowerCase().includes(term) ||
+            (o.articulo?.cod_articulo || "").toLowerCase().includes(term)
+        );
+    }, [addableOrders, addSearchTerm]);
+
+    const togglePendingAdd = (id: number) => {
+        setPendingAddIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
+    const handleRecalculate = (extraIds: number[] = []) => {
+        if (!onRecalculate) {
+            toast.error("Recalcular no está disponible en este contexto.");
+            return;
+        }
+        const forcedArr = Array.from(forzarOrdenIds);
+        const mergedIds = buildOrdenIdsForRecalc(forcedArr, extraIds);
+        onRecalculate(mergedIds, planningRange, forcedArr);
+    };
+
+    const handleAddSelectedAndRecalculate = () => {
+        const extras = Array.from(pendingAddIds);
+        if (extras.length === 0) {
+            toast.error("No seleccionaste ninguna OT para agregar.");
+            return;
+        }
+        // Limpiamos inmediatamente la selección y cerramos el popover ANTES de
+        // disparar el recálculo, para que cuando vuelva a abrir esté vacío y no
+        // se vea el contador "3 seleccionadas" después del éxito.
+        setPendingAddIds(new Set());
+        setAddSearchTerm("");
+        setAddPopoverOpen(false);
+        handleRecalculate(extras);
+    };
+
+    /** Saca una OT del plan y recalcula (sin esa OT). Pensado para el botón "x"
+     *  de cada fila en la tabla de resultados. */
+    const handleRemoveOrderAndRecalculate = (ordenId: number) => {
+        if (!onRecalculate) {
+            toast.error("Eliminar no está disponible en este contexto.");
+            return;
+        }
+        // También quitamos la decisión de forzar si la tenía y la sacamos de los excedentes sticky.
+        const newForzar = Array.from(forzarOrdenIds).filter(id => id !== ordenId);
+        setForzarOrdenIds(new Set(newForzar));
+        setStickyExcedentes(prev => prev.filter(e => e.orden_id !== ordenId));
+
+        const planned = Array.from(new Set(results.map(r => r.orden_id))).filter(id => id !== ordenId);
+        const stickyIds = Array.from(new Set(stickyExcedentes.map(e => e.orden_id))).filter(id => id !== ordenId);
+        const mergedIds = newForzar.length > 0
+            ? Array.from(new Set([...planned, ...newForzar]))
+            : Array.from(new Set([...planned, ...stickyIds]));
+
+        if (mergedIds.length === 0) {
+            toast.error("No podés quitar la última OT del plan. Cerrá la vista previa con la X.");
+            return;
+        }
+        onRecalculate(mergedIds, planningRange, newForzar);
     };
 
     const toggleRow = (ordenId: number) => {
@@ -287,22 +560,302 @@ export function PlanningPreviewModal({
     // Placeholder for conflicts if missing (can be refined later)
     const conflicts = { details: [] as any[] };
 
+    // ---------- Análisis de excedentes (¿por qué no entra?) ----------
+    //
+    // El backend marca una OT como "excedente" cuando el solver no pudo ubicar
+    // ninguno de sus procesos dentro del horizonte (fecha_desde → fecha_hasta).
+    // No nos devuelve el motivo exacto, pero podemos *inferirlo* del dato disponible:
+    //
+    //   1) Duración total de los procesos vs. capacidad teórica del rango.
+    //   2) Fecha prometida posterior al rango (la OT no debería entrar todavía).
+    //   3) Prioridad baja (el solver coloca primero las urgentes / críticas).
+    //
+    // Devuelve una lista de strings amigables que el usuario puede leer y accionar.
+
+    /** Calcula días hábiles entre dos fechas YYYY-MM-DD (excluye sábados/domingos). */
+    const businessDaysBetween = (fromIso?: string, toIso?: string): number => {
+        if (!fromIso || !toIso) return 0;
+        const start = new Date(fromIso);
+        const end = new Date(toIso);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
+        let count = 0;
+        const cur = new Date(start);
+        while (cur <= end) {
+            const dow = cur.getDay();
+            if (dow !== 0 && dow !== 6) count++;
+            cur.setDate(cur.getDate() + 1);
+        }
+        return count;
+    };
+
+    /** Estimación grosera de capacidad del rango: días hábiles × 8h × operarios disponibles. */
+    const rangeCapacityMinutes = React.useMemo(() => {
+        const bizDays = businessDaysBetween(planningRange.fecha_desde, planningRange.fecha_hasta);
+        if (bizDays === 0) return 0;
+        const activeOperators = availableOperators.filter(op => op.disponible).length || 1;
+        return bizDays * 8 * 60 * activeOperators;
+    }, [planningRange.fecha_desde, planningRange.fecha_hasta, availableOperators]);
+
+    /** Suma de duraciones de procesos planificados (+ excedentes) — lo que el plan "intenta" colocar. */
+    const totalDemandMinutes = React.useMemo(() => {
+        const fromResults = results.reduce((acc, r) => acc + (r.duracion_min || 0), 0);
+        const fromExcedentes = displayedExcedentes.reduce((acc, e) => acc + (e.duracion_min || 0), 0);
+        return fromResults + fromExcedentes;
+    }, [results, excedentes]);
+
+    /** Devuelve razones humanas de por qué la OT con ID `ordenId` quedó como excedente. */
+    const getExcedenteReasons = (ordenId: number): string[] => {
+        const procesosOT = excedentes.filter(e => e.orden_id === ordenId);
+        if (procesosOT.length === 0) return ["No hay datos disponibles del solver."];
+        const first = procesosOT[0];
+        const reasons: string[] = [];
+
+        // 1) Duración total OT vs. capacidad del rango
+        const otDurationMin = procesosOT.reduce((a, p) => a + (p.duracion_min || 0), 0);
+        if (rangeCapacityMinutes > 0) {
+            const occupancyRatio = totalDemandMinutes / rangeCapacityMinutes;
+            if (occupancyRatio > 0.9) {
+                reasons.push(
+                    `El rango seleccionado tiene poca capacidad libre (${Math.round(occupancyRatio * 100)}% ocupado por otras OTs). Esta OT requiere ${formatMinutesShort(otDurationMin)} adicionales.`
+                );
+            }
+        }
+
+        // 2) Fecha prometida posterior al rango
+        if (first.fecha_prometida && planningRange.fecha_hasta) {
+            const prom = new Date(first.fecha_prometida);
+            const hasta = new Date(planningRange.fecha_hasta);
+            if (prom > hasta) {
+                const days = Math.ceil((prom.getTime() - hasta.getTime()) / (1000 * 60 * 60 * 24));
+                reasons.push(
+                    `La fecha prometida (${formatDate(first.fecha_prometida)}) está ${days} día${days === 1 ? "" : "s"} después del fin del rango. El motor priorizó OTs con vencimiento dentro del rango.`
+                );
+            }
+        }
+
+        // 3) Prioridad baja
+        if ((first.id_prioridad || 0) <= 2) {
+            reasons.push(
+                `Prioridad ${getPriorityLabel(first.id_prioridad, first.prioridad_descripcion).toLowerCase()}: el motor coloca primero las OTs urgentes y críticas dentro del rango disponible.`
+            );
+        }
+
+        // 4) Demasiados procesos en la OT
+        if (procesosOT.length >= 5) {
+            reasons.push(
+                `Esta OT tiene ${procesosOT.length} procesos secuenciales, lo que requiere una ventana de tiempo más larga que la disponible.`
+            );
+        }
+
+        // Fallback
+        if (reasons.length === 0) {
+            reasons.push(
+                "El motor de planificación no encontró una ventana laboral viable dentro del rango para todos los procesos de esta OT."
+            );
+        }
+
+        return reasons;
+    };
+
+    const formatMinutesShort = (mins: number): string => {
+        if (mins <= 0) return "0 min";
+        if (mins < 60) return `${Math.round(mins)} min`;
+        const h = Math.floor(mins / 60);
+        const m = Math.round(mins % 60);
+        return m === 0 ? `${h} h` : `${h}h ${m}m`;
+    };
+
+    // Bloqueo de cierre por click afuera / Escape: el modal solo se cierra con la X
+    // del header o el botón "Volver". Esto evita perder los ajustes por error.
+    const handleOpenChange = (open: boolean) => {
+        // No cerramos automáticamente; el cierre lo controlan los botones explícitos.
+        if (!open) return;
+    };
+
+    // Cantidad de OTs distintas en el plan actual (no procesos), útil para mostrar al usuario.
+    const uniqueOrdersInPlan = React.useMemo(
+        () => new Set(results.map(r => r.orden_id)).size,
+        [results]
+    );
+
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
+        <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+            <DialogContent
+                showCloseButton={false}
+                className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[90vh] flex flex-col p-0 gap-0"
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onInteractOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}
+            >
+                {/* Header rediseñado: título, KPIs rápidos del plan, acciones (Agregar OTs / Recalcular) y X de cerrar. */}
                 <DialogHeader className="px-6 py-4 border-b border-gray-100 bg-white shrink-0">
                     <div className="flex items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0 flex-1">
                             <DialogTitle className="text-xl font-bold flex items-center gap-2">
                                 <CalendarClock className="w-5 h-5 text-blue-600" />
                                 Vista Previa de Planificación
                             </DialogTitle>
-                            <DialogDescription>
-                                Revise y ajuste la programación antes de confirmar.
+                            <DialogDescription className="mt-0.5">
+                                Revisá y ajustá la programación antes de confirmar. Podés agregar más OTs o recalcular sin salir de esta vista.
                             </DialogDescription>
+                            {/* KPIs rápidos del plan */}
+                            <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px]">
+                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1">
+                                    <Cog className="w-3 h-3" />
+                                    {uniqueOrdersInPlan} OT{uniqueOrdersInPlan === 1 ? "" : "s"} en plan
+                                </Badge>
+                                <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    {results.length} proceso{results.length === 1 ? "" : "s"} · {formatMinutesShort(totalDemandMinutes)}
+                                </Badge>
+                                {displayedExcedentes.length > 0 && (
+                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                                        <AlertTriangle className="w-3 h-3" />
+                                        {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
+                                    </Badge>
+                                )}
+                                {planningRange.fecha_desde && planningRange.fecha_hasta && (
+                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        {formatDate(planningRange.fecha_desde)} → {formatDate(planningRange.fecha_hasta)}
+                                    </Badge>
+                                )}
+                            </div>
                         </div>
-                        {/* Zoom control: aplica al panel principal de la vista previa. */}
-                        <ZoomControl value={zoom} onChange={setZoom} />
+                        <div className="flex items-center gap-2 shrink-0">
+                            {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
+                            {unplannedOrders.length > 0 && onRecalculate && (
+                                <Popover open={addPopoverOpen} onOpenChange={setAddPopoverOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
+                                            disabled={isCalculating || isConfirming}
+                                        >
+                                            <ListPlus className="w-3.5 h-3.5" />
+                                            Agregar OTs
+                                            <Badge className="ml-1 bg-blue-100 text-blue-700 border-0 px-1.5 py-0 text-[10px] tabular-nums">
+                                                {addableOrders.length}
+                                            </Badge>
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[420px] p-0" align="end">
+                                        <div className="p-3 border-b bg-slate-50">
+                                            <div className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                                                <ListPlus className="w-4 h-4 text-blue-600" />
+                                                Agregar OTs al plan
+                                            </div>
+                                            <p className="text-[11px] text-gray-500 mt-1">
+                                                Solo se listan OTs con procesos cargados. Al agregar, el plan se recalcula automáticamente.
+                                            </p>
+                                        </div>
+                                        <div className="p-2 border-b bg-white">
+                                            <div className="relative">
+                                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                                <Input
+                                                    placeholder="Buscar por OT, cliente, código..."
+                                                    value={addSearchTerm}
+                                                    onChange={(e) => setAddSearchTerm(e.target.value)}
+                                                    className="pl-8 h-8 text-xs"
+                                                />
+                                            </div>
+                                        </div>
+                                        {/* Lista scrolleable: overflow-auto nativo en vez de ScrollArea de Radix
+                                            (que dentro de un Popover a veces no respeta max-height y bloquea el scroll). */}
+                                        <div className="max-h-[320px] overflow-y-auto overscroll-contain">
+                                            {filteredAddableOrders.length === 0 ? (
+                                                <div className="p-6 text-center text-xs text-gray-400">
+                                                    {addableOrders.length === 0
+                                                        ? "No hay OTs pendientes disponibles para agregar."
+                                                        : "Ninguna OT coincide con la búsqueda."}
+                                                </div>
+                                            ) : (
+                                                <div className="divide-y">
+                                                    {filteredAddableOrders.map(o => {
+                                                        const checked = pendingAddIds.has(o.id);
+                                                        return (
+                                                            <label
+                                                                key={o.id}
+                                                                className={cn(
+                                                                    "flex items-start gap-2 px-3 py-2 cursor-pointer transition-colors text-xs",
+                                                                    checked ? "bg-blue-50" : "hover:bg-gray-50"
+                                                                )}
+                                                            >
+                                                                <Checkbox
+                                                                    className="mt-0.5"
+                                                                    checked={checked}
+                                                                    onCheckedChange={() => togglePendingAdd(o.id)}
+                                                                />
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex items-center gap-1.5 font-medium text-gray-800">
+                                                                        <span className="font-mono">#{o.id_otvieja || o.id}</span>
+                                                                        <span className="text-gray-300">·</span>
+                                                                        <span className="truncate">{o.cliente?.nombre || "Sin cliente"}</span>
+                                                                    </div>
+                                                                    <div className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">
+                                                                        {o.articulo?.cod_articulo} · {o.articulo?.descripcion || "—"}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-1.5 mt-1">
+                                                                        <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 border-gray-300 text-gray-600">
+                                                                            {getPriorityLabel(o.id_prioridad, o.prioridad?.descripcion)}
+                                                                        </Badge>
+                                                                        {o.fecha_prometida && (
+                                                                            <span className="text-[10px] text-gray-400">
+                                                                                Prom. {formatDate(o.fecha_prometida)}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="p-2 border-t bg-slate-50 flex items-center justify-between gap-2">
+                                            <span className="text-[11px] text-gray-500">
+                                                {pendingAddIds.size} seleccionada{pendingAddIds.size === 1 ? "" : "s"}
+                                            </span>
+                                            <div className="flex items-center gap-1.5">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 text-xs"
+                                                    onClick={() => { setPendingAddIds(new Set()); setAddSearchTerm(""); }}
+                                                    disabled={pendingAddIds.size === 0}
+                                                >
+                                                    Limpiar
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    className="h-7 text-xs bg-blue-600 hover:bg-blue-700"
+                                                    onClick={handleAddSelectedAndRecalculate}
+                                                    disabled={pendingAddIds.size === 0 || isCalculating}
+                                                >
+                                                    <RefreshCw className={cn("w-3 h-3 mr-1", isCalculating && "animate-spin")} />
+                                                    Agregar {pendingAddIds.size > 0 ? `(${pendingAddIds.size})` : ""}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            )}
+                            {/* (Recalcular manual removido: ahora el recálculo es automático
+                                cada vez que se agrega o se elimina una OT del plan.) */}
+                            <ZoomControl value={zoom} onChange={setZoom} />
+                            {/* X explícita: único cierre del modal (además del botón "Volver" del footer). */}
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                onClick={onClose}
+                                disabled={isConfirming || isCalculating}
+                                title="Cerrar"
+                            >
+                                <XIcon className="w-4 h-4" />
+                            </Button>
+                        </div>
                     </div>
                 </DialogHeader>
 
@@ -310,16 +863,50 @@ export function PlanningPreviewModal({
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         <ScrollArea className="flex-1">
                             <div className="min-w-[1000px] p-0" style={{ zoom: zoom / 100 }}>
-                                {excedentes.length > 0 && (
-                                    <div className="m-4 border border-amber-300 bg-amber-50 rounded-lg overflow-hidden">
-                                        <div className="px-4 py-3 bg-amber-100/70 border-b border-amber-200 flex items-center gap-2">
-                                            <AlertTriangle className="w-5 h-5 text-amber-700" />
-                                            <div>
-                                                <div className="font-semibold text-amber-900">
-                                                    {Object.keys(excedentesPorOrden).length} órden(es) no entran en el rango seleccionado
+                                {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
+                                    Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}
+                                {forcedPartialMap.size > 0 && (() => {
+                                    const allUnfit = Array.from(forcedPartialMap.values()).flatMap(v => v.unfit);
+                                    const sinRangoCount = allUnfit.filter(u => (u.rangos_permitidos_proceso || []).length === 0).length;
+                                    const sinMatchCount = allUnfit.length - sinRangoCount;
+                                    return (
+                                        <div className="m-4 border border-blue-200 bg-blue-50 rounded-lg p-3 flex items-start gap-2.5">
+                                            <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                                            <div className="text-xs text-blue-900 flex-1 leading-relaxed">
+                                                <strong>Hay {allUnfit.length} proceso(s) en OT forzada(s) que el motor no pudo asignar.</strong> Abrí cada OT en la tabla para ver cuáles son y por qué.
+                                                <div className="mt-1 text-blue-800 flex flex-wrap gap-x-3 gap-y-0.5">
+                                                    {sinRangoCount > 0 && <span>• <strong>{sinRangoCount}</strong> sin rango configurado en el sistema</span>}
+                                                    {sinMatchCount > 0 && <span>• <strong>{sinMatchCount}</strong> sin operario/máquina compatible</span>}
                                                 </div>
-                                                <div className="text-xs text-amber-700">
-                                                    Decidí qué hacer con cada una. Por defecto se descartan (quedan disponibles para una próxima planificación).
+                                                <div className="mt-1 text-blue-700/90">
+                                                    Estos procesos no se van a guardar al confirmar. Para resolverlo: configurá los rangos faltantes en <strong>Recursos → Procesos</strong> y volvé a planificar.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {displayedExcedentes.length > 0 && (
+                                    <div className="m-4 border-2 border-amber-300 bg-amber-50 rounded-lg overflow-hidden shadow-sm">
+                                        {/* Bandera lateral roja + título más explícito para que no se confunda con la
+                                            tabla de OTs planificadas. La tabla de abajo tiene OTs DISTINTAS — las que SÍ
+                                            entraron. */}
+                                        <div className="px-4 py-3 bg-amber-100/70 border-b-2 border-amber-300 flex items-start gap-3 relative">
+                                            <div className="absolute top-0 left-0 h-full w-1 bg-amber-500" />
+                                            <AlertTriangle className="w-5 h-5 text-amber-700 mt-0.5 shrink-0" />
+                                            <div className="flex-1">
+                                                <div className="font-bold text-amber-900 flex items-center gap-2 flex-wrap">
+                                                    <span className="text-[10px] uppercase tracking-widest bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">
+                                                        Fuera del plan
+                                                    </span>
+                                                    {Object.keys(excedentesPorOrden).length} OT{Object.keys(excedentesPorOrden).length === 1 ? "" : "s"} no entran en el rango
+                                                </div>
+                                                <div className="text-xs text-amber-800/90 mt-1">
+                                                    Estas OTs no caben en la ventana <strong>{planningRange.fecha_desde ? formatDate(planningRange.fecha_desde) : "—"} → {planningRange.fecha_hasta ? formatDate(planningRange.fecha_hasta) : "—"}</strong> con la capacidad disponible. <strong>No están incluidas en la tabla de abajo.</strong>
+                                                </div>
+                                                <div className="text-xs text-amber-700/90 mt-1">
+                                                    Decidí qué hacer con cada una. Por defecto se <strong>descartan</strong> (quedan disponibles para la próxima planificación).
+                                                    Si la <strong>forzás</strong>, el motor la incluirá aunque eso amplíe el rango o sobrecargue operarios.
                                                 </div>
                                             </div>
                                         </div>
@@ -328,40 +915,97 @@ export function PlanningPreviewModal({
                                                 const oid = parseInt(oidStr);
                                                 const first = items[0];
                                                 const forzar = forzarOrdenIds.has(oid);
+                                                const isExpanded = expandedExcedenteId === oid;
+                                                const reasons = isExpanded ? getExcedenteReasons(oid) : [];
+                                                const otDurationMin = items.reduce((a, p) => a + (p.duracion_min || 0), 0);
                                                 return (
-                                                    <div key={oid} className="px-4 py-3 flex items-center justify-between gap-4 bg-white/60">
-                                                        <div className="flex flex-col min-w-0">
-                                                            <div className="text-sm font-medium text-gray-800 truncate">
-                                                                #{first.id_otvieja || oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
+                                                    <div key={oid} className="bg-white/60">
+                                                        {/* Fila principal */}
+                                                        <div className="px-4 py-3 flex items-center justify-between gap-4">
+                                                            <div className="flex items-start gap-3 min-w-0 flex-1">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setExpandedExcedenteId(isExpanded ? null : oid)}
+                                                                    className="mt-0.5 p-1 hover:bg-amber-100 rounded transition-colors text-amber-700"
+                                                                    title={isExpanded ? "Ocultar explicación" : "Ver por qué no entra"}
+                                                                >
+                                                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                                                </button>
+                                                                <div className="flex flex-col min-w-0 flex-1">
+                                                                    <div className="text-sm font-medium text-gray-800 truncate">
+                                                                        #{first.id_otvieja || oid} · {first.cliente || "—"} · {first.articulo ? capitalize(first.articulo) : "—"}
+                                                                    </div>
+                                                                    <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2">
+                                                                        <span>{items.length} proceso(s) · {formatMinutesShort(otDurationMin)}</span>
+                                                                        {first.fecha_prometida && (
+                                                                            <span>· Prometida {formatDate(first.fecha_prometida)}</span>
+                                                                        )}
+                                                                        <Badge variant="outline" className="border-gray-300 text-gray-700 text-[10px]">
+                                                                            {getPriorityLabel(first.id_prioridad, first.prioridad_descripcion)}
+                                                                        </Badge>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                            <div className="text-xs text-gray-500 mt-0.5">
-                                                                {items.length} proceso(s) excedente(s)
-                                                                {first.fecha_prometida && ` · Prometida ${formatDate(first.fecha_prometida)}`}
-                                                                <span className="ml-2">
-                                                                    <Badge variant="outline" className="border-gray-300 text-gray-700 text-[10px]">
-                                                                        {getPriorityLabel(first.id_prioridad, first.prioridad_descripcion)}
-                                                                    </Badge>
-                                                                </span>
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                {!isExpanded && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setExpandedExcedenteId(oid)}
+                                                                        className="text-[11px] text-amber-700 hover:text-amber-900 font-medium flex items-center gap-1 underline-offset-2 hover:underline"
+                                                                    >
+                                                                        <HelpCircle className="w-3 h-3" />
+                                                                        ¿Por qué no entra?
+                                                                    </button>
+                                                                )}
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant={forzar ? "outline" : "default"}
+                                                                    className={!forzar ? "bg-gray-700 hover:bg-gray-800 text-white h-8" : "border-gray-300 text-gray-700 h-8"}
+                                                                    onClick={() => { if (forzar) toggleForzar(oid); }}
+                                                                    disabled={isCalculating || isConfirming}
+                                                                    title="Dejar esta OT fuera del plan"
+                                                                >
+                                                                    Descartar
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant={forzar ? "default" : "outline"}
+                                                                    className={forzar ? "bg-amber-600 hover:bg-amber-700 text-white h-8" : "border-amber-400 text-amber-800 hover:bg-amber-100 h-8"}
+                                                                    onClick={() => { if (!forzar) toggleForzar(oid); }}
+                                                                    disabled={isCalculating || isConfirming}
+                                                                    title="Incluir esta OT aunque amplíe el rango. Se recalculará automáticamente."
+                                                                >
+                                                                    Forzar
+                                                                </Button>
                                                             </div>
                                                         </div>
-                                                        <div className="flex gap-2 shrink-0">
-                                                            <Button
-                                                                size="sm"
-                                                                variant={forzar ? "outline" : "default"}
-                                                                className={!forzar ? "bg-gray-700 hover:bg-gray-800 text-white" : "border-gray-300 text-gray-700"}
-                                                                onClick={() => { if (forzar) toggleForzar(oid); }}
-                                                            >
-                                                                Descartar
-                                                            </Button>
-                                                            <Button
-                                                                size="sm"
-                                                                variant={forzar ? "default" : "outline"}
-                                                                className={forzar ? "bg-amber-600 hover:bg-amber-700 text-white" : "border-amber-400 text-amber-800 hover:bg-amber-100"}
-                                                                onClick={() => { if (!forzar) toggleForzar(oid); }}
-                                                            >
-                                                                Forzar
-                                                            </Button>
-                                                        </div>
+                                                        {/* Explicación expandida */}
+                                                        {isExpanded && (
+                                                            <div className="px-4 pb-4 -mt-1 ml-9">
+                                                                <div className="bg-white border border-amber-200 rounded-md p-3 shadow-sm">
+                                                                    <div className="flex items-start gap-2 mb-2">
+                                                                        <Lightbulb className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                                                                        <div className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                                                                            Motivos posibles
+                                                                        </div>
+                                                                    </div>
+                                                                    <ul className="space-y-1.5 text-xs text-gray-700 ml-6 list-disc list-outside">
+                                                                        {reasons.map((r, i) => (
+                                                                            <li key={i}>{r}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                    <div className="mt-3 pt-3 border-t border-gray-100 flex items-start gap-2">
+                                                                        <Info className="w-3.5 h-3.5 text-blue-500 mt-0.5 shrink-0" />
+                                                                        <div className="text-[11px] text-gray-600 leading-relaxed">
+                                                                            <strong className="text-gray-700">Cómo resolverlo:</strong> ampliá el rango de fechas
+                                                                            (volvé a la selección con "Volver"), subí la prioridad de esta OT en el listado, asegurate
+                                                                            que haya operarios disponibles, o usá <strong className="text-amber-700">Forzar</strong> si
+                                                                            es indispensable que entre.
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             })}
@@ -369,6 +1013,22 @@ export function PlanningPreviewModal({
                                     </div>
                                 )}
 
+                                {/* Encabezado claro de la tabla de planificados: estas OTs SÍ entraron en
+                                    el plan. Se va a confirmar exactamente esto al apretar "Confirmar y Guardar". */}
+                                <div className="mx-4 mt-4 mb-2 flex items-center gap-2">
+                                    <div className="h-5 w-1 bg-green-500 rounded-full" />
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-[10px] uppercase tracking-widest bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-bold">
+                                            En el plan
+                                        </span>
+                                        <span className="text-sm font-bold text-gray-800">
+                                            {uniqueOrdersInPlan} OT{uniqueOrdersInPlan === 1 ? "" : "s"} planificada{uniqueOrdersInPlan === 1 ? "" : "s"}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                            ({results.length} procesos · estas son las que se van a guardar al confirmar)
+                                        </span>
+                                    </div>
+                                </div>
                                 <table className="w-full text-sm text-left border-collapse">
                                     <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm">
                                         <tr>
@@ -384,6 +1044,7 @@ export function PlanningPreviewModal({
                                             <th className="px-4 py-3 text-center">Prioridad</th>
                                             <th className="px-4 py-3 text-center">Prometida</th>
                                             <th className="px-4 py-3 text-center">Alertas</th>
+                                            <th className="px-4 py-3 text-center w-12"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
@@ -425,7 +1086,19 @@ export function PlanningPreviewModal({
                                                                 {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                                             </button>
                                                         </td>
-                                                        <td className="px-4 py-3 font-medium text-inherit">#{firstItem.id_otvieja || ordenId}</td>
+                                                        <td className="px-4 py-3 font-medium text-inherit">
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                                <span>#{firstItem.id_otvieja || ordenId}</span>
+                                                                {forzarOrdenIds.has(ordenId) && (
+                                                                    <span
+                                                                        className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded-full font-bold"
+                                                                        title="OT forzada — el motor amplió el rango para incluirla"
+                                                                    >
+                                                                        Forzada
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </td>
                                                         <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>
                                                         <td className="px-4 py-3 text-gray-500 italic">{firstItem.cliente || "-"}</td>
                                                         <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>
@@ -468,10 +1141,26 @@ export function PlanningPreviewModal({
                                                                 </div>
                                                             ) : null}
                                                         </td>
+                                                        {/* Acciones: quitar OT del plan. Click no debe expandir la fila. */}
+                                                        <td className="px-2 py-3 text-center">
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleRemoveOrderAndRecalculate(ordenId);
+                                                                }}
+                                                                disabled={isCalculating || isConfirming || !onRecalculate}
+                                                                title="Quitar esta OT del plan y recalcular"
+                                                            >
+                                                                <XIcon className="w-4 h-4" />
+                                                            </Button>
+                                                        </td>
                                                     </tr>
                                                     {isExpanded && (
                                                         <tr className="bg-gray-50/50">
-                                                            <td colSpan={12} className="px-0 py-0 border-b shadow-inner">
+                                                            <td colSpan={13} className="px-0 py-0 border-b shadow-inner">
                                                                 <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
                                                                     <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
                                                                     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
@@ -485,12 +1174,9 @@ export function PlanningPreviewModal({
                                                                                 <div className="px-4 py-2 border-b">Inicio Estimado</div>
                                                                             </div>
 
-                                                                            {/* Inner Body */}
+                                                                            {/* Inner Body: procesos auto-asignados (editables) */}
                                                                             {items.map((item, idx) => {
                                                                                 const effectiveItem = getEffectiveItem(item);
-
-
-
                                                                                 return (
                                                                                     <div key={`${item.orden_id}-${item.proceso_id}`} className="contents group/row">
                                                                                         <div className="px-4 py-3 border-b flex items-center text-gray-400 font-mono text-xs">
@@ -503,7 +1189,6 @@ export function PlanningPreviewModal({
                                                                                             </div>
                                                                                         </div>
 
-                                                                                        {/* Operator Select */}
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Select
                                                                                                 value={effectiveItem.id_operario?.toString() || "0"}
@@ -531,7 +1216,6 @@ export function PlanningPreviewModal({
                                                                                             </Select>
                                                                                         </div>
 
-                                                                                        {/* Machinery Select */}
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Select
                                                                                                 value={effectiveItem.id_maquinaria?.toString() || "0"}
@@ -551,7 +1235,6 @@ export function PlanningPreviewModal({
                                                                                             </Select>
                                                                                         </div>
 
-                                                                                        {/* Start Time Input */}
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Input
                                                                                                 type="datetime-local"
@@ -565,6 +1248,132 @@ export function PlanningPreviewModal({
                                                                             })}
                                                                         </div>
                                                                     </div>
+
+                                                                    {/* Sub-sección "Procesos sin asignar" — solo cuando esta OT está forzada y
+                                                                        tiene procesos que el solver no pudo ubicar. Mostramos:
+                                                                          - El motivo concreto (con nombres de rangos, no IDs).
+                                                                          - Selects para asignar manualmente operario, máquina y horario.
+                                                                          - Botón para abrir Recursos en otra pestaña y corregir el dato faltante. */}
+                                                                    {(forcedPartialMap.get(ordenId)?.unfit?.length || 0) > 0 && (
+                                                                        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg overflow-hidden">
+                                                                            <div className="px-4 py-2 bg-red-100/70 border-b border-red-200 flex items-center justify-between gap-2 flex-wrap">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <AlertTriangle className="w-4 h-4 text-red-700" />
+                                                                                    <span className="text-xs font-bold text-red-900 uppercase tracking-wider">
+                                                                                        {forcedPartialMap.get(ordenId)!.unfit.length} proceso(s) sin asignar — podés completarlos a mano
+                                                                                    </span>
+                                                                                </div>
+                                                                                <a
+                                                                                    href="/recursos"
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="text-[11px] font-bold text-red-700 hover:text-red-900 underline underline-offset-2 flex items-center gap-1"
+                                                                                    title="Abrir Recursos en otra pestaña para configurar rangos/operarios"
+                                                                                >
+                                                                                    Abrir Recursos ↗
+                                                                                </a>
+                                                                            </div>
+                                                                            <div className="divide-y divide-red-200">
+                                                                                {forcedPartialMap.get(ordenId)!.unfit.map((u, idx) => {
+                                                                                    const diag = diagnoseUnfitProcess(u);
+                                                                                    const fitCount = forcedPartialMap.get(ordenId)!.fitCount;
+                                                                                    const effU = getEffectiveItem(u);
+                                                                                    const assigned = isUnfitManuallyAssigned(u);
+                                                                                    return (
+                                                                                        <div key={`unfit-${u.proceso_id}-${idx}`} className={cn(
+                                                                                            "px-4 py-2.5 flex flex-col gap-2",
+                                                                                            assigned ? "bg-green-50/60" : "bg-white/60"
+                                                                                        )}>
+                                                                                            {/* Encabezado: proceso + motivo */}
+                                                                                            <div className="flex items-start gap-3">
+                                                                                                <span className="text-[10px] text-gray-400 font-mono mt-0.5 shrink-0">
+                                                                                                    #{fitCount + idx + 1}
+                                                                                                </span>
+                                                                                                <div className="flex-1 min-w-0">
+                                                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                                                        <span className="text-sm font-medium text-gray-800">{capitalize(u.nombre_proceso)}</span>
+                                                                                                        <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{u.duracion_min}m</span>
+                                                                                                        {assigned ? (
+                                                                                                            <span className="text-[9px] uppercase tracking-wider bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded-full font-bold">
+                                                                                                                Asignado a mano ✓
+                                                                                                            </span>
+                                                                                                        ) : (
+                                                                                                            <span className="text-[9px] uppercase tracking-wider bg-red-100 text-red-700 border border-red-300 px-1.5 py-0.5 rounded-full font-bold">
+                                                                                                                {diag.label}
+                                                                                                            </span>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                    {!assigned && (
+                                                                                                        <div className="text-[11px] text-red-700/90 mt-0.5">{diag.hint}</div>
+                                                                                                    )}
+                                                                                                </div>
+                                                                                            </div>
+
+                                                                                            {/* Asignación manual: 3 selects en línea */}
+                                                                                            <div className="grid grid-cols-[1fr_1fr_180px] gap-2 pl-7">
+                                                                                                <Select
+                                                                                                    value={effU.id_operario?.toString() || "0"}
+                                                                                                    onValueChange={(val) => handleUpdate(u, 'id_operario', val === "0" ? null : parseInt(val))}
+                                                                                                >
+                                                                                                    <SelectTrigger className={cn(
+                                                                                                        "h-8 text-xs",
+                                                                                                        !effU.id_operario ? "border-red-300 bg-red-50/30" : "border-green-300 bg-green-50/30"
+                                                                                                    )}>
+                                                                                                        <SelectValue placeholder="Elegir operario" />
+                                                                                                    </SelectTrigger>
+                                                                                                    <SelectContent>
+                                                                                                        <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                        {availableOperators.map(op => {
+                                                                                                            const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
+                                                                                                            return (
+                                                                                                                <SelectItem
+                                                                                                                    key={op.id}
+                                                                                                                    value={op.id.toString()}
+                                                                                                                    disabled={!op.disponible && !isPruebas}
+                                                                                                                    className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
+                                                                                                                >
+                                                                                                                    {op.nombre} {op.apellido} {(!op.disponible && !isPruebas) && "(Ausente)"}
+                                                                                                                </SelectItem>
+                                                                                                            );
+                                                                                                        })}
+                                                                                                    </SelectContent>
+                                                                                                </Select>
+                                                                                                <Select
+                                                                                                    value={effU.id_maquinaria?.toString() || "0"}
+                                                                                                    onValueChange={(val) => handleUpdate(u, 'id_maquinaria', val === "0" ? null : parseInt(val))}
+                                                                                                >
+                                                                                                    <SelectTrigger className={cn(
+                                                                                                        "h-8 text-xs",
+                                                                                                        !effU.id_maquinaria ? "border-red-300 bg-red-50/30" : "border-green-300 bg-green-50/30"
+                                                                                                    )}>
+                                                                                                        <SelectValue placeholder="Elegir máquina" />
+                                                                                                    </SelectTrigger>
+                                                                                                    <SelectContent>
+                                                                                                        <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                        {availableMachines.map(m => (
+                                                                                                            <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
+                                                                                                        ))}
+                                                                                                    </SelectContent>
+                                                                                                </Select>
+                                                                                                <Input
+                                                                                                    type="datetime-local"
+                                                                                                    className={cn(
+                                                                                                        "h-8 text-xs px-2",
+                                                                                                        !effU.fecha_inicio_estimada ? "border-red-300 bg-red-50/30" : "border-green-300 bg-green-50/30"
+                                                                                                    )}
+                                                                                                    value={effU.fecha_inicio_estimada ? effU.fecha_inicio_estimada.slice(0, 16) : ""}
+                                                                                                    onChange={(e) => handleDateChange(u, e.target.value)}
+                                                                                                />
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                            <div className="px-4 py-2 bg-red-100/30 border-t border-red-200 text-[11px] text-red-700/90">
+                                                                                Los procesos que completes manualmente <strong>se guardarán</strong> al confirmar. Los que dejes sin completar se omiten.
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -651,11 +1460,24 @@ export function PlanningPreviewModal({
                     </div >
                 </div >
 
-                <DialogFooter className="p-4 bg-white border-t mt-auto gap-3 shrink-0">
-                    <Button variant="outline" onClick={onBack} disabled={isConfirming} className="border-gray-300 text-gray-700 hover:bg-gray-50">
-                        Volver
-                    </Button>
-                    <Button onClick={handleConfirmWithDecisions} disabled={isConfirming || (results.length === 0 && excedentes.length === 0)} className="bg-blue-600 hover:bg-blue-700 shadow-md px-6">
+                <DialogFooter className="p-4 bg-white border-t mt-auto gap-3 shrink-0 sm:justify-between">
+                    {/* Lado izquierdo: contexto + Volver */}
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} className="border-gray-300 text-gray-700 hover:bg-gray-50">
+                            Volver
+                        </Button>
+                        {forzarOrdenIds.size > 0 && (
+                            <span className="text-amber-700">
+                                <strong>{forzarOrdenIds.size}</strong> excedente{forzarOrdenIds.size === 1 ? "" : "s"} forzada{forzarOrdenIds.size === 1 ? "" : "s"}
+                            </span>
+                        )}
+                    </div>
+                    {/* Lado derecho: confirmar */}
+                    <Button
+                        onClick={handleConfirmWithDecisions}
+                        disabled={isConfirming || isCalculating || (results.length === 0 && displayedExcedentes.length === 0)}
+                        className="bg-blue-600 hover:bg-blue-700 shadow-md px-6"
+                    >
                         {isConfirming ? (
                             <span className="flex items-center gap-2">
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -666,6 +1488,19 @@ export function PlanningPreviewModal({
                         )}
                     </Button>
                 </DialogFooter>
+
+                {/* Overlay durante recalculo: bloquea la UI pero la deja visible para contexto. */}
+                {isCalculating && (
+                    <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-50 pointer-events-none">
+                        <div className="bg-white border border-gray-200 rounded-lg shadow-xl px-6 py-4 flex items-center gap-3 pointer-events-auto">
+                            <Sparkles className="w-5 h-5 text-purple-600 animate-pulse" />
+                            <div>
+                                <div className="text-sm font-bold text-gray-800">Recalculando planificación</div>
+                                <div className="text-[11px] text-gray-500">El motor está distribuyendo procesos en operarios y horarios disponibles...</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </DialogContent >
         </Dialog >
     );

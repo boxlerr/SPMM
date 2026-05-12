@@ -1443,9 +1443,12 @@ async def planificar(
     # -------------------------------
     # Ejecutar el solver en otro hilo
     # -------------------------------
-    # Si el usuario forzó órdenes excedentes en el confirm, re-corremos el solver
-    # SIN cota superior de horizonte para que entren todas, y marcamos las forzadas.
-    effective_fecha_hasta = None if (not preview and forzar_set) else fecha_hasta
+    # Si el usuario forzó órdenes excedentes (sea durante preview o confirm),
+    # re-corremos el solver SIN cota superior de horizonte para que entren todas.
+    # Antes solo aplicaba en confirm — eso impedía ver en la vista previa el impacto
+    # real de forzar (la OT seguía como excedente y el usuario no veía cómo se
+    # acomodaba en operarios/horarios).
+    effective_fecha_hasta = None if forzar_set else fecha_hasta
 
     resultados = await asyncio.to_thread(
         _resolver_planificacion,
