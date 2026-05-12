@@ -40,12 +40,19 @@ interface UnplannedWorkOrdersListProps {
     onEdit: (order: WorkOrder) => void;
     onDelete: (id: number) => void;
     onDataChange?: () => void;
+    /** Zoom (%) aplicado SOLO a la tabla, no al header ni a los filtros. */
+    tableZoom?: number;
 }
 
-export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange }: UnplannedWorkOrdersListProps) {
+export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100 }: UnplannedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
+
+    // Mismo patrón que PlanningListTable: el degradado del borde derecho se oculta
+    // dinámicamente cuando el usuario llegó al final del scroll horizontal.
+    const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const [showRightFade, setShowRightFade] = useState(true);
     const [sortConfig, setSortConfig] = useState<{
         key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'material' | null;
         direction: 'asc' | 'desc' | null;
@@ -142,6 +149,26 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
         return <span className="ml-1 text-orange-600 font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
     };
+
+    // Observa el scroll horizontal y actualiza `showRightFade` (true cuando hay
+    // más columnas a la derecha, false cuando se llegó al final). Margen de 2px
+    // para evitar parpadeo por subpixel rendering.
+    React.useEffect(() => {
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        const updateFade = () => {
+            const remaining = el.scrollWidth - el.scrollLeft - el.clientWidth;
+            setShowRightFade(remaining > 2);
+        };
+        updateFade();
+        el.addEventListener('scroll', updateFade, { passive: true });
+        const ro = new ResizeObserver(updateFade);
+        ro.observe(el);
+        return () => {
+            el.removeEventListener('scroll', updateFade);
+            ro.disconnect();
+        };
+    }, [orders.length, tableZoom]);
 
     const filteredOrders = applyWorkOrderFilters(orders, filters).filter(order => {
         const searchLower = searchTerm.toLowerCase();
@@ -314,7 +341,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                     <div className="text-center">Min. Est.</div>
                                                 </div>
                                                 {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
                                                         <div className="text-gray-500 font-mono">{proc.orden}</div>
                                                         <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
                                                         <div>
@@ -348,9 +375,9 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                         ))}
                     </div>
 
-                    {/* Desktop Table View */}
-                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
-                        <div className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
+                    {/* Desktop Table View. El `zoom` aplica SOLO acá (no al header ni a los filtros). */}
+                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
+                        <div ref={scrollContainerRef} className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
                             <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                                     <tr>
@@ -403,7 +430,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         sortedOrders.map((order, index) => (
                                             <React.Fragment key={order.id}>
                                                 <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 py-3">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
                                                             className="p-1 hover:bg-black/10 rounded transition-colors"
@@ -466,7 +493,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             order.n_pedido || order.n_ped_l || "-"
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'unidades', order.unidades); }}>
+                                                    <td className="px-3 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(order.id, 'unidades', order.unidades); }}>
                                                         {editingOrder?.id === order.id && editingOrder.field === 'unidades' ? (
                                                             <input
                                                                 type="number"
@@ -481,12 +508,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             order.unidades ?? "-"
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 text-center">
+                                                    <td className="px-3 py-3 text-center">
                                                         <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                             {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
                                                         </Badge>
                                                     </td>
-                                                    <td className="px-4 py-3 text-center">
+                                                    <td className="px-3 py-3 text-center">
                                                         {order.estado_material === 'sin_stock' ? (
                                                             <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold">
                                                                 <AlertTriangle className="h-3 w-3" /> Sin Stock
@@ -521,7 +548,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-3 text-center">
+                                                    <td className="px-3 py-3 text-center">
                                                         <span className={cn(
                                                             "text-xs font-bold",
                                                             (order.cantidad_entregada || 0) >= (order.unidades || 1) ? "text-green-700" : "text-orange-600"
@@ -598,7 +625,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50/20 border-b">
-                                                        <td colSpan={19} className="px-4 py-3 md:px-6 md:py-4">
+                                                        <td colSpan={19} className="px-3 py-3 md:px-6 md:py-4">
                                                             <div className="flex flex-col gap-4 w-full max-w-[1200px]">
                                                                 {/* Grid layout for meta info - More compact columns */}
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -723,8 +750,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 </tbody>
                             </table>
                         </div>
-                        {/* Gradient fade derecho — indica visualmente que hay más columnas por scroll. */}
-                        <div className="pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent" />
+                        {/* Gradient fade derecho — solo visible cuando hay más columnas a la
+                            derecha del scroll. Desaparece con transición cuando el usuario
+                            llega al final, igual que en PlanningListTable. */}
+                        <div
+                            className={`pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
+                        />
                     </Card>
                 </>
             )}

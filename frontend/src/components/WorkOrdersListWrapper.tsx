@@ -9,6 +9,7 @@ import { CompletedWorkOrdersList } from "./CompletedWorkOrdersList";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { toast } from "sonner";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import { API_URL } from "@/config";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -29,6 +30,9 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
     const [rawOperarios, setRawOperarios] = useState<any[]>([]);
     const [selectedTask, setSelectedTask] = useState<PlanificacionItem | null>(null);
     const [isDetailsPanelOpen, setIsDetailsPanelOpen] = useState(false);
+
+    // Zoom compartido con la sección de Planificación (misma key en localStorage).
+    const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100);
 
     // New state for Unplanned orders split
     const [allOrders, setAllOrders] = useState<WorkOrder[]>([]);
@@ -245,17 +249,23 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
     return (
         <div className="relative">
             <Tabs defaultValue="planificadas" className="w-full">
-                <TabsList className="mb-6 bg-gray-100 p-1 rounded-xl w-fit">
-                    <TabsTrigger value="planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm">
-                        Planificadas ({plannedOrders.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="no_planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm">
-                        No Planificadas ({unplannedOrders.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="historial" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-sm">
-                        Historial ({completedOrders.length})
-                    </TabsTrigger>
-                </TabsList>
+                {/* Cabecera: tabs + ZoomControl alineado a la derecha. El zoom solo
+                    aplica a No Planificadas e Historial (las listas tabulares); el
+                    tab Planificadas usa Gantt con su propia escala y no debe escalarse. */}
+                <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+                    <TabsList className="bg-gray-100 p-1 rounded-xl w-fit">
+                        <TabsTrigger value="planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm">
+                            Planificadas ({plannedOrders.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="no_planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm">
+                            No Planificadas ({unplannedOrders.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="historial" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-sm">
+                            Historial ({completedOrders.length})
+                        </TabsTrigger>
+                    </TabsList>
+                    <ZoomControl value={zoom} onChange={setZoom} />
+                </div>
 
                 <TabsContent value="planificadas" className="mt-0">
                     <GanttWorkOrdersList
@@ -267,11 +277,14 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                 </TabsContent>
 
                 <TabsContent value="no_planificadas" className="mt-0">
+                    {/* El zoom va como prop para que el componente lo aplique SOLO a la
+                        tabla, no al header (icono + buscador) ni a los filtros. */}
                     <UnplannedWorkOrdersList
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
                         onDelete={handleDeleteOrder}
                         onDataChange={fetchData}
+                        tableZoom={zoom}
                     />
                 </TabsContent>
 
@@ -279,6 +292,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                     <CompletedWorkOrdersList
                         orders={completedOrders}
                         onEdit={handleEditOrder}
+                        tableZoom={zoom}
                     />
                 </TabsContent>
             </Tabs>

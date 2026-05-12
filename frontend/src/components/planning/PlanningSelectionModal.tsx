@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
+import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 
 export interface PlanningRange {
     fecha_desde?: string  // "YYYY-MM-DD"
@@ -53,6 +54,9 @@ export function PlanningSelectionModal({
     availableOperarios = []
 }: PlanningSelectionModalProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
+
+    // Zoom compartido con el resto de Operaciones.
+    const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100)
 
     // Sync selectedIds when modal opens or initialSelectedIds changes
     useEffect(() => {
@@ -307,6 +311,9 @@ export function PlanningSelectionModal({
                                 </div>
                             </PopoverContent>
                         </Popover>
+
+                        {/* Zoom control: afecta a la tabla de selección. */}
+                        <ZoomControl value={zoom} onChange={setZoom} />
                     </div>
                 </DialogHeader>
 
@@ -351,6 +358,7 @@ export function PlanningSelectionModal({
                         <div className="bg-white border rounded-lg shadow-sm flex-1 min-h-0 relative overflow-hidden flex flex-col">
                             <div className="absolute inset-0 overflow-auto">
                                 <PlanningListTable
+                                    tableZoom={zoom}
                                     data={filteredOrders}
                                     selectedIds={selectedIds}
                                     onSelectionChange={setSelectedIds}

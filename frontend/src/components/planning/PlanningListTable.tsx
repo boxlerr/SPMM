@@ -65,6 +65,8 @@ interface PlanningListTableProps {
     hideStatus?: boolean; // New prop to hide status column
     highlightedIds?: number[]; // New prop for visual highlighting
     onFieldUpdate?: (ordenId: number, field: string, value: any) => Promise<void>;
+    /** Zoom (%) aplicado SOLO a la tabla (no al search ni a las tarjetas mobile). */
+    tableZoom?: number;
 }
 
 export const PlanningListTable = React.memo(_PlanningListTable);
@@ -86,7 +88,8 @@ function _PlanningListTable({
 
     onDataChange, // Added
     hideStatus = false,
-    highlightedIds = []
+    highlightedIds = [],
+    tableZoom = 100
 }: PlanningListTableProps) {
 
 
@@ -689,7 +692,7 @@ function _PlanningListTable({
                                     window.location.reload();
                                 }}
                             />
-                            <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+                            <div className="px-3 py-3 bg-gray-50 border-t border-gray-200">
                                 <AddProcessRow
                                     orderId={item.id}
                                     onProcessAdded={() => {
@@ -819,8 +822,8 @@ function _PlanningListTable({
                 )}
             </div>
 
-            {/* Desktop Table View (>= md) */}
-            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
+            {/* Desktop Table View (>= md). El `zoom` aplica SOLO acá (no al search ni a las tarjetas mobile). */}
+            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
                 <div ref={scrollContainerRef} className="w-full overflow-x-auto pt-4 scrollbar-horizontal-visible scrollbar-top">
                     <table className="w-full min-w-[1600px] text-sm text-left">
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
@@ -836,10 +839,10 @@ function _PlanningListTable({
                                         </label>
                                     )}
                                 </th>
-                                <th className="w-10 px-4 py-3"></th>
+                                <th className="w-10 px-3 py-3"></th>
                                 <th className="w-12 px-3 py-3 font-bold text-gray-500 text-center" title="Número de fila">#</th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('id_otvieja')}
                                 >
                                     <div className="flex items-center">
@@ -848,7 +851,7 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('fecha_entrada')}
                                 >
                                     <div className="flex items-center">
@@ -857,7 +860,7 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group min-w-[200px]"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group min-w-[200px]"
                                     onClick={() => handleSort('cliente')}
                                 >
                                     <div className="flex items-center">
@@ -866,7 +869,7 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('codigo')}
                                 >
                                     <div className="flex items-center">
@@ -898,7 +901,7 @@ function _PlanningListTable({
                                     </div>
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('prioridad')}
                                     title="Ordenar por prioridad"
                                 >
@@ -907,18 +910,18 @@ function _PlanningListTable({
                                         <SortIcon column="prioridad" />
                                     </div>
                                 </th>
-                                <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
+                                <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
                                     Material
                                 </th>
-                                <th className="px-4 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene procesos cargados?">
+                                <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene procesos cargados?">
                                     Proceso
                                 </th>
-                                <th className="px-4 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene plano cargado?">
+                                <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene plano cargado?">
                                     Plano
                                 </th>
                                 {!hideStatus && (
                                     <th
-                                        className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                        className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                         onClick={() => handleSort('estado')}
                                     >
                                         <div className="flex items-center justify-center">
@@ -927,11 +930,11 @@ function _PlanningListTable({
                                         </div>
                                     </th>
                                 )}
-                                <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
+                                <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
                                     Entrega
                                 </th>
                                 <th
-                                    className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('fecha_prometida')}
                                 >
                                     <div className="flex items-center">
@@ -989,7 +992,7 @@ function _PlanningListTable({
                                                     </label>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3">
+                                            <td className="px-3 py-3">
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -1075,7 +1078,7 @@ function _PlanningListTable({
                                                     {getPriorityLabel(item.id_prioridad, item.prioridad?.descripcion)}
                                                 </Badge>
                                             </td>
-                                            <td className="px-4 py-3 text-center">
+                                            <td className="px-3 py-3 text-center">
                                                 {item.estado_material === 'sin_stock' ? (
                                                     <Badge
                                                         variant="destructive"
@@ -1112,7 +1115,7 @@ function _PlanningListTable({
                                                 )}
                                             </td>
                                             {/* Proceso: Sí (verde) si tiene procesos cargados. */}
-                                            <td className="px-4 py-3 text-center">
+                                            <td className="px-3 py-3 text-center">
                                                 {(item.procesos && item.procesos.length > 0) ? (
                                                     <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
                                                 ) : (
@@ -1120,7 +1123,7 @@ function _PlanningListTable({
                                                 )}
                                             </td>
                                             {/* Plano: Sí (verde) si tiene_plano==1. */}
-                                            <td className="px-4 py-3 text-center">
+                                            <td className="px-3 py-3 text-center">
                                                 {Number(item.tiene_plano) === 1 ? (
                                                     <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
                                                 ) : (
@@ -1128,11 +1131,11 @@ function _PlanningListTable({
                                                 )}
                                             </td>
                                             {!hideStatus && (
-                                                <td className="px-4 py-3 text-center">
+                                                <td className="px-3 py-3 text-center">
                                                     {renderStatusBadge(getOrderStatus(item))}
                                                 </td>
                                             )}
-                                            <td className="px-4 py-3">
+                                            <td className="px-3 py-3">
                                                 <div
                                                     className="cursor-pointer hover:opacity-70 transition-opacity"
                                                     onClick={(e) => {
@@ -1154,7 +1157,7 @@ function _PlanningListTable({
                                             </td>
 
                                             {/* Editable F. Prometida */}
-                                            <td className="px-4 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }}>
+                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_prometida' ? (
                                                     <input
                                                         type="date"
@@ -1171,7 +1174,7 @@ function _PlanningListTable({
                                             </td>
 
                                             {/* Editable F. Entrega */}
-                                            <td className="px-4 py-3 text-gray-500 cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }}>
+                                            <td className="px-3 py-3 text-gray-500 cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrega' ? (
                                                     <input
                                                         type="date"

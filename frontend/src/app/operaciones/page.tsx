@@ -19,6 +19,7 @@ import { OperatorLoadTab } from "./_components/OperatorLoadTab"
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { cn } from "@/lib/utils"
 import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2, ChevronDown } from "lucide-react"
+import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { usePanelContext } from "@/contexts/PanelContext"
@@ -75,6 +76,11 @@ export default function OperacionesPage() {
   // (vistas Semanal/Diaria). Si está seteada, gana sobre "hoy" y sobre "lote".
   // Si es null, se usa la lógica vieja (lote seleccionado → fecha del lote, o hoy).
   const [customRefDate, setCustomRefDate] = useState<Date | null>(null)
+
+  // Zoom (%) compartido entre todas las vistas de Operaciones (Planificación,
+  // No Planificadas, Historial, Modal Planificar y Vista Previa). Persistido en
+  // localStorage bajo la key 'plan_zoom'. Ver components/ui/zoom-control.tsx.
+  const [planZoom, setPlanZoom] = usePersistedZoom('plan_zoom', 100)
 
   // Selective Planning State
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false)
@@ -1060,12 +1066,18 @@ export default function OperacionesPage() {
         {/* Padding-top reducido (pt-4) porque ahora el header también es un card con
             su propio margin inferior implícito. Antes era py-8 que generaba un gap
             excesivo entre el header full-width y el card del body. */}
-        <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : activeTab === 'work_orders' ? 'w-full px-2 sm:px-3 md:px-4 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 pt-4 pb-4 sm:pb-8'}`}>
+        {/* Padding unificado entre `work_orders` y `lista_planificacion` para que las
+            tablas internas (PlanningListTable / UnplannedWorkOrdersList / CompletedWorkOrdersList)
+            tengan exactamente el mismo ancho útil y los anchos de columna se vean iguales. */}
+        <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 pt-4 pb-4 sm:pb-8'}`}>
           {/* Para `lista_planificacion` quitamos el padding del card (`p-0`) para que
               la barra de sub-tabs (Planificadas | Semanal | ...) ocupe el ancho COMPLETO
               y toque los bordes superior e izquierdo del card. El padding interno lo
               maneja cada TabsContent abajo. */}
-          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-3 sm:p-4' : activeTab === 'lista_planificacion' ? 'p-0 overflow-hidden' : 'p-6'}`}>
+          {/* `work_orders` usa el mismo padding interno (p-6 / p-0) que `lista_planificacion`
+              para que las tablas hijas tengan el mismo ancho exacto y las columnas se
+              alineen entre Planificación, No Planificadas e Historial. */}
+          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-6' : activeTab === 'lista_planificacion' ? 'p-0 overflow-hidden' : 'p-6'}`}>
             {/* Redundant header removed */}
 
             {activeTab === "operarios" && (
@@ -1141,6 +1153,10 @@ export default function OperacionesPage() {
 
                   <div className="py-2 pr-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full xl:w-auto">
 
+                    {/* Zoom control compartido (mismo storage key que No Planificadas,
+                        Historial, Planificar y Vista Previa). */}
+                    <ZoomControl value={planZoom} onChange={setPlanZoom} />
+
                     <Button
                       variant="outline"
                       size="sm"
@@ -1210,10 +1226,14 @@ export default function OperacionesPage() {
                   </div>
                 </div>
 
+                {/* El zoom NO se aplica acá globalmente — se pasa como prop `tableZoom`
+                    a cada PlanningListTable para que solo afecte la tabla, no la barra
+                    de búsqueda ni los banners de Semanal/Diaria. */}
                 <div className="flex-1 p-0">
                   <TabsContent value="general" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
                     {/* General: Show all that are NOT fully finalized */}
                     <PlanningListTable
+                      tableZoom={planZoom}
                       data={plannedOrdenes.filter(order => {
                         // Exclude if all processes are finalized
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
@@ -1348,6 +1368,7 @@ export default function OperacionesPage() {
                       );
                     })()}
                     <PlanningListTable
+                      tableZoom={planZoom}
                       data={plannedOrdenes.filter(order => {
                         // 1. Check if fully finalized (exclude)
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
@@ -1519,6 +1540,7 @@ export default function OperacionesPage() {
                       );
                     })()}
                     <PlanningListTable
+                      tableZoom={planZoom}
                       data={plannedOrdenes.filter(order => {
                         // 1. Check if fully finalized (exclude)
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
@@ -1575,6 +1597,7 @@ export default function OperacionesPage() {
                   <TabsContent value="finalizadas" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
                     {/* Finalizadas: Filter where ALL processes are status 3 (Finalizado) */}
                     <PlanningListTable
+                      tableZoom={planZoom}
                       data={plannedOrdenes.filter(order => {
                         // Check if order has processes and ALL are status 3
                         return order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);

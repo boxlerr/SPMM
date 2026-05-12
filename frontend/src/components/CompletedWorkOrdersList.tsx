@@ -23,12 +23,36 @@ import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOr
 interface CompletedWorkOrdersListProps {
     orders: WorkOrder[];
     onEdit: (order: WorkOrder) => void;
+    /** Zoom (%) aplicado SOLO a la tabla, no al header ni a los filtros. */
+    tableZoom?: number;
 }
 
-export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersListProps) {
+export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: CompletedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
+
+    // Mismo patrón que PlanningListTable: el degradado del borde derecho se oculta
+    // dinámicamente cuando el usuario llegó al final del scroll horizontal.
+    const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const [showRightFade, setShowRightFade] = useState(true);
+
+    React.useEffect(() => {
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        const updateFade = () => {
+            const remaining = el.scrollWidth - el.scrollLeft - el.clientWidth;
+            setShowRightFade(remaining > 2);
+        };
+        updateFade();
+        el.addEventListener('scroll', updateFade, { passive: true });
+        const ro = new ResizeObserver(updateFade);
+        ro.observe(el);
+        return () => {
+            el.removeEventListener('scroll', updateFade);
+            ro.disconnect();
+        };
+    }, [orders.length, tableZoom]);
     const [sortConfig, setSortConfig] = useState<{
         key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'fecha_entrega' | null;
         direction: 'asc' | 'desc' | null;
@@ -227,7 +251,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                     <div className="text-center">Min. Est.</div>
                                                 </div>
                                                 {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
                                                         <div className="text-gray-500 font-mono">{proc.orden}</div>
                                                         <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
                                                         <div>
@@ -258,9 +282,9 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                         ))}
                     </div>
 
-                    {/* Desktop Table View */}
-                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
-                        <div className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
+                    {/* Desktop Table View. El `zoom` aplica SOLO acá (no al header ni a los filtros). */}
+                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
+                        <div ref={scrollContainerRef} className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
                             <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                                     <tr>
@@ -311,7 +335,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                         sortedOrders.map((order, index) => (
                                             <React.Fragment key={order.id}>
                                                 <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 py-3">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
                                                             className="p-1 hover:bg-black/10 rounded transition-colors"
@@ -328,7 +352,14 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                     <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
                                                     <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
                                                     <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
-                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[400px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}</td>
+                                                    {/* Producto: mismas restricciones que en PlanningListTable / Unplanned
+                                                        para que la altura de fila sea consistente entre las 3 tablas
+                                                        (min-w-[300px] max-w-[450px] + line-clamp-2). */}
+                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>
+                                                        <span className="line-clamp-2">
+                                                            {(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}
+                                                        </span>
+                                                    </td>
                                                     <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
                                                     <td className="px-3 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
                                                     {/* Proceso: Sí (verde) si tenía procesos cargados. */}
@@ -360,7 +391,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                             Finalizada
                                                         </Badge>
                                                     </td>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 py-3">
                                                         <div className="flex items-center justify-center">
                                                             <Button 
                                                                 variant="ghost" 
@@ -394,7 +425,7 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                                                             <div>Operario</div>
                                                                         </div>
                                                                         {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                                            <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                                                            <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
                                                                                 <div className="text-gray-500 font-mono">{proc.orden}</div>
                                                                                 <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
                                                                                 <div>
@@ -433,8 +464,12 @@ export function CompletedWorkOrdersList({ orders, onEdit }: CompletedWorkOrdersL
                                 </tbody>
                             </table>
                         </div>
-                        {/* Gradient fade derecho — indica visualmente que hay más columnas por scroll. */}
-                        <div className="pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent" />
+                        {/* Gradient fade derecho — solo visible cuando hay más columnas a la
+                            derecha del scroll. Desaparece con transición cuando el usuario
+                            llega al final, igual que en PlanningListTable. */}
+                        <div
+                            className={`pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
+                        />
                     </Card>
                 </>
             )}

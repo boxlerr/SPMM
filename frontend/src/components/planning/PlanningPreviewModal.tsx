@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 
 interface PlanificacionResult {
     orden_id: number;
@@ -71,6 +72,9 @@ export function PlanningPreviewModal({
     availableOperators = [],
     availableMachines = []
 }: PlanningPreviewModalProps) {
+
+    // Zoom compartido (key 'plan_zoom' en localStorage).
+    const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100);
 
     // Local state for edits
     const [editedResults, setEditedResults] = React.useState<Record<string, PlanificacionResult>>({});
@@ -287,19 +291,25 @@ export function PlanningPreviewModal({
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
                 <DialogHeader className="px-6 py-4 border-b border-gray-100 bg-white shrink-0">
-                    <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                        <CalendarClock className="w-5 h-5 text-blue-600" />
-                        Vista Previa de Planificación
-                    </DialogTitle>
-                    <DialogDescription>
-                        Revise y ajuste la programación antes de confirmar.
-                    </DialogDescription>
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                                <CalendarClock className="w-5 h-5 text-blue-600" />
+                                Vista Previa de Planificación
+                            </DialogTitle>
+                            <DialogDescription>
+                                Revise y ajuste la programación antes de confirmar.
+                            </DialogDescription>
+                        </div>
+                        {/* Zoom control: aplica al panel principal de la vista previa. */}
+                        <ZoomControl value={zoom} onChange={setZoom} />
+                    </div>
                 </DialogHeader>
 
                 <div className="flex flex-1 overflow-hidden">
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         <ScrollArea className="flex-1">
-                            <div className="min-w-[1000px] p-0">
+                            <div className="min-w-[1000px] p-0" style={{ zoom: zoom / 100 }}>
                                 {excedentes.length > 0 && (
                                     <div className="m-4 border border-amber-300 bg-amber-50 rounded-lg overflow-hidden">
                                         <div className="px-4 py-3 bg-amber-100/70 border-b border-amber-200 flex items-center gap-2">
