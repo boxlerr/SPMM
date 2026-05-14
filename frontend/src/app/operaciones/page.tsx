@@ -52,6 +52,9 @@ const getAuthHeaders = (): HeadersInit => {
 export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima" | "carga">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  /** OT pre-seleccionada para editar (viene del query param `?edit_ot=ID` desde
+   *  el link "Editar OT ↗" del PlanningPreviewModal, o de otra parte del sistema). */
+  const [orderToEdit, setOrderToEdit] = useState<WorkOrder | null>(null)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
   // Refresh Trigger for Children
@@ -253,6 +256,35 @@ export default function OperacionesPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  /**
+   * Lee el query param `?edit_ot=ID` (o `?edit_ot_vieja=ID`) y, cuando las OTs
+   * ya están cargadas, abre el modal de edición. Esto permite que desde el modal
+   * de vista previa el usuario haga click en "Editar OT ↗" y aterrice acá
+   * directamente sobre la OT correcta, en una pestaña separada.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (ordenesTrabajo.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const editOtId = params.get("edit_ot");
+    const editOtVieja = params.get("edit_ot_vieja");
+    if (!editOtId && !editOtVieja) return;
+
+    const target = editOtId
+      ? ordenesTrabajo.find(o => o.id === parseInt(editOtId))
+      : ordenesTrabajo.find(o => o.id_otvieja === parseInt(editOtVieja!));
+
+    if (target) {
+      setOrderToEdit(target);
+      setIsCreateModalOpen(true);
+      // Limpiamos el query param sin recargar para que no se vuelva a abrir al refresh.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("edit_ot");
+      url.searchParams.delete("edit_ot_vieja");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [ordenesTrabajo]);
 
 
   const uniqueLotes = React.useMemo(() => {
@@ -1223,41 +1255,48 @@ export default function OperacionesPage() {
             {activeTab === "work_orders" && <WorkOrdersListWrapper refreshTrigger={refreshTrigger} />}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
-                <div className="border-b px-4 sm:px-6 pt-2 bg-gray-50/50 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-                  <TabsList className="bg-transparent p-0 h-auto flex flex-wrap gap-2 sm:gap-4 justify-start w-full xl:w-auto">
+                {/* Header de sub-tabs: cambié `xl:flex-row` → `lg:flex-row` para que tabs y
+                    acciones queden lado a lado desde 1024px (antes solo desde 1280px, lo cual
+                    hacía que con el sidebar abierto las acciones se fueran a una segunda fila).
+                    Si el ancho aún no alcanza, los tabs scrollean horizontal (no wrappean). */}
+                <div className="border-b px-4 sm:px-6 pt-2 bg-gray-50/50 flex flex-col lg:flex-row lg:items-center justify-between gap-2 lg:gap-3">
+                  <TabsList className="bg-transparent p-0 h-auto flex flex-nowrap gap-1 sm:gap-2 lg:gap-3 justify-start w-full lg:w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     <TabsTrigger
                       value="general"
-                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Planificadas
                     </TabsTrigger>
                     <TabsTrigger
                       value="semanal"
-                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Semanal
                     </TabsTrigger>
                     <TabsTrigger
                       value="diaria"
-                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Diaria
                     </TabsTrigger>
                     <TabsTrigger
                       value="finalizadas"
-                      className="rounded-none border-b-2 border-transparent px-2 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Finalizadas
                     </TabsTrigger>
                     <TabsTrigger
                       value="carga"
-                      className="rounded-none border-b-2 border-transparent px-4 py-3 text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Carga
                     </TabsTrigger>
                   </TabsList>
 
-                  <div className="py-2 pr-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full xl:w-auto">
+                  {/* Acciones de la derecha: mantengo todo en línea (sm:flex-row) y reduzco el
+                      ancho del Select para que la barra entera quepa al lado de los tabs sin
+                      romper el layout cuando hay sidebar abierto. */}
+                  <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap lg:flex-nowrap w-full lg:w-auto">
 
                     {/* Zoom control compartido (mismo storage key que No Planificadas,
                         Historial, Planificar y Vista Previa). */}
@@ -1282,8 +1321,8 @@ export default function OperacionesPage() {
                       )}
                       title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Re-planificar este lote (incluyendo órdenes pendientes)"}
                     >
-                      <RefreshCw className={cn("mr-2 h-3.5 w-3.5", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
-                      Re-planificar
+                      <RefreshCw className={cn("h-3.5 w-3.5 lg:mr-2", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
+                      <span className="hidden lg:inline">Re-planificar</span>
                     </Button>
 
                     <Button
@@ -1303,8 +1342,8 @@ export default function OperacionesPage() {
                     </Button>
 
                     <Select value={selectedLoteId} onValueChange={setSelectedLoteId}>
-                      <SelectTrigger className="w-[280px] bg-white border-gray-200">
-                        <SelectValue placeholder="Filtrar por Historial / Lote" />
+                      <SelectTrigger className="w-[180px] lg:w-[220px] xl:w-[260px] bg-white border-gray-200 text-xs lg:text-sm">
+                        <SelectValue placeholder="Lote / Historial" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todas las Planificaciones</SelectItem>
@@ -1752,12 +1791,17 @@ export default function OperacionesPage() {
 
       <CreateWorkOrderModal
         isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        onClose={() => {
+          setIsCreateModalOpen(false)
+          setOrderToEdit(null)
+        }}
         onSuccess={() => {
           setIsCreateModalOpen(false)
+          setOrderToEdit(null)
           fetchData()
           setRefreshTrigger(prev => prev + 1)
         }}
+        orderToEdit={orderToEdit}
       />
 
 

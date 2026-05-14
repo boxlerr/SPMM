@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
@@ -861,8 +862,12 @@ export function PlanningPreviewModal({
 
                 <div className="flex flex-1 overflow-hidden">
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
-                        <ScrollArea className="flex-1">
-                            <div className="min-w-[1000px] p-0" style={{ zoom: zoom / 100 }}>
+                        {/* Scroll nativo en lugar de Radix ScrollArea: la versión Radix no rendea
+                            scrollbar horizontal por default y la tabla (min-w 1000px) quedaba pisada
+                            por el sidebar de Carga de Operarios. Con overflow-auto el navegador
+                            maneja ambos ejes y muestra scrollbar cuando hace falta. */}
+                        <div className="flex-1 overflow-auto">
+                            <div className="min-w-[1000px] p-0 pr-2" style={{ zoom: zoom / 100 }}>
                                 {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
                                     Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}
                                 {forcedPartialMap.size > 0 && (() => {
@@ -1061,17 +1066,38 @@ export function PlanningPreviewModal({
                                             });
                                             const isOrderLate = lateItems.length > 0;
 
-                                            // Calculate max delay in days
+                                            // Calculate max delay + cache the worst-case item so el tooltip
+                                            // pueda mostrar fechas reales (fin estimado vs prometida).
                                             let maxDelayDays = 0;
+                                            let worstLateItem: PlanificacionResult | null = null;
                                             if (isOrderLate) {
-                                                const delays = lateItems.map(i => {
+                                                let maxDiff = -Infinity;
+                                                for (const i of lateItems) {
                                                     const fin = new Date(i.fecha_fin_estimada!);
                                                     const prom = new Date(i.fecha_prometida!);
-                                                    const diffTime = fin.getTime() - prom.getTime(); // Positive if late
-                                                    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                                                });
-                                                maxDelayDays = Math.max(...delays);
+                                                    const diff = fin.getTime() - prom.getTime();
+                                                    if (diff > maxDiff) {
+                                                        maxDiff = diff;
+                                                        worstLateItem = i;
+                                                    }
+                                                }
+                                                maxDelayDays = Math.ceil(maxDiff / (1000 * 60 * 60 * 24));
                                             }
+                                            // Detecta placeholder 1950 (significa "sin fecha prometida real"):
+                                            const promesaEsPlaceholder = worstLateItem?.fecha_prometida
+                                                ? new Date(worstLateItem.fecha_prometida).getFullYear() <= 1950
+                                                : false;
+                                            // Formato dd/MM/yyyy HH:mm para el tooltip.
+                                            const formatFull = (dStr?: string | null) => {
+                                                if (!dStr) return "—";
+                                                try {
+                                                    const d = new Date(dStr);
+                                                    return d.toLocaleString("es-AR", {
+                                                        day: "2-digit", month: "2-digit", year: "numeric",
+                                                        hour: "2-digit", minute: "2-digit",
+                                                    });
+                                                } catch { return dStr; }
+                                            };
 
                                             const percentage = firstItem.unidades ? ((firstItem.cantidad_entregada || 0) / firstItem.unidades) * 100 : 0;
 
@@ -1135,10 +1161,53 @@ export function PlanningPreviewModal({
                                                         <td className="px-4 py-3 text-center text-inherit opacity-90">{formatDate(firstItem.fecha_prometida)}</td>
                                                         <td className="px-4 py-3 text-center">
                                                             {isOrderLate ? (
-                                                                <div className="flex items-center justify-center gap-1 text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200 text-xs font-bold whitespace-nowrap">
-                                                                    <AlertTriangle className="w-3 h-3" />
-                                                                    <span>+{maxDelayDays} días</span>
-                                                                </div>
+                                                                <TooltipProvider delayDuration={150}>
+                                                                    <Tooltip>
+                                                                        <TooltipTrigger asChild>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="flex items-center justify-center gap-1 text-red-700 bg-red-100 px-2 py-1 rounded border border-red-200 text-xs font-bold whitespace-nowrap hover:bg-red-200 transition-colors cursor-help"
+                                                                            >
+                                                                                <AlertTriangle className="w-3 h-3" />
+                                                                                <span>+{maxDelayDays.toLocaleString("es-AR")} días</span>
+                                                                            </button>
+                                                                        </TooltipTrigger>
+                                                                        <TooltipContent side="left" className="max-w-[320px] p-0 bg-white border border-red-200 shadow-xl text-gray-800">
+                                                                            <div className="px-3 py-2 bg-red-50 border-b border-red-200 flex items-center gap-2">
+                                                                                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                                                                                <span className="text-xs font-bold text-red-900 uppercase tracking-wider">OT atrasada según el plan</span>
+                                                                            </div>
+                                                                            <div className="p-3 space-y-2 text-xs">
+                                                                                <div className="grid grid-cols-[120px_1fr] gap-x-2 gap-y-1">
+                                                                                    <span className="text-gray-500">Fecha prometida</span>
+                                                                                    <span className={cn("font-semibold tabular-nums", promesaEsPlaceholder ? "text-amber-700" : "text-gray-900")}>
+                                                                                        {promesaEsPlaceholder ? "Sin definir" : formatFull(worstLateItem?.fecha_prometida)}
+                                                                                    </span>
+                                                                                    <span className="text-gray-500">Fin estimado</span>
+                                                                                    <span className="font-semibold text-gray-900 tabular-nums">
+                                                                                        {formatFull(worstLateItem?.fecha_fin_estimada)}
+                                                                                    </span>
+                                                                                    <span className="text-gray-500">Proceso que rompe</span>
+                                                                                    <span className="font-medium text-gray-700 truncate" title={worstLateItem?.nombre_proceso || ""}>
+                                                                                        {worstLateItem?.nombre_proceso ? capitalize(worstLateItem.nombre_proceso) : "—"}
+                                                                                    </span>
+                                                                                    <span className="text-gray-500">Diferencia</span>
+                                                                                    <span className="font-bold text-red-700 tabular-nums">+{maxDelayDays.toLocaleString("es-AR")} días</span>
+                                                                                </div>
+                                                                                {promesaEsPlaceholder ? (
+                                                                                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800 leading-snug">
+                                                                                        <strong>⚠ Sin fecha prometida real:</strong> esta OT tiene <code className="bg-amber-100 px-1 rounded">1950-01-01</code> como placeholder. Por eso la diferencia es absurda. Cargá la fecha de entrega real en el editor de la OT.
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <div className="mt-2 text-[11px] text-gray-500 leading-snug">
+                                                                                        El motor calculó que el último proceso de esta OT termina <strong className="text-red-700">después</strong> de la fecha que le prometiste al cliente.
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        </TooltipContent>
+                                                                    </Tooltip>
+                                                                </TooltipProvider>
                                                             ) : null}
                                                         </td>
                                                         {/* Acciones: quitar OT del plan. Click no debe expandir la fila. */}
@@ -1255,122 +1324,131 @@ export function PlanningPreviewModal({
                                                                           - Selects para asignar manualmente operario, máquina y horario.
                                                                           - Botón para abrir Recursos en otra pestaña y corregir el dato faltante. */}
                                                                     {(forcedPartialMap.get(ordenId)?.unfit?.length || 0) > 0 && (
-                                                                        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg overflow-hidden">
-                                                                            <div className="px-4 py-2 bg-red-100/70 border-b border-red-200 flex items-center justify-between gap-2 flex-wrap">
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <AlertTriangle className="w-4 h-4 text-red-700" />
-                                                                                    <span className="text-xs font-bold text-red-900 uppercase tracking-wider">
-                                                                                        {forcedPartialMap.get(ordenId)!.unfit.length} proceso(s) sin asignar — podés completarlos a mano
+                                                                        <div className="mt-3 bg-red-50/70 border border-red-200 rounded-md overflow-hidden">
+                                                                            {/* Header compacto con links a Recursos y a editar OT (para procesos duplicados / mal cargados) */}
+                                                                            <div className="px-3 py-1.5 bg-red-100/70 border-b border-red-200 flex items-center justify-between gap-2 flex-wrap">
+                                                                                <div className="flex items-center gap-1.5">
+                                                                                    <AlertTriangle className="w-3.5 h-3.5 text-red-700" />
+                                                                                    <span className="text-[11px] font-bold text-red-900 uppercase tracking-wider">
+                                                                                        {forcedPartialMap.get(ordenId)!.unfit.length} sin asignar — completá a mano u omití
                                                                                     </span>
                                                                                 </div>
-                                                                                <a
-                                                                                    href="/recursos"
-                                                                                    target="_blank"
-                                                                                    rel="noopener noreferrer"
-                                                                                    className="text-[11px] font-bold text-red-700 hover:text-red-900 underline underline-offset-2 flex items-center gap-1"
-                                                                                    title="Abrir Recursos en otra pestaña para configurar rangos/operarios"
-                                                                                >
-                                                                                    Abrir Recursos ↗
-                                                                                </a>
+                                                                                <div className="flex items-center gap-3 text-[11px] font-medium">
+                                                                                    <a
+                                                                                        href={`/operaciones?edit_ot=${ordenId}`}
+                                                                                        target="_blank"
+                                                                                        rel="noopener noreferrer"
+                                                                                        className="text-red-700 hover:text-red-900 underline underline-offset-2"
+                                                                                        title="Abrir editor de la OT en otra pestaña (procesos duplicados, etc.)"
+                                                                                    >
+                                                                                        Editar OT ↗
+                                                                                    </a>
+                                                                                    <a
+                                                                                        href="/recursos"
+                                                                                        target="_blank"
+                                                                                        rel="noopener noreferrer"
+                                                                                        className="text-red-700 hover:text-red-900 underline underline-offset-2"
+                                                                                        title="Configurar rangos/operarios en Recursos"
+                                                                                    >
+                                                                                        Recursos ↗
+                                                                                    </a>
+                                                                                </div>
                                                                             </div>
-                                                                            <div className="divide-y divide-red-200">
+                                                                            {/* Tabla compacta: una fila por proceso, todo en una línea horizontal.
+                                                                                Grid: # | Proceso | Motivo (compactado) | Operario | Máquina | Inicio */}
+                                                                            <div className="divide-y divide-red-200/70">
                                                                                 {forcedPartialMap.get(ordenId)!.unfit.map((u, idx) => {
                                                                                     const diag = diagnoseUnfitProcess(u);
                                                                                     const fitCount = forcedPartialMap.get(ordenId)!.fitCount;
                                                                                     const effU = getEffectiveItem(u);
                                                                                     const assigned = isUnfitManuallyAssigned(u);
                                                                                     return (
-                                                                                        <div key={`unfit-${u.proceso_id}-${idx}`} className={cn(
-                                                                                            "px-4 py-2.5 flex flex-col gap-2",
-                                                                                            assigned ? "bg-green-50/60" : "bg-white/60"
-                                                                                        )}>
-                                                                                            {/* Encabezado: proceso + motivo */}
-                                                                                            <div className="flex items-start gap-3">
-                                                                                                <span className="text-[10px] text-gray-400 font-mono mt-0.5 shrink-0">
-                                                                                                    #{fitCount + idx + 1}
-                                                                                                </span>
-                                                                                                <div className="flex-1 min-w-0">
-                                                                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                                                                        <span className="text-sm font-medium text-gray-800">{capitalize(u.nombre_proceso)}</span>
-                                                                                                        <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{u.duracion_min}m</span>
-                                                                                                        {assigned ? (
-                                                                                                            <span className="text-[9px] uppercase tracking-wider bg-green-100 text-green-700 border border-green-300 px-1.5 py-0.5 rounded-full font-bold">
-                                                                                                                Asignado a mano ✓
-                                                                                                            </span>
-                                                                                                        ) : (
-                                                                                                            <span className="text-[9px] uppercase tracking-wider bg-red-100 text-red-700 border border-red-300 px-1.5 py-0.5 rounded-full font-bold">
-                                                                                                                {diag.label}
-                                                                                                            </span>
+                                                                                        <div
+                                                                                            key={`unfit-${u.proceso_id}-${idx}`}
+                                                                                            className={cn(
+                                                                                                "px-3 py-1.5 grid grid-cols-[26px_180px_1fr_140px_140px_150px] gap-2 items-center text-xs",
+                                                                                                assigned ? "bg-green-50/60" : "bg-white/60"
+                                                                                            )}
+                                                                                        >
+                                                                                            <span className="text-[10px] text-gray-400 font-mono">#{fitCount + idx + 1}</span>
+                                                                                            <div className="flex items-center gap-1 min-w-0">
+                                                                                                <span className="font-medium text-gray-800 truncate" title={capitalize(u.nombre_proceso)}>{capitalize(u.nombre_proceso)}</span>
+                                                                                                <span className="text-[10px] text-gray-500 bg-gray-100 px-1 rounded shrink-0">{u.duracion_min}m</span>
+                                                                                            </div>
+                                                                                            <div className="min-w-0 text-[11px]" title={diag.hint}>
+                                                                                                {assigned ? (
+                                                                                                    <span className="text-green-700 font-semibold">✓ Asignado a mano</span>
+                                                                                                ) : (
+                                                                                                    <span className={cn(
+                                                                                                        "truncate block",
+                                                                                                        diag.code === "no_rango" ? "text-red-700" : "text-orange-700"
+                                                                                                    )}>
+                                                                                                        {diag.label}
+                                                                                                        {diag.rangos.length > 0 && (
+                                                                                                            <span className="text-gray-500 ml-1">· rangos: {formatRangoIds(diag.rangos)}</span>
                                                                                                         )}
-                                                                                                    </div>
-                                                                                                    {!assigned && (
-                                                                                                        <div className="text-[11px] text-red-700/90 mt-0.5">{diag.hint}</div>
-                                                                                                    )}
-                                                                                                </div>
+                                                                                                    </span>
+                                                                                                )}
                                                                                             </div>
-
-                                                                                            {/* Asignación manual: 3 selects en línea */}
-                                                                                            <div className="grid grid-cols-[1fr_1fr_180px] gap-2 pl-7">
-                                                                                                <Select
-                                                                                                    value={effU.id_operario?.toString() || "0"}
-                                                                                                    onValueChange={(val) => handleUpdate(u, 'id_operario', val === "0" ? null : parseInt(val))}
-                                                                                                >
-                                                                                                    <SelectTrigger className={cn(
-                                                                                                        "h-8 text-xs",
-                                                                                                        !effU.id_operario ? "border-red-300 bg-red-50/30" : "border-green-300 bg-green-50/30"
-                                                                                                    )}>
-                                                                                                        <SelectValue placeholder="Elegir operario" />
-                                                                                                    </SelectTrigger>
-                                                                                                    <SelectContent>
-                                                                                                        <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
-                                                                                                        {availableOperators.map(op => {
-                                                                                                            const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
-                                                                                                            return (
-                                                                                                                <SelectItem
-                                                                                                                    key={op.id}
-                                                                                                                    value={op.id.toString()}
-                                                                                                                    disabled={!op.disponible && !isPruebas}
-                                                                                                                    className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
-                                                                                                                >
-                                                                                                                    {op.nombre} {op.apellido} {(!op.disponible && !isPruebas) && "(Ausente)"}
-                                                                                                                </SelectItem>
-                                                                                                            );
-                                                                                                        })}
-                                                                                                    </SelectContent>
-                                                                                                </Select>
-                                                                                                <Select
-                                                                                                    value={effU.id_maquinaria?.toString() || "0"}
-                                                                                                    onValueChange={(val) => handleUpdate(u, 'id_maquinaria', val === "0" ? null : parseInt(val))}
-                                                                                                >
-                                                                                                    <SelectTrigger className={cn(
-                                                                                                        "h-8 text-xs",
-                                                                                                        !effU.id_maquinaria ? "border-red-300 bg-red-50/30" : "border-green-300 bg-green-50/30"
-                                                                                                    )}>
-                                                                                                        <SelectValue placeholder="Elegir máquina" />
-                                                                                                    </SelectTrigger>
-                                                                                                    <SelectContent>
-                                                                                                        <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
-                                                                                                        {availableMachines.map(m => (
-                                                                                                            <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
-                                                                                                        ))}
-                                                                                                    </SelectContent>
-                                                                                                </Select>
-                                                                                                <Input
-                                                                                                    type="datetime-local"
-                                                                                                    className={cn(
-                                                                                                        "h-8 text-xs px-2",
-                                                                                                        !effU.fecha_inicio_estimada ? "border-red-300 bg-red-50/30" : "border-green-300 bg-green-50/30"
-                                                                                                    )}
-                                                                                                    value={effU.fecha_inicio_estimada ? effU.fecha_inicio_estimada.slice(0, 16) : ""}
-                                                                                                    onChange={(e) => handleDateChange(u, e.target.value)}
-                                                                                                />
-                                                                                            </div>
+                                                                                            <Select
+                                                                                                value={effU.id_operario?.toString() || "0"}
+                                                                                                onValueChange={(val) => handleUpdate(u, 'id_operario', val === "0" ? null : parseInt(val))}
+                                                                                            >
+                                                                                                <SelectTrigger className={cn(
+                                                                                                    "h-7 text-[11px] px-2",
+                                                                                                    !effU.id_operario ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
+                                                                                                )}>
+                                                                                                    <SelectValue placeholder="Operario" />
+                                                                                                </SelectTrigger>
+                                                                                                <SelectContent>
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                    {availableOperators.map(op => {
+                                                                                                        const isPruebas = op.sector?.toUpperCase() === 'PRUEBAS';
+                                                                                                        return (
+                                                                                                            <SelectItem
+                                                                                                                key={op.id}
+                                                                                                                value={op.id.toString()}
+                                                                                                                disabled={!op.disponible && !isPruebas}
+                                                                                                                className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
+                                                                                                            >
+                                                                                                                {op.nombre} {op.apellido}
+                                                                                                            </SelectItem>
+                                                                                                        );
+                                                                                                    })}
+                                                                                                </SelectContent>
+                                                                                            </Select>
+                                                                                            <Select
+                                                                                                value={effU.id_maquinaria?.toString() || "0"}
+                                                                                                onValueChange={(val) => handleUpdate(u, 'id_maquinaria', val === "0" ? null : parseInt(val))}
+                                                                                            >
+                                                                                                <SelectTrigger className={cn(
+                                                                                                    "h-7 text-[11px] px-2",
+                                                                                                    !effU.id_maquinaria ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
+                                                                                                )}>
+                                                                                                    <SelectValue placeholder="Máquina" />
+                                                                                                </SelectTrigger>
+                                                                                                <SelectContent>
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                    {availableMachines.map(m => (
+                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
+                                                                                                    ))}
+                                                                                                </SelectContent>
+                                                                                            </Select>
+                                                                                            <Input
+                                                                                                type="datetime-local"
+                                                                                                className={cn(
+                                                                                                    "h-7 text-[11px] px-1.5",
+                                                                                                    !effU.fecha_inicio_estimada ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
+                                                                                                )}
+                                                                                                value={effU.fecha_inicio_estimada ? effU.fecha_inicio_estimada.slice(0, 16) : ""}
+                                                                                                onChange={(e) => handleDateChange(u, e.target.value)}
+                                                                                            />
                                                                                         </div>
                                                                                     );
                                                                                 })}
                                                                             </div>
-                                                                            <div className="px-4 py-2 bg-red-100/30 border-t border-red-200 text-[11px] text-red-700/90">
-                                                                                Los procesos que completes manualmente <strong>se guardarán</strong> al confirmar. Los que dejes sin completar se omiten.
+                                                                            <div className="px-3 py-1 bg-red-100/30 border-t border-red-200 text-[10px] text-red-700/80 italic">
+                                                                                Los que completes a mano se guardan. Los vacíos se omiten al confirmar.
                                                                             </div>
                                                                         </div>
                                                                     )}
@@ -1385,7 +1463,7 @@ export function PlanningPreviewModal({
                                 </table >
                             </div >
 
-                        </ScrollArea >
+                        </div>
                     </div >
 
                     {/* Operator Workload Sidebar */}
@@ -1424,13 +1502,29 @@ export function PlanningPreviewModal({
 
                                         const isOverloaded = totalLoadHours > maxCapacityHours;
 
+                                        // Rangos del operario: pueden venir como [{id, nombre}] o como [id]. Manejamos ambos.
+                                        const rawRangos: any[] = op.rangos || [];
+                                        const rangosNombres: string[] = rawRangos
+                                            .map(r => {
+                                                if (typeof r === "object" && r !== null) return r.nombre || (r.id ? formatRangoIds([r.id]) : "");
+                                                return formatRangoIds([Number(r)]);
+                                            })
+                                            .filter(Boolean);
+                                        const horario = (op.hora_inicio && op.hora_fin)
+                                            ? `${op.hora_inicio.slice(0, 5)} – ${op.hora_fin.slice(0, 5)}`
+                                            : null;
                                         return (
                                             <div key={op.id} className="bg-white p-3 rounded-lg border shadow-sm">
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <span className="text-sm font-medium text-gray-700 truncate">{op.nombre} {op.apellido}</span>
+                                                <div className="flex justify-between items-start mb-1.5 gap-2">
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-sm font-medium text-gray-800 truncate">{op.nombre} {op.apellido}</div>
+                                                        {op.sector && (
+                                                            <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold truncate">{op.sector}</div>
+                                                        )}
+                                                    </div>
                                                     <span className={cn(
-                                                        "text-xs font-bold px-1.5 py-0.5 rounded",
-                                                        isOverloaded ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"
+                                                        "text-xs font-bold px-1.5 py-0.5 rounded tabular-nums shrink-0",
+                                                        isOverloaded ? "bg-red-100 text-red-700" : percentage > 80 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-600"
                                                     )}>
                                                         {Math.round(percentage)}%
                                                     </span>
@@ -1445,12 +1539,37 @@ export function PlanningPreviewModal({
                                                         style={{ width: `${percentage}%` }}
                                                     />
                                                 </div>
-                                                <div className="flex justify-between items-center text-xs text-gray-500">
-                                                    <span>{totalLoadHours.toFixed(1)}h / {maxCapacityHours}h</span>
+                                                <div className="flex justify-between items-center text-xs text-gray-500 mb-1.5">
+                                                    <span className="tabular-nums">{totalLoadHours.toFixed(1)}h / {maxCapacityHours}h</span>
                                                     {sessionLoadMin > 0 && (
                                                         <span className="text-blue-600 font-medium">+{Math.round(sessionLoadMin / 60 * 10) / 10}h nuevas</span>
                                                     )}
                                                 </div>
+                                                {/* Rangos del operario: chips compactos para ver qué procesos puede hacer. */}
+                                                {rangosNombres.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-100">
+                                                        {rangosNombres.slice(0, 4).map((nombre, i) => (
+                                                            <span key={i} className="text-[9px] uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded font-semibold">
+                                                                {nombre}
+                                                            </span>
+                                                        ))}
+                                                        {rangosNombres.length > 4 && (
+                                                            <span className="text-[9px] text-gray-400 px-1 py-0.5" title={rangosNombres.slice(4).join(", ")}>
+                                                                +{rangosNombres.length - 4}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                {/* Horario laboral del operario */}
+                                                {horario && (
+                                                    <div className="flex items-center gap-1 mt-1 text-[10px] text-gray-400">
+                                                        <Clock className="w-2.5 h-2.5" />
+                                                        <span className="tabular-nums">{horario}</span>
+                                                        {op.disponible === false && (
+                                                            <span className="ml-auto text-red-600 font-bold uppercase">Ausente</span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })
