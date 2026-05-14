@@ -2,17 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { API_URL } from '../config';
-import { isTokenExpired, msUntilExpiry } from '@/lib/jwt';
+import { isTokenExpired } from '@/lib/jwt';
 
 interface User {
   id_usuario: number;
@@ -31,18 +22,22 @@ interface AuthContextType {
   logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
+  /** Mantenida por compatibilidad pero ya no abre popup — sólo limpia y redirige. */
   notifySessionExpired: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Endpoints públicos: aunque devuelvan 401, no significa "sesión expirada".
-// Por ejemplo /auth/login devuelve 401 con credenciales inválidas y no debe disparar el popup.
+// Por ejemplo /auth/login devuelve 401 con credenciales inválidas.
 const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/forgot-password', '/auth/reset-password'];
+// Endpoint usado para mantener vivo el backend (Render free tier duerme el server
+// tras ~15 min sin tráfico). Si lo incluyéramos en el interceptor de 401, podría
+// disparar logout por un mal cold-start, así que lo excluimos.
+const KEEPALIVE_PATHS = ['/health'];
 
 function isApiUrl(url: string): boolean {
   if (!url) return false;
-  // API_URL puede ser absoluta (https://...) o relativa (/api). Cubrimos ambos.
   if (API_URL.startsWith('/')) {
     return url.startsWith(API_URL) || url.includes(API_URL + '/') || url.startsWith(`${window.location.origin}${API_URL}`);
   }
@@ -53,20 +48,55 @@ function isPublicAuthPath(url: string): boolean {
   return PUBLIC_AUTH_PATHS.some((p) => url.includes(p));
 }
 
+function isKeepalivePath(url: string): boolean {
+  return KEEPALIVE_PATHS.some((p) => url.includes(p));
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [sessionExpired, setSessionExpired] = useState(false);
   const router = useRouter();
 
   // `tokenRef` mantiene siempre el token actual para que el interceptor de fetch
   // (instalado una sola vez) lo lea sin recrearse cada vez que cambia.
   const tokenRef = useRef<string | null>(null);
+  // Flag para evitar disparar el redirect a /login varias veces en paralelo
+  // cuando llegan muchos 401 juntos (típico al cargar la app y caen varios
+  // fetches simultáneamente).
+  const redirectingRef = useRef(false);
+  // Contador consecutivo de 401: el primero podría ser un cold-start mal manejado
+  // en Render; sólo logueamos al usuario si vemos 2+ seguidos.
+  const auth401CountRef = useRef(0);
 
+  /**
+   * "Sesión expirada" silencioso: limpia credenciales y manda a /login SIN popup.
+   * Antes había un AlertDialog modal que aparecía en cualquier 401 y obligaba al
+   * usuario a hacer clic. Como en producción Render duerme el backend y un primer
+   * fetch a veces devuelve 401 por cold-start, el popup aparecía sin motivo real.
+   * Ahora simplemente redirige y el usuario re-loguea (con token de 30 días).
+   */
+  const performSilentLogout = useCallback(() => {
+    if (redirectingRef.current) return;
+    redirectingRef.current = true;
+    try {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+    } catch {}
+    setToken(null);
+    tokenRef.current = null;
+    setUser(null);
+    // Pequeño delay para que la app no muestre flashes raros antes de navegar.
+    setTimeout(() => {
+      router.push('/login');
+      redirectingRef.current = false;
+    }, 50);
+  }, [router]);
+
+  // Mantenido por compatibilidad con código viejo que lo importa.
   const notifySessionExpired = useCallback(() => {
-    setSessionExpired(true);
-  }, []);
+    performSilentLogout();
+  }, [performSilentLogout]);
 
   // ---- 1) Carga inicial: validar exp del token guardado ---------------------
   useEffect(() => {
@@ -77,7 +107,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (storedToken && storedUser) {
           if (isTokenExpired(storedToken)) {
-            // Token vencido o corrupto: lo borramos antes de montar nada
+            // Token vencido o corrupto: lo borramos. NO mostramos popup — el
+            // usuario va a aterrizar en /login automáticamente por el guard
+            // de cada página (ProtectedRoute / similar).
             localStorage.removeItem('access_token');
             localStorage.removeItem('user');
           } else {
@@ -98,7 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
   }, []);
 
-  // ---- 2) Interceptor global de fetch: dispara popup en 401 a la API --------
+  // ---- 2) Interceptor global de fetch: maneja 401 sin popup -----------------
+  // Antes: cualquier 401 abría un AlertDialog modal que bloqueaba la app.
+  // Ahora: tras 2+ 401 consecutivos en endpoints de API (no public, no /health,
+  // y sólo si creíamos tener sesión), hacemos logout silencioso a /login.
+  // El "2+" es importante porque el cold-start de Render puede devolver 401 una
+  // vez y al siguiente request ya va a andar.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const originalFetch = window.fetch;
@@ -111,16 +148,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await originalFetch(input, init);
 
       try {
-        if (
-          response.status === 401 &&
-          isApiUrl(url) &&
-          !isPublicAuthPath(url) &&
-          tokenRef.current  // sólo notificamos si creíamos estar autenticados
-        ) {
-          notifySessionExpired();
+        const isAuthFailure = response.status === 401
+          && isApiUrl(url)
+          && !isPublicAuthPath(url)
+          && !isKeepalivePath(url)
+          && tokenRef.current;
+
+        if (isAuthFailure) {
+          auth401CountRef.current += 1;
+          if (auth401CountRef.current >= 2) {
+            performSilentLogout();
+          }
+        } else if (response.ok && isApiUrl(url) && !isPublicAuthPath(url)) {
+          // Reset si un request a la API anduvo bien — descarta falsos positivos
+          // por cold-start.
+          auth401CountRef.current = 0;
         }
       } catch (e) {
-        // Nunca rompemos el response por culpa del interceptor
         console.warn('Error en interceptor de fetch:', e);
       }
 
@@ -130,37 +174,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [notifySessionExpired]);
+  }, [performSilentLogout]);
 
-  // ---- 3) Timer atado al `exp` real del JWT ---------------------------------
-  // Cuando el token vence (según su claim `exp`), disparamos el popup, sin esperar
-  // a que el usuario haga un fetch que vuelva 401.
+  // ---- 3) Keep-alive: ping a /health cada 10 minutos ------------------------
+  // Render free tier duerme el servicio tras ~15 minutos sin tráfico. Eso causa
+  // que al volver a la app, el primer fetch tarde 30-60s o falle con 401/502.
+  // Para evitarlo, mientras la sesión esté activa pingueamos /health cada 10 min,
+  // suficiente para no llegar nunca al umbral de sueño. El ping NO incluye token
+  // y el endpoint /health no requiere auth.
   useEffect(() => {
-    if (!token) return;
-    const remainingMs = msUntilExpiry(token);
-    if (remainingMs == null) return;
+    if (!token) return; // sin sesión, no tiene sentido mantener vivo el backend
+    const ping = () => {
+      // No usamos await: es fire-and-forget. Tampoco queremos que un error
+      // (red caída, etc.) escale al usuario.
+      try {
+        fetch(`${API_URL}/health`, { method: 'GET', cache: 'no-store' }).catch(() => { });
+      } catch { /* noop */ }
+    };
+    // Primer ping inmediato para despertar el backend cuando el usuario entra.
+    ping();
+    const id = setInterval(ping, 10 * 60 * 1000); // 10 min
+    return () => clearInterval(id);
+  }, [token]);
 
-    if (remainingMs <= 0) {
-      notifySessionExpired();
-      return;
-    }
+  // ---- 4) Timer atado al `exp` del JWT: DESHABILITADO -----------------------
+  // Antes corría un setTimeout que disparaba el popup cuando llegaba el `exp`
+  // del JWT. Eso era molesto porque:
+  //   - Si el usuario tenía un token viejo (cuando el TTL era 30 min) el popup
+  //     saltaba al instante.
+  //   - El usuario terminaba viendo "Sesión expirada" sin haber hecho nada.
+  // Ahora sólo confiamos en el 401 real del backend (que ya tiene TTL=30 días).
 
-    const id = setTimeout(() => {
-      notifySessionExpired();
-    }, remainingMs);
-
-    return () => clearTimeout(id);
-  }, [token, notifySessionExpired]);
-
-  // ---- 4) Inactividad: DESHABILITADO ----------------------------------------
-  // Antes había un timer que disparaba "Sesión Expirada" tras 8h sin mover el mouse.
-  // En el taller la gente puede pasar horas sin tocar la PC y la sesión no debería
-  // caerse por eso. La caducidad real está controlada por:
-  //   - el `exp` del JWT (30 días por default, ver backend/core/config.py)
-  //   - el interceptor global de 401 (si el server rechaza el token por cualquier motivo)
-  //   - el botón "Cerrar sesión" del usuario
-  // Si en el futuro se quiere reactivar inactividad, restaurar este bloque
-  // desde el historial de git y ajustar INACTIVITY_TIMEOUT al valor deseado.
+  // ---- 5) Inactividad: DESHABILITADO ----------------------------------------
+  // En el taller la gente puede pasar horas sin tocar la PC y la sesión no
+  // debería caerse por eso.
 
   const login = async (username: string, password: string) => {
     try {
@@ -183,7 +230,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(access_token);
         tokenRef.current = access_token;
         setUser(userData);
-        setSessionExpired(false);
+        // Reseteamos contadores al re-loguear.
+        auth401CountRef.current = 0;
+        redirectingRef.current = false;
 
         return { success: true };
       } else {
@@ -208,7 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     tokenRef.current = null;
     setUser(null);
-    setSessionExpired(false);
+    auth401CountRef.current = 0;
 
     router.push('/login');
   };
@@ -226,22 +275,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-
-      <AlertDialog open={sessionExpired}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Sesión Expirada</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tu sesión ha caducado. Por favor, inicia sesión nuevamente para continuar.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={logout}>
-              Iniciar Sesión
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Popup "Sesión Expirada" removido a propósito. Antes era un AlertDialog
+          modal que aparecía al instante por cualquier 401 (incluido cold-start de
+          Render) y obligaba a hacer click. Ahora cualquier expiración real hace
+          logout silencioso a /login. */}
     </AuthContext.Provider>
   );
 }
