@@ -236,9 +236,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         return { success: true };
       } else {
+        // El backend devuelve { status:false, errors:[{message, campo}] }.
+        // Para 5xx (ej. 503 cuando la BD está caída) usamos un mensaje genérico
+        // de servicio no disponible en vez del fallback de credenciales.
+        const backendMessage = data?.errors?.[0]?.message;
+        const fallback = response.status >= 500
+          ? 'Servicio no disponible. Intenta nuevamente en unos segundos.'
+          : 'Credenciales inválidas';
         return {
           success: false,
-          error: data.errorDescription || 'Credenciales inválidas'
+          error: backendMessage || fallback,
         };
       }
     } catch (error) {

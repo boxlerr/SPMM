@@ -11,6 +11,7 @@ from backend.core.security import verify_password, get_password_hash, create_acc
 from backend.core.config import settings
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
 
 class AuthService:
@@ -88,8 +89,8 @@ class AuthService:
             usuario_data['expires_in'] = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # En segundos
             
             return usuario_data
-            
-        except BusinessException:
+
+        except (BusinessException, InfrastructureException):
             raise
         except Exception as e:
             logger.error(f"Error en login: {str(e)}")

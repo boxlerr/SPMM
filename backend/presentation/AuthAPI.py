@@ -17,6 +17,7 @@ from backend.core.security import get_current_user, require_admin
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
@@ -55,6 +56,14 @@ async def login(
             data=result
         )
         
+    except InfrastructureException as e:
+        # Falla de infraestructura (ej: BD caída). No exponemos el detalle real
+        # al usuario final: respondemos 503 con un mensaje genérico.
+        logger.error(f"Error de infraestructura en login: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Servicio no disponible. Intenta nuevamente en unos segundos."
+        )
     except BusinessException as e:
         logger.error(f"Error de negocio en login: {str(e)}")
         raise HTTPException(
