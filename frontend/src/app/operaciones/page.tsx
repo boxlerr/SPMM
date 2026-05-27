@@ -1252,7 +1252,15 @@ export default function OperacionesPage() {
               />
             )}
 
-            {activeTab === "work_orders" && <WorkOrdersListWrapper refreshTrigger={refreshTrigger} />}
+            {activeTab === "work_orders" && (
+              <WorkOrdersListWrapper
+                refreshTrigger={refreshTrigger}
+                orders={ordenesTrabajo}
+                planificacion={rawPlanificacion}
+                operarios={rawOperarios}
+                onRefresh={fetchData}
+              />
+            )}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
                 {/* Header de sub-tabs: cambié `xl:flex-row` → `lg:flex-row` para que tabs y

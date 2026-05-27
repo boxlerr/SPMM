@@ -20,22 +20,40 @@ const getAuthHeaders = (): HeadersInit => {
 
 interface WorkOrdersListWrapperProps {
     refreshTrigger?: number;
+    /** OTs ya cargadas por la página padre. Evita refetch duplicado de /ordenes. */
+    orders: WorkOrder[];
+    /** Planificación cargada por el padre. Inicializa el state local que permite optimistic updates. */
+    planificacion: PlanificacionItem[];
+    /** Operarios cargados por el padre, usados en el modal de detalles. */
+    operarios: any[];
+    /** Callback para pedirle al padre que vuelva a cargar todos los datos
+     *  (después de crear/editar/eliminar OTs o de cambios masivos). */
+    onRefresh?: () => void;
 }
 
-export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrdersListWrapperProps) {
-    const [tasks, setTasks] = useState<GanttTask[]>([]);
-    const [loading, setLoading] = useState(true);
-    // rawPlanificacion is mainly for task details mapping
-    const [rawPlanificacion, setRawPlanificacion] = useState<PlanificacionItem[]>([]);
-    const [rawOperarios, setRawOperarios] = useState<any[]>([]);
+export default function WorkOrdersListWrapper({
+    refreshTrigger = 0,
+    orders,
+    planificacion,
+    operarios,
+    onRefresh,
+}: WorkOrdersListWrapperProps) {
+    // State local para permitir optimistic updates (cambio de operario, estado, etc.)
+    // sin tener que esperar el round-trip al backend. Se re-sincroniza desde props
+    // cuando el padre vuelve a fetchear.
+    const [rawPlanificacion, setRawPlanificacion] = useState<PlanificacionItem[]>(planificacion);
+    const [tasks, setTasks] = useState<GanttTask[]>(() => convertPlanificacionToGanttTasks(planificacion));
+
+    useEffect(() => {
+        setRawPlanificacion(planificacion);
+        setTasks(convertPlanificacionToGanttTasks(planificacion));
+    }, [planificacion]);
+
     const [selectedTask, setSelectedTask] = useState<PlanificacionItem | null>(null);
     const [isDetailsPanelOpen, setIsDetailsPanelOpen] = useState(false);
 
     // Zoom compartido con la sección de Planificación (misma key en localStorage).
     const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100);
-
-    // New state for Unplanned orders split
-    const [allOrders, setAllOrders] = useState<WorkOrder[]>([]);
 
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -58,50 +76,16 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
         return colors[processName] || "#6b7280";
     };
 
-    const fetchData = async () => {
-        try {
-            setLoading(true);
+    // El fetch de /ordenes, /planificacion y /operarios ya no vive acá:
+    // la página padre (OperacionesPage) los carga UNA VEZ y los pasa por props.
+    // Esto eliminó ~5 requests duplicadas a /ordenes por cada navegación a este tab.
+    // Cuando algo cambia (crear/editar/eliminar OT), llamamos a `onRefresh?.()` para
+    // que el padre re-fetchee y el nuevo `planificacion` baje por prop al state local.
 
-            const [planResponse, ordenesResponse, opResponse] = await Promise.all([
-                fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() }),
-                fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() }),
-                fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() })
-            ]);
-
-            // 1. Process Planificacion
-            if (planResponse.ok) {
-                const planData: PlanificacionItem[] = await planResponse.json();
-                setRawPlanificacion(planData);
-                const ganttTasks = convertPlanificacionToGanttTasks(planData);
-                setTasks(ganttTasks);
-            } else {
-                console.error("Error fetching planificacion");
-            }
-
-            // 2. Process Orders
-            if (ordenesResponse.ok) {
-                const ordenesData = await ordenesResponse.json();
-                const ordenesList = Array.isArray(ordenesData) ? ordenesData : (ordenesData.data || []);
-                setAllOrders(ordenesList);
-            }
-
-            // 3. Process Operarios
-            if (opResponse.ok) {
-                const opData = await opResponse.json();
-                const rawOps = Array.isArray(opData.data) ? opData.data : (Array.isArray(opData) ? opData : []);
-                setRawOperarios(rawOps);
-            }
-
-        } catch (error) {
-            console.error("Error loading Work Orders data:", error);
-            toast.error("Error al cargar datos");
-        } finally {
-            setLoading(false);
-        }
-    };
-
+    // Dispara un refresh externo cuando cambia el trigger (creación de OT desde el header).
     useEffect(() => {
-        fetchData();
+        if (refreshTrigger > 0) onRefresh?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [refreshTrigger]);
 
     const handleTaskClick = (task: GanttTask) => {
@@ -204,9 +188,9 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
     // Planned = Exists in Planificacion table AND not completed
     const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
 
-    const plannedOrders = allOrders.filter(o => plannedOrderIds.has(o.id) && !o.finalizadototal);
-    const unplannedOrders = allOrders.filter(o => !plannedOrderIds.has(o.id) && !o.finalizadototal);
-    const completedOrders = allOrders.filter(o => o.finalizadototal);
+    const plannedOrders = orders.filter(o => plannedOrderIds.has(o.id) && !o.finalizadototal);
+    const unplannedOrders = orders.filter(o => !plannedOrderIds.has(o.id) && !o.finalizadototal);
+    const completedOrders = orders.filter(o => o.finalizadototal);
 
     const handleEditOrder = (order: WorkOrder) => {
         setOrderToEdit(order);
@@ -214,7 +198,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
     };
 
     const handleEditSuccess = () => {
-        fetchData(); // Refresh all data
+        onRefresh?.();
     };
 
     const handleDeleteOrder = (id: number) => {
@@ -233,7 +217,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
             if (!response.ok) throw new Error("Error al eliminar");
 
             toast.success("Orden eliminada correctamente");
-            fetchData();
+            onRefresh?.();
         } catch (error) {
             console.error("Error deleting order:", error);
             toast.error("Error al eliminar la orden");
@@ -241,10 +225,6 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
             setDeleteOrderId(null);
         }
     };
-
-    if (loading) {
-        return <div className="p-8 text-center text-gray-500">Cargando órdenes de trabajo...</div>;
-    }
 
     return (
         <div className="relative">
@@ -272,7 +252,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                         tasks={tasks}
                         onTaskClick={handleTaskClick}
                         onBulkStatusChange={handleBulkStatusChange}
-                        onDataRefresh={fetchData}
+                        onDataRefresh={onRefresh}
                     />
                 </TabsContent>
 
@@ -283,7 +263,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
                         onDelete={handleDeleteOrder}
-                        onDataChange={fetchData}
+                        onDataChange={onRefresh}
                         tableZoom={zoom}
                     />
                 </TabsContent>
@@ -302,7 +282,7 @@ export default function WorkOrdersListWrapper({ refreshTrigger = 0 }: WorkOrders
                 selectedItem={selectedTask}
                 onClose={() => setIsDetailsPanelOpen(false)}
                 getProcessColor={getProcessColor}
-                operarios={rawOperarios}
+                operarios={operarios}
                 onOperatorChange={handleOperatorChange}
                 onStatusChange={handleStatusChange}
             />

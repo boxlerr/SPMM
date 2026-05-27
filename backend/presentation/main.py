@@ -1,5 +1,6 @@
 from fastapi import FastAPI,HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.exceptions import RequestValidationError
 # Routers de presentación
 from backend.presentation.ProcesoAPI import router as proceso_router
@@ -60,6 +61,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Comprime respuestas > 500 bytes. Reduce el payload de /ordenes (~1.5MB) a ~150-250KB,
+# que sobre la conexión DuckDNS (upload limitado) es el cuello principal de descarga.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # 🔹 Registrar todos los routers
 # Auth queda público (sus endpoints protegidos lo manejan internamente)
