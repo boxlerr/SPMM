@@ -1,5 +1,5 @@
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import func, case
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
@@ -31,7 +31,9 @@ class OrdenTrabajoRepository:
     async def find_all(self):
         try:
             logger.info("Repository - Obtener todas las órdenes de trabajo.")
-            # Added eager loading for basic relations
+            # joinedload para relaciones 1-a-1 (no inflan filas).
+            # selectinload para 'procesos' (1-a-muchos): evita el producto cartesiano
+            # que multiplicaba miles de filas y disparaba la latencia del endpoint /ordenes.
             result = await self.db.execute(
                 select(OrdenTrabajo)
                 .options(
@@ -39,7 +41,7 @@ class OrdenTrabajoRepository:
                     joinedload(OrdenTrabajo.sector),
                     joinedload(OrdenTrabajo.cliente),
                     joinedload(OrdenTrabajo.prioridad),
-                    joinedload(OrdenTrabajo.procesos).options(
+                    selectinload(OrdenTrabajo.procesos).options(
                         joinedload(OrdenTrabajoProceso.proceso),
                         joinedload(OrdenTrabajoProceso.estado_proceso)
                     )
