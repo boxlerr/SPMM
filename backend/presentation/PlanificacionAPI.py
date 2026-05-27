@@ -115,15 +115,17 @@ async def obtener_planificacion(db = Depends(get_db)):
     """)
     result = await db.execute(query)
     rows = result.fetchall()
-    
+
     # Helper for date conversion (duplicated from Service to avoid circular imports or complex refactoring)
     from datetime import datetime, timedelta
-    
-    def convertir_minutos_a_fecha(minutos_acumulados: int):
-        from backend.infrastructure.ConfigRepository import ConfigRepository
-        config_repo = ConfigRepository()
-        blocked_dates = set(config_repo.get_blocked_dates())
+    from backend.infrastructure.ConfigRepository import ConfigRepository
 
+    # Leer blocked_dates UNA sola vez por request (antes se leía desde disco
+    # 2 veces por cada fila del resultado, lo cual escalaba a O(N) lecturas de I/O).
+    config_repo = ConfigRepository()
+    blocked_dates = set(config_repo.get_blocked_dates())
+
+    def convertir_minutos_a_fecha(minutos_acumulados: int):
         ahora = datetime.now()
         inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
         
