@@ -32,33 +32,37 @@ async def get_estadisticas(db=Depends(get_db)):
     no depende de INNER JOIN con catálogos (articulo / sector / prioridad).
     """
     try:
+        # SQL Server no permite subqueries (EXISTS) dentro de una función de
+        # agregación, por eso el EXISTS se resuelve por fila en la subconsulta
+        # derivada y los SUM agregan sobre la columna ya calculada.
         query = text("""
             SELECT
                 COUNT(*) AS total,
-                SUM(CASE WHEN ISNULL(ot.finalizadototal, 0) = 1 THEN 1 ELSE 0 END) AS completadas,
+                SUM(CASE WHEN t.fin = 1 THEN 1 ELSE 0 END) AS completadas,
+                SUM(CASE WHEN t.fin = 0 AND t.iniciado = 1 THEN 1 ELSE 0 END) AS en_proceso,
                 SUM(CASE
-                        WHEN ISNULL(ot.finalizadototal, 0) = 0
-                         AND EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
-                                     WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
-                        THEN 1 ELSE 0 END) AS en_proceso,
-                SUM(CASE
-                        WHEN ISNULL(ot.finalizadototal, 0) = 0
-                         AND NOT EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
-                                         WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
-                         AND ot.fecha_prometida IS NOT NULL
-                         AND ot.fecha_prometida > '1950-01-01'
-                         AND ot.fecha_prometida < CAST(GETDATE() AS DATE)
+                        WHEN t.fin = 0 AND t.iniciado = 0
+                         AND t.fecha_prometida IS NOT NULL
+                         AND t.fecha_prometida > '1950-01-01'
+                         AND t.fecha_prometida < CAST(GETDATE() AS DATE)
                         THEN 1 ELSE 0 END) AS retrasadas,
                 SUM(CASE
-                        WHEN ISNULL(ot.finalizadototal, 0) = 0
-                         AND NOT EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
-                                         WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
-                         AND (ot.fecha_prometida IS NULL
-                              OR ot.fecha_prometida <= '1950-01-01'
-                              OR ot.fecha_prometida >= CAST(GETDATE() AS DATE))
+                        WHEN t.fin = 0 AND t.iniciado = 0
+                         AND (t.fecha_prometida IS NULL
+                              OR t.fecha_prometida <= '1950-01-01'
+                              OR t.fecha_prometida >= CAST(GETDATE() AS DATE))
                         THEN 1 ELSE 0 END) AS pendientes,
-                SUM(CASE WHEN ot.fecha_orden >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS creadas_hoy
-            FROM orden_trabajo ot
+                SUM(CASE WHEN t.fecha_orden >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS creadas_hoy
+            FROM (
+                SELECT
+                    ISNULL(ot.finalizadototal, 0) AS fin,
+                    CASE WHEN EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
+                                      WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
+                         THEN 1 ELSE 0 END AS iniciado,
+                    ot.fecha_prometida,
+                    ot.fecha_orden
+                FROM orden_trabajo ot
+            ) t
         """)
         result = await db.execute(query)
         row = result.mappings().first() or {}

@@ -64,7 +64,12 @@ export function useDashboardData() {
             const response = await fetchWithAuth("/api/dashboard/estadisticas")
             if (!response.ok) throw new Error("Error al cargar estadísticas")
             const data = await response.json()
-            setEstadisticas(data.data || null)
+            // El backend responde 200 con success=false si la query falla:
+            // sin este chequeo el spinner queda girando para siempre.
+            if (!data.success || !data.data) {
+                throw new Error(data.error || "Error al cargar estadísticas")
+            }
+            setEstadisticas(data.data)
         } catch (err) {
             const msg = err instanceof Error ? err.message : "Error desconocido"
             if (msg !== "Sesión expirada") {
