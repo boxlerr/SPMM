@@ -118,11 +118,11 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             }
 
             try {
-                const opRes = await fetch(`${cleanUrl}/operarios`, { headers: getAuthHeaders() });
-                if (opRes.ok) {
-                    const payload = await opRes.json();
+                const rangRes = await fetch(`${cleanUrl}/rangos`, { headers: getAuthHeaders() });
+                if (rangRes.ok) {
+                    const payload = await rangRes.json();
                     const listData = Array.isArray(payload) ? payload : (payload?.data || []);
-                    const cats = listData.map((o: any) => o.categoria).filter(Boolean);
+                    const cats = listData.map((r: any) => r.nombre || r).filter(Boolean);
 
                     if (data?.categoria) {
                         cats.push(data.categoria);
@@ -131,7 +131,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     setCategorias(Array.from(new Set(cats)));
                 }
             } catch (error) {
-                console.error("Error al obtener categorías:", error);
+                console.error("Error al obtener rangos:", error);
                 if (data?.categoria) setCategorias([data.categoria]);
             }
 

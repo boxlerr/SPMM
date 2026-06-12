@@ -111,22 +111,21 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         console.error("Error al obtener sectores:", error);
       }
 
-      // Cargar categorías desde operarios existentes
+      // Cargar categorías (rangos) desde el catálogo de Rangos
       try {
-        const opRes = await fetch(`${cleanUrl}/operarios`, { headers: getAuthHeaders() });
-        if (opRes.ok) {
-          const payload = await opRes.json();
-          // El backend retorna ResponseDTO: {status: true, data: [...]}
+        const rangRes = await fetch(`${cleanUrl}/rangos`, { headers: getAuthHeaders() });
+        if (rangRes.ok) {
+          const payload = await rangRes.json();
           const data = payload?.data || [];
-          const arr = Array.isArray(data) ? data : [];
-          const cats = arr.map((o: any) => o.categoria).filter(Boolean);
-          setCategorias(Array.from(new Set(cats)));
-          console.log("Categorías cargadas:", cats);
+          const lista = Array.isArray(data)
+            ? data.map((r: any) => r.nombre || r).filter(Boolean)
+            : [];
+          setCategorias(Array.from(new Set(lista)));
         } else {
-          console.error("Error al cargar operarios:", opRes.status, opRes.statusText);
+          console.error("Error al cargar rangos:", rangRes.status, rangRes.statusText);
         }
       } catch (error) {
-        console.error("Error al obtener categorías:", error);
+        console.error("Error al obtener rangos:", error);
       }
 
       // Cargar procesos
