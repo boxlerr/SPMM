@@ -187,6 +187,9 @@ export function convertPlanificacionToGanttTasks(
       allowedRanges: item.rangos_permitidos || [],
       client: item.cliente,
       forzadoFueraRango: !!item.forzado_fuera_rango,
+      machineId: item.id_maquinaria,
+      machineName: item.nombre_maquinaria,
+      orden: item.secuencia,
     };
 
     return task;

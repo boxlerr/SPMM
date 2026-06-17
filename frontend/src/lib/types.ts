@@ -32,6 +32,9 @@ export interface GanttTask {
     dbId?: number;
     allowedRanges?: number[];
     forzadoFueraRango?: boolean;
+    machineId?: number;
+    machineName?: string;
+    orden?: number;
 }
 
 export interface Resource {

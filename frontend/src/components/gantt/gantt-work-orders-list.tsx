@@ -24,6 +24,7 @@ import {
     Plus,
     Paperclip,
     AlertCircle,
+    Wrench,
 } from "lucide-react";
 
 interface GanttWorkOrdersListProps {
@@ -423,7 +424,9 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
-                                    {otTasks.map((task, taskIndex) => {
+                                    {[...otTasks]
+                                        .sort((a, b) => (a.orden ?? Number.MAX_SAFE_INTEGER) - (b.orden ?? Number.MAX_SAFE_INTEGER))
+                                        .map((task, taskIndex) => {
                                         const sMeta = statusMeta(task.status);
                                         const taskDuration = Math.round((task.duration || 0) * 60) || minutesBetween(task.startTime, task.endTime);
                                         const isSelected = selectedTaskIds.has(task.id);
@@ -454,7 +457,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                 {/* Línea 1: # paso + estado */}
                                                 <div className="flex items-center justify-between mb-2">
                                                     <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-md bg-gray-100 text-[10px] font-bold text-gray-600 tabular-nums">
-                                                        {taskIndex + 1}
+                                                        {task.orden ?? taskIndex + 1}
                                                     </span>
                                                     <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border", sMeta.cls)}>
                                                         {sMeta.label}
@@ -467,7 +470,10 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                 </h6>
 
                                                 {/* Operario */}
-                                                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-100">
+                                                <div className={cn(
+                                                    "flex items-center gap-2",
+                                                    task.machineName ? "mb-2" : "mb-3 pb-3 border-b border-gray-100"
+                                                )}>
                                                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-gray-700 font-bold text-[10px] shrink-0 border border-gray-200">
                                                         {getInitials(task.resourceName)}
                                                     </div>
@@ -478,6 +484,21 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                         </span>
                                                     </div>
                                                 </div>
+
+                                                {/* Máquina (solo si está asignada en la planificación) */}
+                                                {task.machineName && (
+                                                    <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-100">
+                                                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-50 to-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 border border-indigo-200">
+                                                            <Wrench className="w-3 h-3" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 block leading-none">Máquina</span>
+                                                            <span className="text-xs text-gray-700 font-medium truncate block" title={task.machineName}>
+                                                                {toTitleCase(task.machineName)}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                )}
 
                                                 {/* Horarios */}
                                                 <div className="space-y-1">
