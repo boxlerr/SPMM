@@ -5,3 +5,4 @@ class PlanificacionUpdateDTO(BaseModel):
     inicio_min: Optional[int] = None
     fin_min: Optional[int] = None
     id_operario: Optional[int] = None
+    id_maquinaria: Optional[int] = None

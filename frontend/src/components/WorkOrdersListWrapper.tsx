@@ -26,6 +26,8 @@ interface WorkOrdersListWrapperProps {
     planificacion: PlanificacionItem[];
     /** Operarios cargados por el padre, usados en el modal de detalles. */
     operarios: any[];
+    /** Maquinarias cargadas por el padre, usadas en el modal de detalles. */
+    maquinarias?: any[];
     /** Callback para pedirle al padre que vuelva a cargar todos los datos
      *  (después de crear/editar/eliminar OTs o de cambios masivos). */
     onRefresh?: () => void;
@@ -36,6 +38,7 @@ export default function WorkOrdersListWrapper({
     orders,
     planificacion,
     operarios,
+    maquinarias = [],
     onRefresh,
 }: WorkOrdersListWrapperProps) {
     // State local para permitir optimistic updates (cambio de operario, estado, etc.)
@@ -117,6 +120,37 @@ export default function WorkOrdersListWrapper({
             });
         } catch (error) {
             console.error("Error updating operator:", error);
+        }
+    };
+
+    const handleMachineryChange = async (newMachineId: string) => {
+        if (!selectedTask) return;
+        const machineId = parseInt(newMachineId);
+        // El select usa "0" para "Sin asignar" → guardamos undefined en el state local
+        // y el backend interpreta 0 como NULL.
+        const normalizedId = machineId === 0 ? undefined : machineId;
+        const machine = maquinarias.find(m => m.id === machineId);
+        const updatedItem = {
+            ...selectedTask,
+            id_maquinaria: normalizedId,
+            nombre_maquinaria: machine?.nombre,
+        };
+        setSelectedTask(updatedItem);
+        setRawPlanificacion(prev => prev.map(p => p.id === selectedTask.id ? updatedItem : p));
+        setTasks(prev => prev.map(t => {
+            if (t.dbId === selectedTask.id) {
+                return { ...t, machineId: normalizedId, machineName: machine?.nombre };
+            }
+            return t;
+        }));
+        try {
+            await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
+                method: "PUT",
+                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+                body: JSON.stringify({ id_maquinaria: machineId }),
+            });
+        } catch (error) {
+            console.error("Error updating machinery:", error);
         }
     };
 
@@ -283,7 +317,9 @@ export default function WorkOrdersListWrapper({
                 onClose={() => setIsDetailsPanelOpen(false)}
                 getProcessColor={getProcessColor}
                 operarios={operarios}
+                maquinarias={maquinarias}
                 onOperatorChange={handleOperatorChange}
+                onMachineryChange={handleMachineryChange}
                 onStatusChange={handleStatusChange}
             />
 

@@ -1258,6 +1258,7 @@ export default function OperacionesPage() {
                 orders={ordenesTrabajo}
                 planificacion={rawPlanificacion}
                 operarios={rawOperarios}
+                maquinarias={rawMaquinarias}
                 onRefresh={fetchData}
               />
             )}

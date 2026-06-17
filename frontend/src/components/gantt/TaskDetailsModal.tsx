@@ -54,13 +54,20 @@ const capitalizeFirstLetter = (text: string): string => {
     return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
 }
 
+interface Maquinaria {
+    id: number;
+    nombre: string;
+}
+
 interface TaskDetailsModalProps {
     isOpen: boolean;
     selectedItem: PlanificacionItem | null;
     onClose: () => void;
     getProcessColor: (processName: string) => string;
     operarios: Operario[];
+    maquinarias?: Maquinaria[];
     onOperatorChange: (newOpId: string) => void;
+    onMachineryChange?: (newMachineId: string) => void;
     onStatusChange: (newStatus: string) => void;
     variant?: "modal" | "sidebar";
 }
@@ -77,7 +84,9 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
     onClose,
     getProcessColor,
     operarios,
+    maquinarias = [],
     onOperatorChange,
+    onMachineryChange,
     onStatusChange,
     variant = "modal",
 }) => {
@@ -88,6 +97,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
     const [localObservaciones, setLocalObservaciones] = React.useState("");
     const [localStatus, setLocalStatus] = React.useState<string>("1");
     const [localOperator, setLocalOperator] = React.useState<string>("");
+    const [localMachinery, setLocalMachinery] = React.useState<string>("0");
 
     const [isSaving, setIsSaving] = React.useState(false);
     const [showSuccess, setShowSuccess] = React.useState(false);
@@ -98,6 +108,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             setLocalObservaciones(selectedItem.observaciones_proceso || selectedItem.observaciones_ot || "");
             setLocalStatus(selectedItem.id_estado?.toString() || "1");
             setLocalOperator(selectedItem.id_operario?.toString() || "");
+            setLocalMachinery(selectedItem.id_maquinaria?.toString() || "0");
             setShowSuccess(false);
         }
     }, [selectedItem]);
@@ -136,6 +147,11 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
             // 3. Save Operator if changed
             if (localOperator !== (selectedItem.id_operario?.toString() || "")) {
                 onOperatorChange(localOperator);
+            }
+
+            // 4. Save Machinery if changed
+            if (onMachineryChange && localMachinery !== (selectedItem.id_maquinaria?.toString() || "0")) {
+                onMachineryChange(localMachinery);
             }
 
             // Show success animation
@@ -348,11 +364,32 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
                                     Maquinaria
                                 </label>
-                                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50/50 h-12 flex items-center">
-                                    <span className="text-sm text-gray-700 font-medium">
-                                        {selectedItem.nombre_maquinaria || "Sin asignar"}
-                                    </span>
-                                </div>
+                                {onMachineryChange && maquinarias.length > 0 ? (
+                                    <Select
+                                        value={localMachinery}
+                                        onValueChange={setLocalMachinery}
+                                    >
+                                        <SelectTrigger className="w-full h-12 text-sm bg-white border-gray-200 hover:border-gray-300 transition-colors">
+                                            <SelectValue placeholder="Sin asignar" />
+                                        </SelectTrigger>
+                                        <SelectContent className="z-[70]">
+                                            <SelectItem value="0" className="text-gray-400 italic">
+                                                Sin asignar
+                                            </SelectItem>
+                                            {maquinarias.map((m) => (
+                                                <SelectItem key={m.id} value={m.id.toString()}>
+                                                    {m.nombre}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <div className="p-3 rounded-lg border border-gray-200 bg-gray-50/50 h-12 flex items-center">
+                                        <span className="text-sm text-gray-700 font-medium">
+                                            {selectedItem.nombre_maquinaria || "Sin asignar"}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Duración */}

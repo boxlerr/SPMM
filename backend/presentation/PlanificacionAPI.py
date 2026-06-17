@@ -209,6 +209,14 @@ async def actualizar_planificacion(id: int, dto: PlanificacionUpdateDTO, db = De
         updates.append("id_operario = :id_operario")
         params["id_operario"] = dto.id_operario
 
+    if dto.id_maquinaria is not None:
+        # 0 = "Sin asignar" desde el frontend -> NULL en la DB.
+        if dto.id_maquinaria == 0:
+            updates.append("id_maquinaria = NULL")
+        else:
+            updates.append("id_maquinaria = :id_maquinaria")
+            params["id_maquinaria"] = dto.id_maquinaria
+
     if not updates:
         return {"message": "No changes provided"}
 
