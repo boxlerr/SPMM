@@ -184,7 +184,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         });
         secondarySkills.forEach(skillId => {
             if (skillId && skillId !== "none") {
-                // Remove duplicates by preferring primary if user messed up and selected the same thing
+                // Preferir principal si ya está cargada
                 if (!skillsPayload.find(s => s.id_proceso === parseInt(skillId))) {
                     skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 2, habilitado: true });
                 }
@@ -215,7 +215,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 ((data as any).dias_trabajo || "MON,TUE,WED,THU,FRI") !== (payload.dias_trabajo || "MON,TUE,WED,THU,FRI") ||
                 (((data as any).min_desayuno ?? 15)) !== (payload.min_desayuno ?? 15) ||
                 (((data as any).min_almuerzo ?? 30)) !== (payload.min_almuerzo ?? 30) ||
-                JSON.stringify(data.skills?.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
+                JSON.stringify(data.skills?.filter(s => s.nivel === 1 || s.nivel === 2).map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
                 method: "PUT",
@@ -527,6 +527,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                         <h3 className="text-base font-semibold text-gray-900">Habilidades</h3>
                     </div>
 
+                    <p className="text-xs text-muted-foreground mb-3">Las SKILLS NATIVAS se derivan automáticamente del rango asignado al operario.</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <div>

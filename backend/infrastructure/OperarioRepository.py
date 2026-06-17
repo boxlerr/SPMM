@@ -4,6 +4,7 @@ from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 
 from backend.domain.Operario import Operario
 from backend.domain.OperarioRango import OperarioRango
+from backend.domain.Rango import Rango
 
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -19,7 +20,16 @@ class OperarioRepository:
 
     async def find_by_id(self, id: int):
         try:
-            result = await self.db.execute(select(Operario).options(selectinload(Operario.rangos), selectinload(Operario.procesos_skill)).where(Operario.id == id))
+            result = await self.db.execute(
+                select(Operario)
+                .options(
+                    selectinload(Operario.rangos)
+                    .selectinload(OperarioRango.rango)
+                    .selectinload(Rango.procesos),
+                    selectinload(Operario.procesos_skill),
+                )
+                .where(Operario.id == id)
+            )
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Repository - Error al buscar Operario {id}: {e}")
@@ -29,7 +39,12 @@ class OperarioRepository:
         try:
             logger.info("Repository - Obtener todos los operarios desde la base de datos.")
             result = await self.db.execute(
-                select(Operario).options(selectinload(Operario.rangos), selectinload(Operario.procesos_skill))
+                select(Operario).options(
+                    selectinload(Operario.rangos)
+                    .selectinload(OperarioRango.rango)
+                    .selectinload(Rango.procesos),
+                    selectinload(Operario.procesos_skill),
+                )
             )
             data = result.scalars().unique().all()
             logger.info(f"Repository - Resultado OK ({len(data)} registros)")

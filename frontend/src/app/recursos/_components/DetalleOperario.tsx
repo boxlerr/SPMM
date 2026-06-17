@@ -473,7 +473,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   {(!operario.skills || operario.skills.length === 0) && !addingPrimarySkill && !addingSecondarySkill ? (
                     <div className="flex flex-col gap-2">
                       <p className="text-muted-foreground italic text-xs px-2 mb-2">Sin habilidades registradas</p>
-                      <div className="flex gap-2 px-2">
+                      <div className="flex flex-wrap gap-2 px-2">
                         <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddingPrimarySkill(true)}>
                           <Plus className="h-3 w-3 mr-1" /> Principal
                         </Button>
@@ -483,7 +483,33 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       </div>
                     </div>
                   ) : (
-                    <Accordion type="multiple" className="w-full" defaultValue={["primary", "secondary"]}>
+                    <Accordion type="multiple" className="w-full" defaultValue={["native", "primary", "secondary"]}>
+                      <AccordionItem value="native" className="border-b-0 mb-3 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                        <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
+                          <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
+                            <span className="truncate pr-2">SKILLS NATIVAS</span>
+                            <span className="text-[10px] font-normal uppercase tracking-wide text-emerald-600 shrink-0 pr-1">Del rango</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="pt-0 pb-3 ml-1">
+                          <div className="flex flex-col gap-2.5">
+                            {(operario.skills || []).filter(s => s.nivel === 0).map(skill => (
+                              <div key={skill.id_proceso} className="flex justify-between items-center py-1.5 gap-2">
+                                <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
+                                  <span className="font-medium text-gray-900 text-sm truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
+                                    {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">Nativa</span>
+                              </div>
+                            ))}
+                          </div>
+                          {(!operario.skills || !operario.skills.some(s => s.nivel === 0)) && (
+                            <p className="text-sm text-gray-500 italic py-2 text-center">No hay SKILLS NATIVAS</p>
+                          )}
+                        </AccordionContent>
+                      </AccordionItem>
                       <AccordionItem value="primary" className="border-b-0 mb-3 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
                         <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">

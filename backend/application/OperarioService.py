@@ -25,6 +25,40 @@ def _normalizar_dias_trabajo(valor):
     return ",".join(d for d in orden if d in items)
 
 
+def _build_skills_payload(operario):
+    """
+    Combina las skills cargadas manualmente (nivel 1 y 2) con las skills nativas
+    computadas desde los rangos del operario (nivel 0).
+    Si un mismo id_proceso aparece como cargado y como nativo, gana el cargado.
+    """
+    payload = []
+    procesos_vistos = set()
+
+    for s in (operario.procesos_skill or []):
+        payload.append({
+            "id_proceso": s.id_proceso,
+            "nivel": s.nivel,
+            "habilitado": s.habilitado,
+        })
+        procesos_vistos.add(s.id_proceso)
+
+    for op_rango in (operario.rangos or []):
+        rango = getattr(op_rango, "rango", None)
+        if rango is None:
+            continue
+        for rp in (rango.procesos or []):
+            if rp.id_proceso in procesos_vistos:
+                continue
+            payload.append({
+                "id_proceso": rp.id_proceso,
+                "nivel": 0,
+                "habilitado": True,
+            })
+            procesos_vistos.add(rp.id_proceso)
+
+    return payload
+
+
 def _validar_pausa(valor, default):
     """Convierte a int, recorta a [0, 240] minutos. Devuelve default si inválido."""
     if valor is None:
@@ -143,7 +177,7 @@ class OperarioService:
                     "min_desayuno": getattr(o, "min_desayuno", None) if getattr(o, "min_desayuno", None) is not None else 15,
                     "min_almuerzo": getattr(o, "min_almuerzo", None) if getattr(o, "min_almuerzo", None) is not None else 30,
                     "rangos": [r.id_rango for r in o.rangos],
-                    "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
+                    "skills": _build_skills_payload(o),
                 }
                 for o in operarios
             ]
@@ -182,10 +216,10 @@ class OperarioService:
                     "dias_trabajo": getattr(o, "dias_trabajo", None) or "MON,TUE,WED,THU,FRI",
                     "min_desayuno": getattr(o, "min_desayuno", None) if getattr(o, "min_desayuno", None) is not None else 15,
                     "min_almuerzo": getattr(o, "min_almuerzo", None) if getattr(o, "min_almuerzo", None) is not None else 30,
-                    "skills": [{"id_proceso": s.id_proceso, "nivel": s.nivel, "habilitado": s.habilitado} for s in o.procesos_skill]
+                    "skills": _build_skills_payload(o),
                 },
                 errorDescription=""
-            )   
+            )
         except Exception as e:
             logger.error(f"Service - Error al obtener Operario: {e}")
             raise InfrastructureException("Error al obtener Operario.") from e

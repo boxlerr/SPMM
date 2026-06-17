@@ -174,7 +174,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       dni: formData.dni ? onlyDigits(formData.dni) : null,
     } as any;
 
-    // Preparar skills (N primarios + N secundarios)
+    // Preparar skills (N primarios + N secundarios). Las nativas se derivan del rango.
     const skillsPayload: { id_proceso: number; nivel: number; habilitado: boolean }[] = [];
     primarySkills.forEach(skillId => {
       if (skillId && skillId !== "none") {
@@ -361,6 +361,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Habilidades del Operario</h3>
+            <p className="text-xs text-muted-foreground">Las SKILLS NATIVAS se derivan automáticamente del rango del operario.</p>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
