@@ -25,16 +25,19 @@ import {
     Paperclip,
     AlertCircle,
     Wrench,
+    ArrowUp,
+    ArrowDown,
 } from "lucide-react";
 
 interface GanttWorkOrdersListProps {
     tasks: GanttTask[];
     onTaskClick?: (task: GanttTask) => void;
     onBulkStatusChange?: (taskIds: string[], newStatus: string) => void;
+    onProcessReorder?: (ordenId: number, orderedTasks: GanttTask[]) => void;
     onDataRefresh?: () => void;
 }
 
-export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, onDataRefresh }: GanttWorkOrdersListProps) {
+export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, onProcessReorder, onDataRefresh }: GanttWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = React.useState("");
     const [isSelectionMode, setIsSelectionMode] = React.useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
@@ -424,12 +427,24 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
-                                    {[...otTasks]
-                                        .sort((a, b) => (a.orden ?? Number.MAX_SAFE_INTEGER) - (b.orden ?? Number.MAX_SAFE_INTEGER))
-                                        .map((task, taskIndex) => {
+                                    {(() => {
+                                        const sortedOtTasks = [...otTasks].sort((a, b) =>
+                                            (a.orden ?? Number.MAX_SAFE_INTEGER) - (b.orden ?? Number.MAX_SAFE_INTEGER)
+                                        );
+                                        const handleMove = (taskIndex: number, dir: -1 | 1) => {
+                                            if (!onProcessReorder) return;
+                                            const target = taskIndex + dir;
+                                            if (target < 0 || target >= sortedOtTasks.length) return;
+                                            const next = [...sortedOtTasks];
+                                            [next[taskIndex], next[target]] = [next[target], next[taskIndex]];
+                                            onProcessReorder(head.workOrderId, next);
+                                        };
+                                        return sortedOtTasks.map((task, taskIndex) => {
                                         const sMeta = statusMeta(task.status);
                                         const taskDuration = Math.round((task.duration || 0) * 60) || minutesBetween(task.startTime, task.endTime);
                                         const isSelected = selectedTaskIds.has(task.id);
+                                        const canMoveUp = !!onProcessReorder && taskIndex > 0 && !isSelectionMode;
+                                        const canMoveDown = !!onProcessReorder && taskIndex < sortedOtTasks.length - 1 && !isSelectionMode;
                                         return (
                                             <div
                                                 key={task.id}
@@ -454,11 +469,35 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                     </div>
                                                 )}
 
-                                                {/* Línea 1: # paso + estado */}
+                                                {/* Línea 1: # paso + reorder + estado */}
                                                 <div className="flex items-center justify-between mb-2">
-                                                    <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-md bg-gray-100 text-[10px] font-bold text-gray-600 tabular-nums">
-                                                        {task.orden ?? taskIndex + 1}
-                                                    </span>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-md bg-gray-100 text-[10px] font-bold text-gray-600 tabular-nums">
+                                                            {task.orden ?? taskIndex + 1}
+                                                        </span>
+                                                        {!!onProcessReorder && !isSelectionMode && (
+                                                            <div className="flex items-center gap-0.5">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => { e.stopPropagation(); handleMove(taskIndex, -1); }}
+                                                                    disabled={!canMoveUp}
+                                                                    title="Subir orden"
+                                                                    className="h-5 w-5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                                                                >
+                                                                    <ArrowUp className="w-3 h-3" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => { e.stopPropagation(); handleMove(taskIndex, 1); }}
+                                                                    disabled={!canMoveDown}
+                                                                    title="Bajar orden"
+                                                                    className="h-5 w-5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+                                                                >
+                                                                    <ArrowDown className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                     <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border", sMeta.cls)}>
                                                         {sMeta.label}
                                                     </span>
@@ -528,7 +567,8 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                 </div>
                                             </div>
                                         );
-                                    })}
+                                    });
+                                    })()}
 
                                     {/* Card "Agregar Proceso" */}
                                     <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white/40 hover:bg-blue-50/30 hover:border-blue-300 transition-all flex items-center justify-center min-h-[200px] p-3">

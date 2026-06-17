@@ -184,6 +184,44 @@ export default function WorkOrdersListWrapper({
         }
     };
 
+    const handleProcessReorder = async (ordenId: number, orderedTasks: GanttTask[]) => {
+        // Cada task queda con orden = idx + 1.
+        const updates = orderedTasks
+            .filter(t => t.dbId !== undefined)
+            .map((t, idx) => ({ dbId: t.dbId!, newOrden: idx + 1 }));
+
+        // Optimistic: actualizo orden en los tasks visibles y en rawPlanificacion (secuencia).
+        setTasks(prev => prev.map(t => {
+            const u = updates.find(x => x.dbId === t.dbId);
+            return u ? { ...t, orden: u.newOrden } : t;
+        }));
+        setRawPlanificacion(prev => prev.map(p => {
+            const u = updates.find(x => x.dbId === p.id);
+            return u ? { ...p, secuencia: u.newOrden } : p;
+        }));
+
+        // Construyo el payload con id_proceso (no el id de planificación).
+        const ordenes = orderedTasks
+            .map((t, idx) => {
+                const planItem = rawPlanificacion.find(p => p.id === t.dbId);
+                return planItem ? { id_proceso: planItem.proceso_id, orden: idx + 1 } : null;
+            })
+            .filter((x): x is { id_proceso: number; orden: number } => x !== null);
+
+        try {
+            const res = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/reorder`, {
+                method: "PUT",
+                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+                body: JSON.stringify({ ordenes }),
+            });
+            if (!res.ok) throw new Error("reorder failed");
+        } catch (error) {
+            console.error("Error reordering processes:", error);
+            toast.error("Error al reordenar procesos");
+            onRefresh?.();
+        }
+    };
+
     const handleBulkStatusChange = async (taskIds: string[], newStatus: string) => {
         let idEstado = 1;
         if (newStatus === 'en_proceso') idEstado = 2;
@@ -286,6 +324,7 @@ export default function WorkOrdersListWrapper({
                         tasks={tasks}
                         onTaskClick={handleTaskClick}
                         onBulkStatusChange={handleBulkStatusChange}
+                        onProcessReorder={handleProcessReorder}
                         onDataRefresh={onRefresh}
                     />
                 </TabsContent>
