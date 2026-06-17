@@ -509,10 +509,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                 </h6>
 
                                                 {/* Operario */}
-                                                <div className={cn(
-                                                    "flex items-center gap-2",
-                                                    task.machineName ? "mb-2" : "mb-3 pb-3 border-b border-gray-100"
-                                                )}>
+                                                <div className="flex items-center gap-2 mb-2">
                                                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-gray-700 font-bold text-[10px] shrink-0 border border-gray-200">
                                                         {getInitials(task.resourceName)}
                                                     </div>
@@ -524,20 +521,29 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                     </div>
                                                 </div>
 
-                                                {/* Máquina (solo si está asignada en la planificación) */}
-                                                {task.machineName && (
-                                                    <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-100">
-                                                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-50 to-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 border border-indigo-200">
-                                                            <Wrench className="w-3 h-3" />
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 block leading-none">Máquina</span>
+                                                {/* Máquina — siempre visible; "Sin asignar" cuando no hay (ej. procesos manuales) */}
+                                                <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-100">
+                                                    <div className={cn(
+                                                        "w-7 h-7 rounded-full flex items-center justify-center shrink-0 border",
+                                                        task.machineName
+                                                            ? "bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-600 border-indigo-200"
+                                                            : "bg-gray-50 text-gray-400 border-gray-200"
+                                                    )}>
+                                                        <Wrench className="w-3 h-3" />
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 block leading-none">Máquina</span>
+                                                        {task.machineName ? (
                                                             <span className="text-xs text-gray-700 font-medium truncate block" title={task.machineName}>
                                                                 {toTitleCase(task.machineName)}
                                                             </span>
-                                                        </div>
+                                                        ) : (
+                                                            <span className="text-xs text-gray-400 italic truncate block">
+                                                                Sin asignar
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                )}
+                                                </div>
 
                                                 {/* Horarios */}
                                                 <div className="space-y-1">
