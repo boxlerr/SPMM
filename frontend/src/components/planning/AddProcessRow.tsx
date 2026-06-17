@@ -55,20 +55,30 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
 
         setLoading(true);
         try {
-            const promises = validItems.map(item =>
-                fetch(`${API_URL}/ordenes/${orderId}/procesos`, {
+            // No mandamos `orden`: el backend lo calcula como max(orden)+1 dentro de la misma
+            // transacción, así varios procesos agregados en serie quedan numerados correctamente.
+            // Las llamadas van secuenciales (no en paralelo) para que cada una vea el max actualizado.
+            let allSuccess = true;
+            let firstError: string | null = null;
+            for (const item of validItems) {
+                const res = await fetch(`${API_URL}/ordenes/${orderId}/procesos`, {
                     method: 'POST',
                     headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                     body: JSON.stringify({
                         id_proceso: parseInt(item.procesoId),
                         tiempo_estimado: parseInt(item.tiempo) || 0,
-                        orden: 99
                     })
-                })
-            );
-
-            const results = await Promise.all(promises);
-            const allSuccess = results.every(res => res.ok);
+                });
+                if (!res.ok) {
+                    allSuccess = false;
+                    // Intentamos extraer el message del ResponseDTO del backend.
+                    try {
+                        const body = await res.json();
+                        firstError = body?.errors?.[0]?.message || null;
+                    } catch { /* body no era JSON */ }
+                    break;
+                }
+            }
 
             if (allSuccess) {
                 setEditableItems([]);
@@ -76,7 +86,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                 setIsAdding(false);
                 toast.success("Procesos guardados correctamente");
             } else {
-                toast.error("Error al guardar uno o más procesos");
+                toast.error(firstError || "Error al guardar uno o más procesos");
             }
         } catch (e) {
             console.error(e);

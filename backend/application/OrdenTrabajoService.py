@@ -9,6 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
 from datetime import datetime
 from sqlalchemy import func, select
@@ -532,14 +533,34 @@ class OrdenTrabajoService:
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None):
         logger.info(f"Service - Agregar proceso {id_proceso} a Orden {id_orden}")
-        
+
         # Verify order exists
         exists = await self.repository.find_by_id(id_orden)
         if not exists:
              raise NotFoundException(f"No se encontró la orden de trabajo con ID {id_orden}")
-             
+
+        # El PK de orden_trabajo_proceso es (id_orden_trabajo, id_proceso), así que
+        # cortamos antes con un mensaje claro en vez de devolver 500 por la violación de PK.
+        ya_existe = any(p.id_proceso == id_proceso for p in (exists.procesos or []))
+        if ya_existe:
+            raise BusinessException(f"Este proceso ya está cargado en la OT.")
+
         nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden)
-        
+
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
+
+    async def eliminarProceso(self, id_orden: int, id_proceso: int):
+        logger.info(f"Service - Eliminar proceso {id_proceso} de Orden {id_orden}")
+
+        exists = await self.repository.find_by_id(id_orden)
+        if not exists:
+            raise NotFoundException(f"No se encontró la orden de trabajo con ID {id_orden}")
+
+        proceso_en_ot = any(p.id_proceso == id_proceso for p in (exists.procesos or []))
+        if not proceso_en_ot:
+            raise NotFoundException(f"El proceso {id_proceso} no está cargado en la OT {id_orden}.")
+
+        await self.repository.eliminarProceso(id_orden, id_proceso)
+        return ResponseDTO(status=True, data={"message": "Proceso eliminado correctamente"})

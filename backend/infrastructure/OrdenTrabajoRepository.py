@@ -66,7 +66,9 @@ class OrdenTrabajoRepository:
                     joinedload(OrdenTrabajo.sector),
                     joinedload(OrdenTrabajo.cliente),
                     joinedload(OrdenTrabajo.prioridad),
-                    joinedload(OrdenTrabajo.procesos).options(
+                    # `procesos` es una colección → usamos selectinload para no romper
+                    # el scalar_one_or_none (joinedload de colecciones requiere .unique()).
+                    selectinload(OrdenTrabajo.procesos).options(
                         joinedload(OrdenTrabajoProceso.proceso),
                         joinedload(OrdenTrabajoProceso.estado_proceso)
                     )
@@ -835,14 +837,46 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_cantidad_entregada: {e}")
             raise InfrastructureException("Error al actualizar la cantidad entregada.") from e
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int):
+    async def eliminarProceso(self, id_orden: int, id_proceso: int):
+        from sqlalchemy import text
+        try:
+            logger.info(f"Repository - Eliminar proceso {id_proceso} de Orden {id_orden}")
+
+            # Primero limpiamos planificacion si tiene una entrada (puede no tenerla
+            # si es un proceso huérfano nunca planificado).
+            await self.db.execute(
+                text("DELETE FROM planificacion WHERE orden_id = :oid AND proceso_id = :pid"),
+                {"oid": id_orden, "pid": id_proceso}
+            )
+
+            # Después el registro de orden_trabajo_proceso.
+            await self.db.execute(
+                text("DELETE FROM orden_trabajo_proceso WHERE id_orden_trabajo = :oid AND id_proceso = :pid"),
+                {"oid": id_orden, "pid": id_proceso}
+            )
+
+            await self.db.commit()
+            logger.info("Repository - Proceso eliminado correctamente.")
+            return True
+
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en eliminarProceso: {e}")
+            raise InfrastructureException("Error al eliminar proceso de la orden.") from e
+
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None):
         try:
             logger.info(f"Repository - Agregar proceso {id_proceso} a Orden {id_orden}")
-            
-            # Check if exists (should not happen usually with this flow, but good practice)
-            # Actually, `orden` is part of PK? No, PK is (id_orden, id_proceso).
-            # So duplicates by ID are forbidden.
-            
+
+            # Si no viene `orden`, calculamos max(orden)+1 dentro de la misma transacción
+            # para que el nuevo proceso quede al final (1 si no había ninguno).
+            if orden is None:
+                max_orden_q = select(func.coalesce(func.max(OrdenTrabajoProceso.orden), 0)).where(
+                    OrdenTrabajoProceso.id_orden_trabajo == id_orden
+                )
+                result = await self.db.execute(max_orden_q)
+                orden = (result.scalar() or 0) + 1
+
             nuevo_proceso = OrdenTrabajoProceso(
                 id_orden_trabajo=id_orden,
                 id_proceso=id_proceso,

@@ -35,6 +35,8 @@ export interface GanttTask {
     machineId?: number;
     machineName?: string;
     orden?: number;
+    procesoId?: number;
+    isUnplanned?: boolean;
 }
 
 export interface Resource {

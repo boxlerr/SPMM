@@ -27,6 +27,7 @@ import {
     Wrench,
     ArrowUp,
     ArrowDown,
+    Trash2,
 } from "lucide-react";
 
 interface GanttWorkOrdersListProps {
@@ -34,10 +35,11 @@ interface GanttWorkOrdersListProps {
     onTaskClick?: (task: GanttTask) => void;
     onBulkStatusChange?: (taskIds: string[], newStatus: string) => void;
     onProcessReorder?: (ordenId: number, orderedTasks: GanttTask[]) => void;
+    onTaskDelete?: (task: GanttTask) => void;
     onDataRefresh?: () => void;
 }
 
-export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, onProcessReorder, onDataRefresh }: GanttWorkOrdersListProps) {
+export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, onProcessReorder, onTaskDelete, onDataRefresh }: GanttWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = React.useState("");
     const [isSelectionMode, setIsSelectionMode] = React.useState(false);
     const [selectedTaskIds, setSelectedTaskIds] = React.useState<Set<string>>(new Set());
@@ -287,8 +289,11 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                     const head = otTasks[0];
                     const productDescription = head.notes || "";
                     const totalDurationMin = sumDurations(otTasks);
-                    const firstStart = otTasks[0];
-                    const lastEnd = otTasks[otTasks.length - 1];
+                    // Para los rangos de Inicio/Fin del header solo consideramos tasks
+                    // planificados (los huérfanos no tienen horarios).
+                    const plannedOtTasks = otTasks.filter(t => !t.isUnplanned);
+                    const firstStart = plannedOtTasks[0] ?? head;
+                    const lastEnd = plannedOtTasks[plannedOtTasks.length - 1] ?? head;
                     const prio = priorityMeta(head.priority);
                     const delivered = head.cantidad_entregada || 0;
                     const totalUnits = head.quantity || 0;
@@ -449,14 +454,24 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                             <div
                                                 key={task.id}
                                                 className={cn(
-                                                    "relative rounded-xl border bg-white p-3.5 cursor-pointer transition-all duration-200 overflow-hidden",
-                                                    isSelectionMode && isSelected
-                                                        ? "border-red-500 ring-2 ring-red-100 shadow-md bg-red-50/30"
-                                                        : "border-gray-200 hover:border-red-300 hover:shadow-md hover:-translate-y-0.5"
+                                                    "relative rounded-xl border p-3.5 transition-all duration-200 overflow-hidden",
+                                                    task.isUnplanned
+                                                        ? "bg-amber-50/30 border-dashed border-amber-300 cursor-default"
+                                                        : "bg-white cursor-pointer",
+                                                    !task.isUnplanned && (
+                                                        isSelectionMode && isSelected
+                                                            ? "border-red-500 ring-2 ring-red-100 shadow-md bg-red-50/30"
+                                                            : "border-gray-200 hover:border-red-300 hover:shadow-md hover:-translate-y-0.5"
+                                                    )
                                                 )}
-                                                onClick={() => isSelectionMode ? toggleTaskSelection(task.id) : onTaskClick?.(task)}
+                                                onClick={() => {
+                                                    if (task.isUnplanned) return;
+                                                    if (isSelectionMode) toggleTaskSelection(task.id);
+                                                    else onTaskClick?.(task);
+                                                }}
+                                                title={task.isUnplanned ? "Proceso sin planificar — re-planificá la OT para asignar horario, operario y máquina." : undefined}
                                             >
-                                                {isSelectionMode && (
+                                                {isSelectionMode && !task.isUnplanned && (
                                                     <div className="absolute top-2 right-2 z-10">
                                                         <div className={cn(
                                                             "w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",
@@ -497,9 +512,24 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                                 </button>
                                                             </div>
                                                         )}
+                                                        {!!onTaskDelete && !isSelectionMode && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => { e.stopPropagation(); onTaskDelete(task); }}
+                                                                title="Eliminar proceso"
+                                                                className="h-5 w-5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors ml-0.5"
+                                                            >
+                                                                <Trash2 className="w-3 h-3" />
+                                                            </button>
+                                                        )}
                                                     </div>
-                                                    <span className={cn("text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border", sMeta.cls)}>
-                                                        {sMeta.label}
+                                                    <span className={cn(
+                                                        "text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border",
+                                                        task.isUnplanned
+                                                            ? "bg-amber-100 text-amber-700 border-amber-200"
+                                                            : sMeta.cls
+                                                    )}>
+                                                        {task.isUnplanned ? "Sin planificar" : sMeta.label}
                                                     </span>
                                                 </div>
 
@@ -545,26 +575,33 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                     </div>
                                                 </div>
 
-                                                {/* Horarios */}
+                                                {/* Horarios — solo si está planificado. Si no, mostramos solo "min estimados". */}
                                                 <div className="space-y-1">
-                                                    <div className="flex items-center justify-between text-[11px]">
-                                                        <span className="text-gray-400 font-medium flex items-center gap-1">
-                                                            <CalendarIcon className="w-2.5 h-2.5" /> Inicio
-                                                        </span>
-                                                        <span className="font-bold text-gray-800 tabular-nums">
-                                                            {formatDate(task.startDate)} · {task.startTime}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center justify-between text-[11px]">
-                                                        <span className="text-gray-400 font-medium flex items-center gap-1">
-                                                            <CalendarIcon className="w-2.5 h-2.5" /> Fin
-                                                        </span>
-                                                        <span className="font-bold text-gray-800 tabular-nums">
-                                                            {task.endDate !== task.startDate ? `${formatDate(task.endDate)} · ` : ""}{task.endTime}
-                                                        </span>
-                                                    </div>
+                                                    {!task.isUnplanned && (
+                                                        <>
+                                                            <div className="flex items-center justify-between text-[11px]">
+                                                                <span className="text-gray-400 font-medium flex items-center gap-1">
+                                                                    <CalendarIcon className="w-2.5 h-2.5" /> Inicio
+                                                                </span>
+                                                                <span className="font-bold text-gray-800 tabular-nums">
+                                                                    {formatDate(task.startDate)} · {task.startTime}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center justify-between text-[11px]">
+                                                                <span className="text-gray-400 font-medium flex items-center gap-1">
+                                                                    <CalendarIcon className="w-2.5 h-2.5" /> Fin
+                                                                </span>
+                                                                <span className="font-bold text-gray-800 tabular-nums">
+                                                                    {task.endDate !== task.startDate ? `${formatDate(task.endDate)} · ` : ""}{task.endTime}
+                                                                </span>
+                                                            </div>
+                                                        </>
+                                                    )}
                                                     {taskDuration > 0 && (
-                                                        <div className="flex items-center justify-center gap-1 text-[10px] text-gray-500 pt-1.5 mt-1.5 border-t border-dashed border-gray-200">
+                                                        <div className={cn(
+                                                            "flex items-center justify-center gap-1 text-[10px] text-gray-500",
+                                                            !task.isUnplanned && "pt-1.5 mt-1.5 border-t border-dashed border-gray-200"
+                                                        )}>
                                                             <Clock className="w-2.5 h-2.5" />
                                                             <span className="font-semibold tabular-nums">{formatDuration(taskDuration)}</span>
                                                             <span className="text-gray-400">estimados</span>

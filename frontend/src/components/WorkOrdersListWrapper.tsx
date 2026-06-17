@@ -45,12 +45,60 @@ export default function WorkOrdersListWrapper({
     // sin tener que esperar el round-trip al backend. Se re-sincroniza desde props
     // cuando el padre vuelve a fetchear.
     const [rawPlanificacion, setRawPlanificacion] = useState<PlanificacionItem[]>(planificacion);
-    const [tasks, setTasks] = useState<GanttTask[]>(() => convertPlanificacionToGanttTasks(planificacion));
+
+    // Mezcla tasks "reales" (con entrada en planificacion) + placeholders para procesos
+    // de OTs planificadas que están en orden_trabajo_proceso pero no tienen planificación
+    // todavía (típicamente, procesos agregados a mano después de planificar la OT).
+    const buildTasks = (plan: PlanificacionItem[], ords: WorkOrder[]): GanttTask[] => {
+        const planned = convertPlanificacionToGanttTasks(plan);
+        const plannedOrderIds = new Set(plan.map(p => p.orden_id));
+        const unplanned: GanttTask[] = [];
+        for (const order of ords) {
+            if (!plannedOrderIds.has(order.id) || !order.procesos) continue;
+            const plannedProcessIds = new Set(
+                plan.filter(p => p.orden_id === order.id).map(p => p.proceso_id)
+            );
+            for (const proc of order.procesos) {
+                if (plannedProcessIds.has(proc.proceso.id)) continue;
+                unplanned.push({
+                    id: `unplanned-${order.id}-${proc.proceso.id}`,
+                    workOrderId: order.id,
+                    workOrderNumber: order.id_otvieja?.toString() || order.id.toString(),
+                    resourceId: 'unassigned',
+                    resourceName: proc.operario_nombre || 'Sin Asignar',
+                    resourceType: 'operario',
+                    process: proc.proceso?.nombre || '',
+                    startDate: '',
+                    endDate: '',
+                    startTime: '',
+                    endTime: '',
+                    duration: (proc.tiempo_proceso || 0) / 60,
+                    priority: 'normal',
+                    status: (proc.estado_proceso?.id === 3 ? 'finalizado_total' :
+                             proc.estado_proceso?.id === 2 ? 'en_proceso' : 'nuevo') as any,
+                    progress: proc.estado_proceso?.id === 3 ? 100 :
+                              proc.estado_proceso?.id === 2 ? 50 : 0,
+                    client: order.cliente?.nombre,
+                    isDelayed: false,
+                    orden: proc.orden,
+                    procesoId: proc.proceso?.id,
+                    isUnplanned: true,
+                    notes: order.observaciones || order.detalle || '',
+                    quantity: order.unidades,
+                    cantidad_entregada: order.cantidad_entregada,
+                });
+            }
+        }
+        return [...planned, ...unplanned];
+    };
+
+    const [tasks, setTasks] = useState<GanttTask[]>(() => buildTasks(planificacion, orders));
 
     useEffect(() => {
         setRawPlanificacion(planificacion);
-        setTasks(convertPlanificacionToGanttTasks(planificacion));
-    }, [planificacion]);
+        setTasks(buildTasks(planificacion, orders));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [planificacion, orders]);
 
     const [selectedTask, setSelectedTask] = useState<PlanificacionItem | null>(null);
     const [isDetailsPanelOpen, setIsDetailsPanelOpen] = useState(false);
@@ -96,6 +144,49 @@ export default function WorkOrdersListWrapper({
         if (originalItem) {
             setSelectedTask(originalItem);
             setIsDetailsPanelOpen(true);
+        }
+    };
+
+    // Confirmación de delete
+    const [taskToDelete, setTaskToDelete] = useState<GanttTask | null>(null);
+
+    const handleRequestDeleteTask = (task: GanttTask) => {
+        setTaskToDelete(task);
+    };
+
+    const confirmDeleteTask = async () => {
+        if (!taskToDelete || taskToDelete.procesoId === undefined) {
+            setTaskToDelete(null);
+            return;
+        }
+        const ordenId = taskToDelete.workOrderId;
+        const procesoId = taskToDelete.procesoId;
+        const taskId = taskToDelete.id;
+        const planId = taskToDelete.dbId;
+        // Optimistic: saco de tasks y de rawPlanificacion.
+        setTasks(prev => prev.filter(t => t.id !== taskId));
+        if (planId !== undefined) {
+            setRawPlanificacion(prev => prev.filter(p => p.id !== planId));
+        }
+        setTaskToDelete(null);
+        try {
+            const res = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/${procesoId}`, {
+                method: "DELETE",
+                headers: getAuthHeaders(),
+            });
+            if (!res.ok) {
+                let errMsg = "Error al eliminar el proceso";
+                try {
+                    const body = await res.json();
+                    errMsg = body?.errors?.[0]?.message || errMsg;
+                } catch {}
+                throw new Error(errMsg);
+            }
+            toast.success("Proceso eliminado");
+        } catch (error: any) {
+            console.error("Error deleting process:", error);
+            toast.error(error?.message || "Error al eliminar el proceso");
+            onRefresh?.();
         }
     };
 
@@ -185,28 +276,23 @@ export default function WorkOrdersListWrapper({
     };
 
     const handleProcessReorder = async (ordenId: number, orderedTasks: GanttTask[]) => {
-        // Cada task queda con orden = idx + 1.
-        const updates = orderedTasks
-            .filter(t => t.dbId !== undefined)
-            .map((t, idx) => ({ dbId: t.dbId!, newOrden: idx + 1 }));
+        // Construyo el payload usando procesoId directo (sirve para planificados y no planificados).
+        const ordenes = orderedTasks
+            .map((t, idx) => t.procesoId !== undefined ? { id_proceso: t.procesoId, orden: idx + 1 } : null)
+            .filter((x): x is { id_proceso: number; orden: number } => x !== null);
 
-        // Optimistic: actualizo orden en los tasks visibles y en rawPlanificacion (secuencia).
+        // Optimistic: actualizo orden en tasks (por procesoId) y secuencia en rawPlanificacion.
+        const ordenByProcId = new Map(ordenes.map(o => [o.id_proceso, o.orden]));
         setTasks(prev => prev.map(t => {
-            const u = updates.find(x => x.dbId === t.dbId);
-            return u ? { ...t, orden: u.newOrden } : t;
+            if (t.workOrderId !== ordenId || t.procesoId === undefined) return t;
+            const newOrden = ordenByProcId.get(t.procesoId);
+            return newOrden !== undefined ? { ...t, orden: newOrden } : t;
         }));
         setRawPlanificacion(prev => prev.map(p => {
-            const u = updates.find(x => x.dbId === p.id);
-            return u ? { ...p, secuencia: u.newOrden } : p;
+            if (p.orden_id !== ordenId) return p;
+            const newOrden = ordenByProcId.get(p.proceso_id);
+            return newOrden !== undefined ? { ...p, secuencia: newOrden } : p;
         }));
-
-        // Construyo el payload con id_proceso (no el id de planificación).
-        const ordenes = orderedTasks
-            .map((t, idx) => {
-                const planItem = rawPlanificacion.find(p => p.id === t.dbId);
-                return planItem ? { id_proceso: planItem.proceso_id, orden: idx + 1 } : null;
-            })
-            .filter((x): x is { id_proceso: number; orden: number } => x !== null);
 
         try {
             const res = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/reorder`, {
@@ -325,6 +411,7 @@ export default function WorkOrdersListWrapper({
                         onTaskClick={handleTaskClick}
                         onBulkStatusChange={handleBulkStatusChange}
                         onProcessReorder={handleProcessReorder}
+                        onTaskDelete={handleRequestDeleteTask}
                         onDataRefresh={onRefresh}
                     />
                 </TabsContent>
@@ -377,6 +464,20 @@ export default function WorkOrdersListWrapper({
                 onConfirm={confirmDelete}
                 title="Eliminar Orden de Trabajo"
                 description="¿Estás seguro de que deseas eliminar esta orden? Esta acción eliminará permanentemente la orden, sus procesos, archivos y planificaciones asociadas. Esta acción no se puede deshacer."
+                confirmText="Eliminar"
+                cancelText="Cancelar"
+                variant="destructive"
+            />
+            <ConfirmationDialog
+                isOpen={!!taskToDelete}
+                onClose={() => setTaskToDelete(null)}
+                onConfirm={confirmDeleteTask}
+                title="Eliminar proceso"
+                description={
+                    taskToDelete
+                        ? `¿Eliminar "${taskToDelete.process}" de la OT? Si tenía planificación, también se borrará. Esta acción no se puede deshacer.`
+                        : ""
+                }
                 confirmText="Eliminar"
                 cancelText="Cancelar"
                 variant="destructive"

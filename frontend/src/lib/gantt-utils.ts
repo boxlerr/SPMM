@@ -190,6 +190,7 @@ export function convertPlanificacionToGanttTasks(
       machineId: item.id_maquinaria,
       machineName: item.nombre_maquinaria,
       orden: item.secuencia,
+      procesoId: item.proceso_id,
     };
 
     return task;
