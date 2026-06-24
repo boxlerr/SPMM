@@ -212,6 +212,51 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
     }
   };
 
+  const handleNativeSkillToggle = async (id_proceso: number, currentState: boolean) => {
+    if (updatingSkills.has(id_proceso)) return;
+
+    setUpdatingSkills(prev => new Set(prev).add(id_proceso));
+    const newHabilitado = !currentState;
+
+    // Optimistic Update
+    const skillList = operario.skills || [];
+    const skillToUpdate = skillList.find(x => x.id_proceso === id_proceso && x.nivel === 0);
+    if (skillToUpdate) {
+      skillToUpdate.habilitado = newHabilitado;
+      setRenderTrigger(r => r + 1);
+    }
+
+    try {
+      const cleanUrl = API_URL.replace(/\/$/, "");
+      const response = await fetch(`${cleanUrl}/operarios/${operario.id}/skills-nativas/${id_proceso}/estado`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        body: JSON.stringify({ habilitado: newHabilitado }),
+      });
+
+      if (response.ok) {
+        showToast(`Habilidad nativa ${newHabilitado ? 'activada' : 'desactivada'}`, 'success');
+        onOperatorUpdated?.();
+      } else {
+        // Revert
+        if (skillToUpdate) skillToUpdate.habilitado = currentState;
+        setRenderTrigger(r => r + 1);
+        showToast("Error al actualizar la habilidad nativa (Error del servidor)", 'error');
+      }
+    } catch (error) {
+      // Revert
+      if (skillToUpdate) skillToUpdate.habilitado = currentState;
+      setRenderTrigger(r => r + 1);
+      showToast("Error de conexión al actualizar la habilidad nativa", 'error');
+    } finally {
+      setUpdatingSkills(prev => {
+        const next = new Set(prev);
+        next.delete(id_proceso);
+        return next;
+      });
+    }
+  };
+
   const handleDeleteSkill = async (id_proceso: number) => {
     if (!confirm("¿Seguro que deseas eliminar esta habilidad?")) return;
 
@@ -497,11 +542,19 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             {(operario.skills || []).filter(s => s.nivel === 0).map(skill => (
                               <div key={skill.id_proceso} className="flex justify-between items-center py-1.5 gap-2">
                                 <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
-                                  <span className="font-medium text-gray-900 text-sm truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
+                                  <span className={`font-medium text-sm truncate flex-1 ${skill.habilitado ? 'text-gray-900' : 'text-gray-400 line-through'}`} title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
                                     {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
                                   </span>
+                                  <span className="text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">Nativa</span>
                                 </div>
-                                <span className="text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">Nativa</span>
+                                <button
+                                  disabled={updatingSkills.has(skill.id_proceso)}
+                                  onClick={() => handleNativeSkillToggle(skill.id_proceso, skill.habilitado)}
+                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                  title={skill.habilitado ? "Desactivar habilidad nativa" : "Activar habilidad nativa"}
+                                >
+                                  <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
+                                </button>
                               </div>
                             ))}
                           </div>

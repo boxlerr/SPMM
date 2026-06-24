@@ -259,6 +259,7 @@ def _crear_variables_y_dominios(
     maquinarias,
     RANGOS_BÁSICOS,
     RANGOS_ESPECIALIZADOS,
+    nativas_off=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -269,6 +270,8 @@ def _crear_variables_y_dominios(
     operario_vars, maq_vars = {}, {}
     presente_vars = {}
     dur_map = {}
+
+    nativas_off = nativas_off or {}
 
     op_to_rango = {op_id: r_id for (op_id, r_id) in operarios}
     REAL_OP_IDS = [op_id for (op_id, _) in operarios]
@@ -304,21 +307,28 @@ def _crear_variables_y_dominios(
 
         # ----------------- Operarios válidos -----------------
         if op_skill_levels:
-            # Lógica de Skills primero
+            # Lógica de Skills primero (modo skill-map): solo los operarios con skill
+            # explícita nivel 1/2. Las nativas no aplican acá (ya están excluidas).
             operarios_validos = list(op_skill_levels.keys())
-        elif not rangos_proc:
-            operarios_validos = REAL_OP_IDS[:]
         else:
-            requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
-            requiere_especial  = any(r in RANGOS_ESPECIALIZADOS for r in rangos_proc)
-
-            if requiere_especial:
-                objetivo = set(rangos_proc) & RANGOS_ESPECIALIZADOS
-                operarios_validos = [op_id for (op_id, rango) in operarios if rango in objetivo]
-            elif requiere_basicos:
+            if not rangos_proc:
                 operarios_validos = REAL_OP_IDS[:]
             else:
-                operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
+                requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
+                requiere_especial  = any(r in RANGOS_ESPECIALIZADOS for r in rangos_proc)
+
+                if requiere_especial:
+                    objetivo = set(rangos_proc) & RANGOS_ESPECIALIZADOS
+                    operarios_validos = [op_id for (op_id, rango) in operarios if rango in objetivo]
+                elif requiere_basicos:
+                    operarios_validos = REAL_OP_IDS[:]
+                else:
+                    operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
+
+            # Camino rango: restar las nativas desactivadas explícitamente para este proceso.
+            excluidos = nativas_off.get(proc_id)
+            if excluidos:
+                operarios_validos = [op_id for op_id in operarios_validos if op_id not in excluidos]
 
         if not operarios_validos:
             logger.warning(f"Proceso {proc_id} sin operarios válidos; usando dummy")
@@ -1039,7 +1049,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None):
     model = cp_model.CpModel()
 
     # Init Config
@@ -1135,6 +1145,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         maquinarias,
         RANGOS_BÁSICOS,
         RANGOS_ESPECIALIZADOS,
+        nativas_off,
     )
 
     # ---- Restricciones ----
@@ -1344,6 +1355,8 @@ async def planificar(
 
     # 🔹 Cargar mapa de skills (proceso_id -> {operario_id: nivel})
     mapa_skills = await repo_skill.get_map_por_proceso()
+    # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir en el camino rango
+    nativas_off = await repo_skill.get_nativas_deshabilitadas()
 
     # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
     if not preview and plan:
@@ -1457,6 +1470,7 @@ async def planificar(
         maquinarias,
         fecha_desde,
         effective_fecha_hasta,
+        nativas_off,
     )
 
     planificados, excedentes = _split_resultados(resultados)
@@ -1488,6 +1502,7 @@ async def planificar_pendientes(
             repo_skill = OperarioProcesoSkillRepository(db)
         
         mapa_skills = await repo_skill.get_map_por_proceso()
+        nativas_off = await repo_skill.get_nativas_deshabilitadas()
 
         # 🔹 SOLO órdenes con procesos pendientes
         ordenes = await repo_orden.find_with_pending_procesos(ordenes_ids)
@@ -1546,6 +1561,7 @@ async def planificar_pendientes(
             maquinarias,
             fecha_desde,
             fecha_hasta,
+            nativas_off,
         )
 
         planificados, excedentes = _split_resultados(resultados)

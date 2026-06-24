@@ -99,6 +99,15 @@ async def actualizar_estado_skill(id: int, id_proceso: int, dto: ProcesoSkillUpd
     except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 🔹 PUT /operarios/{id}/skills-nativas/{id_proceso}/estado
+@router.put("/operarios/{id}/skills-nativas/{id_proceso}/estado")
+async def actualizar_estado_skill_nativa(id: int, id_proceso: int, dto: ProcesoSkillUpdateDTO, db=Depends(get_db)):
+    try:
+        service = OperarioService(db)
+        return await service.actualizarEstadoSkillNativa(id, id_proceso, dto.habilitado)
+    except InfrastructureException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # 🔹 POST /operarios/{id}/skills
 @router.post("/operarios/{id}/skills")
 async def agregar_skill(id: int, dto: ProcesoSkillDTO, db=Depends(get_db)):
