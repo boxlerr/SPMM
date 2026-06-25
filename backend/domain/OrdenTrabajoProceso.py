@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey, PrimaryKeyConstraint, String, DateTime, DateTime
+from sqlalchemy import Column, Integer, ForeignKey, PrimaryKeyConstraint, String, DateTime
 from sqlalchemy.orm import relationship
 from backend.infrastructure.db import Base
 
@@ -12,10 +12,10 @@ class OrdenTrabajoProceso(Base):
     id_estado = Column(Integer, ForeignKey("estado_proceso.id"), default=1)
     observaciones = Column(String, nullable=True)
 
-    # New fields for real time tracking
-    inicio_real = Column(DateTime, nullable=True)
-    fin_real = Column(DateTime, nullable=True)
-    
+    # Cantidad de operarios que el proceso requiere en simultáneo (default 1).
+    # La columna ya existe en la base (cant_operarios, NOT NULL default 1).
+    cant_operarios = Column(Integer, nullable=False, default=1)
+
     # New fields for real time tracking
     inicio_real = Column(DateTime, nullable=True)
     fin_real = Column(DateTime, nullable=True)

@@ -38,6 +38,7 @@ class OrdenTrabajoProcesoDTO(BaseModel):
     # Flattened or selected fields to avoid circular recursion to OrdenTrabajo
     orden: Optional[int] = None # Assuming 'orden' means execution order, not the work order ID
     tiempo_proceso: Optional[int] = None
+    cant_operarios: Optional[int] = None  # Operarios que requiere el proceso en simultáneo
     observaciones: Optional[str] = None
     
     # Nested objects

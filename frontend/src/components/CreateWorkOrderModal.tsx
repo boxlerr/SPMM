@@ -46,6 +46,7 @@ interface ProcessItem {
     id: string; // Temporary ID for UI
     proceso_id: string;
     tiempo_proceso: string;
+    cant_operarios: string; // Operarios que requiere el proceso en simultáneo
 }
 
 interface Articulo {
@@ -218,6 +219,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         id: Math.random().toString(36).substr(2, 9), // Temp UI ID
                         proceso_id: p.proceso.id.toString(),
                         tiempo_proceso: p.tiempo_proceso ? p.tiempo_proceso.toString() : "",
+                        cant_operarios: p.cant_operarios ? p.cant_operarios.toString() : "1",
                     }));
                     setProcesses(mappedProcesses);
                 } else {
@@ -355,6 +357,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             id: Math.random().toString(36).substr(2, 9),
             proceso_id: "",
             tiempo_proceso: "",
+            cant_operarios: "1",
         };
         setProcesses([...processes, newProcess]);
     };
@@ -483,6 +486,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             procesos: processes.map(p => ({
                 proceso_id: parseInt(p.proceso_id),
                 tiempo_proceso: parseInt(p.tiempo_proceso) || 0,
+                cant_operarios: parseInt(p.cant_operarios) || 1,
             }))
         };
 
@@ -1169,7 +1173,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                             )}
                                                         </div>
 
-                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                                             <div className="space-y-1.5 md:col-span-1">
                                                                 <Label className="text-xs font-medium text-gray-500">Tipo de Proceso *</Label>
                                                                 <SearchableSelect
@@ -1189,6 +1193,18 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                                                     value={process.tiempo_proceso}
                                                                     onChange={(e) => handleProcessChange(process.id, "tiempo_proceso", e.target.value)}
                                                                     min={0}
+                                                                    className="h-9 bg-white border-gray-200"
+                                                                />
+                                                            </div>
+                                                            <div className="space-y-1.5 md:col-span-1">
+                                                                <Label className="text-xs font-medium text-gray-500">Operarios necesarios</Label>
+                                                                <Input
+                                                                    type="number"
+                                                                    disabled={isLegacyOT}
+                                                                    placeholder="1"
+                                                                    value={process.cant_operarios}
+                                                                    onChange={(e) => handleProcessChange(process.id, "cant_operarios", e.target.value)}
+                                                                    min={1}
                                                                     className="h-9 bg-white border-gray-200"
                                                                 />
                                                             </div>

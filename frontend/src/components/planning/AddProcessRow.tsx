@@ -19,7 +19,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
     const [procesos, setProcesos] = React.useState<any[]>([]);
 
     // List of editable items
-    const [editableItems, setEditableItems] = React.useState<{ id: string, procesoId: string, tiempo: string }[]>([]);
+    const [editableItems, setEditableItems] = React.useState<{ id: string, procesoId: string, tiempo: string, cantOperarios: string }[]>([]);
 
     const fetchProcesos = async () => {
         try {
@@ -36,10 +36,10 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
     };
 
     const handleAddEmptyRow = () => {
-        setEditableItems(prev => [...prev, { id: Math.random().toString(), procesoId: "", tiempo: "" }]);
+        setEditableItems(prev => [...prev, { id: Math.random().toString(), procesoId: "", tiempo: "", cantOperarios: "1" }]);
     };
 
-    const handleUpdateItem = (id: string, field: 'procesoId' | 'tiempo', value: string) => {
+    const handleUpdateItem = (id: string, field: 'procesoId' | 'tiempo' | 'cantOperarios', value: string) => {
         setEditableItems(prev => prev.map(item =>
             item.id === id ? { ...item, [field]: value } : item
         ));
@@ -67,6 +67,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                     body: JSON.stringify({
                         id_proceso: parseInt(item.procesoId),
                         tiempo_estimado: parseInt(item.tiempo) || 0,
+                        cant_operarios: parseInt(item.cantOperarios) || 1,
                     })
                 });
                 if (!res.ok) {
@@ -108,7 +109,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                     setIsAdding(true);
                     fetchProcesos();
                     // Start with one empty row
-                    setEditableItems([{ id: Math.random().toString(), procesoId: "", tiempo: "" }]);
+                    setEditableItems([{ id: Math.random().toString(), procesoId: "", tiempo: "", cantOperarios: "1" }]);
                 }}
                 className={cn(
                     "flex items-center gap-2 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors w-full px-4 py-2 hover:bg-gray-100",
@@ -174,7 +175,21 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                         </div>
                     </div>
 
-                    {variant === 'table' && <><div></div><div></div></>}
+                    {/* Operarios necesarios */}
+                    <div className={cn("flex flex-col gap-1", variant === 'card' ? "w-full" : "")}>
+                        {variant === 'card' && <span className="text-[10px] uppercase font-bold text-gray-400">Operarios necesarios</span>}
+                        <Input
+                            type="number"
+                            min={1}
+                            className={cn("h-8 text-xs bg-white", variant === 'card' ? "w-full" : "text-center")}
+                            value={item.cantOperarios}
+                            onChange={e => handleUpdateItem(item.id, 'cantOperarios', e.target.value)}
+                            placeholder="1"
+                            title="Operarios que requiere el proceso en simultáneo"
+                        />
+                    </div>
+
+                    {variant === 'table' && <div></div>}
 
                     <div className={cn("flex items-center", variant === 'card' ? "justify-end mt-1" : "")}>
                         {variant === 'card' ? (

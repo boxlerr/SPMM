@@ -14,6 +14,7 @@ from backend.domain.Operario import Operario
 from backend.domain.OperarioRango import OperarioRango
 from backend.domain.Planificacion import Planificacion
 from backend.domain.Plano import Plano
+from backend.domain.IncidenciaProceso import IncidenciaProceso
 from backend.domain.Prioridad import Prioridad
 from backend.domain.Sector import Sector
 from backend.domain.Usuario import Usuario

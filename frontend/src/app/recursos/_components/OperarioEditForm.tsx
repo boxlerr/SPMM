@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Operario } from "../_types";
+import { Operario, SECTORES_OPERARIO } from "../_types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { capitalizeName } from "@/lib/utils";
@@ -44,6 +45,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         dias_trabajo: "MON,TUE,WED,THU,FRI",
         min_desayuno: 15,
         min_almuerzo: 30,
+        interpreta_planos: false,
     });
 
     const [sectores, setSectores] = useState<string[]>([]);
@@ -71,6 +73,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 dias_trabajo: (data as any)?.dias_trabajo || "MON,TUE,WED,THU,FRI",
                 min_desayuno: (data as any)?.min_desayuno ?? 15,
                 min_almuerzo: (data as any)?.min_almuerzo ?? 30,
+                interpreta_planos: (data as any)?.interpreta_planos ?? false,
             });
             setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
             setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
@@ -91,6 +94,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 dias_trabajo: "MON,TUE,WED,THU,FRI",
                 min_desayuno: 15,
                 min_almuerzo: 30,
+                interpreta_planos: false,
             });
             setPrimarySkills([]);
             setSecondarySkills([]);
@@ -99,23 +103,14 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
     useEffect(() => {
         const loadOptions = async () => {
-            try {
-                const sectRes = await fetch(`${cleanUrl}/sectores`, { headers: getAuthHeaders() });
-                if (sectRes.ok) {
-                    const payload = await sectRes.json();
-                    const listData = Array.isArray(payload) ? payload : (payload?.data || []);
-                    const lista = listData.map((s: any) => s.nombre || s).filter(Boolean);
-
-                    if (data?.sector) {
-                        lista.push(data.sector);
-                    }
-
-                    setSectores(Array.from(new Set(lista)));
-                }
-            } catch (error) {
-                console.error("Error al obtener sectores:", error);
-                if (data?.sector) setSectores([data.sector]);
+            // Sectores de operario: lista fija de Met Long (ver SECTORES_OPERARIO en _types).
+            // Conservamos el sector actual del operario aunque no esté en la lista canónica,
+            // para no perder valores legacy al editar (p. ej. sectores viejos del cliente).
+            const lista: string[] = [...SECTORES_OPERARIO];
+            if (data?.sector) {
+                lista.push(data.sector);
             }
+            setSectores(Array.from(new Set(lista)));
 
             try {
                 const rangRes = await fetch(`${cleanUrl}/rangos`, { headers: getAuthHeaders() });
@@ -215,6 +210,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 ((data as any).dias_trabajo || "MON,TUE,WED,THU,FRI") !== (payload.dias_trabajo || "MON,TUE,WED,THU,FRI") ||
                 (((data as any).min_desayuno ?? 15)) !== (payload.min_desayuno ?? 15) ||
                 (((data as any).min_almuerzo ?? 30)) !== (payload.min_almuerzo ?? 30) ||
+                (((data as any).interpreta_planos ?? false)) !== (payload.interpreta_planos ?? false) ||
                 JSON.stringify(data.skills?.filter(s => s.nivel === 1 || s.nivel === 2).map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
@@ -528,6 +524,14 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     </div>
 
                     <p className="text-xs text-muted-foreground mb-3">Las SKILLS NATIVAS se derivan automáticamente del rango asignado al operario.</p>
+                    <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2 cursor-pointer w-fit mb-3">
+                        <Checkbox
+                            checked={formData.interpreta_planos}
+                            onCheckedChange={(v) => setFormData({ ...formData, interpreta_planos: v === true })}
+                        />
+                        <span className="text-sm font-medium text-gray-700">Interpretación de planos</span>
+                        <span className="text-xs text-muted-foreground">(sabe leer planos)</span>
+                    </label>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <div>

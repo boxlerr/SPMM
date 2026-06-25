@@ -15,6 +15,7 @@ from backend.presentation.AuthAPI import router as auth_router
 from backend.presentation.NotificacionAPI import router as notificacion_router
 from backend.presentation.DashboardAPI import router as dashboard_router
 from backend.presentation.PlanoAPI import router as plano_router
+from backend.presentation.IncidenciaProcesoAPI import router as incidencia_router
 from backend.presentation.ClienteAPI import router as cliente_router
 
 
@@ -97,6 +98,7 @@ app.include_router(maquinaria_router,tags=["maquinarias"], dependencies=protecte
 app.include_router(notificacion_router, tags=["notificaciones"], dependencies=protected_deps)
 app.include_router(dashboard_router, tags=["dashboard"], dependencies=protected_deps)
 app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
+app.include_router(incidencia_router, tags=["incidencias"], dependencies=protected_deps)
 app.include_router(ws_router, tags=["websocket"])
 
 app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)

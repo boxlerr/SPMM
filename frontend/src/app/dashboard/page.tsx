@@ -8,6 +8,7 @@ import TimelineEntregas from "@/components/dashboard/TimelineEntregas"
 import DistribucionPrioridades from "@/components/dashboard/DistribucionPrioridades"
 import TopClients from "@/components/dashboard/TopClients"
 import TopArticles from "@/components/dashboard/TopArticles"
+import IncidenciasPlanos from "@/components/dashboard/IncidenciasPlanos"
 
 
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
@@ -99,6 +100,9 @@ export default function DashboardPage() {
 
         {/* 2. Ordenes Críticas */}
         <OrdenesCriticas ordenes={ordenesCriticas} loading={loadingCriticas} />
+
+        {/* Interpretación de planos: incidencias y tiempo perdido */}
+        <IncidenciasPlanos />
 
         {/* 3. Timeline de entregas */}
         <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />

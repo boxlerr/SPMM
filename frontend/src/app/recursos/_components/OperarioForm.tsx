@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Operario } from "../_types";
+import { Operario, SECTORES_OPERARIO } from "../_types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { capitalizeName } from "@/lib/utils"
@@ -42,9 +43,10 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     email: "",
     hora_inicio: "07:00",
     hora_fin: "16:00",
+    interpreta_planos: false,
   });
 
-  const [sectores, setSectores] = useState<string[]>([]);
+  const [sectores, setSectores] = useState<string[]>([...SECTORES_OPERARIO]);
   const [categorias, setCategorias] = useState<string[]>([]);
   const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
   const [primarySkills, setPrimarySkills] = useState<string[]>([]);
@@ -52,6 +54,9 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    // Conservar el sector actual aunque no esté en la lista canónica de Met Long
+    // (evita perder valores legacy al editar un operario con un sector viejo).
+    setSectores(Array.from(new Set([...SECTORES_OPERARIO, ...(data?.sector ? [data.sector] : [])])));
     if (data) {
       setFormData({
         nombre: data.nombre || "",
@@ -66,6 +71,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         email: (data as any)?.email || "",
         hora_inicio: (data as any)?.hora_inicio || "07:00",
         hora_fin: (data as any)?.hora_fin || "16:00",
+        interpreta_planos: (data as any)?.interpreta_planos ?? false,
       });
       setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
       setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
@@ -83,34 +89,17 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         email: "",
         hora_inicio: "09:00",
         hora_fin: "18:00",
+        interpreta_planos: false,
       });
       setPrimarySkills([]);
       setSecondarySkills([]);
     }
   }, [data, open]);
 
-  // Cargar sectores desde el backend y categorías desde operarios existentes
+  // Sectores de operario: lista fija de Met Long (ver SECTORES_OPERARIO en _types).
+  // Las categorías (rangos) sí se cargan desde el backend.
   useEffect(() => {
     const loadOptions = async () => {
-      // Cargar sectores
-      try {
-        const sectRes = await fetch(`${cleanUrl}/sectores`, { headers: getAuthHeaders() });
-        if (sectRes.ok) {
-          const payload = await sectRes.json();
-          // El backend retorna ResponseDTO: {status: true, data: [...]}
-          const data = payload?.data || [];
-          const lista = Array.isArray(data)
-            ? data.map((s: any) => s.nombre || s).filter(Boolean)
-            : [];
-          setSectores(Array.from(new Set(lista)));
-          console.log("Sectores cargados:", lista);
-        } else {
-          console.error("Error al cargar sectores:", sectRes.status, sectRes.statusText);
-        }
-      } catch (error) {
-        console.error("Error al obtener sectores:", error);
-      }
-
       // Cargar categorías (rangos) desde el catálogo de Rangos
       try {
         const rangRes = await fetch(`${cleanUrl}/rangos`, { headers: getAuthHeaders() });
@@ -362,6 +351,14 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Habilidades del Operario</h3>
             <p className="text-xs text-muted-foreground">Las SKILLS NATIVAS se derivan automáticamente del rango del operario.</p>
+            <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2 cursor-pointer w-fit">
+              <Checkbox
+                checked={formData.interpreta_planos}
+                onCheckedChange={(v) => setFormData({ ...formData, interpreta_planos: v === true })}
+              />
+              <span className="text-sm font-medium">Interpretación de planos</span>
+              <span className="text-xs text-muted-foreground">(sabe leer planos)</span>
+            </label>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">

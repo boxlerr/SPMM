@@ -113,6 +113,7 @@ export interface WorkOrder {
     procesos: {
         orden: number;
         tiempo_proceso: number;
+        cant_operarios?: number;
         observaciones?: string;
         proceso: {
             id: number;

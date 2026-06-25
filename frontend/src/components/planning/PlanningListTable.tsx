@@ -3,6 +3,7 @@
 import React from "react";
 import { WorkOrder, PlanificacionItem } from "@/lib/types";
 import { AddProcessRow } from "@/components/planning/AddProcessRow";
+import { RegistrarIncidenciaModal } from "@/components/planning/RegistrarIncidenciaModal";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
@@ -19,7 +20,9 @@ import {
     AlertCircle,
     AlertTriangle,
     Check,
-    CheckCircle2
+    CheckCircle2,
+    Users,
+    FileWarning
 } from "lucide-react";
 import { toast } from "sonner";
 import { OrderFiles } from "@/components/common/OrderFiles";
@@ -350,6 +353,7 @@ function _PlanningListTable({
     const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: string, value: string, originalValue: string } | null>(null);
     const [editingStartDate, setEditingStartDate] = React.useState<{ orderId: number, processId: number, planId: number, value: string } | null>(null);
     const [deliveryOrder, setDeliveryOrder] = React.useState<{ id: number, total: number, delivered: number } | null>(null);
+    const [incidencia, setIncidencia] = React.useState<{ orderId: number, procesoId: number, procesoNombre: string, operarioId: number | null, operarioNombre: string } | null>(null);
 
     const handleTextClick = (orderId: number, field: string, currentValue: string | undefined | number) => {
         const val = currentValue?.toString() || "";
@@ -549,7 +553,32 @@ function _PlanningListTable({
                                         {/* Proceso */}
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Proceso</span>
-                                            <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                                {proc.cant_operarios && proc.cant_operarios > 1 && (
+                                                    <span
+                                                        className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full"
+                                                        title={`Requiere ${proc.cant_operarios} operarios en simultáneo`}
+                                                    >
+                                                        <Users className="w-3 h-3" />
+                                                        {proc.cant_operarios}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIncidencia({
+                                                        orderId: item.id,
+                                                        procesoId: proc.proceso.id,
+                                                        procesoNombre: proc.proceso?.nombre || "",
+                                                        operarioId: plannedItem?.id_operario ?? null,
+                                                        operarioNombre: proc.operario_nombre || "",
+                                                    })}
+                                                    title="Registrar incidencia de plano (tiempo perdido)"
+                                                    className="shrink-0 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded p-0.5 transition-colors"
+                                                >
+                                                    <FileWarning className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* Inicio Estimado */}
@@ -1248,6 +1277,18 @@ function _PlanningListTable({
                     className={`pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
                 />
             </Card >
+
+            {incidencia && (
+                <RegistrarIncidenciaModal
+                    open={!!incidencia}
+                    onClose={() => setIncidencia(null)}
+                    orderId={incidencia.orderId}
+                    procesoId={incidencia.procesoId}
+                    procesoNombre={incidencia.procesoNombre}
+                    operarioId={incidencia.operarioId}
+                    operarioNombre={incidencia.operarioNombre}
+                />
+            )}
         </div >
     );
 }

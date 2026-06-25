@@ -760,16 +760,19 @@ class OrdenTrabajoRepository:
                 if not pid: continue
                 
                 incoming_ids.add(pid)
-                
+
                 # Update fields based on new DTO structure (no dates, just minutes)
                 minutes = item.get('tiempo_proceso')
-                
+                cant_ops = item.get('cant_operarios')
+
                 if pid in current_map:
                     # UPDATE existing
                     existing_proc = current_map[pid]
                     existing_proc.orden = index + 1
                     if minutes is not None:
                         existing_proc.tiempo_proceso = minutes
+                    if cant_ops is not None:
+                        existing_proc.cant_operarios = cant_ops
                 else:
                     # CREATE new
                     new_proc = OrdenTrabajoProceso(
@@ -777,7 +780,8 @@ class OrdenTrabajoRepository:
                         id_proceso=pid,
                         orden=index + 1,
                         id_estado=1, # Default Nuevo
-                        tiempo_proceso=minutes or 0
+                        tiempo_proceso=minutes or 0,
+                        cant_operarios=cant_ops or 1
                     )
                     self.db.add(new_proc)
             
@@ -864,7 +868,7 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en eliminarProceso: {e}")
             raise InfrastructureException("Error al eliminar proceso de la orden.") from e
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1):
         try:
             logger.info(f"Repository - Agregar proceso {id_proceso} a Orden {id_orden}")
 
@@ -882,6 +886,7 @@ class OrdenTrabajoRepository:
                 id_proceso=id_proceso,
                 orden=orden,
                 tiempo_proceso=tiempo_estimado,
+                cant_operarios=cant_operarios or 1,
                 id_estado=1  # Default: Pendiente
             )
             

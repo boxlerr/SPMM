@@ -94,12 +94,8 @@ class OrdenTrabajoService:
                     id_orden_trabajo=orden_creada.id,
                     id_proceso=proc_dto.proceso_id,
                     orden=index + 1,
-                    # Por ahora no guardamos fechas/operarios en esta tabla intermedia si no tiene columnas
-                    # Pero el frontend manda fechas. ¿Dónde van? 
-                    # Si 'OrdenTrabajoProceso' es solo definición, ok. 
-                    # Si queremos guardar fechas, deberíamos crear Planificacion.
-                    # Asumiremos MVP: Guardar relación básica.
-                    tiempo_proceso=0 # Default
+                    tiempo_proceso=proc_dto.tiempo_proceso or 0,
+                    cant_operarios=proc_dto.cant_operarios or 1,
                 )
                 # Hack: Direct save via session if repository doesn't have specific method?
                 # OrdenTrabajoRepository.save uses add/commit. 
@@ -533,7 +529,7 @@ class OrdenTrabajoService:
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1):
         logger.info(f"Service - Agregar proceso {id_proceso} a Orden {id_orden}")
 
         # Verify order exists
@@ -547,7 +543,7 @@ class OrdenTrabajoService:
         if ya_existe:
             raise BusinessException(f"Este proceso ya está cargado en la OT.")
 
-        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden)
+        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios)
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
 

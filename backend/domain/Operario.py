@@ -36,6 +36,8 @@ class Operario(Base):
     dias_trabajo = Column(String(50), nullable=False, default="MON,TUE,WED,THU,FRI")
     min_desayuno = Column(Integer, nullable=False, default=15)
     min_almuerzo = Column(Integer, nullable=False, default=30)
+    # Habilidad transversal: ¿sabe interpretar planos? (no atada a un proceso)
+    interpreta_planos = Column(Boolean, nullable=False, default=False)
 
     rangos = relationship("OperarioRango", back_populates="operario")
     procesos_skill = relationship("OperarioProcesoSkill", back_populates="operario", cascade="all, delete-orphan")

@@ -14,6 +14,7 @@ class OperarioRequestDTO(BaseModel):
     sector: Optional[str] = None
     categoria: str = Field(..., max_length=100)
     disponible: Optional[bool] = True
+    interpreta_planos: Optional[bool] = False  # ¿sabe interpretar planos?
     skills: Optional[list['ProcesoSkillDTO']] = Field(default_factory=list)
     
     # Estos sí pueden ser opcionales

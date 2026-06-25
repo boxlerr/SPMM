@@ -260,16 +260,23 @@ def _crear_variables_y_dominios(
     RANGOS_BÁSICOS,
     RANGOS_ESPECIALIZADOS,
     nativas_off=None,
+    cant_op_map=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
     y devuelve todos los dicts necesarios para el resto del modelo.
+
+    `cant_op_map`: dict {(orden_id, secuencia): cantidad_operarios}. Para procesos
+    que requieren más de 1 operario se crean variables de operario adicionales
+    ("slots") en `op_extra_vars`, con el mismo dominio que el operario principal.
     """
 
     inicio_vars, fin_vars, intervalo_vars = {}, {}, {}
     operario_vars, maq_vars = {}, {}
+    op_extra_vars = {}  # (orden_id, secuencia) -> [IntVar, ...] operarios adicionales
     presente_vars = {}
     dur_map = {}
+    cant_op_map = cant_op_map or {}
 
     nativas_off = nativas_off or {}
 
@@ -346,6 +353,20 @@ def _crear_variables_y_dominios(
         # ✔ REGISTRAR OPERARIOS ANTES DE ABANDONAR LA ITERACIÓN
         op_domain_vals[(orden_id, secuencia)] = operarios_validos[:]
         operario_vars[(orden_id, secuencia)] = op_var
+
+        # Slots extra de operario si el proceso requiere más de 1 persona.
+        # Mismo dominio que el principal (incluye DUMMY para casos sin gente suficiente).
+        k_ops = int(cant_op_map.get((orden_id, secuencia), 1) or 1)
+        if k_ops > 1:
+            extras = []
+            for j in range(1, k_ops):
+                ev = model.NewIntVarFromDomain(
+                    cp_model.Domain.FromValues(operarios_validos),
+                    f"op_{orden_id}_{secuencia}_x{j}"
+                )
+                extras.append(ev)
+            op_extra_vars[(orden_id, secuencia)] = extras
+
         inicio_vars[(orden_id, secuencia)] = start
         fin_vars[(orden_id, secuencia)] = end
         intervalo_vars[(orden_id, secuencia)] = itv
@@ -461,7 +482,29 @@ def _crear_variables_y_dominios(
         op_domain_vals,
         maq_domain_vals,
         presente_vars,
+        op_extra_vars,
     )
+
+
+def _agregar_distintos_operarios(model, operario_vars, op_extra_vars, DUMMY_OP_ID):
+    """
+    Para procesos que requieren N operarios: los slots (principal + extras) deben ser
+    operarios REALES distintos. Se permite que varios queden en DUMMY si no alcanza la
+    gente (esos slots quedan sin asignar y se penalizan en la función objetivo).
+    """
+    for key, extras in (op_extra_vars or {}).items():
+        slots = [operario_vars[key]] + list(extras)
+        for i in range(len(slots)):
+            for j in range(i + 1, len(slots)):
+                a, b = slots[i], slots[j]
+                eq = model.NewBoolVar(f"eqop_{key[0]}_{key[1]}_{i}_{j}")
+                model.Add(a == b).OnlyEnforceIf(eq)
+                model.Add(a != b).OnlyEnforceIf(eq.Not())
+                a_dummy = model.NewBoolVar(f"adum_{key[0]}_{key[1]}_{i}_{j}")
+                model.Add(a == DUMMY_OP_ID).OnlyEnforceIf(a_dummy)
+                model.Add(a != DUMMY_OP_ID).OnlyEnforceIf(a_dummy.Not())
+                # Si son iguales, solo se permite cuando ambos son DUMMY (a==b==DUMMY).
+                model.AddBoolOr([eq.Not(), a_dummy])
 
 
 def _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars, presente_vars=None):
@@ -507,22 +550,33 @@ def _agregar_no_solape_operarios(
     dur_map,
     operario_vars,
     presente_vars=None,
+    op_extra_vars=None,
 ):
     """
     Añade restricciones de no solapamiento por operario
     usando intervalos opcionales. Si presente_vars está, el intervalo
     solo participa si el proceso está presente.
+
+    Considera tanto el operario principal de cada proceso como los slots extra
+    (procesos que requieren N operarios), de modo que un operario asignado a
+    cualquier slot queda ocupado durante ese proceso.
     """
+    # Lista combinada de slots: (clave_proceso, var, indice_slot).
+    slots = [((o, s), v, 0) for (o, s), v in operario_vars.items()]
+    for (o, s), extras in (op_extra_vars or {}).items():
+        for idx, v in enumerate(extras, start=1):
+            slots.append(((o, s), v, idx))
+
     for op_id in REAL_OP_IDS:
         pres_intervals = []
-        for (orden_id, secuencia), op_var in operario_vars.items():
-            es_op = model.NewBoolVar(f"esop_{orden_id}_{secuencia}_op{op_id}")
+        for (orden_id, secuencia), op_var, slot_idx in slots:
+            es_op = model.NewBoolVar(f"esop_{orden_id}_{secuencia}_{slot_idx}_op{op_id}")
             model.Add(op_var == op_id).OnlyEnforceIf(es_op)
             model.Add(op_var != op_id).OnlyEnforceIf(es_op.Not())
 
             if presente_vars is not None:
                 # pres = es_op AND presente
-                pres = model.NewBoolVar(f"usaop_{orden_id}_{secuencia}_op{op_id}")
+                pres = model.NewBoolVar(f"usaop_{orden_id}_{secuencia}_{slot_idx}_op{op_id}")
                 presente = presente_vars[(orden_id, secuencia)]
                 model.AddBoolAnd([es_op, presente]).OnlyEnforceIf(pres)
                 model.AddBoolOr([es_op.Not(), presente.Not()]).OnlyEnforceIf(pres.Not())
@@ -535,7 +589,7 @@ def _agregar_no_solape_operarios(
 
             opt_interval = model.NewOptionalIntervalVar(
                 start, dur, end, pres,
-                f"i_op_{orden_id}_{secuencia}_{op_id}"
+                f"i_op_{orden_id}_{secuencia}_{slot_idx}_{op_id}"
             )
             pres_intervals.append(opt_interval)
 
@@ -718,6 +772,7 @@ def _agregar_funcion_objetivo(
     PENAL_DUMMY_MAQ,
     H,
     presente_vars=None,
+    op_extra_vars=None,
 ):
     # Pesos de prioridad para excedentes (más agresivo: prio 1 vale 100x prio 5)
     PESO_EXCED_POR_PRIO = {1: 10000, 2: 5000, 3: 1000, 4: 300, 5: 100}
@@ -846,6 +901,15 @@ def _agregar_funcion_objetivo(
             pdm_eff = _gate_bool(pick_dummy_maq, f"pdm_eff_{orden_id}_{secuencia}")
             total_obj.append((pdm_eff, PENAL_DUMMY_MAQ))
 
+        # Slots extra de operario (procesos que requieren N personas): penalizar
+        # que queden en DUMMY, para que el solver trate de cubrir las N posiciones.
+        for ex_idx, ev in enumerate((op_extra_vars or {}).get((orden_id, secuencia), [])):
+            ev_dummy = model.NewBoolVar(f"xdum_{orden_id}_{secuencia}_{ex_idx}")
+            model.Add(ev == 999999).OnlyEnforceIf(ev_dummy)
+            model.Add(ev != 999999).OnlyEnforceIf(ev_dummy.Not())
+            ev_eff = _gate_bool(ev_dummy, f"xdumeff_{orden_id}_{secuencia}_{ex_idx}")
+            total_obj.append((ev_eff, PENAL_DUMMY))
+
 
         # Penalización por sobre-cualificación en tareas básicas
         if rangos_proc and any(rid in RANGOS_BÁSICOS for rid in rangos_proc):
@@ -936,10 +1000,14 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
+
+    Procesos que requieren N operarios: emiten una fila por operario asignado. La fila
+    principal conserva la máquina; las filas de los operarios adicionales van sin máquina
+    (comparten la del proceso) para no marcar la misma máquina como ocupada N veces.
     """
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -957,6 +1025,14 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
             else:
                 excedente = False
 
+            fecha_prom_str = (
+                fecha_prometida.strftime("%Y-%m-%d")
+                if isinstance(fecha_prometida, (date, datetime))
+                else (fecha_prometida if isinstance(fecha_prometida, str) else None)
+            )
+            fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref)
+            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref)
+
             resultados.append({
                 "orden_id": orden_id,
                 "proceso_id": proc_id,
@@ -970,17 +1046,40 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "id_rango_operario": op_to_rango.get(op_id) if op_id != DUMMY_OP_ID else None,
                 "id_maquinaria": maq_id if maq_id != DUMMY_MAQ_ID else None,
                 "rangos_permitidos_proceso": rangos_proc,
-                "fecha_prometida": (
-                    fecha_prometida.strftime("%Y-%m-%d")
-                    if isinstance(fecha_prometida, (date, datetime))
-                    else (fecha_prometida if isinstance(fecha_prometida, str) else None)
-                ),
+                "fecha_prometida": fecha_prom_str,
                 "sin_asignar": (op_id == DUMMY_OP_ID),
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
                 "excedente": excedente,
-                "fecha_inicio_estimada": _convertir_minutos_a_fecha(inicio_m, start_time_ref),
-                "fecha_fin_estimada": _convertir_minutos_a_fecha(fin_m, start_time_ref),
+                "fecha_inicio_estimada": fecha_ini_est,
+                "fecha_fin_estimada": fecha_fin_est,
             })
+
+            # Operarios adicionales del proceso (slots extra). Una fila por cada operario
+            # real asignado; los slots que quedaron en DUMMY (sin gente) se omiten.
+            for ev in (op_extra_vars or {}).get((orden_id, secuencia), []):
+                ev_id = solver.Value(ev)
+                if ev_id == DUMMY_OP_ID:
+                    continue
+                resultados.append({
+                    "orden_id": orden_id,
+                    "proceso_id": proc_id,
+                    "secuencia": secuencia,
+                    "nombre_proceso": nombre_proceso,
+                    "inicio_min": inicio_m,
+                    "fin_min": fin_m,
+                    "duracion_min": dur,
+                    "prioridad_peso": peso_prioridad,
+                    "id_operario": ev_id,
+                    "id_rango_operario": op_to_rango.get(ev_id),
+                    "id_maquinaria": None,
+                    "rangos_permitidos_proceso": rangos_proc,
+                    "fecha_prometida": fecha_prom_str,
+                    "sin_asignar": False,
+                    "sin_maquinaria": True,
+                    "excedente": excedente,
+                    "fecha_inicio_estimada": fecha_ini_est,
+                    "fecha_fin_estimada": fecha_fin_est,
+                })
 
         resultados.sort(key=lambda x: (x["orden_id"], x["secuencia"]))
     else:
@@ -1049,7 +1148,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None):
     model = cp_model.CpModel()
 
     # Init Config
@@ -1138,6 +1237,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         op_domain_vals,
         maq_domain_vals,
         presente_vars,
+        op_extra_vars,
     ) = _crear_variables_y_dominios(
         model,
         procesos_norm,
@@ -1146,12 +1246,14 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         RANGOS_BÁSICOS,
         RANGOS_ESPECIALIZADOS,
         nativas_off,
+        cant_op_map,
     )
 
     # ---- Restricciones ----
     _agregar_restricciones_secuencia(model, procesos_norm, inicio_vars, fin_vars, presente_vars=presente_vars)
     _agregar_cadena_presencia(model, procesos_norm, presente_vars)
-    _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars, presente_vars=presente_vars)
+    _agregar_distintos_operarios(model, operario_vars, op_extra_vars, DUMMY_OP_ID)
+    _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars, presente_vars=presente_vars, op_extra_vars=op_extra_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars, presente_vars=presente_vars)
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars)
@@ -1189,6 +1291,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         PENAL_DUMMY_MAQ,
         H,
         presente_vars=presente_vars,
+        op_extra_vars=op_extra_vars,
     )
 
 
@@ -1216,6 +1319,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         DUMMY_MAQ_ID,
         ahora_ref,
         presente_vars=presente_vars,
+        op_extra_vars=op_extra_vars,
     )
 
     return resultados
@@ -1381,6 +1485,7 @@ async def planificar(
 
 
     procesos_para_solver = []
+    cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
 
     # -----------------------
     # Procesar cada orden
@@ -1389,6 +1494,7 @@ async def planificar(
         prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
         for rel in orden.procesos:
+            cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
 
             # Duración mínima
             dur_min = rel.tiempo_proceso or 1
@@ -1471,6 +1577,7 @@ async def planificar(
         fecha_desde,
         effective_fecha_hasta,
         nativas_off,
+        cant_op_map,
     )
 
     planificados, excedentes = _split_resultados(resultados)
@@ -1525,6 +1632,7 @@ async def planificar_pendientes(
 
 
         procesos_para_solver = []
+        cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
 
         for orden in ordenes:
             prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
@@ -1534,6 +1642,7 @@ async def planificar_pendientes(
                 if rel.id_estado == 3:
                     continue
 
+                cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
                 dur_min = rel.tiempo_proceso or 1
                 nombre_proceso = rel.proceso.nombre.lower() if rel.proceso else ""
                 usa_maquina = proceso_usa_maquina(nombre_proceso)
@@ -1562,6 +1671,7 @@ async def planificar_pendientes(
             fecha_desde,
             fecha_hasta,
             nativas_off,
+            cant_op_map,
         )
 
         planificados, excedentes = _split_resultados(resultados)

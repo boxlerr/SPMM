@@ -4,9 +4,10 @@ from datetime import datetime
 
 class OrdenTrabajoProcesoCreateDTO(BaseModel):
     proceso_id: int
-    operario_id: Optional[str] = None 
+    operario_id: Optional[str] = None
     maquinaria_id: Optional[str] = None
     tiempo_proceso: int # Nuevo campo en minutos
+    cant_operarios: Optional[int] = 1  # Operarios que requiere el proceso en simultáneo
     # fecha_inicio y fecha_fin ya no se envian desde el create modal
 
 class OrdenTrabajoRequestDTO(BaseModel):

@@ -188,12 +188,14 @@ class AgregarProcesoRequest(BaseModel):
     tiempo_estimado: int
     # `orden` es opcional: si no viene, el repo calcula max(orden)+1.
     orden: int | None = None
+    # Operarios que requiere el proceso en simultáneo (default 1).
+    cant_operarios: int | None = None
 
 @router.post("/ordenes/{id_orden}/procesos")
 async def agregar_proceso_orden(id_orden: int, body: AgregarProcesoRequest, db=Depends(get_db)):
     logger.info(f"API - Inicio POST /ordenes/{id_orden}/procesos")
     service = OrdenTrabajoService(db)
-    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden)
+    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden, body.cant_operarios or 1)
 
 
 @router.delete("/ordenes/{id_orden}/procesos/{id_proceso}")
