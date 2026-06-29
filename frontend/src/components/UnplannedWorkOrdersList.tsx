@@ -395,7 +395,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     ) : (
                                         sortedOrders.map((order, index) => (
                                             <React.Fragment key={order.id}>
-                                                <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
+                                                {/* Doble click en cualquier parte de la fila abre el modal de edición. */}
+                                                <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))} onDoubleClick={() => onEdit(order)}>
                                                     <td className="px-3 py-3">
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
@@ -485,14 +486,6 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                     </td>
                                                     <td className="px-3 py-3">
                                                         <div className="flex items-center justify-center gap-1">
-                                                            <Button 
-                                                                variant="ghost" 
-                                                                size="sm" 
-                                                                className="h-7 px-2.5 text-orange-600 hover:text-orange-700 hover:bg-orange-50 gap-1 text-xs font-bold"
-                                                                onClick={(e) => { e.stopPropagation(); onEdit(order); }}
-                                                            >
-                                                                <Edit2 className="w-3 h-3" /> Editar
-                                                            </Button>
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
