@@ -54,7 +54,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
     const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
     const [showRightFade, setShowRightFade] = useState(true);
     const [sortConfig, setSortConfig] = useState<{
-        key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'material' | null;
+        key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'material' | 'proceso' | 'plano' | 'entrega' | 'fecha_prometida' | null;
         direction: 'asc' | 'desc' | null;
     }>({ key: null, direction: null });
 
@@ -215,6 +215,32 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                     return sortConfig.direction === 'asc' ? (a.unidades || 0) - (b.unidades || 0) : (b.unidades || 0) - (a.unidades || 0);
                 case 'prioridad':
                     return sortConfig.direction === 'asc' ? (a.id_prioridad || 0) - (b.id_prioridad || 0) : (b.id_prioridad || 0) - (a.id_prioridad || 0);
+                case 'material': {
+                    // Rango: OK (mejor) → Pedido → Sin Stock (peor). `undefined` se trata como Sin Stock.
+                    const rank = (estado?: string) => (estado === 'ok' ? 2 : estado === 'pedido' ? 1 : 0);
+                    const diff = rank(a.estado_material) - rank(b.estado_material);
+                    return sortConfig.direction === 'asc' ? diff : -diff;
+                }
+                case 'proceso': {
+                    const has = (o: WorkOrder) => (o.procesos && o.procesos.length > 0 ? 1 : 0);
+                    const diff = has(a) - has(b);
+                    return sortConfig.direction === 'asc' ? diff : -diff;
+                }
+                case 'plano': {
+                    const has = (o: WorkOrder) => (Number(o.tiene_plano) === 1 ? 1 : 0);
+                    const diff = has(a) - has(b);
+                    return sortConfig.direction === 'asc' ? diff : -diff;
+                }
+                case 'entrega': {
+                    // Ordena por proporción entregada (cantidad_entregada / unidades).
+                    const ratio = (o: WorkOrder) => (o.cantidad_entregada || 0) / (o.unidades || 1);
+                    const diff = ratio(a) - ratio(b);
+                    return sortConfig.direction === 'asc' ? diff : -diff;
+                }
+                case 'fecha_prometida':
+                    return sortConfig.direction === 'asc'
+                        ? new Date(a.fecha_prometida || 0).getTime() - new Date(b.fecha_prometida || 0).getTime()
+                        : new Date(b.fecha_prometida || 0).getTime() - new Date(a.fecha_prometida || 0).getTime();
                 default:
                     return 0;
             }
@@ -405,11 +431,21 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('prioridad')}>
                                             <div className="flex items-center justify-center">Prioridad<SortIcon column="prioridad" /></div>
                                         </th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Material</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene procesos cargados?">Proceso</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene plano cargado?">Plano</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Entrega</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600">F. Prometida</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('material')}>
+                                            <div className="flex items-center justify-center">Material<SortIcon column="material" /></div>
+                                        </th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" title="¿La OT tiene procesos cargados?" onClick={() => handleSort('proceso')}>
+                                            <div className="flex items-center justify-center">Proceso<SortIcon column="proceso" /></div>
+                                        </th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" title="¿La OT tiene plano cargado?" onClick={() => handleSort('plano')}>
+                                            <div className="flex items-center justify-center">Plano<SortIcon column="plano" /></div>
+                                        </th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('entrega')}>
+                                            <div className="flex items-center justify-center">Entrega<SortIcon column="entrega" /></div>
+                                        </th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_prometida')}>
+                                            <div className="flex items-center">F. Prometida<SortIcon column="fecha_prometida" /></div>
+                                        </th>
                                         <th className="px-3 py-3 font-bold text-gray-600">Aprobado x</th>
                                         <th className="px-3 py-3 font-bold text-gray-600">Pedido x</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Acciones</th>
