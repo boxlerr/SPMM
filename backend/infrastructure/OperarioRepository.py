@@ -109,6 +109,27 @@ class OperarioRepository:
             logger.error(f"Repository - Error al eliminar Operario {id}: {e}")
             raise InfrastructureException("Error al eliminar el Operario.") from e
 
+    async def sync_rangos(self, id_operario: int, rango_ids):
+        """
+        Sincroniza la relacion operario_rango: borra los vinculos actuales del
+        operario y reinserta los recibidos (deduplicados). Mismo patron que skills.
+        """
+        try:
+            await self.db.execute(
+                delete(OperarioRango).where(OperarioRango.id_operario == id_operario)
+            )
+            vistos = set()
+            for rid in (rango_ids or []):
+                if rid is None or rid in vistos:
+                    continue
+                vistos.add(rid)
+                self.db.add(OperarioRango(id_operario=id_operario, id_rango=rid))
+            await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error al sincronizar rangos de operario {id_operario}: {e}")
+            raise InfrastructureException("Error al sincronizar los rangos del Operario.") from e
+
     async def find_with_rangos(self):
         """
         Devuelve una lista de tuplas (id_operario, id_rango)

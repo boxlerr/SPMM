@@ -38,6 +38,7 @@ export interface Operario {
   dias_trabajo?: string;
   min_desayuno?: number;
   min_almuerzo?: number;
+  rangos?: number[];
   skills?: ProcesoSkill[];
 }
 

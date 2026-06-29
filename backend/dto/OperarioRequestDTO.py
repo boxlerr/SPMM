@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 from datetime import date
 from backend.dto.ProcesoSkillDTO import ProcesoSkillDTO
@@ -16,6 +16,9 @@ class OperarioRequestDTO(BaseModel):
     disponible: Optional[bool] = True
     interpreta_planos: Optional[bool] = False  # ¿sabe interpretar planos?
     skills: Optional[list['ProcesoSkillDTO']] = Field(default_factory=list)
+    # Rangos del operario (ids). Alimentan operario_rango -> SKILLS NATIVAS.
+    # None = no enviado (no tocar); [] = vaciar todos.
+    rangos: Optional[List[int]] = None
     
     # Estos sí pueden ser opcionales
     telefono: Optional[str] = Field(None, max_length=50)

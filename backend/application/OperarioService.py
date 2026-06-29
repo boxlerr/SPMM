@@ -137,6 +137,10 @@ class OperarioService:
 
             operario_creado = await self.repository.save(operario)
 
+            # Vincular rangos (operario_rango) -> de aqui salen las SKILLS NATIVAS.
+            if operario_dto.rangos is not None:
+                await self.repository.sync_rangos(operario_creado.id, operario_dto.rangos)
+
             return ResponseDTO(
                 status=True,
                 data=jsonable_encoder(operario_creado),
@@ -230,6 +234,7 @@ class OperarioService:
                     "dias_trabajo": getattr(o, "dias_trabajo", None) or "MON,TUE,WED,THU,FRI",
                     "min_desayuno": getattr(o, "min_desayuno", None) if getattr(o, "min_desayuno", None) is not None else 15,
                     "min_almuerzo": getattr(o, "min_almuerzo", None) if getattr(o, "min_almuerzo", None) is not None else 30,
+                    "rangos": [r.id_rango for r in o.rangos],
                     "skills": _build_skills_payload(o),
                 },
                 errorDescription=""
@@ -243,6 +248,9 @@ class OperarioService:
         try:
             nueva_data = operario_dto.dict(exclude_unset=True)
             skills_data = nueva_data.pop("skills", None)
+            # 'rangos' no es columna de Operario: hay que sacarlo antes del update
+            # y sincronizar la tabla operario_rango por separado.
+            rangos_data = nueva_data.pop("rangos", None)
 
             if skills_data is not None:
                 pass # validations removed
@@ -292,6 +300,9 @@ class OperarioService:
                         habilitado=s.get("habilitado", True)
                     ))
                 await self.repository.db.commit()
+
+            if rangos_data is not None:
+                await self.repository.sync_rangos(id, rangos_data)
 
             return ResponseDTO(
                 status=True,

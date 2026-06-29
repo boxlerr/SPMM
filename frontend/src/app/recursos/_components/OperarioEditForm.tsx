@@ -49,7 +49,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     });
 
     const [sectores, setSectores] = useState<string[]>([]);
-    const [categorias, setCategorias] = useState<string[]>([]);
+    const [rangosCatalog, setRangosCatalog] = useState<{ id: number; nombre: string }[]>([]);
+    const [selectedRangos, setSelectedRangos] = useState<number[]>([]);
+    const [principalRango, setPrincipalRango] = useState<number | null>(null);
     const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
     const [primarySkills, setPrimarySkills] = useState<string[]>([]);
     const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
@@ -77,6 +79,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             });
             setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
             setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
+            setSelectedRangos(data.rangos || []);
         } else {
             setFormData({
                 nombre: "",
@@ -98,8 +101,24 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             });
             setPrimarySkills([]);
             setSecondarySkills([]);
+            setSelectedRangos([]);
         }
     }, [data, isCreating]);
+
+    // Mantener el rango principal valido (coincide con categoria, o el primero).
+    useEffect(() => {
+        if (selectedRangos.length === 0) {
+            setPrincipalRango(null);
+            return;
+        }
+        setPrincipalRango((prev) => {
+            if (prev && selectedRangos.includes(prev)) return prev;
+            const porNombre = rangosCatalog.find(
+                (r) => r.nombre === (data?.categoria || "") && selectedRangos.includes(r.id)
+            )?.id;
+            return porNombre ?? selectedRangos[0];
+        });
+    }, [selectedRangos, rangosCatalog, data]);
 
     useEffect(() => {
         const loadOptions = async () => {
@@ -117,17 +136,13 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 if (rangRes.ok) {
                     const payload = await rangRes.json();
                     const listData = Array.isArray(payload) ? payload : (payload?.data || []);
-                    const cats = listData.map((r: any) => r.nombre || r).filter(Boolean);
-
-                    if (data?.categoria) {
-                        cats.push(data.categoria);
-                    }
-
-                    setCategorias(Array.from(new Set(cats)));
+                    const lista = listData
+                        .map((r: any) => ({ id: r.id, nombre: r.nombre }))
+                        .filter((r: any) => r.id != null && r.nombre);
+                    setRangosCatalog(lista);
                 }
             } catch (error) {
                 console.error("Error al obtener rangos:", error);
-                if (data?.categoria) setCategorias([data.categoria]);
             }
 
             try {
@@ -152,7 +167,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         if (!formData.nombre.trim()) newErrors.nombre = "Requerido";
         if (!formData.apellido.trim()) newErrors.apellido = "Requerido";
         if (!formData.sector.trim()) newErrors.sector = "Requerido";
-        if (!formData.categoria.trim()) newErrors.categoria = "Requerido";
+        if (selectedRangos.length === 0) newErrors.categoria = "Seleccioná al menos un rango";
         if (!isValidDate(formData.fecha_nacimiento)) newErrors.fecha_nacimiento = "Fecha inválida";
         if (!isValidDate(formData.fecha_ingreso)) newErrors.fecha_ingreso = "Fecha inválida";
         const cuil = onlyDigits(formData.dni);
@@ -162,10 +177,21 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         return Object.keys(newErrors).length === 0;
     };
 
+    const toggleRango = (id: number) => {
+        setSelectedRangos((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+    };
+
     const handleSubmit = async () => {
         if (!validate()) return;
+        // La categoría (string) se deriva del rango principal elegido.
+        const categoriaPrincipal =
+            rangosCatalog.find((r) => r.id === (principalRango ?? selectedRangos[0]))?.nombre || "";
         const payload = {
             ...formData,
+            categoria: categoriaPrincipal,
+            rangos: selectedRangos,
             telefono: formData.telefono ? onlyDigits(formData.telefono) : null,
             celular: formData.celular ? onlyDigits(formData.celular) : null,
             dni: formData.dni ? onlyDigits(formData.dni) : null,
@@ -211,6 +237,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 (((data as any).min_desayuno ?? 15)) !== (payload.min_desayuno ?? 15) ||
                 (((data as any).min_almuerzo ?? 30)) !== (payload.min_almuerzo ?? 30) ||
                 (((data as any).interpreta_planos ?? false)) !== (payload.interpreta_planos ?? false) ||
+                JSON.stringify([...(data.rangos || [])].sort((a, b) => a - b)) !== JSON.stringify([...selectedRangos].sort((a, b) => a - b)) ||
                 JSON.stringify(data.skills?.filter(s => s.nivel === 1 || s.nivel === 2).map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
             const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
@@ -249,7 +276,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         onSuccess();
     };
 
-    const baseDisabled = !formData.nombre || !formData.apellido || !formData.sector || !formData.categoria;
+    const baseDisabled = !formData.nombre || !formData.apellido || !formData.sector || selectedRangos.length === 0;
     const disabled = isCreating
         ? baseDisabled || !formData.fecha_nacimiento || !formData.fecha_ingreso
         : baseDisabled;
@@ -341,27 +368,49 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                             {errors.sector && <p className="text-xs text-destructive">{errors.sector}</p>}
                         </div>
                         <div className="space-y-1.5">
-                            <Label className="text-gray-700">Categoría (Rango) *</Label>
-                            <Select value={formData.categoria} onValueChange={(v) => setFormData({ ...formData, categoria: v })}>
-                                <SelectTrigger className="bg-gray-50/50">
-                                    <SelectValue placeholder={categorias.length > 0 ? "Selecciona un rango" : "No hay rangos disponibles"} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {categorias.length > 0 ? (
-                                        categorias.map((c) => (
-                                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                                        ))
-                                    ) : (
-                                        <div className="px-2 py-1.5 text-sm text-muted-foreground">No hay rangos disponibles</div>
-                                    )}
-                                </SelectContent>
-                            </Select>
-                            {errors.categoria && <p className="text-xs text-destructive">{errors.categoria}</p>}
-                        </div>
-                        <div className="space-y-1.5 sm:col-span-2">
                             <Label className="text-gray-700">Fecha de Ingreso *</Label>
                             <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} required className="bg-gray-50/50" />
                             {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
+                        </div>
+                        <div className="space-y-1.5 sm:col-span-2">
+                            <Label className="text-gray-700">Rango(s) * <span className="text-xs font-normal text-muted-foreground">— otorgan las habilidades nativas</span></Label>
+                            <div className="flex flex-wrap gap-2">
+                                {rangosCatalog.length === 0 && (
+                                    <p className="text-xs text-muted-foreground">No hay rangos disponibles</p>
+                                )}
+                                {rangosCatalog.map((r) => {
+                                    const sel = selectedRangos.includes(r.id);
+                                    return (
+                                        <button
+                                            key={r.id}
+                                            type="button"
+                                            onClick={() => toggleRango(r.id)}
+                                            className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${sel
+                                                ? "bg-blue-100 border-blue-300 text-blue-900"
+                                                : "bg-gray-50/50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}
+                                        >
+                                            {r.nombre}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {selectedRangos.length > 1 && (
+                                <div className="space-y-1 pt-1">
+                                    <Label className="text-xs text-gray-700">Rango principal (define la categoría)</Label>
+                                    <Select value={principalRango ? principalRango.toString() : ""} onValueChange={(v) => setPrincipalRango(parseInt(v))}>
+                                        <SelectTrigger className="bg-gray-50/50">
+                                            <SelectValue placeholder="Elegí el rango principal" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {selectedRangos.map((id) => {
+                                                const r = rangosCatalog.find((x) => x.id === id);
+                                                return <SelectItem key={id} value={id.toString()}>{r?.nombre ?? id}</SelectItem>;
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                            {errors.categoria && <p className="text-xs text-destructive">{errors.categoria}</p>}
                         </div>
                     </div>
                 </div>
@@ -523,7 +572,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                         <h3 className="text-base font-semibold text-gray-900">Habilidades</h3>
                     </div>
 
-                    <p className="text-xs text-muted-foreground mb-3">Las SKILLS NATIVAS se derivan automáticamente del rango asignado al operario.</p>
+                    <p className="text-xs text-muted-foreground mb-3">Las SKILLS NATIVAS se derivan automáticamente de los rangos asignados en Información Laboral.</p>
                     <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2 cursor-pointer w-fit mb-3">
                         <Checkbox
                             checked={formData.interpreta_planos}

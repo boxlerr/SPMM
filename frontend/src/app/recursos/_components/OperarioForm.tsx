@@ -47,7 +47,9 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
   });
 
   const [sectores, setSectores] = useState<string[]>([...SECTORES_OPERARIO]);
-  const [categorias, setCategorias] = useState<string[]>([]);
+  const [rangosCatalog, setRangosCatalog] = useState<{ id: number; nombre: string }[]>([]);
+  const [selectedRangos, setSelectedRangos] = useState<number[]>([]);
+  const [principalRango, setPrincipalRango] = useState<number | null>(null);
   const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
   const [primarySkills, setPrimarySkills] = useState<string[]>([]);
   const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
@@ -75,6 +77,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       });
       setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
       setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
+      setSelectedRangos(data.rangos || []);
     } else {
       setFormData({
         nombre: "",
@@ -93,23 +96,42 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       });
       setPrimarySkills([]);
       setSecondarySkills([]);
+      setSelectedRangos([]);
     }
   }, [data, open]);
 
-  // Sectores de operario: lista fija de Met Long (ver SECTORES_OPERARIO en _types).
-  // Las categorías (rangos) sí se cargan desde el backend.
+  // Mantener el rango principal valido: si el actual sigue elegido se conserva;
+  // si no, se elige el que coincide con la categoria cargada o el primero.
+  useEffect(() => {
+    if (selectedRangos.length === 0) {
+      setPrincipalRango(null);
+      return;
+    }
+    setPrincipalRango((prev) => {
+      if (prev && selectedRangos.includes(prev)) return prev;
+      const porNombre = rangosCatalog.find(
+        (r) => r.nombre === (data?.categoria || "") && selectedRangos.includes(r.id)
+      )?.id;
+      return porNombre ?? selectedRangos[0];
+    });
+  }, [selectedRangos, rangosCatalog, data]);
+
+  // Sectores de operario: lista fija de Met Long (ver SECTORES_OPERARIO en _types),
+  // ya seteada arriba. Acá solo cargamos rangos y procesos desde el backend.
   useEffect(() => {
     const loadOptions = async () => {
-      // Cargar categorías (rangos) desde el catálogo de Rangos
+      // Cargar catálogo de Rangos (id + nombre) para el multi-select
       try {
         const rangRes = await fetch(`${cleanUrl}/rangos`, { headers: getAuthHeaders() });
         if (rangRes.ok) {
           const payload = await rangRes.json();
           const data = payload?.data || [];
           const lista = Array.isArray(data)
-            ? data.map((r: any) => r.nombre || r).filter(Boolean)
+            ? data
+                .map((r: any) => ({ id: r.id, nombre: r.nombre }))
+                .filter((r: any) => r.id != null && r.nombre)
             : [];
-          setCategorias(Array.from(new Set(lista)));
+          setRangosCatalog(lista);
         } else {
           console.error("Error al cargar rangos:", rangRes.status, rangRes.statusText);
         }
@@ -139,7 +161,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     const newErrors: Record<string, string> = {};
     if (!formData.nombre.trim()) newErrors.nombre = "Requerido";
     if (!formData.apellido.trim()) newErrors.apellido = "Requerido";
-    if (!formData.categoria.trim()) newErrors.categoria = "Requerido";
+    if (selectedRangos.length === 0) newErrors.categoria = "Seleccioná al menos un rango";
     // Check dates only if present
     if (formData.fecha_nacimiento && !isValidDate(formData.fecha_nacimiento)) newErrors.fecha_nacimiento = "Fecha inválida";
     if (formData.fecha_ingreso && !isValidDate(formData.fecha_ingreso)) newErrors.fecha_ingreso = "Fecha inválida";
@@ -150,10 +172,21 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     return Object.keys(newErrors).length === 0;
   };
 
+  const toggleRango = (id: number) => {
+    setSelectedRangos((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const handleSubmit = async () => {
     if (!validate()) return;
+    // La categoría (string) se deriva del rango principal elegido.
+    const categoriaPrincipal =
+      rangosCatalog.find((r) => r.id === (principalRango ?? selectedRangos[0]))?.nombre || "";
     const payload = {
       ...formData,
+      categoria: categoriaPrincipal,
+      rangos: selectedRangos,
       sector: formData.sector || null,
       fecha_nacimiento: formData.fecha_nacimiento || null,
       fecha_ingreso: formData.fecha_ingreso || null,
@@ -203,7 +236,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         (originalCelular || "") !== (payload.celular || "") ||
         (originalDni || "") !== (payload.dni || "") ||
         ((data as any).hora_inicio || "07:00") !== (payload.hora_inicio || "07:00") ||
-        ((data as any).hora_fin || "16:00") !== (payload.hora_fin || "16:00");
+        ((data as any).hora_fin || "16:00") !== (payload.hora_fin || "16:00") ||
+        JSON.stringify([...(data.rangos || [])].sort((a, b) => a - b)) !== JSON.stringify([...selectedRangos].sort((a, b) => a - b));
 
       const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
         method: "PUT",
@@ -241,7 +275,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     onSuccess();
   };
 
-  const disabled = !formData.nombre || !formData.apellido || !formData.categoria;
+  const disabled = !formData.nombre || !formData.apellido || selectedRangos.length === 0;
 
   const handlePrimaryChange = (index: number, val: string) => {
     const newSkills = [...primarySkills];
@@ -323,34 +357,56 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
                 {errors.sector && <p className="text-xs text-destructive">{errors.sector}</p>}
               </div>
               <div className="space-y-2">
-                <Label>Categoría (Rango) *</Label>
-                <Select value={formData.categoria} onValueChange={(v) => setFormData({ ...formData, categoria: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={categorias.length > 0 ? "Selecciona un rango" : "No hay rangos disponibles"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categorias.length > 0 ? (
-                      categorias.map((c) => (
-                        <SelectItem key={c} value={c}>{c}</SelectItem>
-                      ))
-                    ) : (
-                      <div className="px-2 py-1.5 text-sm text-muted-foreground">No hay rangos disponibles</div>
-                    )}
-                  </SelectContent>
-                </Select>
-                {errors.categoria && <p className="text-xs text-destructive">{errors.categoria}</p>}
+                <Label>Fecha de Ingreso</Label>
+                <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} />
+                {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Fecha de Ingreso</Label>
-              <Input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({ ...formData, fecha_ingreso: e.target.value })} />
-              {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso}</p>}
+              <Label>Rango(s) * <span className="text-xs font-normal text-muted-foreground">— otorgan las habilidades nativas</span></Label>
+              <div className="flex flex-wrap gap-2">
+                {rangosCatalog.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No hay rangos disponibles</p>
+                )}
+                {rangosCatalog.map((r) => {
+                  const sel = selectedRangos.includes(r.id);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => toggleRango(r.id)}
+                      className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${sel
+                        ? "bg-blue-100 border-blue-300 text-blue-900"
+                        : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}
+                    >
+                      {r.nombre}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedRangos.length > 1 && (
+                <div className="space-y-1 pt-1">
+                  <Label className="text-xs">Rango principal (define la categoría)</Label>
+                  <Select value={principalRango ? principalRango.toString() : ""} onValueChange={(v) => setPrincipalRango(parseInt(v))}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Elegí el rango principal" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedRangos.map((id) => {
+                        const r = rangosCatalog.find((x) => x.id === id);
+                        return <SelectItem key={id} value={id.toString()}>{r?.nombre ?? id}</SelectItem>;
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {errors.categoria && <p className="text-xs text-destructive">{errors.categoria}</p>}
             </div>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Habilidades del Operario</h3>
-            <p className="text-xs text-muted-foreground">Las SKILLS NATIVAS se derivan automáticamente del rango del operario.</p>
+            <p className="text-xs text-muted-foreground">Las SKILLS NATIVAS se derivan automáticamente de los rangos seleccionados arriba.</p>
             <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2 cursor-pointer w-fit">
               <Checkbox
                 checked={formData.interpreta_planos}
