@@ -108,7 +108,7 @@ export default function DashboardPage() {
         <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />
 
         {/* 4. Top Artículos y Top Clientes (y Distribución) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 md:gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 md:gap-8">
           {/* Top Artículos */}
           <TopArticles articulos={topArticulos} loading={loadingExtras} />
 
