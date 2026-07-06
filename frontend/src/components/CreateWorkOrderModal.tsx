@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -642,6 +642,75 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         }
     };
 
+    // "Imprimir OT": arma una vista imprimible (ventana nueva) con los datos de la
+    // orden + procesos + materias primas, y dispara el diálogo de impresión del navegador.
+    // Usa el estado actual del formulario, así sirve tanto para una OT existente como para un borrador.
+    const handlePrint = () => {
+        const esc = (v: unknown) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const fmt = (d?: string) => (d ? new Date(d).toLocaleDateString("es-AR") : "-");
+        const cliente = clientes.find(c => c.id.toString() === generalData.cliente_id)?.nombre || generalData.cliente || "-";
+        const art = articulos.find(a => a.id.toString() === generalData.articulo_id);
+        const articuloLabel = art ? `${art.cod_articulo} — ${art.descripcion}` : "-";
+        const prioridad = prioridades.find(p => p.id.toString() === generalData.prioridad_id)?.nombre || "-";
+        const sector = sectores.find(s => s.id.toString() === generalData.sector_id)?.nombre || "-";
+        const procName = (id: string) => procesosOptions.find(p => p.id.toString() === id)?.nombre || "-";
+        const maqName = (id: string) => maquinarias.find(m => m.id.toString() === id)?.nombre || "Sin máquina";
+
+        const procs = processes.filter(p => p.incluido && p.proceso_id);
+        const procRows = procs.length
+            ? procs.map((p, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${esc(procName(p.proceso_id))}</td><td style="text-align:center">${esc(p.tiempo || 0)}</td><td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td><td style="text-align:center">${esc(p.cant_operarios || 1)}</td></tr>`).join("")
+            : `<tr><td colspan="5" style="text-align:center;color:#999">Sin procesos cargados</td></tr>`;
+
+        const mpRows = materiasPrimas.length
+            ? materiasPrimas.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}</td><td style="text-align:center">${esc(mp.cantidad)}</td><td style="text-align:center">${esc(mp.unidad)}</td></tr>`).join("")
+            : `<tr><td colspan="4" style="text-align:center;color:#999">Sin materias primas</td></tr>`;
+
+        const otNum = orderToEdit?.id_otvieja || orderToEdit?.id || "Nueva";
+        const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>OT ${esc(otNum)}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#222;margin:24px;font-size:12px}
+h1{font-size:20px;margin:0 0 2px}.sub{color:#666;margin:0 0 16px;font-size:11px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 24px;margin-bottom:8px}
+.cell{border-bottom:1px solid #eee;padding:4px 0;display:flex;justify-content:space-between;gap:12px}
+.cell .k{color:#888;text-transform:uppercase;font-size:10px;letter-spacing:.5px}.cell .v{font-weight:bold;text-align:right}
+h2{font-size:13px;margin:18px 0 6px;border-bottom:2px solid #333;padding-bottom:3px}
+table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}
+th{background:#f3f3f3;text-transform:uppercase;font-size:10px}
+.notas{white-space:pre-wrap;border:1px solid #eee;padding:8px;border-radius:4px;color:#333;margin-top:4px}
+@media print{body{margin:0}}
+</style></head><body>
+<h1>Orden de Trabajo #${esc(otNum)}</h1>
+<p class="sub">${esc(cliente)} · impreso ${new Date().toLocaleString("es-AR")}</p>
+<div class="grid">
+<div class="cell"><span class="k">Cliente</span><span class="v">${esc(cliente)}</span></div>
+<div class="cell"><span class="k">Prioridad</span><span class="v">${esc(prioridad)}</span></div>
+<div class="cell"><span class="k">Producto</span><span class="v">${esc(articuloLabel)}</span></div>
+<div class="cell"><span class="k">Sector</span><span class="v">${esc(sector)}</span></div>
+<div class="cell"><span class="k">Cantidad</span><span class="v">${esc(detailsData.cantidad || "-")}</span></div>
+<div class="cell"><span class="k">N° Pedido</span><span class="v">${esc(generalData.n_pedido || "-")}</span></div>
+<div class="cell"><span class="k">F. Entrada</span><span class="v">${fmt(generalData.fecha_entrada)}</span></div>
+<div class="cell"><span class="k">F. Prometida</span><span class="v">${fmt(generalData.fecha_prometida)}</span></div>
+</div>
+<h2>Procesos</h2>
+<table><thead><tr><th>#</th><th>Proceso</th><th>Min</th><th>Máquina</th><th>Cant. emp.</th></tr></thead><tbody>${procRows}</tbody></table>
+<h2>Materias Primas</h2>
+<table><thead><tr><th>Código</th><th>Descripción</th><th>Cant</th><th>Un</th></tr></thead><tbody>${mpRows}</tbody></table>
+${generalData.descripcion ? `<h2>Descripción</h2><div class="notas">${esc(generalData.descripcion)}</div>` : ""}
+${detailsData.observaciones ? `<h2>Nota de taller</h2><div class="notas">${esc(detailsData.observaciones)}</div>` : ""}
+</body></html>`;
+
+        const w = window.open("", "_blank", "width=900,height=700");
+        if (!w) {
+            toast.error("Habilitá las ventanas emergentes para poder imprimir la OT.");
+            return;
+        }
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        // Pequeño delay para que el navegador termine de renderizar antes del diálogo de impresión.
+        setTimeout(() => w.print(), 250);
+    };
+
     return (
         <>
             <ConfirmationDialog
@@ -1167,14 +1236,26 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                         <DialogFooter className="px-6 py-3 border-t bg-gray-50/50 flex-shrink-0">
                             <div className="flex items-center justify-between w-full">
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={handleAttemptClose}
-                                    className="h-10 px-8 hover:bg-white hover:text-red-600 hover:border-red-200 transition-colors"
-                                >
-                                    Cancelar
-                                </Button>
+                                <div className="flex items-center gap-3">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={handleAttemptClose}
+                                        className="h-10 px-8 hover:bg-white hover:text-red-600 hover:border-red-200 transition-colors"
+                                    >
+                                        Cancelar
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={handlePrint}
+                                        className="h-10 px-5 gap-2 hover:bg-white hover:text-blue-600 hover:border-blue-200 transition-colors"
+                                        title="Imprimir esta OT (procesos + materias primas)"
+                                    >
+                                        <Printer className="w-4 h-4" />
+                                        Imprimir
+                                    </Button>
+                                </div>
                                 <div className="flex gap-3">
                                     {(activeTab === "procesos" || activeTab === "materias") && (
                                         <Button
