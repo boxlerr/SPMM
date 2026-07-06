@@ -1,11 +1,10 @@
 import React from 'react';
 import { Button } from "@/components/ui/button";
-import { PlusCircle, Plus, X, Save, Search, Check, ChevronDown } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { PlusCircle, X, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { API_URL } from "@/config";
+import { ProcesosEditor, ProcesoRow, makeEmptyRow } from "@/components/planning/ProcesosEditor";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -13,51 +12,54 @@ const getAuthHeaders = (): HeadersInit => {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 };
 
+/**
+ * Alta rápida (inline) de procesos sobre una OT existente. Usa el mismo listado
+ * `ProcesosEditor` que el alta de OT (rediseño reunión Metlo 2-jul-2026), así la
+ * carga queda idéntica en los dos lados e incluye la columna Máquina.
+ * Guarda cada proceso tildado con POST /ordenes/{id}/procesos (secuencial, para
+ * que cada uno vea el max(orden) actualizado).
+ */
 export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, variant = 'table', label }: { orderId: number, onProcessAdded: () => void, isCentered?: boolean, variant?: 'table' | 'card', label?: string }) {
     const [isAdding, setIsAdding] = React.useState(false);
     const [loading, setLoading] = React.useState(false);
     const [procesos, setProcesos] = React.useState<any[]>([]);
+    const [maquinarias, setMaquinarias] = React.useState<any[]>([]);
+    const [rows, setRows] = React.useState<ProcesoRow[]>([]);
 
-    // List of editable items
-    const [editableItems, setEditableItems] = React.useState<{ id: string, procesoId: string, tiempo: string, cantOperarios: string }[]>([]);
-
-    const fetchProcesos = async () => {
+    const fetchCatalogos = async () => {
         try {
-            const res = await fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.data && Array.isArray(data.data)) {
-                    setProcesos(data.data);
-                }
+            const [pRes, mRes] = await Promise.all([
+                fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() }),
+            ]);
+            if (pRes.ok) {
+                const data = await pRes.json();
+                if (data?.data && Array.isArray(data.data)) setProcesos(data.data);
+            }
+            if (mRes.ok) {
+                const data = await mRes.json();
+                setMaquinarias(Array.isArray(data) ? data : (data?.data || []));
             }
         } catch (e) {
             console.error(e);
         }
     };
 
-    const handleAddEmptyRow = () => {
-        setEditableItems(prev => [...prev, { id: Math.random().toString(), procesoId: "", tiempo: "", cantOperarios: "1" }]);
-    };
-
-    const handleUpdateItem = (id: string, field: 'procesoId' | 'tiempo' | 'cantOperarios', value: string) => {
-        setEditableItems(prev => prev.map(item =>
-            item.id === id ? { ...item, [field]: value } : item
-        ));
-    };
-
-    const handleRemoveItem = (id: string) => {
-        setEditableItems(prev => prev.filter(item => item.id !== id));
+    const openEditor = () => {
+        setIsAdding(true);
+        fetchCatalogos();
+        setRows([makeEmptyRow()]);
     };
 
     const handleBatchSave = async () => {
-        const validItems = editableItems.filter(i => i.procesoId && i.tiempo);
+        // Sólo se guardan los procesos tildados ("Va") con proceso elegido y minutos.
+        const validItems = rows.filter(r => r.incluido && r.proceso_id && r.tiempo);
         if (validItems.length === 0) return;
 
         setLoading(true);
         try {
-            // No mandamos `orden`: el backend lo calcula como max(orden)+1 dentro de la misma
-            // transacción, así varios procesos agregados en serie quedan numerados correctamente.
-            // Las llamadas van secuenciales (no en paralelo) para que cada una vea el max actualizado.
+            // Secuenciales (no en paralelo) para que cada POST vea el max(orden)
+            // actualizado y los procesos queden numerados correctamente.
             let allSuccess = true;
             let firstError: string | null = null;
             for (const item of validItems) {
@@ -65,14 +67,15 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                     method: 'POST',
                     headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        id_proceso: parseInt(item.procesoId),
+                        id_proceso: parseInt(item.proceso_id),
                         tiempo_estimado: parseInt(item.tiempo) || 0,
-                        cant_operarios: parseInt(item.cantOperarios) || 1,
+                        cant_operarios: parseInt(item.cant_operarios) || 1,
+                        // id_maquinaria: máquina preseleccionada ('' -> null = planificador decide)
+                        id_maquinaria: item.maquina_id ? parseInt(item.maquina_id) : null,
                     })
                 });
                 if (!res.ok) {
                     allSuccess = false;
-                    // Intentamos extraer el message del ResponseDTO del backend.
                     try {
                         const body = await res.json();
                         firstError = body?.errors?.[0]?.message || null;
@@ -82,7 +85,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
             }
 
             if (allSuccess) {
-                setEditableItems([]);
+                setRows([]);
                 onProcessAdded();
                 setIsAdding(false);
                 toast.success("Procesos guardados correctamente");
@@ -105,12 +108,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
 
         return (
             <button
-                onClick={() => {
-                    setIsAdding(true);
-                    fetchProcesos();
-                    // Start with one empty row
-                    setEditableItems([{ id: Math.random().toString(), procesoId: "", tiempo: "", cantOperarios: "1" }]);
-                }}
+                onClick={openEditor}
                 className={cn(
                     "flex items-center gap-2 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors w-full px-4 py-2 hover:bg-gray-100",
                     isCentered ? "justify-center" : ""
@@ -122,12 +120,14 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
         );
     }
 
+    const guardables = rows.filter(r => r.incluido && r.proceso_id && r.tiempo).length;
+
     return (
         <div className={cn(
-            "flex flex-col w-full animate-in fade-in slide-in-from-top-1 bg-blue-50/30 border-t border-blue-100 p-2 gap-2",
+            "flex flex-col w-full animate-in fade-in slide-in-from-top-1 bg-blue-50/30 border-t border-blue-100 p-3 gap-2",
             variant === 'card' ? "rounded-lg border bg-white" : ""
         )}>
-            <div className="flex justify-between items-center px-2">
+            <div className="flex justify-between items-center px-1">
                 <span className="text-xs font-medium text-blue-800">Nuevos Procesos</span>
                 <Button
                     size="sm"
@@ -139,189 +139,28 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                 </Button>
             </div>
 
-            {editableItems.map((item, idx) => (
-                <div key={item.id} className={cn(
-                    "items-center gap-2",
-                    variant === 'table'
-                        ? "grid grid-cols-[50px_1fr_180px_120px_80px_100px_200px_200px] gap-4"
-                        : "flex flex-col gap-2 w-full p-2 rounded border border-blue-100 shadow-sm transition-all"
-                )}>
-                    {variant === 'table' && <div className="text-right pr-2 text-xs text-gray-400">#{idx + 1}</div>}
+            <ProcesosEditor
+                rows={rows}
+                onChange={setRows}
+                procesos={procesos}
+                maquinarias={maquinarias}
+            />
 
-                    {/* Process Selection */}
-                    <div className={cn("flex flex-col gap-1", variant === 'card' ? "w-full" : "w-full")}>
-                        {variant === 'card' && <span className="text-[10px] uppercase font-bold text-gray-400">Proceso</span>}
-                        <ProcessSelector
-                            value={item.procesoId}
-                            onChange={(val) => handleUpdateItem(item.id, 'procesoId', val)}
-                            procesos={procesos}
-                        />
-                    </div>
-
-                    {variant === 'table' && <><div></div><div></div></>}
-
-                    {/* Time Input */}
-                    <div className={cn("flex flex-col gap-1", variant === 'card' ? "w-full" : "")}>
-                        {variant === 'card' && <span className="text-[10px] uppercase font-bold text-gray-400">Tiempo Estimado</span>}
-                        <div className="relative">
-                            <Input
-                                type="number"
-                                className={cn("h-8 text-xs bg-white", variant === 'card' ? "w-full pr-8" : "text-center")}
-                                value={item.tiempo}
-                                onChange={e => handleUpdateItem(item.id, 'tiempo', e.target.value)}
-                                placeholder="0"
-                            />
-                            {variant === 'card' && <span className="absolute right-2 top-1.5 text-xs text-gray-400 pointer-events-none">min</span>}
-                        </div>
-                    </div>
-
-                    {/* Operarios necesarios */}
-                    <div className={cn("flex flex-col gap-1", variant === 'card' ? "w-full" : "")}>
-                        {variant === 'card' && <span className="text-[10px] uppercase font-bold text-gray-400">Operarios necesarios</span>}
-                        <Input
-                            type="number"
-                            min={1}
-                            className={cn("h-8 text-xs bg-white", variant === 'card' ? "w-full" : "text-center")}
-                            value={item.cantOperarios}
-                            onChange={e => handleUpdateItem(item.id, 'cantOperarios', e.target.value)}
-                            placeholder="1"
-                            title="Operarios que requiere el proceso en simultáneo"
-                        />
-                    </div>
-
-                    {variant === 'table' && <div></div>}
-
-                    <div className={cn("flex items-center", variant === 'card' ? "justify-end mt-1" : "")}>
-                        {variant === 'card' ? (
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-6 px-2 text-red-500 hover:text-red-700 hover:bg-red-50 text-xs flex items-center gap-1"
-                                onClick={() => handleRemoveItem(item.id)}
-                            >
-                                <X className="w-3 h-3" /> Eliminar
-                            </Button>
-                        ) : (
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
-                                onClick={() => handleRemoveItem(item.id)}
-                                disabled={editableItems.length === 1}
-                            >
-                                <X className="w-4 h-4" />
-                            </Button>
-                        )}
-                    </div>
-                </div>
-            ))}
-
-            <div className={cn("flex items-center gap-2 mt-2 px-1", variant === 'card' ? "flex-col" : "")}>
-                {variant !== 'card' && (
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 text-xs gap-1 border-dashed"
-                        onClick={handleAddEmptyRow}
-                    >
-                        <Plus className="w-3.5 h-3.5" />
-                        Agregar otra fila
-                    </Button>
-                )}
-
-                {variant !== 'card' && <div className="flex-1"></div>}
-
+            <div className="flex items-center justify-end mt-1">
                 <Button
                     size="sm"
-                    className={cn(
-                        "h-8 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1 shadow-sm",
-                        variant === 'card' ? "w-full justify-center" : ""
-                    )}
+                    className="h-8 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1 shadow-sm"
                     onClick={handleBatchSave}
-                    disabled={loading || editableItems.filter(i => i.procesoId && i.tiempo).length === 0}
+                    disabled={loading || guardables === 0}
                 >
                     {loading ? "..." : (
                         <>
                             <Save className="w-3.5 h-3.5" />
-                            {variant === 'card' ? "Guardar" : `Guardar Todo (${editableItems.filter(i => i.procesoId && i.tiempo).length})`}
+                            Guardar Todo ({guardables})
                         </>
                     )}
                 </Button>
             </div>
         </div>
     );
-}
-
-function ProcessSelector({ value, onChange, procesos }: { value: string, onChange: (val: string) => void, procesos: any[] }) {
-    const [open, setOpen] = React.useState(false)
-    const [searchTerm, setSearchTerm] = React.useState("")
-
-    const safeProcesos = Array.isArray(procesos) ? procesos : [];
-
-    const selectedProcess = safeProcesos.find(p => p.id.toString() === value)
-
-    const filteredProcesos = safeProcesos.filter(p =>
-        p.nombre.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-
-    return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={open}
-                    className="h-8 w-full justify-between text-xs font-normal bg-white"
-                >
-                    <span className="truncate">
-                        {selectedProcess ? selectedProcess.nombre : "Seleccionar Proceso..."}
-                    </span>
-                    <ChevronDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[300px] p-0" align="start">
-                <div className="flex flex-col w-full bg-white rounded-md">
-                    <div className="flex items-center border-b px-3 py-2">
-                        <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                        <input
-                            className="flex h-9 w-full rounded-md bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                            placeholder="Buscar proceso..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            autoFocus
-                        />
-                    </div>
-                    <div className="max-h-[300px] overflow-auto p-1">
-                        {filteredProcesos.length === 0 && (
-                            <div className="py-6 text-center text-sm text-muted-foreground">
-                                No se encontró el proceso.
-                            </div>
-                        )}
-                        {filteredProcesos.map((proceso) => (
-                            <div
-                                key={proceso.id}
-                                className={cn(
-                                    "relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-slate-100",
-                                    value === proceso.id.toString() && "bg-slate-100"
-                                )}
-                                onClick={() => {
-                                    onChange(proceso.id.toString())
-                                    setOpen(false)
-                                    setSearchTerm("")
-                                }}
-                            >
-                                <Check
-                                    className={cn(
-                                        "mr-2 h-4 w-4",
-                                        value === proceso.id.toString() ? "opacity-100" : "opacity-0"
-                                    )}
-                                />
-                                {proceso.nombre}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </PopoverContent>
-        </Popover>
-    )
 }
