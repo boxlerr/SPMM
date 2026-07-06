@@ -264,40 +264,40 @@ export default function RecursosPage() {
           onClick={() => setTabActiva("operarios")}
           className={`flex-1 ${tabActiva === "operarios" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
-          <User className="h-4 w-4 sm:mr-2" />
-          <span className="hidden xs:inline">Operarios</span>
+          <User className="h-4 w-4 mr-2" />
+          <span>Operarios</span>
         </Button>
         <Button
           variant={tabActiva === "maquinas" ? "default" : "outline"}
           onClick={() => setTabActiva("maquinas")}
           className={`flex-1 ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
-          <Factory className="h-4 w-4 sm:mr-2" />
-          <span className="hidden xs:inline">Máquinas</span>
+          <Factory className="h-4 w-4 mr-2" />
+          <span>Maquinarias</span>
         </Button>
         <Button
           variant={tabActiva === "procesos" ? "default" : "outline"}
           onClick={() => setTabActiva("procesos")}
           className={`flex-1 ${tabActiva === "procesos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
-          <Layers className="h-4 w-4 sm:mr-2" />
-          <span className="hidden xs:inline">Procesos</span>
+          <Layers className="h-4 w-4 mr-2" />
+          <span>Procesos</span>
         </Button>
         <Button
           variant={tabActiva === "rangos" ? "default" : "outline"}
           onClick={() => setTabActiva("rangos")}
           className={`flex-1 ${tabActiva === "rangos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
-          <Target className="h-4 w-4 sm:mr-2" />
-          <span className="hidden xs:inline">Rangos</span>
+          <Target className="h-4 w-4 mr-2" />
+          <span>Rangos</span>
         </Button>
         <Button
           variant={tabActiva === "sectores" ? "default" : "outline"}
           onClick={() => setTabActiva("sectores")}
           className={`flex-1 ${tabActiva === "sectores" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
-          <MapPin className="h-4 w-4 sm:mr-2" />
-          <span className="hidden xs:inline">Sectores</span>
+          <MapPin className="h-4 w-4 mr-2" />
+          <span>Sectores</span>
         </Button>
       </div>
 
