@@ -25,11 +25,12 @@
  */
 
 import React from "react";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Plus, Trash2, History, Lock, Settings } from "lucide-react";
+import { Plus, Trash2, History, Lock, Settings, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface ProcesoRow {
@@ -72,7 +73,17 @@ interface ProcesosEditorProps {
     historialLoading?: boolean;
 }
 
-const GRID = "grid grid-cols-[36px_36px_minmax(0,1fr)_96px_minmax(0,200px)_110px_40px] gap-2 items-center";
+const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,200px)_110px_40px] gap-2 items-center";
+
+/**
+ * Mantiene sólo el desplazamiento vertical del drag (bloquea el eje X). Sin esto,
+ * la fila sigue el cursor también en horizontal y se ve desalineada de las columnas.
+ */
+function lockDragAxisX(style?: React.CSSProperties): React.CSSProperties | undefined {
+    if (!style?.transform) return style;
+    const locked = style.transform.replace(/translate\(\s*[^,]+,/, "translate(0px,");
+    return { ...style, transform: locked };
+}
 
 export function ProcesosEditor({
     rows,
@@ -98,6 +109,18 @@ export function ProcesosEditor({
     const remove = (id: string) => onChange(rows.filter((r) => r.id !== id));
 
     const addRow = () => onChange([...rows, makeEmptyRow()]);
+
+    // Reordenar por drag & drop: la posición en la lista = la secuencia del proceso.
+    const onDragEnd = (result: DropResult) => {
+        if (disabled || !result.destination) return;
+        const from = result.source.index;
+        const to = result.destination.index;
+        if (from === to) return;
+        const next = Array.from(rows);
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        onChange(next);
+    };
 
     const incluidos = rows.filter((r) => r.incluido).length;
 
@@ -144,6 +167,7 @@ export function ProcesosEditor({
             <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
                 {/* Header */}
                 <div className={cn(GRID, "px-3 py-2 bg-gray-50/80 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-gray-500")}>
+                    <div></div>
                     <div className="text-center" title="Incluir este proceso en la orden">Va</div>
                     <div className="text-center">#</div>
                     <div>Proceso</div>
@@ -165,109 +189,144 @@ export function ProcesosEditor({
                         </p>
                     </div>
                 ) : (
-                    <div className="divide-y divide-gray-100">
-                        {rows.map((row, idx) => {
-                            const conMaquina = !!row.maquina_id;
-                            return (
+                    <DragDropContext onDragEnd={onDragEnd}>
+                        <Droppable droppableId="procesos-editor">
+                            {(dropProvided) => (
                                 <div
-                                    key={row.id}
-                                    className={cn(
-                                        GRID,
-                                        "px-3 py-2 transition-colors",
-                                        row.incluido ? "hover:bg-blue-50/30" : "bg-gray-50/60 opacity-60"
-                                    )}
+                                    ref={dropProvided.innerRef}
+                                    {...dropProvided.droppableProps}
+                                    className="divide-y divide-gray-100"
                                 >
-                                    {/* Tilde: va / no va */}
-                                    <div className="flex justify-center">
-                                        <Checkbox
-                                            checked={row.incluido}
-                                            disabled={disabled}
-                                            onCheckedChange={(c) => update(row.id, { incluido: !!c })}
-                                            title={row.incluido ? "Este proceso va en la orden" : "Destildado: no se guardará"}
-                                        />
-                                    </div>
+                                    {rows.map((row, idx) => {
+                                        const conMaquina = !!row.maquina_id;
+                                        return (
+                                            <Draggable
+                                                key={row.id}
+                                                draggableId={row.id}
+                                                index={idx}
+                                                isDragDisabled={disabled}
+                                            >
+                                                {(dragProvided, dragSnapshot) => (
+                                                    <div
+                                                        ref={dragProvided.innerRef}
+                                                        {...dragProvided.draggableProps}
+                                                        style={lockDragAxisX(dragProvided.draggableProps.style)}
+                                                        className={cn(
+                                                            GRID,
+                                                            "px-3 py-2 transition-colors bg-white",
+                                                            row.incluido ? "hover:bg-blue-50/30" : "bg-gray-50/60 opacity-60",
+                                                            dragSnapshot.isDragging && "shadow-lg ring-1 ring-blue-300 rounded-lg bg-white opacity-100"
+                                                        )}
+                                                    >
+                                                        {/* Manija de arrastre */}
+                                                        <div
+                                                            {...dragProvided.dragHandleProps}
+                                                            className={cn(
+                                                                "flex justify-center text-gray-300",
+                                                                disabled ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing hover:text-gray-500"
+                                                            )}
+                                                            title="Arrastrar para reordenar"
+                                                        >
+                                                            <GripVertical className="w-4 h-4" />
+                                                        </div>
 
-                                    {/* Orden (posición) */}
-                                    <div className="flex justify-center">
-                                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-600 text-[11px] font-bold">
-                                            {idx + 1}
-                                        </span>
-                                    </div>
+                                                        {/* Tilde: va / no va */}
+                                                        <div className="flex justify-center">
+                                                            <Checkbox
+                                                                checked={row.incluido}
+                                                                disabled={disabled}
+                                                                onCheckedChange={(c) => update(row.id, { incluido: !!c })}
+                                                                title={row.incluido ? "Este proceso va en la orden" : "Destildado: no se guardará"}
+                                                            />
+                                                        </div>
 
-                                    {/* Proceso */}
-                                    <div className="min-w-0">
-                                        <SearchableSelect
-                                            options={procesoOptions}
-                                            value={row.proceso_id}
-                                            onValueChange={(v) => update(row.id, { proceso_id: v })}
-                                            placeholder="Seleccionar proceso..."
-                                            disabled={disabled}
-                                        />
-                                    </div>
+                                                        {/* Orden (posición) */}
+                                                        <div className="flex justify-center">
+                                                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-600 text-[11px] font-bold">
+                                                                {idx + 1}
+                                                            </span>
+                                                        </div>
 
-                                    {/* Minutos */}
-                                    <div>
-                                        <Input
-                                            type="number"
-                                            min={0}
-                                            value={row.tiempo}
-                                            disabled={disabled}
-                                            onChange={(e) => update(row.id, { tiempo: e.target.value })}
-                                            placeholder="0"
-                                            className="h-8 text-xs text-center bg-white"
-                                        />
-                                    </div>
+                                                        {/* Proceso */}
+                                                        <div className="min-w-0">
+                                                            <SearchableSelect
+                                                                options={procesoOptions}
+                                                                value={row.proceso_id}
+                                                                onValueChange={(v) => update(row.id, { proceso_id: v })}
+                                                                placeholder="Seleccionar proceso..."
+                                                                disabled={disabled}
+                                                            />
+                                                        </div>
 
-                                    {/* Máquina (elegir = preseleccionar) */}
-                                    <div className="min-w-0 flex items-center gap-1">
-                                        <div className="min-w-0 flex-1">
-                                            <SearchableSelect
-                                                options={maquinaOptions}
-                                                value={row.maquina_id}
-                                                onValueChange={(v) => update(row.id, { maquina_id: v })}
-                                                placeholder="Sin máquina"
-                                                disabled={disabled}
-                                            />
-                                        </div>
-                                        {conMaquina && (
-                                            <Lock
-                                                className="w-3.5 h-3.5 shrink-0 text-amber-500"
-                                                aria-label="Máquina forzada (preseleccionada)"
-                                            />
-                                        )}
-                                    </div>
+                                                        {/* Minutos */}
+                                                        <div>
+                                                            <Input
+                                                                type="number"
+                                                                min={0}
+                                                                value={row.tiempo}
+                                                                disabled={disabled}
+                                                                onChange={(e) => update(row.id, { tiempo: e.target.value })}
+                                                                placeholder="0"
+                                                                className="h-8 text-xs text-center bg-white"
+                                                            />
+                                                        </div>
 
-                                    {/* Cantidad de empleados */}
-                                    <div>
-                                        <Input
-                                            type="number"
-                                            min={1}
-                                            value={row.cant_operarios}
-                                            disabled={disabled}
-                                            onChange={(e) => update(row.id, { cant_operarios: e.target.value })}
-                                            placeholder="1"
-                                            title="Operarios que requiere el proceso en simultáneo"
-                                            className="h-8 text-xs text-center bg-white"
-                                        />
-                                    </div>
+                                                        {/* Máquina (elegir = preseleccionar) */}
+                                                        <div className="min-w-0 flex items-center gap-1">
+                                                            <div className="min-w-0 flex-1">
+                                                                <SearchableSelect
+                                                                    options={maquinaOptions}
+                                                                    value={row.maquina_id}
+                                                                    onValueChange={(v) => update(row.id, { maquina_id: v })}
+                                                                    placeholder="Sin máquina"
+                                                                    disabled={disabled}
+                                                                />
+                                                            </div>
+                                                            {conMaquina && (
+                                                                <Lock
+                                                                    className="w-3.5 h-3.5 shrink-0 text-amber-500"
+                                                                    aria-label="Máquina forzada (preseleccionada)"
+                                                                />
+                                                            )}
+                                                        </div>
 
-                                    {/* Eliminar */}
-                                    <div className="flex justify-center">
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            disabled={disabled}
-                                            onClick={() => remove(row.id)}
-                                            className="h-7 w-7 text-gray-400 hover:text-red-500 hover:bg-red-50"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </div>
+                                                        {/* Cantidad de empleados */}
+                                                        <div>
+                                                            <Input
+                                                                type="number"
+                                                                min={1}
+                                                                value={row.cant_operarios}
+                                                                disabled={disabled}
+                                                                onChange={(e) => update(row.id, { cant_operarios: e.target.value })}
+                                                                placeholder="1"
+                                                                title="Operarios que requiere el proceso en simultáneo"
+                                                                className="h-8 text-xs text-center bg-white"
+                                                            />
+                                                        </div>
+
+                                                        {/* Eliminar */}
+                                                        <div className="flex justify-center">
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                disabled={disabled}
+                                                                onClick={() => remove(row.id)}
+                                                                className="h-7 w-7 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </Draggable>
+                                        );
+                                    })}
+                                    {dropProvided.placeholder}
                                 </div>
-                            );
-                        })}
-                    </div>
+                            )}
+                        </Droppable>
+                    </DragDropContext>
                 )}
             </div>
 

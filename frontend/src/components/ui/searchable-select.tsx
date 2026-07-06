@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { ChevronDown, Check, Search, X } from "lucide-react";
 
@@ -13,6 +14,24 @@ interface SearchableSelectProps {
     disabled?: boolean;
 }
 
+interface MenuPosition {
+    /** desplazamiento izquierdo relativo al contenedor del portal */
+    left: number;
+    width: number;
+    /** true = el menú se abre hacia arriba (no había espacio abajo) */
+    openUp: boolean;
+    maxHeight: number;
+    /** ancla vertical relativa al portal: top si abre hacia abajo, bottom si abre hacia arriba */
+    anchor: number;
+}
+
+/** Contenedor donde se portalea el menú: el modal si existe (para no quedar fuera
+ *  del focus-trap de Radix Dialog), o el body si no hay modal. */
+function getPortalTarget(el: HTMLElement | null): HTMLElement {
+    if (typeof document === "undefined") return null as unknown as HTMLElement;
+    return (el?.closest('[role="dialog"]') as HTMLElement | null) ?? document.body;
+}
+
 export function SearchableSelect({
     options,
     value,
@@ -23,30 +42,70 @@ export function SearchableSelect({
 }: SearchableSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState("");
+    const [menuPos, setMenuPos] = useState<MenuPosition | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
+    // Calcula la posición del menú (fixed) a partir del trigger. Se portalea dentro
+    // del modal (o del body si no hay) para escapar de contenedores con
+    // overflow-hidden (el listado de procesos) sin salir del focus-trap del Dialog.
+    const computePosition = useCallback(() => {
+        if (!containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const target = getPortalTarget(containerRef.current);
+        // Coordenadas del contenedor del portal: el body no tiene "rect" útil, se
+        // usa el viewport. Si es el modal (con transform), position:fixed queda
+        // relativo a su caja, así que restamos su origen.
+        const isBody = !target || target === document.body;
+        const parent = isBody ? null : target.getBoundingClientRect();
+        const offLeft = parent ? parent.left : 0;
+        const offTop = parent ? parent.top : 0;
+        const bottomEdge = parent ? parent.bottom : window.innerHeight;
+
+        const MENU_MAX = 300;
+        const MARGIN = 4;
+        const spaceBelow = window.innerHeight - rect.bottom - 8;
+        const spaceAbove = rect.top - 8;
+        const openUp = spaceBelow < Math.min(MENU_MAX, 220) && spaceAbove > spaceBelow;
+        const maxHeight = Math.max(160, Math.min(MENU_MAX, openUp ? spaceAbove : spaceBelow));
+        setMenuPos({
+            left: rect.left - offLeft,
+            width: rect.width,
+            openUp,
+            maxHeight,
+            anchor: openUp
+                ? bottomEdge - rect.top + MARGIN   // bottom: apoya el menú justo arriba del trigger
+                : rect.bottom - offTop + MARGIN,    // top: apoya el menú justo debajo del trigger
+        });
     }, []);
 
     useEffect(() => {
-        if (isOpen && inputRef.current) {
-            inputRef.current.focus();
-        }
-        if (isOpen && containerRef.current) {
-            // Pequeño delay para asegurar que el dropdown se renderizó y el layout se ajustó
-            setTimeout(() => {
-                containerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }, 100);
-        }
-    }, [isOpen]);
+        if (!isOpen) return;
+        computePosition();
+        if (inputRef.current) inputRef.current.focus();
+
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as Node;
+            if (
+                containerRef.current && !containerRef.current.contains(target) &&
+                menuRef.current && !menuRef.current.contains(target)
+            ) {
+                setIsOpen(false);
+            }
+        };
+        const handleReposition = () => computePosition();
+
+        document.addEventListener("mousedown", handleClickOutside);
+        window.addEventListener("resize", handleReposition);
+        // capture: true para reaccionar al scroll de cualquier contenedor ancestro
+        window.addEventListener("scroll", handleReposition, true);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            window.removeEventListener("resize", handleReposition);
+            window.removeEventListener("scroll", handleReposition, true);
+        };
+    }, [isOpen, computePosition]);
 
     const filteredOptions = options.filter(opt =>
         opt.label.toLowerCase().includes(search.toLowerCase())
@@ -88,10 +147,27 @@ export function SearchableSelect({
                 </div>
             </div>
 
-            {isOpen && (
+            {isOpen && menuPos && typeof document !== "undefined" && createPortal(
                 <div
-                    className="absolute z-[9999] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-2xl max-h-[300px] overflow-hidden flex flex-col animate-in fade-in-0 zoom-in-95 duration-100 ring-1 ring-black/5"
-                    style={{ position: 'absolute', top: '100%', left: 0, right: 0 }}
+                    ref={menuRef}
+                    className="z-[9999] bg-white border border-gray-200 rounded-lg shadow-2xl overflow-hidden flex flex-col animate-in fade-in-0 zoom-in-95 duration-100 ring-1 ring-black/5"
+                    style={{
+                        position: "fixed",
+                        pointerEvents: "auto",
+                        left: menuPos.left,
+                        width: menuPos.width,
+                        maxHeight: menuPos.maxHeight,
+                        ...(menuPos.openUp ? { bottom: menuPos.anchor } : { top: menuPos.anchor }),
+                    }}
+                    onKeyDown={(e) => {
+                        // Que ESC cierre sólo el desplegable y no burbujee al Radix
+                        // Dialog (si no, dispara el "Cancelar creación" del modal).
+                        if (e.key === "Escape") {
+                            e.stopPropagation();
+                            e.nativeEvent.stopImmediatePropagation();
+                            setIsOpen(false);
+                        }
+                    }}
                 >
                     <div className="p-3 border-b border-gray-100 flex items-center gap-2 bg-gray-50/80 backdrop-blur sticky top-0 z-10">
                         <Search className="w-4 h-4 text-gray-400" />
@@ -130,7 +206,8 @@ export function SearchableSelect({
                             ))
                         )}
                     </div>
-                </div>
+                </div>,
+                getPortalTarget(containerRef.current)
             )}
         </div>
     );
