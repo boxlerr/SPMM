@@ -1518,8 +1518,14 @@ export function PlanningPreviewModal({
                                                 <div className="flex justify-between items-start mb-1.5 gap-2">
                                                     <div className="min-w-0 flex-1">
                                                         <div className="text-sm font-medium text-gray-800 truncate">{op.nombre} {op.apellido}</div>
-                                                        {op.sector && (
+                                                        {/* Subtítulo uniforme: sector → si no hay, rango principal → si no, "Sin sector".
+                                                            Antes se ocultaba cuando el operario no tenía sector, dejando tarjetas sin subtítulo. */}
+                                                        {op.sector ? (
                                                             <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold truncate">{op.sector}</div>
+                                                        ) : rangosNombres.length > 0 ? (
+                                                            <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold truncate">{rangosNombres[0]}</div>
+                                                        ) : (
+                                                            <div className="text-[10px] uppercase tracking-wide text-gray-300 font-semibold italic truncate">Sin sector</div>
                                                         )}
                                                     </div>
                                                     <span className={cn(
