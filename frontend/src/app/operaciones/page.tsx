@@ -1402,7 +1402,8 @@ export default function OperacionesPage() {
                       maquinarias={rawMaquinarias}
                       planificacion={rawPlanificacion}
                       onRowClick={(item) => {
-                        console.log("Clicked order:", item);
+                        setOrderToEdit(item);
+                        setIsCreateModalOpen(true);
                       }}
                       onDataChange={fetchData}
                     />
