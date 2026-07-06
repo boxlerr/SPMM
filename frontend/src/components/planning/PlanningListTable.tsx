@@ -1004,7 +1004,7 @@ function _PlanningListTable({
                                 sortedData.map((item, index) => (
                                     <React.Fragment key={item.id}>
                                         <tr
-                                            onClick={() => onRowClick(item)}
+                                            onClick={() => { toggleRow(item.id); onRowClick(item); }}
                                             className={cn(
                                                 "border-b transition-colors duration-150 cursor-pointer hover:opacity-80",
                                                 getRowColor(item)
