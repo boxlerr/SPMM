@@ -551,6 +551,27 @@ class OrdenTrabajoService:
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
 
+    async def obtenerHistorialProcesos(self, id_articulo: int, excluir_orden_id: int | None = None):
+        """
+        "Traer historial": trae los procesos de la última OT del mismo producto
+        (id_articulo = código + descripción). El frontend los carga en el listado
+        todos tildados; el usuario destilda los que esta vez no van.
+        """
+        logger.info(f"Service - Traer historial de procesos para articulo {id_articulo}")
+        procs = await self.repository.obtener_historial_procesos(id_articulo, excluir_orden_id)
+        data = [
+            {
+                "id_proceso": p.id_proceso,
+                "nombre_proceso": p.proceso.nombre if p.proceso else None,
+                "tiempo_proceso": p.tiempo_proceso,
+                "cant_operarios": p.cant_operarios,
+                "id_maquinaria": p.id_maquinaria,
+                "orden": p.orden,
+            }
+            for p in procs
+        ]
+        return ResponseDTO(status=True, data=data)
+
     async def eliminarProceso(self, id_orden: int, id_proceso: int):
         logger.info(f"Service - Eliminar proceso {id_proceso} de Orden {id_orden}")
 

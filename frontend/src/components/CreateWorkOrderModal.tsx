@@ -67,6 +67,7 @@ interface MateriaPrimaItem {
 export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [historialLoading, setHistorialLoading] = useState(false);
     const [activeTab, setActiveTab] = useState("general");
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
     const [showConfirmCancel, setShowConfirmCancel] = useState(false);
@@ -603,6 +604,44 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         setActiveTab("general");
     };
 
+    // "Traer historial": trae los procesos de la última OT del mismo producto
+    // (artículo = código + descripción) y los carga en el listado, todos tildados.
+    const handleTraerHistorial = async () => {
+        if (!generalData.articulo_id) {
+            toast.error("Elegí primero el producto (artículo) en la pestaña General");
+            setActiveTab("general");
+            return;
+        }
+        setHistorialLoading(true);
+        try {
+            const params = new URLSearchParams({ id_articulo: generalData.articulo_id });
+            if (orderToEdit?.id) params.set("excluir_orden_id", orderToEdit.id.toString());
+            const res = await fetch(`${API_URL}/ordenes/historial-procesos?${params.toString()}`, { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error("request failed");
+            const body = await res.json();
+            const items = Array.isArray(body?.data) ? body.data : [];
+            if (items.length === 0) {
+                toast.info("No hay historial de procesos para este producto");
+                return;
+            }
+            const nuevos: ProcesoRow[] = items.map((it: any) => ({
+                id: Math.random().toString(36).slice(2),
+                proceso_id: it.id_proceso != null ? it.id_proceso.toString() : "",
+                tiempo: it.tiempo_proceso != null ? it.tiempo_proceso.toString() : "",
+                cant_operarios: it.cant_operarios != null ? it.cant_operarios.toString() : "1",
+                maquina_id: it.id_maquinaria ? it.id_maquinaria.toString() : "",
+                incluido: true,
+            }));
+            setProcesses(nuevos);
+            toast.success(`Se trajeron ${nuevos.length} procesos del historial. Destildá los que esta vez no van.`);
+        } catch (e) {
+            console.error(e);
+            toast.error("No se pudo traer el historial");
+        } finally {
+            setHistorialLoading(false);
+        }
+    };
+
     return (
         <>
             <ConfirmationDialog
@@ -1119,6 +1158,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                                         procesos={procesosOptions}
                                         maquinarias={maquinarias}
                                         disabled={isLegacyOT}
+                                        onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
+                                        historialLoading={historialLoading}
                                     />
                                 </TabsContent>
                             </Tabs>

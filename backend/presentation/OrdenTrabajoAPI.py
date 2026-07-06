@@ -57,6 +57,14 @@ async def listar_por_fechas(desde: datetime, hasta: datetime, db=Depends(get_db)
     service = OrdenTrabajoService(db)
     return await service.listarPorFechas(desde, hasta)
 
+# 🔹 Traer historial de procesos de un producto (para el botón "Traer historial").
+#    Va ANTES de /ordenes/{id} para que "historial-procesos" no se interprete como {id}.
+@router.get("/ordenes/historial-procesos")
+async def historial_procesos(id_articulo: int, excluir_orden_id: int | None = None, db=Depends(get_db)):
+    logger.info(f"API - Inicio GET /ordenes/historial-procesos?id_articulo={id_articulo}")
+    service = OrdenTrabajoService(db)
+    return await service.obtenerHistorialProcesos(id_articulo, excluir_orden_id)
+
 # 🔹 Obtener orden por ID
 @router.get("/ordenes/{id}")
 async def obtener_orden(id: int, db=Depends(get_db)):

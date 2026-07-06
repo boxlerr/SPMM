@@ -911,7 +911,41 @@ class OrdenTrabajoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error en agregarProceso: {e}")
             raise InfrastructureException("Error al agregar proceso a la orden.") from e
-            raise InfrastructureException("Error al actualizar cantidad entregada.") from e
+
+    async def obtener_historial_procesos(self, id_articulo: int, excluir_orden_id: int | None = None):
+        """
+        "Traer historial": devuelve los procesos de la ÚLTIMA OT (por fecha_orden)
+        del mismo producto (id_articulo) que tenga procesos cargados. El producto
+        (artículo) = código + descripción, tal como pidió Lucas. [] si no hay historial.
+        """
+        try:
+            # 1. id de la OT más reciente de ese artículo que TENGA procesos.
+            con_procesos = select(OrdenTrabajoProceso.id_orden_trabajo).distinct()
+            ot_id_q = (
+                select(OrdenTrabajo.id)
+                .where(OrdenTrabajo.id_articulo == id_articulo)
+                .where(OrdenTrabajo.id.in_(con_procesos))
+                .order_by(OrdenTrabajo.fecha_orden.desc(), OrdenTrabajo.id.desc())
+                .limit(1)
+            )
+            if excluir_orden_id:
+                ot_id_q = ot_id_q.where(OrdenTrabajo.id != excluir_orden_id)
+            ot_id = (await self.db.execute(ot_id_q)).scalar_one_or_none()
+            if not ot_id:
+                return []
+
+            # 2. procesos de esa OT, con el nombre del proceso, ordenados por 'orden'.
+            proc_q = (
+                select(OrdenTrabajoProceso)
+                .where(OrdenTrabajoProceso.id_orden_trabajo == ot_id)
+                .options(joinedload(OrdenTrabajoProceso.proceso))
+                .order_by(OrdenTrabajoProceso.orden)
+            )
+            procs = (await self.db.execute(proc_q)).scalars().all()
+            return list(procs)
+        except Exception as e:
+            logger.error(f"Repository - Error en obtener_historial_procesos: {e}")
+            raise InfrastructureException("Error al traer el historial de procesos.") from e
 
     async def get_material_status(self, orden_ids: list[int]) -> dict[int, str]:
         """
