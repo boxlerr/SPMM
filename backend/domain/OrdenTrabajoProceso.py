@@ -16,6 +16,14 @@ class OrdenTrabajoProceso(Base):
     # La columna ya existe en la base (cant_operarios, NOT NULL default 1).
     cant_operarios = Column(Integer, nullable=False, default=1)
 
+    # Máquina PRESELECCIONADA para este proceso (pedido reunión Metlo 2-jul-2026).
+    #   - NULL  = sin preselección: el planificador elige la máquina.
+    #   - <id>  = preselección: se fuerza ese proceso a esa máquina.
+    # Requiere la migración backend/scripts/migrations/2026-07-05_maquina_en_proceso.sql
+    # corrida ANTES de desplegar (si la columna no existe, el ORM rompe al leer procesos).
+    # El sync (sync_db.py) NO la pisa (no está en su MERGE), igual que cant_operarios.
+    id_maquinaria = Column(Integer, ForeignKey("maquinaria.id"), nullable=True)
+
     # New fields for real time tracking
     inicio_real = Column(DateTime, nullable=True)
     fin_real = Column(DateTime, nullable=True)

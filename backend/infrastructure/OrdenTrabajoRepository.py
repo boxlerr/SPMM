@@ -764,6 +764,12 @@ class OrdenTrabajoRepository:
                 # Update fields based on new DTO structure (no dates, just minutes)
                 minutes = item.get('tiempo_proceso')
                 cant_ops = item.get('cant_operarios')
+                # Máquina preseleccionada: puede venir como int, string o None.
+                # '', '0' o None = sin preselección. La clave 'maquinaria_id' es
+                # opcional: si NO viene en el item, no tocamos el valor existente.
+                _has_maq = 'maquinaria_id' in item
+                _maq_raw = item.get('maquinaria_id')
+                id_maquinaria = int(_maq_raw) if (_maq_raw not in (None, "", "0")) else None
 
                 if pid in current_map:
                     # UPDATE existing
@@ -773,6 +779,8 @@ class OrdenTrabajoRepository:
                         existing_proc.tiempo_proceso = minutes
                     if cant_ops is not None:
                         existing_proc.cant_operarios = cant_ops
+                    if _has_maq:
+                        existing_proc.id_maquinaria = id_maquinaria
                 else:
                     # CREATE new
                     new_proc = OrdenTrabajoProceso(
@@ -781,7 +789,8 @@ class OrdenTrabajoRepository:
                         orden=index + 1,
                         id_estado=1, # Default Nuevo
                         tiempo_proceso=minutes or 0,
-                        cant_operarios=cant_ops or 1
+                        cant_operarios=cant_ops or 1,
+                        id_maquinaria=id_maquinaria
                     )
                     self.db.add(new_proc)
             
@@ -868,7 +877,7 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en eliminarProceso: {e}")
             raise InfrastructureException("Error al eliminar proceso de la orden.") from e
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None):
         try:
             logger.info(f"Repository - Agregar proceso {id_proceso} a Orden {id_orden}")
 
@@ -887,6 +896,7 @@ class OrdenTrabajoRepository:
                 orden=orden,
                 tiempo_proceso=tiempo_estimado,
                 cant_operarios=cant_operarios or 1,
+                id_maquinaria=id_maquinaria,  # None = sin preselección
                 id_estado=1  # Default: Pendiente
             )
             

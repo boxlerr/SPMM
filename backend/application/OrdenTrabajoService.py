@@ -90,12 +90,16 @@ class OrdenTrabajoService:
             from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
             
             for index, proc_dto in enumerate(dto.procesos):
+                # maquinaria_id viene como string opcional desde el modal; '' / None = sin preselección.
+                _maq = getattr(proc_dto, "maquinaria_id", None)
+                id_maquinaria = int(_maq) if (_maq not in (None, "", "0")) else None
                 nuevo_proceso = OrdenTrabajoProceso(
                     id_orden_trabajo=orden_creada.id,
                     id_proceso=proc_dto.proceso_id,
                     orden=index + 1,
                     tiempo_proceso=proc_dto.tiempo_proceso or 0,
                     cant_operarios=proc_dto.cant_operarios or 1,
+                    id_maquinaria=id_maquinaria,
                 )
                 # Hack: Direct save via session if repository doesn't have specific method?
                 # OrdenTrabajoRepository.save uses add/commit. 
@@ -529,7 +533,7 @@ class OrdenTrabajoService:
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None):
         logger.info(f"Service - Agregar proceso {id_proceso} a Orden {id_orden}")
 
         # Verify order exists
@@ -543,7 +547,7 @@ class OrdenTrabajoService:
         if ya_existe:
             raise BusinessException(f"Este proceso ya está cargado en la OT.")
 
-        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios)
+        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria)
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
 

@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
+import { ProcesosEditor, ProcesoRow } from "@/components/planning/ProcesosEditor";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -40,13 +41,6 @@ interface Option {
 interface Maquina {
     id: number;
     nombre: string;
-}
-
-interface ProcessItem {
-    id: string; // Temporary ID for UI
-    proceso_id: string;
-    tiempo_proceso: string;
-    cant_operarios: string; // Operarios que requiere el proceso en simultáneo
 }
 
 interface Articulo {
@@ -134,7 +128,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         no_lleva: false
     });
 
-    const [processes, setProcesses] = useState<ProcessItem[]>([]);
+    const [processes, setProcesses] = useState<ProcesoRow[]>([]);
     const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrimaItem[]>([]);
     const [files, setFiles] = useState<File[]>([]);
     const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
@@ -215,11 +209,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                 // Populate processes if they exist
                 if (orderToEdit.procesos && orderToEdit.procesos.length > 0) {
-                    const mappedProcesses: ProcessItem[] = orderToEdit.procesos.map(p => ({
+                    const mappedProcesses: ProcesoRow[] = orderToEdit.procesos.map(p => ({
                         id: Math.random().toString(36).substr(2, 9), // Temp UI ID
                         proceso_id: p.proceso.id.toString(),
-                        tiempo_proceso: p.tiempo_proceso ? p.tiempo_proceso.toString() : "",
+                        tiempo: p.tiempo_proceso ? p.tiempo_proceso.toString() : "",
                         cant_operarios: p.cant_operarios ? p.cant_operarios.toString() : "1",
+                        // id_maquinaria puede no estar en el tipo TS todavía; lo leemos defensivo.
+                        maquina_id: (p as any).id_maquinaria ? (p as any).id_maquinaria.toString() : "",
+                        incluido: true,
                     }));
                     setProcesses(mappedProcesses);
                 } else {
@@ -352,24 +349,6 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         setMateriasPrimas(materiasPrimas.filter(p => p.id !== id));
     };
 
-    const handleAddProcess = () => {
-        const newProcess: ProcessItem = {
-            id: Math.random().toString(36).substr(2, 9),
-            proceso_id: "",
-            tiempo_proceso: "",
-            cant_operarios: "1",
-        };
-        setProcesses([...processes, newProcess]);
-    };
-
-    const handleRemoveProcess = (id: string) => {
-        setProcesses(processes.filter(p => p.id !== id));
-    };
-
-    const handleProcessChange = (id: string, field: keyof ProcessItem, value: string) => {
-        setProcesses(processes.map(p => p.id === id ? { ...p, [field]: value } : p));
-    };
-
     const validateForm = () => {
         // OTs sincronizadas desde legacy: solo validamos fecha_prometida, lo demás está bloqueado.
         const legacyOT = !!orderToEdit?.id_otvieja;
@@ -388,14 +367,16 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             return false;
         }
 
-        if (processes.length === 0) {
+        // Sólo validamos los procesos tildados ("Va"): los destildados no se guardan.
+        const incluidos = processes.filter(p => p.incluido);
+        if (incluidos.length === 0) {
             toast.error("Debes agregar al menos un proceso");
             setActiveTab("procesos");
             return false;
         }
 
-        for (const p of processes) {
-            if (!p.proceso_id || !p.tiempo_proceso) {
+        for (const p of incluidos) {
+            if (!p.proceso_id || !p.tiempo) {
                 toast.error("Por favor completa la información de todos los procesos (incluyendo minutos)");
                 setActiveTab("procesos");
                 return false;
@@ -483,11 +464,16 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             programada: generalData.programada,
             en_proceso: generalData.en_proceso,
 
-            procesos: processes.map(p => ({
-                proceso_id: parseInt(p.proceso_id),
-                tiempo_proceso: parseInt(p.tiempo_proceso) || 0,
-                cant_operarios: parseInt(p.cant_operarios) || 1,
-            }))
+            // Sólo se guardan los procesos tildados ("Va") con proceso elegido.
+            // maquinaria_id se manda como string ('' -> null) para respetar el DTO.
+            procesos: processes
+                .filter(p => p.incluido && p.proceso_id)
+                .map(p => ({
+                    proceso_id: parseInt(p.proceso_id),
+                    tiempo_proceso: parseInt(p.tiempo) || 0,
+                    cant_operarios: parseInt(p.cant_operarios) || 1,
+                    maquinaria_id: p.maquina_id ? p.maquina_id : null,
+                }))
         };
 
         try {
@@ -1120,101 +1106,20 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                                 {/* Tab: Procesos */}
                                 <TabsContent value="procesos" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div>
-                                            <h3 className="text-base font-semibold text-gray-900">Procesos de la Orden</h3>
-                                            <p className="text-xs text-gray-500">Define la secuencia de procesos para esta orden (Opcional)</p>
-                                        </div>
-                                        {!isLegacyOT && (
-                                            <Button
-                                                type="button"
-                                                onClick={handleAddProcess}
-                                                className="bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 shadow-sm"
-                                            >
-                                                <Plus className="w-4 h-4 mr-2" />
-                                                Agregar Proceso
-                                            </Button>
-                                        )}
+                                    <div className="space-y-1 mb-1">
+                                        <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
+                                        <p className="text-sm text-gray-500">
+                                            Elegí proceso, máquina, minutos y cantidad de empleados. Destildá los que esta vez no van (opcional).
+                                        </p>
                                     </div>
 
-                                    {processes.length === 0 ? (
-                                        <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
-                                            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                                                <Settings className="w-6 h-6 text-gray-400" />
-                                            </div>
-                                            <p className="text-gray-500 font-medium">No hay procesos agregados</p>
-                                            <p className="text-sm text-gray-400 mt-1">Si no agregas procesos, se podrá crear la orden igual.</p>
-                                        </div>
-                                    ) : (
-                                        <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
-                                            <table className="w-full text-sm text-left relative">
-                                                <thead className="text-xs text-gray-600 bg-gray-50/80 border-b border-gray-200 uppercase whitespace-nowrap">
-                                                    <tr>
-                                                        <th className="px-3 py-2 text-center w-10">#</th>
-                                                        <th className="px-3 py-2">Tipo de Proceso</th>
-                                                        <th className="px-3 py-2 w-28">Min.</th>
-                                                        <th className="px-3 py-2 w-28">Operarios</th>
-                                                        <th className="px-2 py-2 text-center"></th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100">
-                                                    {processes.map((process, index) => (
-                                                        <tr key={process.id} className="hover:bg-gray-50/50 transition-colors group">
-                                                            <td className="px-3 py-2 text-center">
-                                                                <div className="w-7 h-7 mx-auto rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">
-                                                                    {index + 1}
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <SearchableSelect
-                                                                    disabled={isLegacyOT}
-                                                                    options={procesosOptions.map(p => ({ value: p.id.toString(), label: p.nombre }))}
-                                                                    value={process.proceso_id}
-                                                                    onValueChange={(val) => handleProcessChange(process.id, "proceso_id", val)}
-                                                                    placeholder="Seleccionar..."
-                                                                />
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <Input
-                                                                    type="number"
-                                                                    disabled={isLegacyOT}
-                                                                    placeholder="Ej: 60"
-                                                                    value={process.tiempo_proceso}
-                                                                    onChange={(e) => handleProcessChange(process.id, "tiempo_proceso", e.target.value)}
-                                                                    min={0}
-                                                                    className="h-8 bg-white border-gray-200"
-                                                                />
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <Input
-                                                                    type="number"
-                                                                    disabled={isLegacyOT}
-                                                                    placeholder="1"
-                                                                    value={process.cant_operarios}
-                                                                    onChange={(e) => handleProcessChange(process.id, "cant_operarios", e.target.value)}
-                                                                    min={1}
-                                                                    className="h-8 bg-white border-gray-200"
-                                                                />
-                                                            </td>
-                                                            <td className="px-2 py-2 text-center">
-                                                                {!isLegacyOT && (
-                                                                    <Button
-                                                                        type="button"
-                                                                        variant="ghost"
-                                                                        size="sm"
-                                                                        onClick={() => handleRemoveProcess(process.id)}
-                                                                        className="h-7 w-7 p-0 text-gray-400 hover:text-red-500"
-                                                                    >
-                                                                        <Trash2 className="w-4 h-4" />
-                                                                    </Button>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
+                                    <ProcesosEditor
+                                        rows={processes}
+                                        onChange={setProcesses}
+                                        procesos={procesosOptions}
+                                        maquinarias={maquinarias}
+                                        disabled={isLegacyOT}
+                                    />
                                 </TabsContent>
                             </Tabs>
                         </div>

@@ -39,6 +39,9 @@ class OrdenTrabajoProcesoDTO(BaseModel):
     orden: Optional[int] = None # Assuming 'orden' means execution order, not the work order ID
     tiempo_proceso: Optional[int] = None
     cant_operarios: Optional[int] = None  # Operarios que requiere el proceso en simultáneo
+    # Máquina preseleccionada (NULL = el planificador elige). El frontend resuelve
+    # el nombre desde la lista de maquinarias que ya trae, así evitamos lazy-load async.
+    id_maquinaria: Optional[int] = None
     observaciones: Optional[str] = None
     
     # Nested objects

@@ -424,13 +424,27 @@ async def run_sync():
             result_zomb = await session.execute(text(QUERY_FINALIZE_ZOMBIES))
             logger.info(f"  -> Marcadas como finalizadas: {result_zomb.rowcount}")
 
-            # 5. Sincronizar Catálogo de Procesos
+            # 5. Sincronizar Catálogo de Procesos  ← SE MANTIENE.
+            #    Sólo inserta tipos de proceso que falten (INSERT WHERE NOT EXISTS);
+            #    NO toca los procesos por OT. Parte de "traer todo el resto del viejo".
             logger.info("Actualizando catálogo de procesos...")
             await session.execute(text(QUERY_SYNC_PROCESO_CATALOG))
 
-            # 6. Sincronizar Procesos por OT
-            logger.info("Sincronizando procesos por OT...")
-            await session.execute(text(QUERY_SYNC_OT_PROCESOS))
+            # 6. Sincronizar Procesos por OT — DESACTIVADO 2026-07-06 (cutover Metlo).
+            #    Acuerdo reunión 2-jul-2026 (Lucas): desde el lunes los procesos se cargan
+            #    y editan SÓLO en SPMM. QUERY_SYNC_OT_PROCESOS pisaba cada 5 min lo hecho
+            #    en SPMM:
+            #      - forzaba id_estado=1 (reseteaba el avance En proceso/Finalizado a Pendiente)
+            #      - sobreescribía orden y tiempo_proceso
+            #      - re-insertaba procesos borrados en SPMM (WHEN NOT MATCHED)
+            #    Se desactiva para que SPMM sea el ÚNICO dueño de los procesos por OT.
+            #    El resto del sync (cabecera de OT, zombies, catálogos, materia prima)
+            #    sigue igual: una OT nueva creada en el sistema viejo llega SIN procesos
+            #    y el encargado los carga en SPMM.
+            #    Para revertir: descomentar las dos líneas de abajo y borrar el log siguiente.
+            # logger.info("Sincronizando procesos por OT...")
+            # await session.execute(text(QUERY_SYNC_OT_PROCESOS))
+            logger.info("Sync de procesos por OT DESACTIVADO — SPMM dueño de procesos (cutover 2026-07-06).")
 
             # 7. Actualizar / insertar catálogo de Piezas (debe correr ANTES de las MPs por OT,
             #    para que los inserts de orden_trabajo_pieza puedan resolver el id_pieza).
