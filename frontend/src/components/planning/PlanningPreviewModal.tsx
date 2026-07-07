@@ -82,7 +82,7 @@ interface PlanningPreviewModalProps {
     /** Rango de fechas elegido en el modal anterior (para recalcular con el mismo). */
     planningRange?: { fecha_desde?: string; fecha_hasta?: string };
     /** Recalcula el plan con un nuevo set de OTs + el mismo rango + las decisiones de forzar. */
-    onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[]) => void;
+    onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[], procesosPorOrden?: Record<number, number[]>) => void;
     /** True mientras se está recalculando (para mostrar spinner). */
     isCalculating?: boolean;
 }
@@ -113,6 +113,12 @@ export function PlanningPreviewModal({
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
     // Decisión por orden excedente: true = forzar (incluir igual), false = descartar (default)
     const [forzarOrdenIds, setForzarOrdenIds] = React.useState<Set<number>>(new Set());
+
+    // D1 (feedback 06/07): agregar procesos SUELTOS. `pendingAddProcesos` mapea
+    // orden_id -> set de proceso_ids elegidos; `expandedAddIds` = OTs expandidas en
+    // el popover para ver sus procesos.
+    const [pendingAddProcesos, setPendingAddProcesos] = React.useState<Record<number, Set<number>>>({});
+    const [expandedAddIds, setExpandedAddIds] = React.useState<Set<number>>(new Set());
 
     // Reset decisiones de forzar SOLO cuando el modal se abre fresh — no en cada
     // cambio de excedentes (porque ahora recalculamos en cada toggle y eso cambia
@@ -370,6 +376,8 @@ export function PlanningPreviewModal({
     // Limpiar selección "para agregar" cuando cambia el set de resultados (ya fueron incluidas).
     React.useEffect(() => {
         setPendingAddIds(new Set());
+        setPendingAddProcesos({});
+        setExpandedAddIds(new Set());
     }, [results.length, isOpen]);
 
     /** Lista de OTs disponibles para agregar: no están en el plan actual, no son excedentes,
@@ -393,7 +401,9 @@ export function PlanningPreviewModal({
             String(o.id_otvieja || o.id).includes(term) ||
             (o.cliente?.nombre || "").toLowerCase().includes(term) ||
             (o.articulo?.descripcion || "").toLowerCase().includes(term) ||
-            (o.articulo?.cod_articulo || "").toLowerCase().includes(term)
+            (o.articulo?.cod_articulo || "").toLowerCase().includes(term) ||
+            // D1: también buscar por nombre de proceso.
+            (Array.isArray(o.procesos) && o.procesos.some((p: any) => (p.proceso?.nombre || "").toLowerCase().includes(term)))
         );
     }, [addableOrders, addSearchTerm]);
 
@@ -406,30 +416,73 @@ export function PlanningPreviewModal({
         });
     };
 
+    // D1: seleccionar/deseleccionar un proceso suelto de una OT.
+    const togglePendingProceso = (ordenId: number, procesoId: number) => {
+        setPendingAddProcesos(prev => {
+            const next = { ...prev };
+            const set = new Set(next[ordenId] || []);
+            if (set.has(procesoId)) set.delete(procesoId);
+            else set.add(procesoId);
+            if (set.size === 0) delete next[ordenId];
+            else next[ordenId] = set;
+            return next;
+        });
+    };
+
+    const toggleExpandAdd = (ordenId: number) => {
+        setExpandedAddIds(prev => {
+            const next = new Set(prev);
+            if (next.has(ordenId)) next.delete(ordenId);
+            else next.add(ordenId);
+            return next;
+        });
+    };
+
+    // Total de ítems seleccionados para el label del botón (OTs enteras + procesos sueltos
+    // de OTs que NO se agregan enteras).
+    const totalPendingAdd = React.useMemo(() => {
+        let n = pendingAddIds.size;
+        for (const [oidStr, set] of Object.entries(pendingAddProcesos)) {
+            if (!pendingAddIds.has(Number(oidStr))) n += set.size;
+        }
+        return n;
+    }, [pendingAddIds, pendingAddProcesos]);
+
     /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
-    const handleRecalculate = (extraIds: number[] = []) => {
+    const handleRecalculate = (extraIds: number[] = [], procesosPorOrden?: Record<number, number[]>) => {
         if (!onRecalculate) {
             toast.error("Recalcular no está disponible en este contexto.");
             return;
         }
         const forcedArr = Array.from(forzarOrdenIds);
         const mergedIds = buildOrdenIdsForRecalc(forcedArr, extraIds);
-        onRecalculate(mergedIds, planningRange, forcedArr);
+        onRecalculate(mergedIds, planningRange, forcedArr, procesosPorOrden);
     };
 
     const handleAddSelectedAndRecalculate = () => {
-        const extras = Array.from(pendingAddIds);
+        const wholeOts = Array.from(pendingAddIds);
+        // OTs de las que se eligieron procesos SUELTOS (excluyendo las que ya van enteras).
+        const procOrdenIds = Object.keys(pendingAddProcesos)
+            .map(Number)
+            .filter(oid => !pendingAddIds.has(oid) && (pendingAddProcesos[oid]?.size || 0) > 0);
+        const extras = Array.from(new Set([...wholeOts, ...procOrdenIds]));
         if (extras.length === 0) {
-            toast.error("No seleccionaste ninguna OT para agregar.");
+            toast.error("No seleccionaste ninguna OT ni proceso para agregar.");
             return;
         }
+        // procesos_por_orden solo para las OTs de las que se eligieron procesos sueltos.
+        const procesosPorOrden: Record<number, number[]> = {};
+        for (const oid of procOrdenIds) {
+            procesosPorOrden[oid] = Array.from(pendingAddProcesos[oid]);
+        }
         // Limpiamos inmediatamente la selección y cerramos el popover ANTES de
-        // disparar el recálculo, para que cuando vuelva a abrir esté vacío y no
-        // se vea el contador "3 seleccionadas" después del éxito.
+        // disparar el recálculo, para que cuando vuelva a abrir esté vacío.
         setPendingAddIds(new Set());
+        setPendingAddProcesos({});
+        setExpandedAddIds(new Set());
         setAddSearchTerm("");
         setAddPopoverOpen(false);
-        handleRecalculate(extras);
+        handleRecalculate(extras, Object.keys(procesosPorOrden).length > 0 ? procesosPorOrden : undefined);
     };
 
     /** Saca una OT del plan y recalcula (sin esa OT). Pensado para el botón "x"
@@ -748,7 +801,7 @@ export function PlanningPreviewModal({
                                                 Agregar OTs al plan
                                             </div>
                                             <p className="text-[11px] text-gray-500 mt-1">
-                                                Solo se listan OTs con procesos cargados. Al agregar, el plan se recalcula automáticamente.
+                                                Tildá la OT entera, o expandí (▸) para elegir <strong>procesos sueltos</strong>. Al agregar, el plan se recalcula.
                                             </p>
                                         </div>
                                         <div className="p-2 border-b bg-white">
@@ -775,40 +828,75 @@ export function PlanningPreviewModal({
                                                 <div className="divide-y">
                                                     {filteredAddableOrders.map(o => {
                                                         const checked = pendingAddIds.has(o.id);
+                                                        const expanded = expandedAddIds.has(o.id);
+                                                        const procs: any[] = Array.isArray(o.procesos) ? o.procesos : [];
+                                                        const selProcs = pendingAddProcesos[o.id] || new Set<number>();
                                                         return (
-                                                            <label
-                                                                key={o.id}
-                                                                className={cn(
-                                                                    "flex items-start gap-2 px-3 py-2 cursor-pointer transition-colors text-xs",
-                                                                    checked ? "bg-blue-50" : "hover:bg-gray-50"
-                                                                )}
-                                                            >
-                                                                <Checkbox
-                                                                    className="mt-0.5"
-                                                                    checked={checked}
-                                                                    onCheckedChange={() => togglePendingAdd(o.id)}
-                                                                />
-                                                                <div className="min-w-0 flex-1">
-                                                                    <div className="flex items-center gap-1.5 font-medium text-gray-800">
-                                                                        <span className="font-mono">#{o.id_otvieja || o.id}</span>
-                                                                        <span className="text-gray-300">·</span>
-                                                                        <span className="truncate">{o.cliente?.nombre || "Sin cliente"}</span>
+                                                            <div key={o.id} className={cn("text-xs", checked && "bg-blue-50")}>
+                                                                <div className={cn("flex items-start gap-2 px-3 py-2 transition-colors", !checked && "hover:bg-gray-50")}>
+                                                                    <Checkbox
+                                                                        className="mt-0.5"
+                                                                        checked={checked}
+                                                                        onCheckedChange={() => togglePendingAdd(o.id)}
+                                                                    />
+                                                                    <div className="min-w-0 flex-1 cursor-pointer" onClick={() => togglePendingAdd(o.id)}>
+                                                                        <div className="flex items-center gap-1.5 font-medium text-gray-800">
+                                                                            <span className="font-mono">#{o.id_otvieja || o.id}</span>
+                                                                            <span className="text-gray-300">·</span>
+                                                                            <span className="truncate">{o.cliente?.nombre || "Sin cliente"}</span>
+                                                                        </div>
+                                                                        <div className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">
+                                                                            {o.articulo?.cod_articulo} · {o.articulo?.descripcion || "—"}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1.5 mt-1">
+                                                                            <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 border-gray-300 text-gray-600">
+                                                                                {getPriorityLabel(o.id_prioridad, o.prioridad?.descripcion)}
+                                                                            </Badge>
+                                                                            {selProcs.size > 0 && !checked && (
+                                                                                <Badge className="text-[9px] py-0 px-1.5 h-4 bg-blue-100 text-blue-700 border-0">
+                                                                                    {selProcs.size} proceso{selProcs.size === 1 ? "" : "s"}
+                                                                                </Badge>
+                                                                            )}
+                                                                            {o.fecha_prometida && (
+                                                                                <span className="text-[10px] text-gray-400">
+                                                                                    Prom. {formatDate(o.fecha_prometida)}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">
-                                                                        {o.articulo?.cod_articulo} · {o.articulo?.descripcion || "—"}
-                                                                    </div>
-                                                                    <div className="flex items-center gap-1.5 mt-1">
-                                                                        <Badge variant="outline" className="text-[9px] py-0 px-1.5 h-4 border-gray-300 text-gray-600">
-                                                                            {getPriorityLabel(o.id_prioridad, o.prioridad?.descripcion)}
-                                                                        </Badge>
-                                                                        {o.fecha_prometida && (
-                                                                            <span className="text-[10px] text-gray-400">
-                                                                                Prom. {formatDate(o.fecha_prometida)}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
+                                                                    {/* D1: expandir para elegir procesos sueltos */}
+                                                                    {procs.length > 0 && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={(e) => { e.stopPropagation(); toggleExpandAdd(o.id); }}
+                                                                            className="mt-0.5 p-1 rounded hover:bg-gray-200 text-gray-500 shrink-0"
+                                                                            title="Elegir procesos sueltos de esta OT"
+                                                                        >
+                                                                            {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                                                        </button>
+                                                                    )}
                                                                 </div>
-                                                            </label>
+                                                                {/* Sublista de procesos (D1) */}
+                                                                {expanded && procs.length > 0 && (
+                                                                    <div className={cn("pl-9 pr-3 pb-2 space-y-1", checked && "opacity-50 pointer-events-none")}>
+                                                                        {checked && (
+                                                                            <div className="text-[10px] text-blue-600 italic">La OT completa ya está seleccionada.</div>
+                                                                        )}
+                                                                        {[...procs].sort((a, b) => (a.orden || 0) - (b.orden || 0)).map((p) => {
+                                                                            const pid = p.proceso?.id;
+                                                                            const psel = selProcs.has(pid);
+                                                                            return (
+                                                                                <label key={pid} className={cn("flex items-center gap-2 px-2 py-1 rounded cursor-pointer", psel ? "bg-blue-100/60" : "hover:bg-gray-100")}>
+                                                                                    <Checkbox checked={psel} onCheckedChange={() => togglePendingProceso(o.id, pid)} />
+                                                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-600 text-[9px] font-bold shrink-0">{p.orden}</span>
+                                                                                    <span className="truncate flex-1 text-gray-700">{capitalize(p.proceso?.nombre || "")}</span>
+                                                                                    {p.tiempo_proceso != null && <span className="text-[10px] text-gray-400 shrink-0">{p.tiempo_proceso}m</span>}
+                                                                                </label>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         );
                                                     })}
                                                 </div>
@@ -816,15 +904,16 @@ export function PlanningPreviewModal({
                                         </div>
                                         <div className="p-2 border-t bg-slate-50 flex items-center justify-between gap-2">
                                             <span className="text-[11px] text-gray-500">
-                                                {pendingAddIds.size} seleccionada{pendingAddIds.size === 1 ? "" : "s"}
+                                                {totalPendingAdd} seleccionado{totalPendingAdd === 1 ? "" : "s"}
+                                                <span className="text-gray-400"> ({pendingAddIds.size} OT{pendingAddIds.size === 1 ? "" : "s"} + procesos sueltos)</span>
                                             </span>
                                             <div className="flex items-center gap-1.5">
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
                                                     className="h-7 text-xs"
-                                                    onClick={() => { setPendingAddIds(new Set()); setAddSearchTerm(""); }}
-                                                    disabled={pendingAddIds.size === 0}
+                                                    onClick={() => { setPendingAddIds(new Set()); setPendingAddProcesos({}); setAddSearchTerm(""); }}
+                                                    disabled={totalPendingAdd === 0}
                                                 >
                                                     Limpiar
                                                 </Button>
@@ -832,10 +921,10 @@ export function PlanningPreviewModal({
                                                     size="sm"
                                                     className="h-7 text-xs bg-blue-600 hover:bg-blue-700"
                                                     onClick={handleAddSelectedAndRecalculate}
-                                                    disabled={pendingAddIds.size === 0 || isCalculating}
+                                                    disabled={totalPendingAdd === 0 || isCalculating}
                                                 >
                                                     <RefreshCw className={cn("w-3 h-3 mr-1", isCalculating && "animate-spin")} />
-                                                    Agregar {pendingAddIds.size > 0 ? `(${pendingAddIds.size})` : ""}
+                                                    Agregar {totalPendingAdd > 0 ? `(${totalPendingAdd})` : ""}
                                                 </Button>
                                             </div>
                                         </div>

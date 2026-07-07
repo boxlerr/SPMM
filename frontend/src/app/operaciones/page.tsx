@@ -936,6 +936,7 @@ export default function OperacionesPage() {
     ids: number[],
     range: { fecha_desde?: string; fecha_hasta?: string },
     forzarIds: number[] = [],
+    procesosPorOrden?: Record<number, number[]>,
   ) => {
     if (ids.length === 0) {
       toast.error("No hay OTs para recalcular.");
@@ -955,6 +956,8 @@ export default function OperacionesPage() {
           fecha_desde: range.fecha_desde,
           fecha_hasta: range.fecha_hasta,
           forzar_ordenes_ids: forzarIds.length > 0 ? forzarIds : undefined,
+          // D1: si se eligieron procesos sueltos, se mandan para planificar solo esos de esas OTs.
+          procesos_por_orden: procesosPorOrden && Object.keys(procesosPorOrden).length > 0 ? procesosPorOrden : undefined,
         }),
       });
 
