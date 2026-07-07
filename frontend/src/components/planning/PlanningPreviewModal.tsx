@@ -1256,6 +1256,22 @@ export function PlanningPreviewModal({
                                                                                             <div className="flex items-center gap-2 mt-0.5">
                                                                                                 <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
                                                                                             </div>
+                                                                                            {/* A1 (feedback 06/07): motivo SIEMPRE visible en procesos sin operario asignado,
+                                                                                                aunque la orden se haya planificado (antes solo quedaba el selector vacío, sin explicación). */}
+                                                                                            {!effectiveItem.id_operario && (() => {
+                                                                                                const diag = diagnoseUnfitProcess(item);
+                                                                                                return (
+                                                                                                    <div className="mt-1 flex items-start gap-1 text-[11px] text-red-600 leading-tight" title={diag.hint}>
+                                                                                                        <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                                                                                                        <span>
+                                                                                                            Sin operario asignado
+                                                                                                            {diag.rangos.length > 0
+                                                                                                                ? <span className="text-gray-500"> · requiere rango {formatRangoIds(diag.rangos)}</span>
+                                                                                                                : <span className="text-gray-500"> · el proceso no tiene rango configurado en Recursos</span>}
+                                                                                                        </span>
+                                                                                                    </div>
+                                                                                                );
+                                                                                            })()}
                                                                                         </div>
 
                                                                                         <div className="px-4 py-2 border-b flex items-center">
