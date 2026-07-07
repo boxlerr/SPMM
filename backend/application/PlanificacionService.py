@@ -646,10 +646,11 @@ def _agregar_no_solape_maquinas(
         model.AddNoOverlap(pres_intervals)
 
 
-def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars):
+def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None):
     """
-    Fuerza a que procesos coordinados (ej: Programacion + Produccion) 
-    usen la misma máquina.
+    Fuerza a que procesos coordinados (ej: Programacion + Produccion)
+    usen la misma máquina y, si se pasa `operario_vars`, el MISMO operario
+    (el que prepara la máquina es el que la usa). Ver A2 (feedback 06/07).
     """
     # Agrupar por OT
     ord_ids = set(p[0] for p in procesos_norm)
@@ -679,6 +680,14 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars):
                 # Forzamos igualdad de la variable de máquina
                 model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
                 logger.info(f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y Seq {seq_s} ({name_s}) en OT {oid}")
+                # A2 (feedback 06/07): preparación y producción deben ser el MISMO operario.
+                # Son consecutivos en la secuencia (fin_setup <= inicio_prod), así que no hay
+                # solape temporal y la igualdad es factible. OJO: si el setup no tiene operario
+                # apto y cae en DUMMY, arrastra la producción a DUMMY también (queda visible
+                # como "sin asignar", que es el comportamiento esperado).
+                if operario_vars is not None:
+                    model.Add(operario_vars[(oid, seq_a)] == operario_vars[(oid, seq_s)])
+                    logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
 
 
 def _agregar_compatibilidad_op_maq(
@@ -1256,7 +1265,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars, presente_vars=presente_vars, op_extra_vars=op_extra_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars, presente_vars=presente_vars)
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
-    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars)
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
     ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta)
