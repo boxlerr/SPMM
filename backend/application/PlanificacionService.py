@@ -1450,6 +1450,19 @@ def proceso_usa_maquina(nombre_proceso: str) -> bool:
     return tipo in ("PRODUCCION_MAQUINA", "SETUP")
 
 # 🔸 Función async que envuelve al solver
+def _filtrar_procesos_por_orden(procesos, orden_id, procesos_por_orden):
+    """
+    D1 (feedback 06/07): permite planificar procesos SUELTOS.
+    Si `procesos_por_orden` restringe esta orden (orden_id presente en el dict),
+    devuelve solo los procesos cuyo `id_proceso` esté en la lista elegida.
+    Si no hay restricción para esta orden, devuelve todos (comportamiento actual).
+    """
+    if not procesos_por_orden or orden_id not in procesos_por_orden:
+        return list(procesos)
+    permitidos = set(procesos_por_orden[orden_id])
+    return [rel for rel in procesos if getattr(rel, "id_proceso", None) in permitidos]
+
+
 async def planificar(
     repo_orden: OrdenTrabajoRepository,
     repo_operario: OperarioRepository,
@@ -1463,6 +1476,7 @@ async def planificar(
     fecha_desde: date | None = None,
     fecha_hasta: date | None = None,
     forzar_ordenes_ids: list[int] | None = None,
+    procesos_por_orden: dict[int, list[int]] | None = None,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
     forzar_set = set(forzar_ordenes_ids or [])
@@ -1507,7 +1521,8 @@ async def planificar(
     for orden in ordenes:
         prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
-        for rel in orden.procesos:
+        # D1: si se eligieron procesos sueltos de esta orden, planificamos solo esos.
+        for rel in _filtrar_procesos_por_orden(orden.procesos, orden.id, procesos_por_orden):
             cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
 
             # Duración mínima

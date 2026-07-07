@@ -35,6 +35,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     fecha_desde = body.fecha_desde if body else None
     fecha_hasta = body.fecha_hasta if body else None
     forzar_ordenes_ids = body.forzar_ordenes_ids if body else None
+    procesos_por_orden = body.procesos_por_orden if body else None
 
     try:
         resultados = await planificar(
@@ -49,6 +50,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
             forzar_ordenes_ids=forzar_ordenes_ids,
+            procesos_por_orden=procesos_por_orden,
         )
         return resultados
     except PlanificacionException as e:
