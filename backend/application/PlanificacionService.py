@@ -261,6 +261,7 @@ def _crear_variables_y_dominios(
     RANGOS_ESPECIALIZADOS,
     nativas_off=None,
     cant_op_map=None,
+    preseleccion_maq=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -375,6 +376,12 @@ def _crear_variables_y_dominios(
         if not usa_maquina:
             maqs_validas = [DUMMY_MAQ_ID]
 
+            # Preselección de máquina (feature Metlo): forzar la máquina elegida
+            # también en el camino skill.
+            _presel_sk = (preseleccion_maq or {}).get((orden_id, secuencia))
+            if _presel_sk and _presel_sk in REAL_MAQ_IDS:
+                maqs_validas = [_presel_sk]
+
             maq_var = model.NewIntVarFromDomain(
                 cp_model.Domain.FromValues(maqs_validas),
                 f"maq_{orden_id}_{secuencia}"
@@ -456,6 +463,13 @@ def _crear_variables_y_dominios(
              
         if DUMMY_MAQ_ID not in maqs_validas:
              maqs_validas.append(DUMMY_MAQ_ID)
+
+        # Preselección de máquina (feature Metlo): si el usuario eligió una máquina
+        # para este proceso, se FUERZA (dominio = solo esa máquina), sin fallback DUMMY.
+        _presel = (preseleccion_maq or {}).get((orden_id, secuencia))
+        if _presel and _presel in REAL_MAQ_IDS:
+            maqs_validas = [_presel]
+            logger.info(f"PRESELECCIÓN: forzando máquina {_presel} en proceso {orden_id}/{secuencia}")
 
         maq_var = model.NewIntVarFromDomain(
             cp_model.Domain.FromValues(maqs_validas),
@@ -1157,7 +1171,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None):
     model = cp_model.CpModel()
 
     # Init Config
@@ -1256,6 +1270,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         RANGOS_ESPECIALIZADOS,
         nativas_off,
         cant_op_map,
+        preseleccion_maq,
     )
 
     # ---- Restricciones ----
@@ -1514,6 +1529,7 @@ async def planificar(
 
     procesos_para_solver = []
     cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
+    preseleccion_maq = {}  # (orden_id, secuencia) -> id_maquinaria forzada (preselección Metlo)
 
     # -----------------------
     # Procesar cada orden
@@ -1524,6 +1540,10 @@ async def planificar(
         # D1: si se eligieron procesos sueltos de esta orden, planificamos solo esos.
         for rel in _filtrar_procesos_por_orden(orden.procesos, orden.id, procesos_por_orden):
             cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
+            # Preselección de máquina: si el proceso tiene máquina elegida, se fuerza en el solver.
+            _presel_maq = getattr(rel, "id_maquinaria", None)
+            if _presel_maq:
+                preseleccion_maq[(orden.id, rel.orden)] = _presel_maq
 
             # Duración mínima
             dur_min = rel.tiempo_proceso or 1
@@ -1607,6 +1627,7 @@ async def planificar(
         effective_fecha_hasta,
         nativas_off,
         cant_op_map,
+        preseleccion_maq,
     )
 
     planificados, excedentes = _split_resultados(resultados)
