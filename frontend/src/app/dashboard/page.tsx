@@ -9,6 +9,7 @@ import DistribucionPrioridades from "@/components/dashboard/DistribucionPriorida
 import TopClients from "@/components/dashboard/TopClients"
 import TopArticles from "@/components/dashboard/TopArticles"
 import IncidenciasPlanos from "@/components/dashboard/IncidenciasPlanos"
+import RendimientoEstimadoReal from "@/components/dashboard/RendimientoEstimadoReal"
 
 
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
@@ -103,6 +104,9 @@ export default function DashboardPage() {
 
         {/* Interpretación de planos: incidencias y tiempo perdido */}
         <IncidenciasPlanos />
+
+        {/* Rendimiento: tiempo estimado vs. real por proceso y por operario */}
+        <RendimientoEstimadoReal />
 
         {/* 3. Timeline de entregas */}
         <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />

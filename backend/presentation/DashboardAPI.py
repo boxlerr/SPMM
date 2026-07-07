@@ -544,3 +544,94 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
     except Exception as e:
         print(f"Error en ordenes-por-fecha: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Rendimiento: tiempo ESTIMADO vs REAL (dashboards pedidos por Metlo, reunión 2-jul).
+# El tiempo real sale de fin_real - inicio_real de orden_trabajo_proceso, que se
+# estampan solos al marcar el proceso En Proceso -> Finalizado. Sólo contamos
+# procesos con inicio_real y fin_real REALES: excluimos el sentinel '1900-01-01'
+# (valor placeholder que dejó el sistema viejo) y filas con fin < inicio.
+# ---------------------------------------------------------------------------
+
+@router.get("/rendimiento-procesos")
+async def get_rendimiento_procesos(db=Depends(get_db)):
+    """Estimado vs real agrupado por proceso. Vacío hasta que se marque avance."""
+    try:
+        query = text("""
+            SELECT
+                p.id     AS proceso_id,
+                p.nombre AS proceso,
+                COUNT(*) AS cantidad,
+                SUM(ISNULL(otp.tiempo_proceso, 0))                  AS estimado_min,
+                SUM(DATEDIFF(MINUTE, otp.inicio_real, otp.fin_real)) AS real_min
+            FROM orden_trabajo_proceso otp
+            JOIN proceso p ON p.id = otp.id_proceso
+            WHERE otp.inicio_real IS NOT NULL AND otp.fin_real IS NOT NULL
+              AND otp.inicio_real > '1950-01-01' AND otp.fin_real > '1950-01-01'
+              AND otp.fin_real >= otp.inicio_real
+            GROUP BY p.id, p.nombre
+            ORDER BY SUM(DATEDIFF(MINUTE, otp.inicio_real, otp.fin_real)) DESC
+        """)
+        result = await db.execute(query)
+        rows = result.mappings().all()
+        data = []
+        for r in rows:
+            est = int(r.get("estimado_min") or 0)
+            rea = int(r.get("real_min") or 0)
+            desvio = round(((rea - est) / est) * 100, 1) if est > 0 else None
+            data.append({
+                "proceso_id": r.get("proceso_id"),
+                "proceso": r.get("proceso"),
+                "cantidad": int(r.get("cantidad") or 0),
+                "estimado_min": est,
+                "real_min": rea,
+                "desvio_pct": desvio,
+            })
+        return {"success": True, "data": data}
+    except Exception as e:
+        print(f"Error en rendimiento-procesos: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/rendimiento-operarios")
+async def get_rendimiento_operarios(db=Depends(get_db)):
+    """Estimado vs real agrupado por operario (cruza planificacion con los tiempos reales).
+    Sirve para el ranking de rendimiento. Vacío hasta que se marque avance."""
+    try:
+        query = text("""
+            SELECT
+                o.id                              AS operario_id,
+                CONCAT(o.nombre, ' ', o.apellido) AS operario,
+                COUNT(*) AS cantidad,
+                SUM(ISNULL(otp.tiempo_proceso, 0))                  AS estimado_min,
+                SUM(DATEDIFF(MINUTE, otp.inicio_real, otp.fin_real)) AS real_min
+            FROM orden_trabajo_proceso otp
+            JOIN planificacion pl ON pl.orden_id = otp.id_orden_trabajo AND pl.proceso_id = otp.id_proceso
+            JOIN operario o ON o.id = pl.id_operario
+            WHERE otp.inicio_real IS NOT NULL AND otp.fin_real IS NOT NULL
+              AND otp.inicio_real > '1950-01-01' AND otp.fin_real > '1950-01-01'
+              AND otp.fin_real >= otp.inicio_real
+              AND pl.id_operario IS NOT NULL
+            GROUP BY o.id, o.nombre, o.apellido
+            ORDER BY cantidad DESC
+        """)
+        result = await db.execute(query)
+        rows = result.mappings().all()
+        data = []
+        for r in rows:
+            est = int(r.get("estimado_min") or 0)
+            rea = int(r.get("real_min") or 0)
+            desvio = round(((rea - est) / est) * 100, 1) if est > 0 else None
+            data.append({
+                "operario_id": r.get("operario_id"),
+                "operario": r.get("operario"),
+                "cantidad": int(r.get("cantidad") or 0),
+                "estimado_min": est,
+                "real_min": rea,
+                "desvio_pct": desvio,
+            })
+        return {"success": True, "data": data}
+    except Exception as e:
+        print(f"Error en rendimiento-operarios: {e}")
+        return {"success": False, "error": str(e)}
