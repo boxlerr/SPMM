@@ -1419,10 +1419,15 @@ def _get_tipo_proceso(nombre_proceso: str) -> str:
     # Palabras clave que indican proceso MANUAL
     keywords_manual = [
         "EMBALAD", "DESARM", "ENSAMBL", "LAVADO", "LIMPIEZA",
-        "REBABA", "REBARB", "AMOLAD", "BICELAD", "BISELAD", 
+        "REBABA", "REBARB", "AMOLAD", "BICELAD", "BISELAD",
         "ENDEREZ", "PINTU", "ARMADO", "AJUSTE", "CONTROL", "REVISION",
         "DISENO", "PLANIFICACION", "CUBICACION", "CONSULTAR",
-        "SOLICITAR", "TRABAJO DE FORMA", "MANUAL"
+        "SOLICITAR", "TRABAJO DE FORMA", "MANUAL",
+        # A1 (feedback Metlo 06/07): la soldadura depende del soldador (skill/rango),
+        # no de una máquina específica. Sin esto caía en PRODUCCION_MAQUINA y buscaba
+        # una familia de máquina inexistente → el proceso quedaba "sin nadie".
+        # "SOLDA" cubre SOLDADURA / SOLDAR / SOLDADO / SOLDADURA MIG, etc.
+        "SOLDA",
     ]
     
     if any(k in n for k in keywords_manual):
