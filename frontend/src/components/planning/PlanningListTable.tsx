@@ -106,6 +106,25 @@ function _PlanningListTable({
     const [searchTerm, setSearchTerm] = React.useState("");
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
 
+    // B1 (feedback 06/07): staging de reasignaciones de OPERARIO y MÁQUINA en Planificadas.
+    // Antes cada cambio se guardaba al instante; ahora se acumulan acá y se aplican al
+    // tocar "Aceptar cambios". El avance (estado) y las fechas siguen guardando al toque.
+    const [pendingRes, setPendingRes] = React.useState<Record<string, { operario?: number; maquina?: number }>>({});
+    const resKey = (ordenId: number, procesoId: number) => `${ordenId}-${procesoId}`;
+    const stageOperario = (ordenId: number, procesoId: number, operarioId: number) =>
+        setPendingRes(prev => ({ ...prev, [resKey(ordenId, procesoId)]: { ...prev[resKey(ordenId, procesoId)], operario: operarioId } }));
+    const stageMaquina = (ordenId: number, procesoId: number, maquinaId: number) =>
+        setPendingRes(prev => ({ ...prev, [resKey(ordenId, procesoId)]: { ...prev[resKey(ordenId, procesoId)], maquina: maquinaId } }));
+    const discardPending = () => setPendingRes({});
+    const applyPending = () => {
+        for (const [key, chg] of Object.entries(pendingRes)) {
+            const [oid, pid] = key.split('-').map(Number);
+            if (chg.operario !== undefined && onOperatorChange) onOperatorChange(oid, pid, chg.operario);
+            if (chg.maquina !== undefined && onMachineryChange) onMachineryChange(oid, pid, chg.maquina);
+        }
+        setPendingRes({});
+    };
+
     // Estado del scroll horizontal para mostrar/ocultar el gradient fade dinámicamente.
     // Cuando el usuario llega al final del scroll (no hay más columnas a la derecha),
     // ocultamos el fade para que no engañe diciendo "hay más".
@@ -655,14 +674,14 @@ function _PlanningListTable({
                                             <div>
                                                 {onOperatorChange && operarios.length > 0 ? (
                                                     <Select
-                                                        value={operarios.find(op => {
+                                                        value={(pendingRes[resKey(item.id, proc.proceso.id)]?.operario ?? operarios.find(op => {
                                                             const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
                                                             const currentName = (proc.operario_nombre || "").trim().toLowerCase();
                                                             return opName === currentName;
-                                                        })?.id?.toString() || undefined}
-                                                        onValueChange={(val) => onOperatorChange(item.id, proc.proceso.id, parseInt(val))}
+                                                        })?.id)?.toString() || undefined}
+                                                        onValueChange={(val) => stageOperario(item.id, proc.proceso.id, parseInt(val))}
                                                     >
-                                                        <SelectTrigger className="h-7 text-xs w-full border border-gray-200 px-2">
+                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(item.id, proc.proceso.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
                                                             <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -687,10 +706,10 @@ function _PlanningListTable({
                                             <div>
                                                 {onMachineryChange && maquinarias.length > 0 ? (
                                                     <Select
-                                                        value={plannedItem?.id_maquinaria?.toString() || "0"}
-                                                        onValueChange={(val) => onMachineryChange(item.id, proc.proceso.id, parseInt(val))}
+                                                        value={(pendingRes[resKey(item.id, proc.proceso.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
+                                                        onValueChange={(val) => stageMaquina(item.id, proc.proceso.id, parseInt(val))}
                                                     >
-                                                        <SelectTrigger className="h-7 text-xs w-full border border-gray-200 px-2">
+                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(item.id, proc.proceso.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
                                                             <SelectValue placeholder={machineName} />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -758,6 +777,21 @@ function _PlanningListTable({
 
     return (
         <div className="space-y-4 mt-6">
+            {/* B1 (feedback 06/07): barra flotante de cambios pendientes de operario/máquina.
+                Aparece solo cuando hay reasignaciones sin guardar; el avance y las fechas siguen al toque. */}
+            {Object.keys(pendingRes).length > 0 && (
+                <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white border border-amber-300 shadow-lg rounded-full pl-4 pr-2 py-2">
+                    <span className="text-xs font-medium text-gray-700">
+                        {Object.keys(pendingRes).length} proceso{Object.keys(pendingRes).length === 1 ? "" : "s"} con cambios sin guardar
+                    </span>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs text-gray-500 hover:text-gray-700" onClick={discardPending}>
+                        Descartar
+                    </Button>
+                    <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700 rounded-full px-4" onClick={applyPending}>
+                        Aceptar cambios
+                    </Button>
+                </div>
+            )}
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
