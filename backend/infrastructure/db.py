@@ -50,7 +50,18 @@ safe_log = DATABASE_URL.replace(DB_PASSWORD or "", "*****") if DB_PASSWORD else 
 logger.info(f"Resultado URL: {safe_log}")
 
 # 🔹 Crear el engine asincrónico
-engine = create_async_engine(DATABASE_URL, echo=False, future=True)
+# pool_pre_ping: prueba cada conexión antes de usarla y descarta las muertas.
+#   Evita el error intermitente "server disconnected" cuando SQL Server / el
+#   firewall cierra conexiones ociosas y el pool entrega una conexión obsoleta.
+# pool_recycle: recicla conexiones con más de 30 min para que no lleguen a
+#   quedar obsoletas por timeout del servidor.
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
 
 # 🔹 Crear la sesión asincrónica
 SessionLocal = sessionmaker(

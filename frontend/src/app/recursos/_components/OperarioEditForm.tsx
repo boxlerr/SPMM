@@ -56,6 +56,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     const [primarySkills, setPrimarySkills] = useState<string[]>([]);
     const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (data && !isCreating) {
@@ -240,37 +241,65 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 JSON.stringify([...(data.rangos || [])].sort((a, b) => a - b)) !== JSON.stringify([...selectedRangos].sort((a, b) => a - b)) ||
                 JSON.stringify(data.skills?.filter(s => s.nivel === 1 || s.nivel === 2).map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
 
-            const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
-                method: "PUT",
-                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ...payload,
-                    disponible: data.disponible ?? true,
-                }),
-            });
+            setIsSaving(true);
+            try {
+                const response = await fetch(`${cleanUrl}/operarios/${data.id}`, {
+                    method: "PUT",
+                    headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ...payload,
+                        disponible: data.disponible ?? true,
+                    }),
+                });
 
-            if (response.ok && hasChanges) {
-                addNotification(
-                    `Operario ${payload.nombre} ${payload.apellido} ha sido modificado`,
-                    "operario_updated"
-                );
-                showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} modificado correctamente`, 'success');
+                if (!response.ok) {
+                    // No cerramos el form: así el operario no pierde lo que cargó y puede reintentar.
+                    console.error("Error al guardar operario:", response.status, await response.text().catch(() => ""));
+                    showToast("No se pudieron guardar los cambios. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+                    return;
+                }
+
+                if (hasChanges) {
+                    addNotification(
+                        `Operario ${payload.nombre} ${payload.apellido} ha sido modificado`,
+                        "operario_updated"
+                    );
+                    showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} modificado correctamente`, 'success');
+                }
+            } catch (error) {
+                console.error("Error de red al guardar operario:", error);
+                showToast("No se pudo conectar con el servidor. Revisá la conexión e intentá de nuevo.", 'error');
+                return;
+            } finally {
+                setIsSaving(false);
             }
         } else {
-            const response = await fetch(`${cleanUrl}/operarios`, {
-                method: "POST",
-                headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ...payload,
-                    disponible: true,
-                }),
-            });
-            if (response.ok) {
+            setIsSaving(true);
+            try {
+                const response = await fetch(`${cleanUrl}/operarios`, {
+                    method: "POST",
+                    headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ...payload,
+                        disponible: true,
+                    }),
+                });
+                if (!response.ok) {
+                    console.error("Error al crear operario:", response.status, await response.text().catch(() => ""));
+                    showToast("No se pudo crear el operario. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+                    return;
+                }
                 addNotification(
                     `Operario ${payload.nombre} ${payload.apellido} ha sido creado`,
                     "operario_created"
                 );
                 showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} creado correctamente`, 'success');
+            } catch (error) {
+                console.error("Error de red al crear operario:", error);
+                showToast("No se pudo conectar con el servidor. Revisá la conexión e intentá de nuevo.", 'error');
+                return;
+            } finally {
+                setIsSaving(false);
             }
         }
         onSuccess();
@@ -676,9 +705,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             </div>
 
             <div className="flex justify-end gap-2 mt-8 pt-4 border-t">
-                <Button variant="outline" onClick={onCancel}>Cancelar</Button>
-                <Button onClick={handleSubmit} disabled={disabled} className="bg-slate-900 text-white hover:bg-slate-800 px-8">
-                    {!isCreating ? "Guardar Cambios" : "Crear Operario"}
+                <Button variant="outline" onClick={onCancel} disabled={isSaving}>Cancelar</Button>
+                <Button onClick={handleSubmit} disabled={disabled || isSaving} className="bg-slate-900 text-white hover:bg-slate-800 px-8">
+                    {isSaving ? "Guardando..." : (!isCreating ? "Guardar Cambios" : "Crear Operario")}
                 </Button>
             </div>
         </div>
