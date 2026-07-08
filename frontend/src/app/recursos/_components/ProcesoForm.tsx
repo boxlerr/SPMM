@@ -75,6 +75,12 @@ export default function ProcesoForm({
                 "success"
             );
             onSuccess();
+        } else {
+            // No cerramos el form: el usuario no pierde lo cargado y puede reintentar.
+            showToast(
+                "No se pudo guardar el proceso. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.",
+                "error"
+            );
         }
     };
 

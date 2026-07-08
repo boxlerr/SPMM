@@ -104,6 +104,12 @@ export default function ClienteForm({ open, onClose, onSuccess, cliente }: Clien
                     "success"
                 );
                 onSuccess();
+            } else {
+                // No cerramos el form: el usuario no pierde lo cargado y puede reintentar.
+                showToast(
+                    "No se pudo guardar el cliente. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.",
+                    "error"
+                );
             }
         } catch (error) {
             console.error("Error saving cliente:", error);

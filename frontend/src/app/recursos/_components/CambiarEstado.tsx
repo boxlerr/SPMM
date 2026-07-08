@@ -63,7 +63,13 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
         }),
       });
 
-      if (response.ok && estadoCambio) {
+      if (!response.ok) {
+        console.error("Error al cambiar estado:", response.status, await response.text().catch(() => ""));
+        showToast("No se pudo cambiar el estado. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+        return;
+      }
+
+      if (estadoCambio) {
         addNotification(
           `Operario ${operario.nombre} ${operario.apellido} cambió de estado: ${estadoAnterior} → ${nuevoEstado}`,
           "operario_updated",
@@ -75,6 +81,7 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
       onSuccess();
     } catch (err) {
       console.error("Error cambiando estado:", err);
+      showToast("No se pudo conectar con el servidor. Revisá la conexión e intentá de nuevo.", 'error');
     }
   };
 

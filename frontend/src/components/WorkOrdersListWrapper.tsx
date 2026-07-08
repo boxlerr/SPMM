@@ -204,13 +204,16 @@ export default function WorkOrdersListWrapper({
             return t;
         }));
         try {
-            await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
+            const res = await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
                 method: "PUT",
                 headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({ id_operario: opId }),
             });
+            if (!res.ok) throw new Error("save failed");
         } catch (error) {
             console.error("Error updating operator:", error);
+            toast.error("No se pudo guardar el cambio de operario. Se revirtió; revisá la conexión e intentá de nuevo.");
+            onRefresh?.();
         }
     };
 
@@ -235,13 +238,16 @@ export default function WorkOrdersListWrapper({
             return t;
         }));
         try {
-            await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
+            const res = await fetch(`${API_URL}/planificacion/${selectedTask.id}`, {
                 method: "PUT",
                 headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({ id_maquinaria: machineId }),
             });
+            if (!res.ok) throw new Error("save failed");
         } catch (error) {
             console.error("Error updating machinery:", error);
+            toast.error("No se pudo guardar el cambio de máquina. Se revirtió; revisá la conexión e intentá de nuevo.");
+            onRefresh?.();
         }
     };
 
@@ -265,13 +271,16 @@ export default function WorkOrdersListWrapper({
             return t;
         }));
         try {
-            await fetch(`${API_URL}/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
+            const res = await fetch(`${API_URL}/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
                 method: "PUT",
                 headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                 body: JSON.stringify({ id_estado: idEstado }),
             });
+            if (!res.ok) throw new Error("save failed");
         } catch (error) {
             console.error("Error updating status:", error);
+            toast.error("No se pudo guardar el cambio de estado. Se revirtió; revisá la conexión e intentá de nuevo.");
+            onRefresh?.();
         }
     };
 
@@ -326,19 +335,26 @@ export default function WorkOrdersListWrapper({
             }
             return p;
         }));
+        let algunErrorBulk = false;
         for (const task of tasksToUpdate) {
             const item = rawPlanificacion.find(p => p.id === task.dbId);
             if (item) {
                 try {
-                    await fetch(`${API_URL}/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
+                    const res = await fetch(`${API_URL}/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
                         method: "PUT",
                         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
                         body: JSON.stringify({ id_estado: idEstado }),
                     });
+                    if (!res.ok) throw new Error("save failed");
                 } catch (error) {
                     console.error(`Error updating task ${task.id}:`, error);
+                    algunErrorBulk = true;
                 }
             }
+        }
+        if (algunErrorBulk) {
+            toast.error("No se pudieron guardar algunos cambios de estado. Se revirtieron; revisá la conexión e intentá de nuevo.");
+            onRefresh?.();
         }
     };
 

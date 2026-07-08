@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
-import { capitalizeName } from "@/lib/utils";
+import { capitalizeName, parseApiError } from "@/lib/utils";
 import { User, Briefcase, Phone, Wrench, Clock } from "lucide-react";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -254,8 +254,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
 
                 if (!response.ok) {
                     // No cerramos el form: así el operario no pierde lo que cargó y puede reintentar.
-                    console.error("Error al guardar operario:", response.status, await response.text().catch(() => ""));
-                    showToast("No se pudieron guardar los cambios. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+                    const bodyText = await response.text().catch(() => "");
+                    console.error("Error al guardar operario:", response.status, bodyText);
+                    showToast(parseApiError(bodyText) || "No se pudieron guardar los cambios. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
                     return;
                 }
 
@@ -285,8 +286,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     }),
                 });
                 if (!response.ok) {
-                    console.error("Error al crear operario:", response.status, await response.text().catch(() => ""));
-                    showToast("No se pudo crear el operario. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+                    const bodyText = await response.text().catch(() => "");
+                    console.error("Error al crear operario:", response.status, bodyText);
+                    showToast(parseApiError(bodyText) || "No se pudo crear el operario. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
                     return;
                 }
                 addNotification(

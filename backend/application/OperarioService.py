@@ -99,20 +99,27 @@ class OperarioService:
 
     # 🔹 Crear Operario
     async def crearOperario(self, operario_dto: OperarioRequestDTO):
-        try:
-            if not operario_dto.nombre or not operario_dto.apellido:
-                raise BusinessException("Nombre y Apellido son obligatorios.")
+        from backend.infrastructure.db_retry import run_with_db_retry, motivo_error_db
+        if not operario_dto.nombre or not operario_dto.apellido:
+            raise BusinessException("Nombre y Apellido son obligatorios.")
+
+        db = self.repository.db
+
+        # Guardado ATÓMICO (operario + skills + rangos en un único commit) con reintento
+        # ante cortes transitorios de la DB. Se reconstruye todo adentro para que, si hubo
+        # un rollback por desconexión, el reintento no use objetos ORM inválidos.
+        async def _guardar():
+            from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+            from backend.domain.OperarioRango import OperarioRango
 
             procesos_skill = []
             if operario_dto.skills:
-                from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
                 for s in operario_dto.skills:
                     procesos_skill.append(OperarioProcesoSkill(
                         id_proceso=s.id_proceso,
                         nivel=s.nivel,
                         habilitado=s.habilitado
                     ))
-
 
             operario = Operario(
                 nombre=operario_dto.nombre,
@@ -135,23 +142,37 @@ class OperarioService:
                 procesos_skill=procesos_skill,
             )
 
-            operario_creado = await self.repository.save(operario)
+            db.add(operario)
+            await db.flush()  # asigna el id sin cerrar la transacción
 
             # Vincular rangos (operario_rango) -> de aqui salen las SKILLS NATIVAS.
             if operario_dto.rangos is not None:
-                await self.repository.sync_rangos(operario_creado.id, operario_dto.rangos)
+                vistos = set()
+                for rid in operario_dto.rangos:
+                    if rid is None or rid in vistos:
+                        continue
+                    vistos.add(rid)
+                    db.add(OperarioRango(id_operario=operario.id, id_rango=rid))
 
-            return ResponseDTO(
-                status=True,
-                data=jsonable_encoder(operario_creado),
-                errorDescription=""
-            )
+            await db.commit()
+            await db.refresh(operario)
+            return operario
 
-        except BusinessException as e:
-            raise e
+        try:
+            operario_creado = await run_with_db_retry(db, _guardar, label="crearOperario")
         except Exception as e:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             logger.error(f"Service - Error al crear Operario: {e}")
-            raise InfrastructureException("Error al guardar el Operario.") from e
+            raise InfrastructureException(motivo_error_db(e, "crear el operario")) from e
+
+        return ResponseDTO(
+            status=True,
+            data=jsonable_encoder(operario_creado),
+            errorDescription=""
+        )
 
     # 🔹 Eliminar Operario
     async def eliminarOperario(self, id: int):
@@ -245,45 +266,57 @@ class OperarioService:
 
     # 🔹 Modificar Operario
     async def modificarOperario(self, id: int, operario_dto: OperarioRequestDTO):
-        try:
-            nueva_data = operario_dto.dict(exclude_unset=True)
-            skills_data = nueva_data.pop("skills", None)
-            # 'rangos' no es columna de Operario: hay que sacarlo antes del update
-            # y sincronizar la tabla operario_rango por separado.
-            rangos_data = nueva_data.pop("rangos", None)
+        # Guardado ATÓMICO: datos del operario + skills + rangos se aplican en una
+        # sola transacción con un único commit al final. Si algo falla a mitad de
+        # camino (p. ej. la DB se desconecta), se hace rollback y NO queda un
+        # guardado parcial: o se guarda todo o no se guarda nada.
+        from sqlalchemy import select, delete
+        from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+        from backend.domain.OperarioRango import OperarioRango
+        from backend.infrastructure.db_retry import run_with_db_retry, motivo_error_db
+        db = self.repository.db
 
+        # Preproceso (puro, una sola vez): no toca la DB, así que no se reintenta.
+        nueva_data = operario_dto.dict(exclude_unset=True)
+        skills_data = nueva_data.pop("skills", None)
+        # 'rangos' no es columna de Operario: se sincroniza la tabla operario_rango aparte.
+        rangos_data = nueva_data.pop("rangos", None)
+
+        if "hora_inicio" in nueva_data and isinstance(nueva_data["hora_inicio"], str):
+            nueva_data["hora_inicio"] = time.fromisoformat(nueva_data["hora_inicio"])
+        if "hora_fin" in nueva_data and isinstance(nueva_data["hora_fin"], str):
+            nueva_data["hora_fin"] = time.fromisoformat(nueva_data["hora_fin"])
+
+        if "dias_trabajo" in nueva_data:
+            normalizados = _normalizar_dias_trabajo(nueva_data["dias_trabajo"])
+            if normalizados is None:
+                # valor inválido: no actualizar para evitar dejar al operario sin días
+                nueva_data.pop("dias_trabajo")
+            else:
+                nueva_data["dias_trabajo"] = normalizados
+        if "min_desayuno" in nueva_data:
+            nueva_data["min_desayuno"] = _validar_pausa(nueva_data["min_desayuno"], 15)
+        if "min_almuerzo" in nueva_data:
+            nueva_data["min_almuerzo"] = _validar_pausa(nueva_data["min_almuerzo"], 30)
+
+        _NO_ENCONTRADO = object()
+
+        # Toda la escritura va en un único commit y se reintenta ante un corte
+        # transitorio de la DB. Es idempotente (reemplaza skills/rangos por completo),
+        # así que reintentar es seguro. Se reconstruye todo adentro para que, tras un
+        # rollback, no queden objetos ORM inválidos.
+        async def _guardar():
+            result = await db.execute(select(Operario).where(Operario.id == id))
+            operario = result.scalar_one_or_none()
+            if not operario:
+                return _NO_ENCONTRADO
+            for key, value in nueva_data.items():
+                setattr(operario, key, value)
+
+            # Skills cargadas (nivel 1/2). Las filas nivel 0 (overrides de nativas
+            # desactivadas) NO se tocan: el form no las maneja y borrarlas las perdería.
             if skills_data is not None:
-                pass # validations removed
-
-            if "hora_inicio" in nueva_data and isinstance(nueva_data["hora_inicio"], str):
-                nueva_data["hora_inicio"] = time.fromisoformat(nueva_data["hora_inicio"])
-            if "hora_fin" in nueva_data and isinstance(nueva_data["hora_fin"], str):
-                nueva_data["hora_fin"] = time.fromisoformat(nueva_data["hora_fin"])
-
-            if "dias_trabajo" in nueva_data:
-                normalizados = _normalizar_dias_trabajo(nueva_data["dias_trabajo"])
-                if normalizados is None:
-                    # valor inválido: no actualizar para evitar dejar al operario sin días
-                    nueva_data.pop("dias_trabajo")
-                else:
-                    nueva_data["dias_trabajo"] = normalizados
-            if "min_desayuno" in nueva_data:
-                nueva_data["min_desayuno"] = _validar_pausa(nueva_data["min_desayuno"], 15)
-            if "min_almuerzo" in nueva_data:
-                nueva_data["min_almuerzo"] = _validar_pausa(nueva_data["min_almuerzo"], 30)
-
-            actualizado = await self.repository.update(id, nueva_data)
-
-            if not actualizado:
-                return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
-
-            if skills_data is not None:
-                from sqlalchemy import delete
-                from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
-                # Solo se reemplazan las skills cargadas (nivel 1/2). Las filas nivel 0
-                # (overrides de nativas desactivadas) NO se tocan: el form no las maneja
-                # y borrarlas acá las perdería en cada edición del operario.
-                await self.repository.db.execute(
+                await db.execute(
                     delete(OperarioProcesoSkill).where(
                         OperarioProcesoSkill.id_operario == id,
                         OperarioProcesoSkill.nivel.in_([1, 2]),
@@ -293,25 +326,42 @@ class OperarioService:
                     # Ignorar nivel 0 si llegara desde el form: las nativas no se cargan manualmente.
                     if s.get("nivel") == 0:
                         continue
-                    self.repository.db.add(OperarioProcesoSkill(
+                    db.add(OperarioProcesoSkill(
                         id_operario=id,
                         id_proceso=s["id_proceso"],
                         nivel=s["nivel"],
-                        habilitado=s.get("habilitado", True)
+                        habilitado=s.get("habilitado", True),
                     ))
-                await self.repository.db.commit()
 
+            # Rangos (operario_rango): borrar y reinsertar deduplicado.
             if rangos_data is not None:
-                await self.repository.sync_rangos(id, rangos_data)
+                await db.execute(
+                    delete(OperarioRango).where(OperarioRango.id_operario == id)
+                )
+                vistos = set()
+                for rid in rangos_data:
+                    if rid is None or rid in vistos:
+                        continue
+                    vistos.add(rid)
+                    db.add(OperarioRango(id_operario=id, id_rango=rid))
 
-            return ResponseDTO(
-                status=True,
-                data={"id": actualizado.id},
-                errorDescription=""
-            )
+            await db.commit()
+            return operario
+
+        try:
+            resultado = await run_with_db_retry(db, _guardar, label=f"modificarOperario#{id}")
         except Exception as e:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             logger.error(f"Service - Error al actualizar Operario: {e}")
-            raise InfrastructureException("Error al actualizar el Operario.") from e
+            raise InfrastructureException(motivo_error_db(e, "guardar los cambios del operario")) from e
+
+        if resultado is _NO_ENCONTRADO:
+            return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
+
+        return ResponseDTO(status=True, data={"id": id}, errorDescription="")
 
     # 🔹 Actualizar estado de habilidad (habilitado/deshabilitado)
     async def actualizarEstadoSkill(self, id_operario: int, id_proceso: int, habilitado: bool):

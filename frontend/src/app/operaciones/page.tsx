@@ -482,6 +482,7 @@ export default function OperacionesPage() {
       console.error("Error updating task:", error);
       setTasks(oldTasks);
       setRawPlanificacion(oldRawPlanificacion);
+      toast.error("No se pudo mover la tarea. Se revirtió; revisá la conexión e intentá de nuevo.");
     }
   };
 
@@ -537,13 +538,16 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch(`${API_URL}/planificacion/` + targetTask.id, {
+      const response = await fetch(`${API_URL}/planificacion/` + targetTask.id, {
         method: "PUT",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_operario: opId }),
       });
+      if (!response.ok) throw new Error("Failed to update operator");
     } catch (error) {
       console.error("Error updating operator:", error);
+      toast.error("No se pudo guardar el cambio de operario. Se revirtió; revisá la conexión e intentá de nuevo.");
+      fetchData();
     }
   };
 
@@ -582,13 +586,16 @@ export default function OperacionesPage() {
     }));
 
     try {
-      await fetch(`${API_URL}/ordenes/` + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
+      const response = await fetch(`${API_URL}/ordenes/` + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
         method: "PUT",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify({ id_estado: idEstado }),
       });
+      if (!response.ok) throw new Error("Failed to update status");
     } catch (error) {
       console.error("Error updating status:", error);
+      toast.error("No se pudo guardar el cambio de estado. Se revirtió; revisá la conexión e intentá de nuevo.");
+      fetchData();
     }
 
   }

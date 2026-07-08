@@ -172,6 +172,8 @@ export default function RecursosPage() {
         showToast(`Proceso ${itemAEliminar.nombre} eliminado correctamente`, 'success');
         await fetchProcesos();
       }
+    } else {
+      showToast("No se pudo eliminar. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
     }
     setMostrarDialogo({ ...mostrarDialogo, eliminar: false });
     setItemAEliminar(null);

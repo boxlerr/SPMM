@@ -14,6 +14,27 @@ export function capitalizeName(text?: string): string {
 }
 
 /**
+ * Extrae el motivo de error del cuerpo (texto) de una respuesta del backend.
+ * Soporta el formato ResponseDTO ({ errors: [{ message }] }) y el detail de FastAPI
+ * (string u objeto). Devuelve "" si no puede extraer un motivo legible.
+ */
+export function parseApiError(bodyText: string): string {
+  if (!bodyText) return "";
+  try {
+    const b = JSON.parse(bodyText);
+    if (Array.isArray(b?.errors) && b.errors.length > 0 && b.errors[0]?.message) {
+      return String(b.errors[0].message);
+    }
+    if (typeof b?.detail === "string") return b.detail;
+    if (b?.detail?.message) return String(b.detail.message);
+    if (typeof b?.message === "string") return b.message;
+  } catch {
+    // el cuerpo no era JSON
+  }
+  return "";
+}
+
+/**
  * Formatea los nombres en los mensajes de notificación
  * Busca patrones comunes y aplica capitalizeName a los nombres encontrados
  */

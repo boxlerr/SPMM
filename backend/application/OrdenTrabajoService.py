@@ -24,38 +24,53 @@ class OrdenTrabajoService:
         self.event_bus = event_bus
 
     async def crearOrdenTrabajo(self, data_json: str, files: list = [], user: dict | None = None):
-        try:
-            import json
-            data_dict = json.loads(data_json)
-            dto = OrdenTrabajoRequestDTO(**data_dict)
-            
-            logger.info("Service - Crear orden de trabajo completa.")
+        import json
+        from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+        from backend.domain.Plano import Plano
+        from backend.infrastructure.db_retry import run_with_db_retry, motivo_error_db
 
-            # Auto-generate id_otvieja if 0 or missing
+        data_dict = json.loads(data_json)
+        dto = OrdenTrabajoRequestDTO(**data_dict)
+        logger.info("Service - Crear orden de trabajo completa.")
+        db = self.repository.db
+
+        # Leer los archivos UNA sola vez: file.read() no se puede repetir en un reintento.
+        archivos_leidos = []
+        if files:
+            for file in files:
+                contenido = await file.read()
+                archivos_leidos.append((
+                    file.filename,
+                    file.content_type.split('/')[-1] if file.content_type else 'bin',
+                    contenido,
+                ))
+
+        # Guardado ATÓMICO (cabecera + procesos + planos en un único commit) con reintento
+        # ante cortes transitorios de la DB. Se reconstruye todo adentro para que, si hubo
+        # un rollback por desconexión, el reintento no use objetos ORM inválidos.
+        async def _guardar():
+            # Auto-generar id_otvieja si vino 0/None (se recalcula en cada intento).
             final_id_otvieja = dto.id_otvieja
             if not final_id_otvieja or final_id_otvieja == 0:
-                # Query max id_otvieja
-                stmt = select(func.max(OrdenTrabajo.id_otvieja))
-                result = await self.repository.db.execute(stmt)
+                result = await db.execute(select(func.max(OrdenTrabajo.id_otvieja)))
                 max_id = result.scalar()
                 final_id_otvieja = (max_id or 0) + 1
 
-            # 1. Crear la Orden (Cabecera)
             orden = OrdenTrabajo(
                 id_otvieja=final_id_otvieja,
 
                 id_prioridad=dto.id_prioridad,
                 id_sector=dto.id_sector,
                 id_articulo=dto.id_articulo,
-                unidades=dto.unidades, 
-                id_cliente=dto.id_cliente, 
-                observaciones=dto.observaciones, # Se usa para el Articulo segun logica frontend
-                detalle=dto.detalle, # 🔹 Nuevo campo detalle usuario
+                unidades=dto.unidades,
+                id_cliente=dto.id_cliente,
+                observaciones=dto.observaciones,  # Se usa para el Articulo segun logica frontend
+                detalle=dto.detalle,  # 🔹 Nuevo campo detalle usuario
                 fecha_orden=dto.fecha_orden,
                 fecha_entrada=dto.fecha_entrada,
                 fecha_prometida=dto.fecha_prometida,
                 fecha_entrega=dto.fecha_entrega,
-                
+
                 # 🔹 Nuevos campos "Pronto"
                 n_ped_l=dto.n_ped_l,
                 n_pedido=dto.n_pedido,
@@ -64,7 +79,7 @@ class OrdenTrabajoService:
                 aprobado_por=dto.aprobado_por,
                 remitos_salida=dto.remitos_salida,
                 f_disp_material=dto.f_disp_material,
-                
+
                 fabricacion=1 if dto.fabricacion else 0,
                 reparacion=1 if dto.reparacion else 0,
                 sin_cargo=1 if dto.sin_cargo else 0,
@@ -78,79 +93,75 @@ class OrdenTrabajoService:
                 tiene_plano=1 if dto.tiene_plano else 0,
                 programada=1 if dto.programada else 0,
                 en_proceso=1 if dto.en_proceso else 0,
-                
+
                 finalizadototal=1 if dto.finalizadototal else 0,
                 finalizadoparcial=1 if dto.finalizadoparcial else 0,
                 reclamo=1 if dto.reclamo else 0
             )
-            
-            orden_creada = await self.repository.save(orden)
-            
-            # 2. Crear relaciones con Procesos
-            from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
-            
+
+            db.add(orden)
+            await db.flush()  # asigna orden.id sin cerrar la transacción
+
+            # Procesos de la OT.
             for index, proc_dto in enumerate(dto.procesos):
                 # maquinaria_id viene como string opcional desde el modal; '' / None = sin preselección.
                 _maq = getattr(proc_dto, "maquinaria_id", None)
                 id_maquinaria = int(_maq) if (_maq not in (None, "", "0")) else None
-                nuevo_proceso = OrdenTrabajoProceso(
-                    id_orden_trabajo=orden_creada.id,
+                db.add(OrdenTrabajoProceso(
+                    id_orden_trabajo=orden.id,
                     id_proceso=proc_dto.proceso_id,
                     orden=index + 1,
                     tiempo_proceso=proc_dto.tiempo_proceso or 0,
                     cant_operarios=proc_dto.cant_operarios or 1,
                     id_maquinaria=id_maquinaria,
-                )
-                # Hack: Direct save via session if repository doesn't have specific method?
-                # OrdenTrabajoRepository.save uses add/commit. 
-                # We should add these objects to the session.
-                self.repository.db.add(nuevo_proceso)
-            
-            # 3. Guardar Archivos (Planos)
-            from backend.domain.Plano import Plano
-            
-            if files:
-                for file in files:
-                    content = await file.read()
-                    nuevo_plano = Plano(
-                        nombre=file.filename,
-                        descripcion="Cargado desde nueva OT",
-                        tipo_archivo=file.content_type.split('/')[-1] if file.content_type else 'bin',
-                        archivo=content, # BLOB
-                        id_orden_trabajo=orden_creada.id
-                    )
-                    self.repository.db.add(nuevo_plano)
-            
-            await self.repository.db.commit()
+                ))
 
-            # 🔹 Evento: Orden Creada
-            if self.event_bus:
-                try:
-                    creator_name = None
-                    if user:
-                        nombre = user.get('nombre', '') or ''
-                        apellido = user.get('apellido', '') or ''
-                        full_name = f"{nombre} {apellido}".strip()
-                        creator_name = full_name.title() if full_name else user.get('username', '').title()
+            # Planos (archivos ya leídos arriba).
+            for (nombre, tipo_archivo, contenido) in archivos_leidos:
+                db.add(Plano(
+                    nombre=nombre,
+                    descripcion="Cargado desde nueva OT",
+                    tipo_archivo=tipo_archivo,
+                    archivo=contenido,  # BLOB
+                    id_orden_trabajo=orden.id,
+                ))
 
-                    event = WorkOrderCreated(
-                        id=orden_creada.id,
-                        id_cliente=orden_creada.id_cliente,
-                        unidades=orden_creada.unidades or 0,
-                        fecha_prometida=str(orden_creada.fecha_prometida),
-                        creator_name=creator_name
-                    )
-                    await self.event_bus.publish(event)
-                except Exception as e:
-                    logger.error(f"Service - Error publishing WorkOrderCreated: {e}")
-            
-            return ResponseDTO(status=True, data=jsonable_encoder(orden_creada))
+            await db.commit()
+            await db.refresh(orden)
+            return orden
 
-        except InfrastructureException:
-            raise  
+        try:
+            orden_creada = await run_with_db_retry(db, _guardar, label="crearOrdenTrabajo")
         except Exception as e:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             logger.error(f"Error creando OT: {e}")
-            raise ApplicationException("Error inesperado al crear la Orden de Trabajo.") from e
+            raise ApplicationException(motivo_error_db(e, "crear la orden de trabajo")) from e
+
+        # 🔹 Evento: Orden Creada (fuera del reintento; si falla el bus, no afecta el guardado)
+        if self.event_bus:
+            try:
+                creator_name = None
+                if user:
+                    nombre = user.get('nombre', '') or ''
+                    apellido = user.get('apellido', '') or ''
+                    full_name = f"{nombre} {apellido}".strip()
+                    creator_name = full_name.title() if full_name else user.get('username', '').title()
+
+                event = WorkOrderCreated(
+                    id=orden_creada.id,
+                    id_cliente=orden_creada.id_cliente,
+                    unidades=orden_creada.unidades or 0,
+                    fecha_prometida=str(orden_creada.fecha_prometida),
+                    creator_name=creator_name
+                )
+                await self.event_bus.publish(event)
+            except Exception as e:
+                logger.error(f"Service - Error publishing WorkOrderCreated: {e}")
+
+        return ResponseDTO(status=True, data=jsonable_encoder(orden_creada))
 
     async def listarOrdenes(self):
         logger.info("Service - Listar órdenes de trabajo.")

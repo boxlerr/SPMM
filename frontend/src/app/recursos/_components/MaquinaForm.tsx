@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Maquina } from "../_types";
 import { useToast } from "@/components/ui/toast"
+import { parseApiError } from "@/lib/utils";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -25,6 +26,7 @@ interface MaquinaFormProps {
 
 export default function MaquinaForm({ open, editing, data, onClose, onSuccess, cleanUrl }: MaquinaFormProps) {
   const { showToast } = useToast();
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     nombre: "",
     cod_maquina: "",
@@ -62,24 +64,34 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
       especialidad: formData.especialidad || null,
     };
 
-    if (editing && data) {
-      const response = await fetch(`${cleanUrl}/maquinarias/${data.id}`, {
-        method: "PUT",
+    setIsSaving(true);
+    try {
+      const url = editing && data ? `${cleanUrl}/maquinarias/${data.id}` : `${cleanUrl}/maquinarias`;
+      const method = editing && data ? "PUT" : "POST";
+      const response = await fetch(url, {
+        method,
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (response.ok) {
-        showToast(`Máquina '${payload.nombre}' modificada correctamente`, 'success');
+      if (!response.ok) {
+        // No cerramos el form: el usuario no pierde lo que cargó y puede reintentar.
+        const bodyText = await response.text().catch(() => "");
+        console.error("Error al guardar maquinaria:", response.status, bodyText);
+        showToast(parseApiError(bodyText) || "No se pudo guardar la máquina. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+        return;
       }
-    } else {
-      const response = await fetch(`${cleanUrl}/maquinarias`, {
-        method: "POST",
-        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) {
-        showToast(`Máquina '${payload.nombre}' creada correctamente`, 'success');
-      }
+      showToast(
+        editing && data
+          ? `Máquina '${payload.nombre}' modificada correctamente`
+          : `Máquina '${payload.nombre}' creada correctamente`,
+        'success'
+      );
+    } catch (error) {
+      console.error("Error de red al guardar maquinaria:", error);
+      showToast("No se pudo conectar con el servidor. Revisá la conexión e intentá de nuevo.", 'error');
+      return;
+    } finally {
+      setIsSaving(false);
     }
     onSuccess();
   };
@@ -108,8 +120,8 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!formData.nombre}>{editing ? "Guardar Cambios" : "Crear Maquinaria"}</Button>
+          <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={!formData.nombre || isSaving}>{isSaving ? "Guardando..." : (editing ? "Guardar Cambios" : "Crear Maquinaria")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
