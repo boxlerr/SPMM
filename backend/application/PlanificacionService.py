@@ -314,10 +314,21 @@ def _crear_variables_y_dominios(
         presente_vars[(orden_id, secuencia)] = model.NewBoolVar(f"pres_{orden_id}_{secuencia}")
 
         # ----------------- Operarios válidos -----------------
+        # Un proceso de MÁQUINA (PRODUCCION_MAQUINA que usa máquina) solo se puede
+        # asignar a operarios con la SKILL cargada. Las skills son la fuente de
+        # verdad: si nadie la tiene, el proceso queda "sin asignar" (dummy) en vez
+        # de abrirse por rango a cualquiera. Ver auditoría: backend/scripts/auditoria_skills.py
+        es_proceso_maquina = usa_maquina and _get_tipo_proceso(nombre_proc) == "PRODUCCION_MAQUINA"
+
         if op_skill_levels:
             # Lógica de Skills primero (modo skill-map): solo los operarios con skill
             # explícita nivel 1/2. Las nativas no aplican acá (ya están excluidas).
             operarios_validos = list(op_skill_levels.keys())
+        elif es_proceso_maquina:
+            # Proceso de máquina SIN skills cargadas para nadie: no lo abrimos por
+            # rango (evita asignar a quien no sabe operar la máquina). Queda sin
+            # asignar + aviso, para que se cargue la skill del operario en la UI.
+            operarios_validos = []
         else:
             if not rangos_proc:
                 operarios_validos = REAL_OP_IDS[:]
@@ -339,9 +350,15 @@ def _crear_variables_y_dominios(
                 operarios_validos = [op_id for op_id in operarios_validos if op_id not in excluidos]
 
         if not operarios_validos:
-            logger.warning(f"Proceso {proc_id} sin operarios válidos; usando dummy")
+            if es_proceso_maquina:
+                logger.warning(
+                    f"Proceso máquina {proc_id} ({nombre_proc}) SIN skills cargadas -> "
+                    f"queda SIN ASIGNAR. Cargar la skill del operario en la UI."
+                )
+            else:
+                logger.warning(f"Proceso {proc_id} sin operarios válidos; usando dummy")
             operarios_validos = [DUMMY_OP_ID]
-        
+
         if DUMMY_OP_ID not in operarios_validos:
             operarios_validos.append(DUMMY_OP_ID)
 
