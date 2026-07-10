@@ -657,30 +657,47 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         const maqName = (id: string) => maquinarias.find(m => m.id.toString() === id)?.nombre || "Sin máquina";
 
         const procs = processes.filter(p => p.incluido && p.proceso_id);
+        // Hoja de procesos (operario): datos planificados + columnas en blanco para
+        // la carga real a mano (empleado, horarios, total, obs).
         const procRows = procs.length
-            ? procs.map((p, i) => `<tr><td style="text-align:center">${i + 1}</td><td>${esc(procName(p.proceso_id))}</td><td style="text-align:center">${esc(p.tiempo || 0)}</td><td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td><td style="text-align:center">${esc(p.cant_operarios || 1)}</td></tr>`).join("")
-            : `<tr><td colspan="5" style="text-align:center;color:#999">Sin procesos cargados</td></tr>`;
+            ? procs.map((p, i) => `<tr><td class="c">${i + 1}</td><td>${esc(procName(p.proceso_id))}</td><td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td><td class="c">${esc(p.tiempo || 0)}</td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`).join("")
+            : `<tr><td colspan="9" class="c" style="color:#999">Sin procesos cargados</td></tr>`;
 
+        // Hoja de materias primas (pañol): datos + columna "Retirado" para tildar a mano.
         const mpRows = materiasPrimas.length
-            ? materiasPrimas.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}</td><td style="text-align:center">${esc(mp.cantidad)}</td><td style="text-align:center">${esc(mp.unidad)}</td></tr>`).join("")
-            : `<tr><td colspan="4" style="text-align:center;color:#999">Sin materias primas</td></tr>`;
+            ? materiasPrimas.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}</td><td class="c">${esc(mp.cantidad)}</td><td class="c">${esc(mp.unidad)}</td><td class="fill c"></td><td class="fill"></td></tr>`).join("")
+            : `<tr><td colspan="6" class="c" style="color:#999">Sin materias primas</td></tr>`;
 
         const otNum = orderToEdit?.id_otvieja || orderToEdit?.id || "Nueva";
+        const hoy = new Date().toLocaleDateString("es-AR");
+        const logoUrl = `${window.location.origin}/longchamps_logo.png`;
+        const encabezado = (titulo: string, subtitulo: string) => `
+<div class="head">
+  <img class="logo" src="${logoUrl}" alt="Longchamps" onerror="this.style.display='none'">
+  <div class="head-c"><div class="empresa">Metalúrgica Longchamps</div><div class="doc">${esc(titulo)}</div></div>
+  <div class="head-r"><div class="otn">OT N° ${esc(otNum)}</div><div class="fecha">${esc(subtitulo)}</div></div>
+</div>`;
         const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>OT ${esc(otNum)}</title>
 <style>
-*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#222;margin:24px;font-size:12px}
-h1{font-size:20px;margin:0 0 2px}.sub{color:#666;margin:0 0 16px;font-size:11px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 24px;margin-bottom:8px}
+*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#222;margin:0;font-size:12px}
+.page{padding:14mm 12mm}.page.break{page-break-after:always}
+.head{display:flex;align-items:center;gap:14px;border-bottom:3px solid #1e3a5f;padding-bottom:8px;margin-bottom:12px}
+.logo{height:48px;width:auto}.head-c{flex:1}.empresa{font-size:12px;color:#1e3a5f;font-weight:bold;letter-spacing:.5px}
+.doc{font-size:20px;font-weight:bold;color:#111}.head-r{text-align:right}.otn{font-size:16px;font-weight:bold}.fecha{font-size:10px;color:#666}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 24px;margin-bottom:10px}
 .cell{border-bottom:1px solid #eee;padding:4px 0;display:flex;justify-content:space-between;gap:12px}
 .cell .k{color:#888;text-transform:uppercase;font-size:10px;letter-spacing:.5px}.cell .v{font-weight:bold;text-align:right}
-h2{font-size:13px;margin:18px 0 6px;border-bottom:2px solid #333;padding-bottom:3px}
-table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:5px 7px;text-align:left}
-th{background:#f3f3f3;text-transform:uppercase;font-size:10px}
-.notas{white-space:pre-wrap;border:1px solid #eee;padding:8px;border-radius:4px;color:#333;margin-top:4px}
-@media print{body{margin:0}}
+h2{font-size:13px;margin:16px 0 6px;border-bottom:2px solid #333;padding-bottom:3px}
+table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #bbb;padding:5px 7px;text-align:left;vertical-align:top}
+th{background:#eef2f7;text-transform:uppercase;font-size:9px}
+td.c,th.c{text-align:center}td.fill{height:30px;background:#fff}
+.notas{white-space:pre-wrap;border:1px solid #ccc;padding:8px;border-radius:4px;color:#333;margin-top:4px;min-height:44px}
+.pie{margin-top:10px;font-size:9px;color:#999;text-align:center}
+@media print{.page{padding:8mm 10mm}}
 </style></head><body>
-<h1>Orden de Trabajo #${esc(otNum)}</h1>
-<p class="sub">${esc(cliente)} · impreso ${new Date().toLocaleString("es-AR")}</p>
+
+<div class="page break">
+${encabezado("Orden de Trabajo — Procesos", `Impreso ${esc(hoy)}`)}
 <div class="grid">
 <div class="cell"><span class="k">Cliente</span><span class="v">${esc(cliente)}</span></div>
 <div class="cell"><span class="k">Prioridad</span><span class="v">${esc(prioridad)}</span></div>
@@ -691,12 +708,29 @@ th{background:#f3f3f3;text-transform:uppercase;font-size:10px}
 <div class="cell"><span class="k">F. Entrada</span><span class="v">${fmt(generalData.fecha_entrada)}</span></div>
 <div class="cell"><span class="k">F. Prometida</span><span class="v">${fmt(generalData.fecha_prometida)}</span></div>
 </div>
-<h2>Procesos</h2>
-<table><thead><tr><th>#</th><th>Proceso</th><th>Min</th><th>Máquina</th><th>Cant. emp.</th></tr></thead><tbody>${procRows}</tbody></table>
-<h2>Materias Primas</h2>
-<table><thead><tr><th>Código</th><th>Descripción</th><th>Cant</th><th>Un</th></tr></thead><tbody>${mpRows}</tbody></table>
+<h2>Procesos (planificado + carga real)</h2>
+<table><thead><tr><th class="c">#</th><th>Proceso</th><th>Máquina</th><th class="c">Min. plan.</th><th>Empleado</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th><th>Obs.</th></tr></thead><tbody>${procRows}</tbody></table>
+<h2>Nota de taller</h2>
+<div class="notas">${esc(detailsData.observaciones || "")}</div>
 ${generalData.descripcion ? `<h2>Descripción</h2><div class="notas">${esc(generalData.descripcion)}</div>` : ""}
-${detailsData.observaciones ? `<h2>Nota de taller</h2><div class="notas">${esc(detailsData.observaciones)}</div>` : ""}
+<div class="pie">Hoja de PROCESOS — para el operario</div>
+</div>
+
+<div class="page">
+${encabezado("Materias Primas", "Retirar en pañol")}
+<div class="grid">
+<div class="cell"><span class="k">Cliente</span><span class="v">${esc(cliente)}</span></div>
+<div class="cell"><span class="k">Producto</span><span class="v">${esc(articuloLabel)}</span></div>
+<div class="cell"><span class="k">Cantidad</span><span class="v">${esc(detailsData.cantidad || "-")}</span></div>
+<div class="cell"><span class="k">N° Pedido</span><span class="v">${esc(generalData.n_pedido || "-")}</span></div>
+</div>
+<h2>Materias Primas</h2>
+<table><thead><tr><th>Código</th><th>Descripción</th><th class="c">Cant.</th><th class="c">Un.</th><th class="c">Retirado</th><th>Obs.</th></tr></thead><tbody>${mpRows}</tbody></table>
+<h2>Observaciones pañol</h2>
+<div class="notas"></div>
+<div class="pie">Hoja de MATERIAS PRIMAS — para el pañol</div>
+</div>
+
 </body></html>`;
 
         const w = window.open("", "_blank", "width=900,height=700");
