@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -872,10 +872,24 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             <Input id="aprobado_por" disabled={isLegacyOT} value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
-                                        {/* Product Full Width */}
-                                        <div className="md:col-span-4 space-y-1.5">
+                                        {/* Producto: selector (busca por código o descripción) + código separado y copiable */}
+                                        <div className="md:col-span-3 space-y-1.5">
                                             <Label htmlFor="articulo" className="text-[11px] font-bold text-gray-400 uppercase">Producto / Artículo <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Buscá por código o descripción" className="h-8" />
+                                        </div>
+                                        <div className="md:col-span-1 space-y-1.5">
+                                            <Label htmlFor="cod_articulo" className="text-[11px] font-bold text-gray-400 uppercase">Código</Label>
+                                            {(() => {
+                                                const codSel = articulos.find(a => a.id.toString() === generalData.articulo_id)?.cod_articulo || "";
+                                                return (
+                                                    <div className="flex items-center gap-1">
+                                                        <Input id="cod_articulo" readOnly value={codSel} placeholder="—" title="Código del producto" className="h-8 text-sm font-mono" />
+                                                        <Button type="button" variant="outline" className="h-8 w-8 p-0 shrink-0" disabled={!codSel} title="Copiar código" onClick={() => { navigator.clipboard.writeText(codSel); toast.success(`Código ${codSel} copiado`); }}>
+                                                            <Copy className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
 
                                         {/* Section: Dates */}
