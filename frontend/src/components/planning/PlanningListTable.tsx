@@ -109,7 +109,17 @@ function _PlanningListTable({
     // B1 (feedback 06/07): staging de reasignaciones de OPERARIO y MÁQUINA en Planificadas.
     // Antes cada cambio se guardaba al instante; ahora se acumulan acá y se aplican al
     // tocar "Aceptar cambios". El avance (estado) y las fechas siguen guardando al toque.
-    const [pendingRes, setPendingRes] = React.useState<Record<string, { operario?: number; maquina?: number }>>({});
+    // Autoguardado: el staging se inicializa desde localStorage para sobrevivir a
+    // un corte de luz / recarga (ver efectos de persistencia más abajo).
+    const STAGING_KEY = "plan_pending_staging";
+    const [pendingRes, setPendingRes] = React.useState<Record<string, { operario?: number; maquina?: number }>>(() => {
+        if (typeof window === "undefined") return {};
+        try {
+            const saved = JSON.parse(localStorage.getItem(STAGING_KEY) || "null");
+            if (saved && typeof saved === "object") return saved;
+        } catch { /* dato corrupto / sin localStorage: ignorar */ }
+        return {};
+    });
     const resKey = (ordenId: number, procesoId: number) => `${ordenId}-${procesoId}`;
     const stageOperario = (ordenId: number, procesoId: number, operarioId: number) =>
         setPendingRes(prev => ({ ...prev, [resKey(ordenId, procesoId)]: { ...prev[resKey(ordenId, procesoId)], operario: operarioId } }));
@@ -124,6 +134,21 @@ function _PlanningListTable({
         }
         setPendingRes({});
     };
+
+    // Aviso una sola vez si se recuperaron cambios de una sesión anterior (corte de luz / recarga).
+    React.useEffect(() => {
+        const n = Object.keys(pendingRes).length;
+        if (n > 0) toast.info(`Se recuperaron ${n} cambio${n === 1 ? "" : "s"} sin guardar de una sesión anterior`);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Persistencia del staging: se guarda ante cada cambio y se limpia al Aceptar/Descartar.
+    React.useEffect(() => {
+        try {
+            if (Object.keys(pendingRes).length > 0) localStorage.setItem(STAGING_KEY, JSON.stringify(pendingRes));
+            else localStorage.removeItem(STAGING_KEY);
+        } catch { /* sin localStorage: ignorar */ }
+    }, [pendingRes]);
 
     // Estado del scroll horizontal para mostrar/ocultar el gradient fade dinámicamente.
     // Cuando el usuario llega al final del scroll (no hay más columnas a la derecha),
