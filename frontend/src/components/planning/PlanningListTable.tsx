@@ -275,9 +275,22 @@ function _PlanningListTable({
             String(item.observaciones || "").toLowerCase().includes(lowerTerm) ||
             String(item.cliente?.nombre || "").toLowerCase().includes(lowerTerm) ||
             String(item.articulo?.cod_articulo || "").toLowerCase().includes(lowerTerm) ||
-            String(item.articulo?.descripcion || "").toLowerCase().includes(lowerTerm)
+            String(item.articulo?.descripcion || "").toLowerCase().includes(lowerTerm) ||
+            item.procesos.some(p => String(p.proceso?.nombre || "").toLowerCase().includes(lowerTerm))
         );
     }, [data, searchTerm]);
+
+    // Al buscar por nombre de proceso, auto-expandir las OT que matchean para que
+    // el proceso (con su orden) quede visible sin abrir la fila a mano.
+    const procesoMatchIds = React.useMemo(() => {
+        const s = searchTerm.trim().toLowerCase();
+        if (!s) return new Set<number>();
+        return new Set(
+            data.filter(item => item.procesos.some(p => String(p.proceso?.nombre || "").toLowerCase().includes(s)))
+                .map(item => item.id)
+        );
+    }, [data, searchTerm]);
+    const isRowExpanded = (id: number) => expandedOrderIds.includes(id) || procesoMatchIds.has(id);
 
     const sortedData = React.useMemo(() => {
 
@@ -820,7 +833,7 @@ function _PlanningListTable({
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
-                    placeholder="Buscar por OT, pedido, cliente, código o producto..."
+                    placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
                     className="pl-10 border-gray-300 focus:border-red-500 focus:ring-red-500"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -846,7 +859,7 @@ function _PlanningListTable({
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
                                     </div>
                                     <button className="text-gray-400">
-                                        {expandedOrderIds.includes(item.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                                        {isRowExpanded(item.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
                                     </button>
                                 </div>
 
@@ -900,7 +913,7 @@ function _PlanningListTable({
                             </div>
 
                             {/* Expanded Details for Mobile */}
-                            {expandedOrderIds.includes(item.id) && (
+                            {isRowExpanded(item.id) && (
                                 <div className="bg-gray-50 border-t p-2">
                                     {renderDetails(item)}
                                 </div>
@@ -1088,7 +1101,7 @@ function _PlanningListTable({
                                                     }}
                                                     className="p-1 hover:bg-black/10 rounded transition-colors"
                                                 >
-                                                    {expandedOrderIds.includes(item.id) ? (
+                                                    {isRowExpanded(item.id) ? (
                                                         <ChevronDown className="h-4 w-4 text-gray-600" />
                                                     ) : (
                                                         <ChevronRight className="h-4 w-4 text-gray-400" />
@@ -1315,7 +1328,7 @@ function _PlanningListTable({
                                                 )}
                                             </td>
                                         </tr>
-                                        {expandedOrderIds.includes(item.id) && (
+                                        {isRowExpanded(item.id) && (
                                             <tr className="bg-gray-50 border-b">
                                                 <td colSpan={19} className="px-4 py-4">
                                                     {renderDetails(item)}
