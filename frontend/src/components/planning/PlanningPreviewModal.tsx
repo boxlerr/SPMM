@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -353,6 +354,14 @@ export function PlanningPreviewModal({
         }
 
         (onConfirm as any)(manualPlan);
+    };
+
+    // Cartel de aviso al forzar: si al confirmar quedan OT excedentes SIN forzar,
+    // avisamos antes de guardar (esas OT no se van a incluir en el plan).
+    const [showForzarWarn, setShowForzarWarn] = React.useState(false);
+    const onClickConfirmar = () => {
+        if (displayedExcedentes.length > 0) { setShowForzarWarn(true); return; }
+        handleConfirmWithDecisions();
     };
 
     const handleConfirmWithEdits = () => {
@@ -733,6 +742,7 @@ export function PlanningPreviewModal({
     );
 
     return (
+        <>
         <Dialog open={isOpen} onOpenChange={handleOpenChange}>
             <DialogContent
                 showCloseButton={false}
@@ -1704,7 +1714,7 @@ export function PlanningPreviewModal({
                     </div>
                     {/* Lado derecho: confirmar */}
                     <Button
-                        onClick={handleConfirmWithDecisions}
+                        onClick={onClickConfirmar}
                         disabled={isConfirming || isCalculating || (results.length === 0 && displayedExcedentes.length === 0)}
                         className="bg-blue-600 hover:bg-blue-700 shadow-md px-6"
                     >
@@ -1733,5 +1743,15 @@ export function PlanningPreviewModal({
                 )}
             </DialogContent >
         </Dialog >
+        <ConfirmationDialog
+            isOpen={showForzarWarn}
+            onClose={() => setShowForzarWarn(false)}
+            onConfirm={() => { setShowForzarWarn(false); handleConfirmWithDecisions(); }}
+            title="Hay OT sin forzar"
+            description={`Quedaron ${Object.keys(excedentesPorOrden).length} OT fuera del plan que no forzaste. Si guardás ahora, esas OT NO se incluyen. Cerrá este aviso para forzarlas, o guardá igual.`}
+            confirmText="Guardar igual"
+            cancelText="Volver a revisar"
+        />
+        </>
     );
 }
