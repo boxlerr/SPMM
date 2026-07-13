@@ -1317,6 +1317,54 @@ export default function OperacionesPage() {
                       romper el layout cuando hay sidebar abierto. */}
                   <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap lg:flex-nowrap w-full lg:w-auto">
 
+                    {/* Selector de semana (al lado del zoom): muestra la semana visualizada
+                        y permite cambiarla. Comparte estado con las vistas Semanal/Diaria
+                        (customRefDate / lote / hoy). */}
+                    {(() => {
+                      let refDate = new Date();
+                      if (customRefDate) refDate = customRefDate;
+                      else if (selectedLoteId !== "all") {
+                        const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+                        if (lote) refDate = new Date(lote.date);
+                      }
+                      const day = refDate.getDay();
+                      const monday = new Date(refDate);
+                      monday.setDate(refDate.getDate() - day + (day === 0 ? -6 : 1));
+                      const sunday = new Date(monday);
+                      sunday.setDate(monday.getDate() + 6);
+                      const fmtD = (d: Date) => format(d, "d MMM", { locale: es });
+                      return (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="bg-white border-gray-200 text-xs gap-1.5" title="Semana visualizada — clic para cambiarla">
+                              <CalendarClock className="h-3.5 w-3.5 text-gray-500" />
+                              <span className="hidden xl:inline text-gray-400 font-normal">Semana</span>
+                              <span className="font-medium">{fmtD(monday)}–{fmtD(sunday)}</span>
+                              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="end">
+                            <div className="border-b px-3 py-2 flex items-center justify-between gap-4">
+                              <p className="text-xs font-semibold text-gray-700">Elegí una semana</p>
+                              {customRefDate && (
+                                <button onClick={() => setCustomRefDate(null)} className="text-[11px] text-blue-600 hover:underline">Volver a hoy</button>
+                              )}
+                            </div>
+                            <CalendarPicker
+                              mode="single"
+                              selected={refDate}
+                              onSelect={(d) => d && setCustomRefDate(d)}
+                              modifiers={{ hasPlan: plannedDateObjects }}
+                              modifiersClassNames={{
+                                hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
+                              }}
+                              locale={es}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      );
+                    })()}
+
                     {/* Zoom control compartido (mismo storage key que No Planificadas,
                         Historial, Planificar y Vista Previa). */}
                     <ZoomControl value={planZoom} onChange={setPlanZoom} />
