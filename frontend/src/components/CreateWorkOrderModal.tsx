@@ -55,6 +55,7 @@ interface MateriaPrimaItem {
     descripcion: string;
     cantidad: string;
     unidad: string;
+    proveedor?: string;
     disponible: string;
     en_produccion: string;
     observaciones: string;
@@ -248,6 +249,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                             descripcion: p.descripcion || "",
                             cantidad: p.cantidad?.toString() || "0",
                             unidad: p.unidad || "",
+                            proveedor: p.proveedor || "",
                             disponible: p.disponible?.toString() || "0",
                             en_produccion: "",
                             observaciones: "",
@@ -665,8 +667,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
         // Hoja de materias primas (pañol): datos + columna "Retirado" para tildar a mano.
         const mpRows = materiasPrimas.length
-            ? materiasPrimas.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}</td><td class="c">${esc(mp.cantidad)}</td><td class="c">${esc(mp.unidad)}</td><td class="fill c"></td><td class="fill"></td></tr>`).join("")
-            : `<tr><td colspan="6" class="c" style="color:#999">Sin materias primas</td></tr>`;
+            ? materiasPrimas.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}</td><td>${esc(mp.proveedor || "")}</td><td class="c">${esc(mp.cantidad)}</td><td class="c">${esc(mp.unidad)}</td><td class="fill c"></td><td class="fill"></td></tr>`).join("")
+            : `<tr><td colspan="7" class="c" style="color:#999">Sin materias primas</td></tr>`;
 
         const otNum = orderToEdit?.id_otvieja || orderToEdit?.id || "Nueva";
         const hoy = new Date().toLocaleDateString("es-AR");
@@ -725,7 +727,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 <div class="cell"><span class="k">N° Pedido</span><span class="v">${esc(generalData.n_pedido || "-")}</span></div>
 </div>
 <h2>Materias Primas</h2>
-<table><thead><tr><th>Código</th><th>Descripción</th><th class="c">Cant.</th><th class="c">Un.</th><th class="c">Retirado</th><th>Obs.</th></tr></thead><tbody>${mpRows}</tbody></table>
+<table><thead><tr><th>Código</th><th>Descripción</th><th>Proveedor</th><th class="c">Cant.</th><th class="c">Un.</th><th class="c">Retirado</th><th>Obs.</th></tr></thead><tbody>${mpRows}</tbody></table>
 <h2>Observaciones pañol</h2>
 <div class="notas"></div>
 <div class="pie">Hoja de MATERIAS PRIMAS — para el pañol</div>
@@ -1193,6 +1195,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                     <tr>
                                                         <th className="px-3 py-2">Código</th>
                                                         <th className="px-3 py-2">Descripción</th>
+                                                        <th className="px-3 py-2">Proveedor</th>
                                                         <th className="px-3 py-2">Cant</th>
                                                         <th className="px-3 py-2">UN</th>
                                                         <th className="px-3 py-2">Disponible</th>
@@ -1208,7 +1211,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 <tbody className="divide-y divide-gray-100">
                                                     {materiasPrimas.length === 0 ? (
                                                         <tr>
-                                                            <td colSpan={12} className="px-4 py-8 text-center text-gray-400">
+                                                            <td colSpan={13} className="px-4 py-8 text-center text-gray-400">
                                                                 No se agregaron materias primas.
                                                             </td>
                                                         </tr>
@@ -1217,6 +1220,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                             <tr key={mp.id} className="hover:bg-gray-50/50 transition-colors group">
                                                                 <td className="px-3 py-2 font-medium">{mp.codigo}</td>
                                                                 <td className="px-3 py-2 truncate max-w-[150px]" title={mp.descripcion}>{mp.descripcion}</td>
+                                                                <td className="px-3 py-2 text-gray-600 truncate max-w-[120px]" title={mp.proveedor}>{mp.proveedor || "—"}</td>
                                                                 <td className="px-3 py-2">{mp.cantidad}</td>
                                                                 <td className="px-3 py-2">{mp.unidad}</td>
                                                                 <td className="px-3 py-2 text-gray-500">{mp.disponible}</td>

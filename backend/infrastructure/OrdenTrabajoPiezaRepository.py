@@ -67,6 +67,7 @@ class OrdenTrabajoPiezaRepository:
                     Pieza.cod_pieza,
                     Pieza.descripcion,
                     Pieza.unitario,
+                    Pieza.proveedor,
                 )
                 .join(Pieza, Pieza.id == OrdenTrabajoPieza.id_pieza)
                 .where(OrdenTrabajoPieza.id_orden_trabajo == id_orden_trabajo)
