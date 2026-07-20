@@ -5,7 +5,8 @@ import React, { useState, useEffect, useMemo } from "react"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs"
+import { ScrollableTabsBar } from "@/components/planning/ScrollableTabsBar"
 import { PlanningListTable } from "@/components/planning/PlanningListTable"
 import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList"
 import DetalleOperario from "@/app/recursos/_components/DetalleOperario"
@@ -1274,12 +1275,13 @@ export default function OperacionesPage() {
             )}
             {activeTab === "lista_planificacion" && (
               <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
-                {/* Header de sub-tabs: cambié `xl:flex-row` → `lg:flex-row` para que tabs y
-                    acciones queden lado a lado desde 1024px (antes solo desde 1280px, lo cual
-                    hacía que con el sidebar abierto las acciones se fueran a una segunda fila).
-                    Si el ancho aún no alcanza, los tabs scrollean horizontal (no wrappean). */}
+                {/* Header de sub-tabs: `lg:flex-row` para que tabs y acciones queden lado a lado
+                    desde 1024px. Prioridad de ancho: los tabs son navegación principal y NO
+                    ceden (`lg:shrink-0` dentro de ScrollableTabsBar); si no entra todo, lo que
+                    wrappea a una segunda fila son las acciones. Por debajo de 1024px los tabs sí
+                    scrollean horizontal, pero mostrando degradado + flecha. */}
                 <div className="border-b px-4 sm:px-6 pt-2 bg-gray-50/50 flex flex-col lg:flex-row lg:items-center justify-between gap-2 lg:gap-3">
-                  <TabsList className="bg-transparent p-0 h-auto flex flex-nowrap gap-1 sm:gap-2 lg:gap-3 justify-start w-full lg:w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <ScrollableTabsBar>
                     <TabsTrigger
                       value="general"
                       className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
@@ -1310,12 +1312,16 @@ export default function OperacionesPage() {
                     >
                       Carga
                     </TabsTrigger>
-                  </TabsList>
+                  </ScrollableTabsBar>
 
-                  {/* Acciones de la derecha: mantengo todo en línea (sm:flex-row) y reduzco el
-                      ancho del Select para que la barra entera quepa al lado de los tabs sin
-                      romper el layout cuando hay sidebar abierto. */}
-                  <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap lg:flex-nowrap w-full lg:w-auto">
+                  {/* Acciones de la derecha. Antes eran `lg:flex-nowrap`, o sea rígidas (~750px
+                      entre selector de semana, zoom, Re-planificar, borrar y el Select). Como los
+                      tabs son el único elemento con `overflow-x-auto` — y por spec eso les da
+                      min-width automático 0 — los tabs absorbían TODO el faltante de ancho y
+                      quedaban cortados en "Planificadas | Seman" con el sidebar abierto.
+                      Ahora las acciones wrappean a una segunda fila (`min-w-0` para poder ceder)
+                      y los tabs, que son la navegación principal, se ven siempre completos. */}
+                  <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap w-full lg:w-auto lg:min-w-0 lg:justify-end">
 
                     {/* Selector de semana (al lado del zoom): muestra la semana visualizada
                         y permite cambiarla. Comparte estado con las vistas Semanal/Diaria
