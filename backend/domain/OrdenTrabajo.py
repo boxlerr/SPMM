@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, UnicodeText
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.infrastructure.db import Base
@@ -8,8 +8,8 @@ class OrdenTrabajo(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     id_otvieja = Column(Integer)  # el número viejo, no clave
-    observaciones = Column(String(255), nullable=True)
-    detalle = Column(String(500), nullable=True) # 🔹 Nuevo campo detalle
+    observaciones = Column(UnicodeText, nullable=True)
+    detalle = Column(Text, nullable=True) # 🔹 Nuevo campo detalle
     reclamo = Column(Integer, default=0) # 0 = No, 1 = Si
 
     id_prioridad = Column(Integer, ForeignKey("prioridad.id"), nullable=False)

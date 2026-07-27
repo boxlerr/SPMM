@@ -25,10 +25,10 @@ class Operario(Base):
     sector = Column(String(100), nullable=True)  # texto simple por ahora
     categoria = Column(String(100), nullable=False)
     disponible = Column(Boolean, nullable=False, default=True)
-    telefono = Column(String(50), nullable=True)
-    celular = Column(String(50), nullable=True)
-    dni = Column(String(20), nullable=True)
-    email = Column(String(100), nullable=True)
+    telefono = Column(String(150), nullable=True)
+    celular = Column(String(150), nullable=True)
+    dni = Column(String(150), nullable=True)
+    email = Column(String(150), nullable=True)
     hora_inicio = Column(Time, nullable=False, default="07:00:00")
     hora_fin = Column(Time, nullable=False, default="16:00:00")
     # Días laborables del operario. Formato CSV con códigos en inglés:

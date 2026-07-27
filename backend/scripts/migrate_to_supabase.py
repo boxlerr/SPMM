@@ -28,7 +28,7 @@ import sys
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
-from sqlalchemy import Column, Integer, MetaData, Table, create_engine, func, select, text
+from sqlalchemy import Boolean, Column, Integer, Table, create_engine, func, select, text
 
 # Importar el paquete de modelos puebla Base.metadata con todas las tablas.
 import backend.domain  # noqa: F401
@@ -77,6 +77,27 @@ def _dst_engine():
     return create_engine(url, future=True)
 
 
+def _ajustar_tipos(filas, t):
+    """
+    SQL Server no tiene boolean: usa BIT, y pyodbc lo devuelve como bool de Python.
+    Varios modelos declaran esas columnas como Integer porque la app guarda 0/1
+    (ej. `revisada=1 if dto.revisada else 0`, `WHERE finalizadototal = 1`).
+    Postgres es estricto con los tipos y rechaza un bool en una columna integer,
+    así que ajustamos cada valor al tipo de la columna destino.
+    """
+    a_int = [c.name for c in t.columns if isinstance(c.type, Integer)]
+    a_bool = [c.name for c in t.columns if isinstance(c.type, Boolean)]
+    for f in filas:
+        for k in a_int:
+            if isinstance(f.get(k), bool):
+                f[k] = int(f[k])
+        for k in a_bool:
+            v = f.get(k)
+            if v is not None and not isinstance(v, bool):
+                f[k] = bool(v)
+    return filas
+
+
 def _tablas(filtro):
     """Tablas en orden seguro de FKs (padres antes que hijos)."""
     tablas = list(Base.metadata.sorted_tables)
@@ -108,7 +129,7 @@ def cmd_data(src, dst, filtro):
     total = 0
     with src.connect() as s:
         for t in tablas:
-            filas = [dict(r) for r in s.execute(select(t)).mappings()]
+            filas = _ajustar_tipos([dict(r) for r in s.execute(select(t)).mappings()], t)
             if not filas:
                 print(f"   {t.name:<28} 0")
                 continue
