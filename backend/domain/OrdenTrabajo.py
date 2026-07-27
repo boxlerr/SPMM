@@ -7,7 +7,7 @@ class OrdenTrabajo(Base):
     __tablename__ = "orden_trabajo"
 
     id = Column(Integer, primary_key=True, index=True)
-    id_otvieja = Column(Integer)  # el número viejo, no clave
+    id_otvieja = Column(Integer, index=True)  # el número viejo, no clave
     observaciones = Column(UnicodeText, nullable=True)
     detalle = Column(Text, nullable=True) # 🔹 Nuevo campo detalle
     reclamo = Column(Integer, default=0) # 0 = No, 1 = Si
@@ -43,6 +43,15 @@ class OrdenTrabajo(Base):
     tiene_plano = Column(Integer, nullable=True, default=0)
     programada = Column(Integer, nullable=True, default=0)
     en_proceso = Column(Integer, nullable=True, default=0)
+
+    # Columnas que existían en la base pero faltaban en el modelo (por eso no se
+    # migraban). `ttt1` y `fc` las escribe el sync y son parte de la regla de
+    # "OT pendiente" del sistema legacy; `obspaniol` son las observaciones de pañol.
+    requerido = Column(String(50), nullable=True)
+    aprobado = Column(String(50), nullable=True)
+    obspaniol = Column(String(500), nullable=True)
+    ttt1 = Column(Integer, nullable=False, default=0)
+    fc = Column(Integer, nullable=False, default=0)
 
     # 🔻 Eliminado: id_maquinaria (se quitó la FK a maquinaria)
 
