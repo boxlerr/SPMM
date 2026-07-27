@@ -27,15 +27,10 @@ class PlanificacionRepository:
         self.db = db  # AsyncSession
 
     async def _ensure_columns(self):
-        """Self-healing: agrega columnas nuevas si no existen (idempotente en MSSQL)."""
+        """Self-healing: agrega columnas nuevas si no existen (idempotente)."""
         ensure_sql = text("""
-            IF NOT EXISTS (
-                SELECT 1 FROM sys.columns
-                WHERE Name = 'forzado_fuera_rango' AND Object_ID = Object_ID('planificacion')
-            )
-            BEGIN
-                ALTER TABLE planificacion ADD forzado_fuera_rango BIT NOT NULL DEFAULT 0;
-            END
+            ALTER TABLE planificacion
+            ADD COLUMN IF NOT EXISTS forzado_fuera_rango BOOLEAN NOT NULL DEFAULT FALSE
         """)
         try:
             await self.db.execute(ensure_sql)

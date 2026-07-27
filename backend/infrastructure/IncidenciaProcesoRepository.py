@@ -24,14 +24,14 @@ class IncidenciaProcesoRepository:
         """Lista las incidencias (con nombres de orden/proceso/operario) más recientes."""
         try:
             query = text(f"""
-                SELECT TOP {int(limit)}
+                SELECT
                     i.id,
                     i.id_orden_trabajo,
                     ot.id_otvieja            AS nro_ot,
                     i.id_proceso,
                     p.nombre                 AS proceso,
                     i.id_operario,
-                    LTRIM(RTRIM(ISNULL(o.nombre,'') + ' ' + ISNULL(o.apellido,''))) AS operario,
+                    btrim(COALESCE(o.nombre,'') || ' ' || COALESCE(o.apellido,'')) AS operario,
                     i.minutos_perdidos,
                     i.operarios_extra,
                     i.descripcion,
@@ -41,9 +41,10 @@ class IncidenciaProcesoRepository:
                 LEFT JOIN proceso p        ON p.id = i.id_proceso
                 LEFT JOIN operario o       ON o.id = i.id_operario
                 WHERE i.tipo = :tipo
-                  AND (:desde IS NULL OR i.fecha_registro >= :desde)
-                  AND (:hasta IS NULL OR i.fecha_registro <  DATEADD(DAY, 1, :hasta))
+                  AND (CAST(:desde AS date) IS NULL OR i.fecha_registro >= CAST(:desde AS date))
+                  AND (CAST(:hasta AS date) IS NULL OR i.fecha_registro < CAST(:hasta AS date) + INTERVAL '1 day')
                 ORDER BY i.fecha_registro DESC
+                LIMIT {int(limit)}
             """)
             result = await self.db.execute(query, {"tipo": tipo, "desde": desde, "hasta": hasta})
             return [dict(r) for r in result.mappings().all()]
@@ -56,23 +57,23 @@ class IncidenciaProcesoRepository:
         try:
             params = {"tipo": tipo, "desde": desde, "hasta": hasta}
             rango = (
-                " AND (:desde IS NULL OR i.fecha_registro >= :desde) "
-                " AND (:hasta IS NULL OR i.fecha_registro <  DATEADD(DAY, 1, :hasta)) "
+                " AND (CAST(:desde AS date) IS NULL OR i.fecha_registro >= CAST(:desde AS date)) "
+                " AND (CAST(:hasta AS date) IS NULL OR i.fecha_registro < CAST(:hasta AS date) + INTERVAL '1 day') "
             )
 
             totales_row = (await self.db.execute(text(f"""
                 SELECT COUNT(*) AS total_incidencias,
-                       ISNULL(SUM(i.minutos_perdidos), 0) AS total_minutos,
-                       ISNULL(SUM(i.operarios_extra), 0)  AS total_operarios_extra
+                       COALESCE(SUM(i.minutos_perdidos), 0) AS total_minutos,
+                       COALESCE(SUM(i.operarios_extra), 0)  AS total_operarios_extra
                 FROM incidencia_proceso i
                 WHERE i.tipo = :tipo {rango}
             """), params)).mappings().first() or {}
 
             por_operario = (await self.db.execute(text(f"""
                 SELECT i.id_operario,
-                       LTRIM(RTRIM(ISNULL(o.nombre,'') + ' ' + ISNULL(o.apellido,''))) AS operario,
+                       btrim(COALESCE(o.nombre,'') || ' ' || COALESCE(o.apellido,'')) AS operario,
                        COUNT(*) AS incidencias,
-                       ISNULL(SUM(i.minutos_perdidos), 0) AS minutos
+                       COALESCE(SUM(i.minutos_perdidos), 0) AS minutos
                 FROM incidencia_proceso i
                 LEFT JOIN operario o ON o.id = i.id_operario
                 WHERE i.tipo = :tipo {rango}
@@ -81,12 +82,12 @@ class IncidenciaProcesoRepository:
             """), params)).mappings().all()
 
             por_mes = (await self.db.execute(text(f"""
-                SELECT FORMAT(i.fecha_registro, 'yyyy-MM') AS mes,
+                SELECT to_char(i.fecha_registro, 'YYYY-MM') AS mes,
                        COUNT(*) AS incidencias,
-                       ISNULL(SUM(i.minutos_perdidos), 0) AS minutos
+                       COALESCE(SUM(i.minutos_perdidos), 0) AS minutos
                 FROM incidencia_proceso i
                 WHERE i.tipo = :tipo {rango}
-                GROUP BY FORMAT(i.fecha_registro, 'yyyy-MM')
+                GROUP BY to_char(i.fecha_registro, 'YYYY-MM')
                 ORDER BY mes
             """), params)).mappings().all()
 
