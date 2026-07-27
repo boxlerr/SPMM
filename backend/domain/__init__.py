@@ -19,4 +19,5 @@ from backend.domain.Prioridad import Prioridad
 from backend.domain.Sector import Sector
 from backend.domain.Usuario import Usuario
 from backend.domain.Notificacion import Notificacion
+from backend.domain.RangoMaquinaria import RangoMaquinaria
 

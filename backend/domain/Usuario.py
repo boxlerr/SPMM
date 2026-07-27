@@ -12,8 +12,10 @@ class Usuario(Base):
     """Entidad Usuario del dominio (SQLAlchemy ORM)"""
     
     __tablename__ = "usuario"
-    __table_args__ = {'schema': 'dbo'}
-    
+    # Sin schema explícito: 'dbo' es el default en SQL Server (igual que el resto de
+    # los modelos) y en Postgres/Supabase el schema es 'public'. Hardcodear 'dbo'
+    # rompía la creación del esquema en Postgres.
+
     # Campos
     id_usuario = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(50), nullable=False, unique=True, index=True)
@@ -28,8 +30,8 @@ class Usuario(Base):
     fecha_creacion = Column(DateTime, nullable=False, default=datetime.utcnow)
     fecha_actualizacion = Column(DateTime, nullable=True, onupdate=datetime.utcnow)
     ultimo_login = Column(DateTime, nullable=True)
-    creado_por = Column(Integer, ForeignKey('dbo.usuario.id_usuario'), nullable=True)
-    actualizado_por = Column(Integer, ForeignKey('dbo.usuario.id_usuario'), nullable=True)
+    creado_por = Column(Integer, ForeignKey('usuario.id_usuario'), nullable=True)
+    actualizado_por = Column(Integer, ForeignKey('usuario.id_usuario'), nullable=True)
     
     def to_dict(self) -> dict:
         """Convierte el usuario a diccionario (sin password_hash)"""

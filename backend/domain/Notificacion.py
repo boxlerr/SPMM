@@ -11,8 +11,9 @@ class Notificacion(Base):
     """Entidad Notificacion del dominio (SQLAlchemy ORM)"""
     
     __tablename__ = "notificacion"
-    __table_args__ = {'schema': 'dbo'}
-    
+    # Sin schema explícito (ver Usuario): 'dbo' es el default en SQL Server y no
+    # existe en Postgres/Supabase.
+
     # Campos
     id_notificacion = Column(Integer, primary_key=True, autoincrement=True, index=True)
     mensaje = Column(String(500), nullable=False)
