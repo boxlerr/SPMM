@@ -44,18 +44,18 @@ async def get_estadisticas(db=Depends(get_db)):
                         WHEN t.fin = 0 AND t.iniciado = 0
                          AND t.fecha_prometida IS NOT NULL
                          AND t.fecha_prometida > '1950-01-01'
-                         AND t.fecha_prometida < CAST(GETDATE() AS DATE)
+                         AND t.fecha_prometida < CURRENT_DATE
                         THEN 1 ELSE 0 END) AS retrasadas,
                 SUM(CASE
                         WHEN t.fin = 0 AND t.iniciado = 0
                          AND (t.fecha_prometida IS NULL
                               OR t.fecha_prometida <= '1950-01-01'
-                              OR t.fecha_prometida >= CAST(GETDATE() AS DATE))
+                              OR t.fecha_prometida >= CURRENT_DATE)
                         THEN 1 ELSE 0 END) AS pendientes,
-                SUM(CASE WHEN t.fecha_orden >= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END) AS creadas_hoy
+                SUM(CASE WHEN t.fecha_orden >= CURRENT_DATE THEN 1 ELSE 0 END) AS creadas_hoy
             FROM (
                 SELECT
-                    ISNULL(ot.finalizadototal, 0) AS fin,
+                    COALESCE(ot.finalizadototal, 0) AS fin,
                     CASE WHEN EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
                                       WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
                          THEN 1 ELSE 0 END AS iniciado,
@@ -101,7 +101,7 @@ async def get_ordenes_criticas(db=Depends(get_db)):
     try:
         # Query raw para asegurar compatibilidad
         query = text("""
-            SELECT TOP 10 
+            SELECT
                 ot.id, 
                 a.descripcion as articulo, 
                 ot.fecha_prometida, 
@@ -110,10 +110,11 @@ async def get_ordenes_criticas(db=Depends(get_db)):
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN prioridad p ON ot.id_prioridad = p.id
             WHERE (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
-            AND ot.fecha_prometida <= DATEADD(day, 7, GETDATE())
-            AND ot.fecha_prometida >= GETDATE()
+            AND ot.fecha_prometida <= now() + INTERVAL '7 days'
+            AND ot.fecha_prometida >= now()
             AND ot.fecha_prometida > '1950-01-01'
             ORDER BY ot.fecha_prometida ASC
+            LIMIT 10
         """)
         
         result = await db.execute(query)
@@ -149,8 +150,8 @@ async def get_timeline_entregas(db=Depends(get_db)):
             SELECT CAST(fecha_prometida AS DATE) as fecha, COUNT(*) as ordenes
             FROM orden_trabajo ot
             WHERE (fecha_entrega IS NULL OR fecha_entrega = '1950-01-01')
-            AND fecha_prometida >= GETDATE()
-            AND fecha_prometida <= DATEADD(day, 7, GETDATE())
+            AND fecha_prometida >= now()
+            AND fecha_prometida <= now() + INTERVAL '7 days'
             AND fecha_prometida > '1950-01-01'
             GROUP BY CAST(fecha_prometida AS DATE)
             ORDER BY fecha ASC
@@ -176,11 +177,12 @@ async def get_clientes_mayor_volumen(db=Depends(get_db)):
     """Obtiene los clientes con mayor volumen de órdenes activas"""
     try:
         query = text("""
-            SELECT TOP 5 c.nombre as cliente, COUNT(ot.id) as cantidad
+            SELECT c.nombre as cliente, COUNT(ot.id) as cantidad
             FROM orden_trabajo ot
             JOIN cliente c ON ot.id_cliente = c.id
             GROUP BY c.nombre
             ORDER BY cantidad DESC
+            LIMIT 5
         """)
         
         result = await db.execute(query)
@@ -241,12 +243,13 @@ async def get_top_articulos(db=Depends(get_db)):
     try:
         # Contamos órdenes por artículo ya que no tenemos cantidad
         query = text("""
-            SELECT TOP 5 a.descripcion as articulo, SUM(ot.unidades) as cantidad
+            SELECT a.descripcion as articulo, SUM(ot.unidades) as cantidad
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
-            WHERE ISNULL(ot.finalizadototal, 0) = 1
+            WHERE COALESCE(ot.finalizadototal, 0) = 1
             GROUP BY a.descripcion
             ORDER BY cantidad DESC
+            LIMIT 5
         """)
         
         result = await db.execute(query)
@@ -272,10 +275,10 @@ async def get_tiempo_promedio(db=Depends(get_db)):
         query = text("""
             SELECT AVG(tiempo_total) as promedio_horas
             FROM (
-                SELECT ot.id, SUM(ISNULL(otp.tiempo_proceso, 0)) as tiempo_total
+                SELECT ot.id, SUM(COALESCE(otp.tiempo_proceso, 0)) as tiempo_total
                 FROM orden_trabajo ot
                 LEFT JOIN orden_trabajo_proceso otp ON ot.id = otp.id_orden_trabajo
-                WHERE ISNULL(ot.finalizadototal, 0) = 1
+                WHERE COALESCE(ot.finalizadototal, 0) = 1
                 GROUP BY ot.id
             ) AS tiempos_por_orden
             WHERE tiempo_total > 0
@@ -394,10 +397,10 @@ async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
                 p.descripcion as prioridad,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id) as total_procesos,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 3) as procesos_completados,
-                (SELECT TOP 1 pr.nombre 
+                (SELECT pr.nombre 
                  FROM orden_trabajo_proceso otp 
                  JOIN proceso pr ON otp.id_proceso = pr.id 
-                 WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 2) as proceso_actual
+                 WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 2 LIMIT 1) as proceso_actual
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
@@ -493,10 +496,10 @@ async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
                 p.descripcion as prioridad,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id) as total_procesos,
                 (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 3) as procesos_completados,
-                (SELECT TOP 1 pr.nombre 
+                (SELECT pr.nombre 
                  FROM orden_trabajo_proceso otp 
                  JOIN proceso pr ON otp.id_proceso = pr.id 
-                 WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 2) as proceso_actual
+                 WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 2 LIMIT 1) as proceso_actual
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             JOIN sector s ON ot.id_sector = s.id
@@ -563,15 +566,15 @@ async def get_rendimiento_procesos(db=Depends(get_db)):
                 p.id     AS proceso_id,
                 p.nombre AS proceso,
                 COUNT(*) AS cantidad,
-                SUM(ISNULL(otp.tiempo_proceso, 0))                  AS estimado_min,
-                SUM(DATEDIFF(MINUTE, otp.inicio_real, otp.fin_real)) AS real_min
+                SUM(COALESCE(otp.tiempo_proceso, 0))                  AS estimado_min,
+                SUM(FLOOR(EXTRACT(EPOCH FROM (otp.fin_real - otp.inicio_real)) / 60)) AS real_min
             FROM orden_trabajo_proceso otp
             JOIN proceso p ON p.id = otp.id_proceso
             WHERE otp.inicio_real IS NOT NULL AND otp.fin_real IS NOT NULL
               AND otp.inicio_real > '1950-01-01' AND otp.fin_real > '1950-01-01'
               AND otp.fin_real >= otp.inicio_real
             GROUP BY p.id, p.nombre
-            ORDER BY SUM(DATEDIFF(MINUTE, otp.inicio_real, otp.fin_real)) DESC
+            ORDER BY real_min DESC
         """)
         result = await db.execute(query)
         rows = result.mappings().all()
@@ -604,8 +607,8 @@ async def get_rendimiento_operarios(db=Depends(get_db)):
                 o.id                              AS operario_id,
                 CONCAT(o.nombre, ' ', o.apellido) AS operario,
                 COUNT(*) AS cantidad,
-                SUM(ISNULL(otp.tiempo_proceso, 0))                  AS estimado_min,
-                SUM(DATEDIFF(MINUTE, otp.inicio_real, otp.fin_real)) AS real_min
+                SUM(COALESCE(otp.tiempo_proceso, 0))                  AS estimado_min,
+                SUM(FLOOR(EXTRACT(EPOCH FROM (otp.fin_real - otp.inicio_real)) / 60)) AS real_min
             FROM orden_trabajo_proceso otp
             JOIN planificacion pl ON pl.orden_id = otp.id_orden_trabajo AND pl.proceso_id = otp.id_proceso
             JOIN operario o ON o.id = pl.id_operario

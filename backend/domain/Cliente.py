@@ -14,6 +14,9 @@ class Cliente(Base):
     __tablename__ = "cliente"
 
     id = Column(Integer, primary_key=True, index=True)
+    # id del cliente en el sistema legacy (metalurgica_db). Es la clave con la que
+    # el sync machea; existía en la base pero faltaba en el modelo.
+    id_viejo = Column(Integer, nullable=True, index=True)
     nombre = Column(String(150), nullable=False)
     direccion = Column(String(255), nullable=True)
     cuit = Column(String(20), nullable=True)
