@@ -1,4 +1,4 @@
-from fastapi import FastAPI,HTTPException, Depends
+from fastapi import FastAPI,HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -28,7 +28,9 @@ from backend.application.event_bus import EventBus
 from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
-from backend.scripts.sync_db import main as sync_main
+from backend.scripts.sync_db import main as sync_main, run_sync as run_sync_once
+import os
+from datetime import datetime
 
 
 import logging
@@ -138,13 +140,46 @@ def health_check(response: Response):
         "service": "SPMM Backend"
     }
 
+@app.post("/internal/sync")
+async def internal_sync(request: Request):
+    """
+    Corre UNA pasada del sync y devuelve el resultado.
+
+    Existe para hosts serverless (Cloud Run), donde el contenedor se apaga si no
+    hay tráfico y el loop de fondo no sobrevive: ahí el sync lo dispara un cron
+    externo (Cloud Scheduler) pegándole a este endpoint.
+
+    Protegido con SYNC_TOKEN. Si la variable no está seteada, el endpoint queda
+    deshabilitado (para que nadie pueda dispararlo en un entorno mal configurado).
+    """
+    esperado = os.getenv("SYNC_TOKEN")
+    if not esperado:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if request.headers.get("x-sync-token") != esperado:
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+    inicio = datetime.now()
+    await run_sync_once()
+    return {
+        "status": "ok",
+        "duracion_seg": round((datetime.now() - inicio).total_seconds(), 1),
+        "timestamp": inicio.isoformat(),
+    }
+
+
 @app.on_event("startup")
 async def startup_event():
     print("RUTAS REGISTRADAS:")
     for route in app.routes:
         print(f"  - {route.path} ({getattr(route, 'methods', 'WS')})")
-    
-    # 🔹 Iniciar la sincronización de base de datos en segundo plano
-    logger.info("Iniciando tarea de sincronización de BD en segundo plano...")
-    asyncio.create_task(sync_main())
+
+    # 🔹 Sincronización de BD en segundo plano.
+    #    En hosts con proceso persistente (Render, Fly, VM) corre como loop.
+    #    En serverless (Cloud Run) se apaga con SYNC_LOOP_ENABLED=false y el sync
+    #    lo dispara Cloud Scheduler contra POST /internal/sync.
+    if (os.getenv("SYNC_LOOP_ENABLED", "true").lower() != "false"):
+        logger.info("Iniciando tarea de sincronización de BD en segundo plano...")
+        asyncio.create_task(sync_main())
+    else:
+        logger.info("Loop de sync DESACTIVADO (SYNC_LOOP_ENABLED=false) — se espera un cron externo a POST /internal/sync.")
 
