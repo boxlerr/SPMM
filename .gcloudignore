@@ -1,0 +1,22 @@
+# Qué NO se sube a Cloud Build. Sin esto el contexto incluiría el venv de Python
+# y node_modules del frontend (cientos de MB) y el build tardaría muchísimo.
+.git/
+.gitignore
+
+# Entornos y dependencias
+**/venv/
+**/.venv/
+**/node_modules/
+**/__pycache__/
+*.pyc
+
+# El frontend va a Vercel, la imagen del backend no lo necesita
+frontend/
+
+# Secretos: las credenciales van como variables de entorno de Cloud Run
+.env
+.env.*
+.mcp.json
+
+# Herramientas locales
+.claude/
