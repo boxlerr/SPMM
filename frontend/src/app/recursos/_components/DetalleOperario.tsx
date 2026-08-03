@@ -377,11 +377,11 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   return (
     <Dialog open={!!operario} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] w-full h-[90vh] flex flex-col p-0 gap-0 overflow-hidden sm:max-w-[95vw]">
-        <DialogHeader className="px-6 py-4 border-b bg-gray-50/50 flex-shrink-0">
+        <DialogHeader className="px-5 py-2.5 border-b bg-gray-50/50 flex-shrink-0">
           <div className="flex items-start justify-between">
             <div>
-              <DialogTitle className="text-xl">{isEditing ? "Editar Operario" : "Perfil del Operario"}</DialogTitle>
-              <DialogDescription>{isEditing ? "Modifica los datos del operario" : "Detalle de actividad y asignaciones"}</DialogDescription>
+              <DialogTitle className="text-base">{isEditing ? "Editar Operario" : "Perfil del Operario"}</DialogTitle>
+              <DialogDescription className="text-xs">{isEditing ? "Modifica los datos del operario" : "Detalle de actividad y asignaciones"}</DialogDescription>
             </div>
             {/* Button moved to sidebar */}
           </div>
@@ -403,26 +403,25 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
           ) : (
             <>
               {/* Sidebar Left: Profile Info */}
-              <div className="w-full md:w-96 lg:w-[420px] md:border-r border-b md:border-b-0 bg-gray-50/30 p-4 md:p-6 flex flex-col gap-4 md:gap-6 overflow-y-auto shrink-0 z-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05)] md:shadow-none">
+              <div className="w-full md:w-80 lg:w-[360px] md:border-r border-b md:border-b-0 bg-gray-50/30 p-3 md:p-4 flex flex-col gap-3 overflow-y-auto shrink-0 z-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05)] md:shadow-none">
                 <div className="text-center">
-                  <div className="h-24 w-24 mx-auto rounded-full bg-slate-200 flex items-center justify-center mb-4 shadow-inner">
-                    <User className="h-12 w-12 text-slate-500" />
+                  <div className="h-12 w-12 mx-auto rounded-full bg-slate-200 flex items-center justify-center mb-1.5 shadow-inner">
+                    <User className="h-6 w-6 text-slate-500" />
                   </div>
-                  <h3 className="text-xl font-bold text-gray-900 break-words">
+                  <h3 className="text-base font-bold text-gray-900 break-words leading-tight">
                     {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
                   </h3>
-                  <p className="text-sm text-gray-500 mt-1 uppercase tracking-wide font-medium">{operario.categoria}</p>
-                  <Badge variant="outline" className="mt-2 text-xs bg-white text-gray-600 border-gray-300">
-                    ID: {operario.id}
-                  </Badge>
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wide font-medium">
+                    {operario.categoria} · ID {operario.id}
+                  </p>
 
-                  <div className="mt-4 flex flex-col gap-3 items-center">
+                  <div className="mt-2 flex gap-2 items-center justify-center">
                     <Select
                       disabled={isUpdating}
                       value={operario.disponible ? "Activo" : "Ausente"}
                       onValueChange={handleOperatorStatusChange}
                     >
-                      <SelectTrigger className={`w-[140px] border-none shadow-sm font-medium h-8 ${getEstadoColor(operario.disponible)}`}>
+                      <SelectTrigger className={`w-[118px] border-none shadow-sm font-medium h-7 text-xs ${getEstadoColor(operario.disponible)}`}>
                         <div className="flex items-center gap-2">
                           <Activity className="h-3 w-3" />
                           <SelectValue />
@@ -438,33 +437,33 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       variant={isEditing ? "destructive" : "outline"}
                       size="sm"
                       onClick={() => setIsEditing(!isEditing)}
-                      className="w-[140px] h-8 text-xs"
+                      className="w-[118px] h-7 text-xs"
                     >
-                      <Pencil className="h-3 w-3 mr-2" />
-                      {isEditing ? "Cancelar" : "Editar Datos"}
+                      <Pencil className="h-3 w-3 mr-1.5" />
+                      {isEditing ? "Cancelar" : "Editar"}
                     </Button>
                   </div>
                 </div>
 
                 <Separator />
 
-                <div className="space-y-4 text-sm">
-                  <div className="flex items-center gap-3 text-gray-700">
-                    <Activity className="h-4 w-4 text-gray-400" />
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <Activity className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                     <span className="font-medium">Sector:</span>
                     <span className="ml-auto text-gray-900">
                       {operario.sector || <span className="text-muted-foreground italic">Sin sector</span>}
                     </span>
                   </div>
                   {operario.dni && (
-                    <div className="flex items-center gap-3 text-gray-700">
-                      <FileText className="h-4 w-4 text-gray-400" />
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <FileText className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                       <span className="font-medium">DNI:</span>
                       <span className="ml-auto text-gray-900">{(operario.dni || "").replace(/\./g, "")}</span>
                     </div>
                   )}
-                  <div className="flex items-center gap-3 text-gray-700">
-                    <Phone className="h-4 w-4 text-gray-400" />
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <Phone className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                     <span className="font-medium">Contacto:</span>
                     <span className="ml-auto text-gray-900">
                       {(operario.celular || operario.telefono) ?
@@ -474,33 +473,33 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     </span>
                   </div>
                   {operario.fecha_nacimiento && (
-                    <div className="flex items-center gap-3 text-gray-700">
-                      <Calendar className="h-4 w-4 text-gray-400" />
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <Calendar className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                       <span className="font-medium">Nacimiento:</span>
                       <span className="ml-auto text-gray-900">{formatDate(operario.fecha_nacimiento)}</span>
                     </div>
                   )}
                   {operario.fecha_ingreso && (
-                    <div className="flex items-center gap-3 text-gray-700">
-                      <Calendar className="h-4 w-4 text-gray-400" />
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <Calendar className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                       <span className="font-medium">Ingreso:</span>
                       <span className="ml-auto text-gray-900">{formatDate(operario.fecha_ingreso)}</span>
                     </div>
                   )}
                   {operario.email && (
-                    <div className="flex items-center gap-3 text-gray-700">
-                      <Activity className="h-4 w-4 text-gray-400" />
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <Activity className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                       <span className="font-medium">Email:</span>
                       <span className="ml-auto text-gray-900">{operario.email}</span>
                     </div>
                   )}
-                  <div className="flex items-start gap-3 text-gray-700">
-                    <Briefcase className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
+                  <div className="flex items-start gap-2 text-gray-700">
+                    <Briefcase className="h-3.5 w-3.5 text-gray-400 shrink-0 mt-0.5 shrink-0" />
                     <span className="font-medium shrink-0">Rango:</span>
                     <span className="ml-auto text-right text-gray-900 font-semibold break-words min-w-0">{operario.categoria}</span>
                   </div>
-                  <div className="flex items-center gap-3 text-gray-700">
-                    <Clock className="h-4 w-4 text-gray-400" />
+                  <div className="flex items-center gap-2 text-gray-700">
+                    <Clock className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                     <span className="font-medium">Horario:</span>
                     <span className="ml-auto text-gray-900">
                       {operario.hora_inicio || "07:00"} - {operario.hora_fin || "16:00"}
@@ -510,8 +509,8 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
 
                 <Separator />
 
-                <div className="space-y-4 text-sm mt-2">
-                  <div className="flex items-center gap-2 mb-2 px-1">
+                <div className="space-y-2 text-xs mt-1">
+                  <div className="flex items-center gap-2 mb-1 px-1">
                     <Wrench className="h-4 w-4 text-purple-500" />
                     <h4 className="font-semibold text-gray-800">Habilidades</h4>
                   </div>
@@ -529,23 +528,23 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     </div>
                   ) : (
                     <Accordion type="multiple" className="w-full" defaultValue={["native", "primary", "secondary"]}>
-                      <AccordionItem value="native" className="border-b-0 mb-3 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
+                      <AccordionItem value="native" className="border-b-0 mb-1.5 bg-white rounded-lg border shadow-sm px-2.5 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-                        <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
+                        <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
                           <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
                             <span className="truncate pr-2">SKILLS NATIVAS</span>
                             <span className="text-[10px] font-normal uppercase tracking-wide text-emerald-600 shrink-0 pr-1">Del rango</span>
                           </div>
                         </AccordionTrigger>
-                        <AccordionContent className="pt-0 pb-3 ml-1">
-                          <div className="flex flex-col gap-2.5">
+                        <AccordionContent className="pt-0 pb-2 ml-1">
+                          <div className="flex flex-col gap-1">
                             {(operario.skills || []).filter(s => s.nivel === 0).map(skill => (
-                              <div key={skill.id_proceso} className="flex justify-between items-center py-1.5 gap-2">
-                                <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
-                                  <span className={`font-medium text-sm truncate flex-1 ${skill.habilitado ? 'text-gray-900' : 'text-gray-400 line-through'}`} title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
+                              <div key={skill.id_proceso} className="flex justify-between items-center py-0.5 gap-2">
+                                <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
+                                  <span className={`font-medium text-xs truncate flex-1 ${skill.habilitado ? 'text-gray-900' : 'text-gray-400 line-through'}`} title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
                                     {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
                                   </span>
-                                  <span className="text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full shrink-0">Nativa</span>
+                                  <span className="text-[9px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0 rounded-full shrink-0">Nativa</span>
                                 </div>
                                 <button
                                   disabled={updatingSkills.has(skill.id_proceso)}
@@ -559,13 +558,13 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             ))}
                           </div>
                           {(!operario.skills || !operario.skills.some(s => s.nivel === 0)) && (
-                            <p className="text-sm text-gray-500 italic py-2 text-center">No hay SKILLS NATIVAS</p>
+                            <p className="text-xs text-gray-500 italic py-1 text-center">No hay SKILLS NATIVAS</p>
                           )}
                         </AccordionContent>
                       </AccordionItem>
-                      <AccordionItem value="primary" className="border-b-0 mb-3 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
+                      <AccordionItem value="primary" className="border-b-0 mb-1.5 bg-white rounded-lg border shadow-sm px-2.5 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                        <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
+                        <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
                           <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
                             <span className="truncate pr-2">SKILLS 1</span>
                             <div
@@ -577,7 +576,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             </div>
                           </div>
                         </AccordionTrigger>
-                        <AccordionContent className="pt-0 pb-3 ml-1">
+                        <AccordionContent className="pt-0 pb-2 ml-1">
                           {addingPrimarySkill && (
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3 bg-blue-50/50 p-2.5 rounded-md border border-blue-100">
                               <div className="flex-1 min-w-0">
@@ -598,15 +597,15 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                               </div>
                             </div>
                           )}
-                          <div className="flex flex-col gap-2.5">
+                          <div className="flex flex-col gap-1">
                             {(operario.skills || []).filter(s => s.nivel === 1).map(skill => (
-                              <div key={skill.id_proceso} className="flex justify-between items-center py-1.5 gap-2">
-                                <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
-                                  <span className="font-medium text-gray-900 text-sm truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
+                              <div key={skill.id_proceso} className="flex justify-between items-center py-0.5 gap-2">
+                                <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
+                                  <span className="font-medium text-gray-900 text-xs truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
                                     {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
                                   </span>
                                   <button
-                                    className="text-red-400 hover:text-red-600 transition-colors bg-red-50 hover:bg-red-100 p-1.5 rounded-full shrink-0"
+                                    className="text-red-400 hover:text-red-600 transition-colors bg-red-50 hover:bg-red-100 p-1 rounded-full shrink-0"
                                     onClick={() => handleDeleteSkill(skill.id_proceso)}
                                     title="Eliminar habilidad"
                                   >
@@ -625,14 +624,14 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             ))}
                           </div>
                           {(!operario.skills || !operario.skills.some(s => s.nivel === 1)) && !addingPrimarySkill && (
-                             <p className="text-sm text-gray-500 italic py-2 text-center">No hay SKILLS 1</p>
+                             <p className="text-xs text-gray-500 italic py-1 text-center">No hay SKILLS 1</p>
                           )}
                         </AccordionContent>
                       </AccordionItem>
 
                       <AccordionItem value="secondary" className="border-b-0 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
-                        <AccordionTrigger className="py-3 hover:no-underline text-sm font-semibold text-gray-800 ml-1">
+                        <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
                           <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
                             <span className="truncate pr-2">SKILLS 2</span>
                             <div
@@ -644,7 +643,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             </div>
                           </div>
                         </AccordionTrigger>
-                        <AccordionContent className="pt-0 pb-3 ml-1">
+                        <AccordionContent className="pt-0 pb-2 ml-1">
                           {addingSecondarySkill && (
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3 bg-slate-50 p-2.5 rounded-md border border-slate-200">
                               <div className="flex-1 min-w-0">
@@ -668,12 +667,12 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                           <div className="flex flex-col gap-3">
                             {(operario.skills || []).filter(s => s.nivel === 2).map((skill, idx) => (
                               <div key={skill.id_proceso} className={`flex justify-between items-center py-1.5 gap-2 ${idx !== 0 ? 'border-t border-gray-100 pt-3' : ''}`}>
-                                <div className="flex items-center gap-2 flex-1 min-w-0 pr-1">
-                                  <span className="font-medium text-gray-900 text-sm truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
+                                <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
+                                  <span className="font-medium text-gray-900 text-xs truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
                                     {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
                                   </span>
                                   <button
-                                    className="text-red-400 hover:text-red-600 transition-colors bg-red-50 hover:bg-red-100 p-1.5 rounded-full shrink-0"
+                                    className="text-red-400 hover:text-red-600 transition-colors bg-red-50 hover:bg-red-100 p-1 rounded-full shrink-0"
                                     onClick={() => handleDeleteSkill(skill.id_proceso)}
                                     title="Eliminar habilidad"
                                   >
@@ -692,7 +691,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             ))}
                           </div>
                           {(!operario.skills || !operario.skills.some(s => s.nivel === 2)) && !addingSecondarySkill && (
-                            <p className="text-sm text-gray-500 italic py-2 text-center">No hay SKILLS 2</p>
+                            <p className="text-xs text-gray-500 italic py-1 text-center">No hay SKILLS 2</p>
                           )}
                         </AccordionContent>
                       </AccordionItem>
@@ -704,31 +703,25 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
               {/* Main Content Right: Stats & Tasks */}
               <div className="flex-1 flex flex-col bg-white overflow-hidden">
                 {/* Stats Overview */}
-                <div className="grid grid-cols-3 gap-3 p-4 border-b bg-white shrink-0">
+                <div className="grid grid-cols-3 gap-2 px-3 py-2 border-b bg-white shrink-0">
                   <Card className="shadow-sm border-slate-100 bg-slate-50">
-                    <CardContent className="p-3 flex flex-col items-center justify-center text-center">
-                      <div className="bg-white p-1.5 rounded-full shadow-sm mb-1">
-                        <Clock className="h-4 w-4 text-blue-600" />
-                      </div>
-                      <span className="text-xl font-bold text-slate-800">{totalHours.toFixed(1)}h</span>
+                    <CardContent className="px-2.5 py-1.5 flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-blue-600 shrink-0" />
+                      <span className="text-base font-bold text-slate-800 leading-none">{totalHours.toFixed(1)}h</span>
                       <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Horas</span>
                     </CardContent>
                   </Card>
                   <Card className="shadow-sm border-slate-100 bg-slate-50">
-                    <CardContent className="p-3 flex flex-col items-center justify-center text-center">
-                      <div className="bg-white p-1.5 rounded-full shadow-sm mb-1">
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      </div>
-                      <span className="text-xl font-bold text-slate-800">{totalTasks}</span>
+                    <CardContent className="px-2.5 py-1.5 flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                      <span className="text-base font-bold text-slate-800 leading-none">{totalTasks}</span>
                       <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Tareas</span>
                     </CardContent>
                   </Card>
                   <Card className="shadow-sm border-slate-100 bg-slate-50">
-                    <CardContent className="p-3 flex flex-col items-center justify-center text-center">
-                      <div className="bg-white p-1.5 rounded-full shadow-sm mb-1">
-                        <Activity className="h-4 w-4 text-orange-600" />
-                      </div>
-                      <span className="text-xl font-bold text-slate-800">{inProgressTasks}</span>
+                    <CardContent className="px-2.5 py-1.5 flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-orange-600 shrink-0" />
+                      <span className="text-base font-bold text-slate-800 leading-none">{inProgressTasks}</span>
                       <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">En Proceso</span>
                     </CardContent>
                   </Card>
@@ -736,24 +729,24 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
 
                 {/* Tasks List (Grouped by OT) */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  <div className="px-6 py-3 border-b flex items-center justify-between bg-white sticky top-0 z-10">
-                    <h4 className="font-semibold text-gray-800 flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-gray-500" />
+                  <div className="px-4 py-2 border-b flex items-center justify-between bg-white sticky top-0 z-10">
+                    <h4 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+                      <Calendar className="h-3.5 w-3.5 text-gray-500" />
                       Órdenes Asignadas
                     </h4>
-                    <Badge variant="secondary" className="text-xs bg-gray-100">
+                    <Badge variant="secondary" className="text-[11px] bg-gray-100">
                       {groupedTasks.length} Órdenes ({tasks.length} procesos)
                     </Badge>
                   </div>
 
-                  <div className="flex-1 p-6 bg-gray-50/30 overflow-y-auto">
+                  <div className="flex-1 px-3 py-2 bg-gray-50/30 overflow-y-auto">
                     {groupedTasks.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
                         <FileText className="h-12 w-12 mb-3 stroke-1" />
                         <p>No hay órdenes asignadas para este operario.</p>
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="space-y-1.5">
                         {groupedTasks.map((group) => {
                           const isExpanded = expandedOrders.has(group.orderId);
                           const groupStatus = group.tasks.some(t => t.id_estado === 2) ? "En Proceso" :
@@ -773,19 +766,19 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             >
                               <CardContent className="p-0">
                                 {/* Order Header */}
-                                <div className="p-4 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <Badge variant="outline" className="font-mono text-sm font-bold text-slate-700 border-slate-300 bg-slate-50">
+                                <div className="px-3 py-2 flex gap-3 items-center">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className="font-mono text-[11px] font-bold text-slate-700 border-slate-300 bg-slate-50 px-1.5 py-0">
                                         OT #{group.orderId}
                                       </Badge>
-                                      <span className="text-base font-semibold text-gray-900 line-clamp-1">
+                                      <span className="text-[13px] font-semibold text-gray-900 line-clamp-1">
                                         {group.article || "Sin Artículo"}
                                       </span>
                                     </div>
-                                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                                    <div className="flex items-center gap-3 text-[11px] text-gray-500 leading-tight">
                                       <span className="flex items-center gap-1">
-                                        <Activity className="h-3 w-3" /> {group.tasks.length} procesos
+                                        <Activity className="h-2.5 w-2.5" /> {group.tasks.length} procesos
                                       </span>
                                       <span>
                                         Entrega: <span className="font-medium text-gray-700">{formatDate(group.date)}</span>
@@ -793,39 +786,37 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center gap-3">
-                                    <Badge className={`${groupStatusColor} whitespace-nowrap`}>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <Badge className={`${groupStatusColor} whitespace-nowrap text-[11px] px-2 py-0`}>
                                       {groupStatus}
                                     </Badge>
-                                    {isExpanded ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+                                    {isExpanded ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
                                   </div>
                                 </div>
 
                                 {/* Expanded Processes List */}
                                 {isExpanded && (
                                   <div className="bg-gray-50/50 border-t border-gray-100 animate-in slide-in-from-top-2 duration-200" onClick={(e) => e.stopPropagation()}>
-                                    <div className="p-4 space-y-3">
-                                      <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                        <Activity className="h-3 w-3" /> Procesos Asignados
+                                    <div className="px-3 py-2 space-y-1">
+                                      <h5 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                                        <Activity className="h-2.5 w-2.5" /> Procesos Asignados
                                       </h5>
                                       {group.tasks.map((task, idx) => (
-                                        <div key={`${task.id}-${idx}`} className="bg-white p-3 rounded-md border border-gray-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-                                          <div className="flex items-center gap-3 flex-1">
-                                            <div className={`w-2 h-2 rounded-full ${task.id_estado === 3 ? "bg-green-500" : task.id_estado === 2 ? "bg-blue-500" : "bg-gray-300"
+                                        <div key={`${task.id}-${idx}`} className="bg-white px-2.5 py-1 rounded-md border border-gray-200 shadow-sm flex items-center justify-between gap-3">
+                                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                                            <div className={`w-2 h-2 rounded-full shrink-0 ${task.id_estado === 3 ? "bg-green-500" : task.id_estado === 2 ? "bg-blue-500" : "bg-gray-300"
                                               }`} />
-                                            <div>
-                                              <p className="font-medium text-sm text-gray-900">{task.nombre_proceso}</p>
-                                              <p className="text-xs text-gray-500">
-                                                Duration: {((task.fin_min - task.inicio_min) / 60).toFixed(1)}h
-                                              </p>
-                                            </div>
+                                            <p className="text-[13px] text-gray-900 truncate">
+                                              <span className="font-medium">{task.nombre_proceso}</span>
+                                              <span className="text-gray-500"> · {((task.fin_min - task.inicio_min) / 60).toFixed(1)}h</span>
+                                            </p>
                                           </div>
 
                                           <Select
                                             value={(task.id_estado ?? 1).toString()}
                                             onValueChange={(val) => handleTaskStatusChange(task, val)}
                                           >
-                                            <SelectTrigger className="w-[140px] h-8 text-xs bg-slate-50">
+                                            <SelectTrigger className="w-[120px] h-7 text-xs bg-slate-50 shrink-0">
                                               <SelectValue placeholder="Estado" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -854,7 +845,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
         </div>
 
         {!isEditing && (
-          <DialogFooter className="px-6 py-4 border-t bg-white flex-shrink-0">
+          <DialogFooter className="px-5 py-2.5 border-t bg-white flex-shrink-0">
             <Button onClick={onClose} className="w-full sm:w-auto">Cerrar</Button>
           </DialogFooter>
         )}
