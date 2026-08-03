@@ -160,6 +160,21 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
         loadOptions();
     }, [cleanUrl, data]);
 
+    // SKILLS NATIVAS que ya tiene el operario (nivel 0, derivadas del rango). Se muestran
+    // acá mismo para que se vea qué ya tiene cargado antes de sumar una SKILL 1 / 2: si el
+    // proceso ya está cargado como nativa, el backend corta el guardado y avisa.
+    const nativas = new Map<number, boolean>(
+        (data?.skills || []).filter(s => s.nivel === 0).map(s => [s.id_proceso, s.habilitado])
+    );
+    const nombreProceso = (id: number) =>
+        procesos.find(p => p.id === id)?.nombre
+        || (data?.skills || []).find(s => s.id_proceso === id)?.nombre_proceso
+        || `Proceso #${id}`;
+    const nativasOrdenadas = Array.from(nativas.keys())
+        .map(id => ({ id, nombre: nombreProceso(id), habilitado: nativas.get(id) !== false }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
+    const esNativa = (skillId: string) => !!skillId && nativas.has(parseInt(skillId));
+
     const onlyDigits = (v: string) => v.replace(/\D/g, "");
     const isValidEmail = (v: string) => !v || /.+@.+\..+/.test(v);
     const isValidDate = (v: string) => !!v && !Number.isNaN(Date.parse(v));
@@ -604,6 +619,26 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     </div>
 
                     <p className="text-xs text-muted-foreground mb-3">Las SKILLS NATIVAS se derivan automáticamente de los rangos asignados en Información Laboral.</p>
+                    {nativasOrdenadas.length > 0 && (
+                        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50/40 px-3 py-2">
+                            <p className="text-xs font-medium text-emerald-800 mb-2">
+                                Ya tiene {nativasOrdenadas.length} SKILLS NATIVAS (del rango) — no hace falta volver a cargarlas
+                            </p>
+                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                                {nativasOrdenadas.map(n => (
+                                    <span
+                                        key={n.id}
+                                        title={n.habilitado ? n.nombre : `${n.nombre} (desactivada)`}
+                                        className={`text-[11px] px-2 py-0.5 rounded-full border ${n.habilitado
+                                            ? "bg-white border-emerald-200 text-emerald-800"
+                                            : "bg-white border-gray-200 text-gray-400 line-through"}`}
+                                    >
+                                        {n.nombre}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2 cursor-pointer w-fit mb-3">
                         <Checkbox
                             checked={formData.interpreta_planos}
@@ -630,27 +665,36 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                                 <div className="flex flex-col gap-3">
                                     {primarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay SKILLS 1</p>}
                                     {primarySkills.map((skillId, idx) => (
-                                        <div key={`param-${idx}`} className="flex gap-2 items-center">
-                                            <Select value={skillId || "none"} onValueChange={(val) => handlePrimaryChange(idx, val)}>
-                                                <SelectTrigger className="bg-gray-50/50 flex-1">
-                                                    <SelectValue placeholder="Seleccionar" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="none">Seleccionar proceso</SelectItem>
-                                                    {procesos.map(p => (
-                                                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                onClick={() => removePrimarySkill(idx)}
-                                            >
-                                                X
-                                            </Button>
+                                        <div key={`param-${idx}`} className="flex flex-col gap-1">
+                                            <div className="flex gap-2 items-center">
+                                                <Select value={skillId || "none"} onValueChange={(val) => handlePrimaryChange(idx, val)}>
+                                                    <SelectTrigger className="bg-gray-50/50 flex-1">
+                                                        <SelectValue placeholder="Seleccionar" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="none">Seleccionar proceso</SelectItem>
+                                                        {procesos.map(p => (
+                                                            <SelectItem key={p.id} value={p.id.toString()}>
+                                                                {p.nombre}{nativas.has(p.id) ? " · ya la tiene (nativa)" : ""}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                    onClick={() => removePrimarySkill(idx)}
+                                                >
+                                                    X
+                                                </Button>
+                                            </div>
+                                            {esNativa(skillId) && (
+                                                <p className="text-[11px] text-amber-700 pl-1">
+                                                    Este proceso ya está cargado como SKILL NATIVA en este operario.
+                                                </p>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -675,27 +719,36 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                                 <div className="flex flex-col gap-3">
                                     {secondarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay SKILLS 2</p>}
                                     {secondarySkills.map((skillId, idx) => (
-                                        <div key={`sec-${idx}`} className="flex gap-2 items-center">
-                                            <Select value={skillId || "none"} onValueChange={(val) => handleSecondaryChange(idx, val)}>
-                                                <SelectTrigger className="bg-gray-50/50 flex-1">
-                                                    <SelectValue placeholder="Seleccionar habilidad" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="none">Seleccionar proceso</SelectItem>
-                                                    {procesos.map(p => (
-                                                        <SelectItem key={p.id} value={p.id.toString()}>{p.nombre}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                onClick={() => removeSecondarySkill(idx)}
-                                            >
-                                                X
-                                            </Button>
+                                        <div key={`sec-${idx}`} className="flex flex-col gap-1">
+                                            <div className="flex gap-2 items-center">
+                                                <Select value={skillId || "none"} onValueChange={(val) => handleSecondaryChange(idx, val)}>
+                                                    <SelectTrigger className="bg-gray-50/50 flex-1">
+                                                        <SelectValue placeholder="Seleccionar habilidad" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="none">Seleccionar proceso</SelectItem>
+                                                        {procesos.map(p => (
+                                                            <SelectItem key={p.id} value={p.id.toString()}>
+                                                                {p.nombre}{nativas.has(p.id) ? " · ya la tiene (nativa)" : ""}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                    onClick={() => removeSecondarySkill(idx)}
+                                                >
+                                                    X
+                                                </Button>
+                                            </div>
+                                            {esNativa(skillId) && (
+                                                <p className="text-[11px] text-amber-700 pl-1">
+                                                    Este proceso ya está cargado como SKILL NATIVA en este operario.
+                                                </p>
+                                            )}
                                         </div>
                                     ))}
                                 </div>

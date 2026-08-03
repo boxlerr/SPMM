@@ -10,6 +10,7 @@ import sqlalchemy.exc as sa_exc
 from sqlalchemy import select
 
 from backend.application.OperarioService import OperarioService
+from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.domain.Operario import Operario
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
@@ -105,6 +106,75 @@ async def test_obtener_operario_aflora_nativa_desactivada(session):
     assert skills[100]["nivel"] == 0 and skills[100]["habilitado"] is False
     # 101 sigue como nativa activa.
     assert skills[101]["nivel"] == 0 and skills[101]["habilitado"] is True
+
+
+async def test_put_avisa_si_el_proceso_ya_esta_cargado_como_nativa(session):
+    """Cargar una SKILL 1/2 sobre un proceso que ya tiene fila nivel 0 chocaba contra la
+    PK (id_operario, id_proceso) y el usuario veía un UniqueViolationError crudo. Ahora
+    se corta con un aviso entendible y sin tocar nada."""
+    await seed_basico(session)
+    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=0, habilitado=False))
+    await session.commit()
+
+    service = OperarioService(session)
+    dto = OperarioRequestDTO(
+        nombre="CAMBIADO", apellido="Perez", categoria="OFICIAL",
+        skills=[ProcesoSkillDTO(id_proceso=100, nivel=1, habilitado=True)],
+    )
+    with pytest.raises(BusinessException) as exc:
+        await service.modificarOperario(1, dto)
+
+    # El aviso nombra el proceso y su estado, para que se sepa cuál sacar del form.
+    assert "Torneado" in str(exc.value)
+    assert "desactivada" in str(exc.value)
+    assert "SKILL NATIVA" in str(exc.value)
+
+    # No se guardó nada: ni el nombre ni la skill; la nativa quedó intacta.
+    res = await session.execute(select(Operario).where(Operario.id == 1))
+    assert res.scalar_one().nombre == "Juan"
+    nativa = await _get_skill(session, 1, 100)
+    assert nativa.nivel == 0 and nativa.habilitado is False
+
+
+async def test_put_permite_skill_sobre_nativa_sin_fila(session):
+    """Una nativa derivada del rango SIN fila persistida no bloquea nada: cargarla como
+    SKILL 1 es el caso normal (la mayoría de las skills cargadas caen sobre nativas)."""
+    await seed_basico(session)  # 101 es nativa por rango y no tiene fila
+    service = OperarioService(session)
+
+    dto = OperarioRequestDTO(
+        nombre="Juan", apellido="Perez", categoria="OFICIAL",
+        skills=[ProcesoSkillDTO(id_proceso=101, nivel=1, habilitado=True)],
+    )
+    resp = await service.modificarOperario(1, dto)
+
+    assert resp.status is True
+    skill = await _get_skill(session, 1, 101)
+    assert skill is not None and skill.nivel == 1
+
+
+async def test_put_dedupe_procesos_repetidos(session):
+    """El mismo proceso cargado en SKILLS 1 y SKILLS 2 generaba dos INSERT con la misma
+    PK. Se queda una sola fila y gana el nivel 1."""
+    await seed_basico(session)
+    service = OperarioService(session)
+
+    dto = OperarioRequestDTO(
+        nombre="Juan", apellido="Perez", categoria="OFICIAL",
+        skills=[
+            ProcesoSkillDTO(id_proceso=200, nivel=2, habilitado=True),
+            ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True),
+        ],
+    )
+    resp = await service.modificarOperario(1, dto)
+
+    assert resp.status is True
+    res = await session.execute(
+        select(OperarioProcesoSkill).where(OperarioProcesoSkill.id_operario == 1)
+    )
+    skills = res.scalars().all()
+    assert len(skills) == 1
+    assert skills[0].id_proceso == 200 and skills[0].nivel == 1
 
 
 async def test_modificar_operario_es_atomico_si_falla_commit(session):

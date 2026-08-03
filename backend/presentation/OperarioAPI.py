@@ -83,6 +83,9 @@ async def modificar_operario(id: int, operario_dto: OperarioRequestDTO, db=Depen
         logger.info(f"API - Inicio PUT /operarios/{id}")
         service = OperarioService(db)
         return await service.modificarOperario(id, operario_dto)
+    except BusinessException as e:
+        # Aviso para el usuario (ej. la skill ya está cargada como nativa), no un error.
+        raise HTTPException(status_code=422, detail=str(e))
     except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
 

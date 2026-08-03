@@ -70,6 +70,78 @@ def _build_skills_payload(operario):
     return payload
 
 
+def _normalizar_skills(skills):
+    """
+    Normaliza las skills que manda el form: una sola entrada por proceso (gana
+    SKILL 1 sobre SKILL 2) y sin nivel 0 — las nativas se derivan del rango, no se
+    cargan a mano. Acepta dicts o DTOs.
+
+    La deduplicación no es cosmética: dos entradas del mismo proceso terminan en dos
+    INSERT con la misma PK (id_operario, id_proceso) y revientan el guardado.
+    """
+    por_proceso = {}
+    for s in (skills or []):
+        datos = s if isinstance(s, dict) else s.dict()
+        nivel = datos.get("nivel")
+        if nivel not in (1, 2):
+            continue
+        id_proceso = datos.get("id_proceso")
+        previo = por_proceso.get(id_proceso)
+        if previo is None or nivel < previo["nivel"]:
+            por_proceso[id_proceso] = {
+                "id_proceso": id_proceso,
+                "nivel": nivel,
+                "habilitado": datos.get("habilitado", True),
+            }
+    return list(por_proceso.values())
+
+
+async def _nativas_que_chocan(db, id_operario, skills_normalizadas):
+    """
+    Devuelve [(nombre_proceso, habilitado)] de las filas nivel 0 ya persistidas para
+    los procesos que el form quiere cargar como SKILL 1/2.
+
+    Esas filas son las nativas y NO se borran al guardar (ver modificarOperario), así
+    que un INSERT sobre el mismo proceso choca contra la PK. En vez de pisarlas a
+    ciegas se corta con un aviso: el proceso ya está cargado en ese operario.
+    """
+    ids = [s["id_proceso"] for s in skills_normalizadas]
+    if not ids:
+        return []
+
+    from sqlalchemy import select
+    from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+    from backend.domain.Proceso import Proceso
+
+    result = await db.execute(
+        select(Proceso.nombre, OperarioProcesoSkill.habilitado)
+        .join(Proceso, Proceso.id == OperarioProcesoSkill.id_proceso)
+        .where(
+            OperarioProcesoSkill.id_operario == id_operario,
+            OperarioProcesoSkill.nivel == 0,
+            OperarioProcesoSkill.id_proceso.in_(ids),
+        )
+        .order_by(Proceso.nombre)
+    )
+    return [(nombre, habilitado) for nombre, habilitado in result.all()]
+
+
+def _mensaje_nativas_que_chocan(filas):
+    """Arma el aviso que ve el usuario cuando el proceso ya está cargado como nativa."""
+    detalle = ", ".join(
+        f"{nombre}{'' if habilitado else ' (desactivada)'}" for nombre, habilitado in filas
+    )
+    if len(filas) == 1:
+        return (
+            f"{detalle} ya está cargada como SKILL NATIVA en este operario. "
+            f"Quitala de SKILLS 1 / SKILLS 2, o eliminá la nativa desde el detalle del operario."
+        )
+    return (
+        f"Estos procesos ya están cargados como SKILL NATIVA en este operario: {detalle}. "
+        f"Quitalos de SKILLS 1 / SKILLS 2, o eliminá las nativas desde el detalle del operario."
+    )
+
+
 def _validar_pausa(valor, default):
     """Convierte a int, recorta a [0, 240] minutos. Devuelve default si inválido."""
     if valor is None:
@@ -112,14 +184,14 @@ class OperarioService:
             from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
             from backend.domain.OperarioRango import OperarioRango
 
-            procesos_skill = []
-            if operario_dto.skills:
-                for s in operario_dto.skills:
-                    procesos_skill.append(OperarioProcesoSkill(
-                        id_proceso=s.id_proceso,
-                        nivel=s.nivel,
-                        habilitado=s.habilitado
-                    ))
+            procesos_skill = [
+                OperarioProcesoSkill(
+                    id_proceso=s["id_proceso"],
+                    nivel=s["nivel"],
+                    habilitado=s["habilitado"],
+                )
+                for s in _normalizar_skills(operario_dto.skills)
+            ]
 
             operario = Operario(
                 nombre=operario_dto.nombre,
@@ -279,6 +351,8 @@ class OperarioService:
         # Preproceso (puro, una sola vez): no toca la DB, así que no se reintenta.
         nueva_data = operario_dto.dict(exclude_unset=True)
         skills_data = nueva_data.pop("skills", None)
+        if skills_data is not None:
+            skills_data = _normalizar_skills(skills_data)
         # 'rangos' no es columna de Operario: se sincroniza la tabla operario_rango aparte.
         rangos_data = nueva_data.pop("rangos", None)
 
@@ -306,6 +380,16 @@ class OperarioService:
         # así que reintentar es seguro. Se reconstruye todo adentro para que, tras un
         # rollback, no queden objetos ORM inválidos.
         async def _guardar():
+            # Las filas nivel 0 (nativas) NO se tocan al guardar: el form no las maneja y
+            # borrarlas las perdería. Por eso se chequea ANTES de escribir nada si alguno
+            # de los procesos que vienen ya está cargado como nativa: sin ese aviso el
+            # INSERT choca contra la PK (id_operario, id_proceso) y el usuario ve un error
+            # de base de datos en vez de entender que ya la tenía cargada.
+            if skills_data:
+                chocan = await _nativas_que_chocan(db, id, skills_data)
+                if chocan:
+                    raise BusinessException(_mensaje_nativas_que_chocan(chocan))
+
             result = await db.execute(select(Operario).where(Operario.id == id))
             operario = result.scalar_one_or_none()
             if not operario:
@@ -313,8 +397,7 @@ class OperarioService:
             for key, value in nueva_data.items():
                 setattr(operario, key, value)
 
-            # Skills cargadas (nivel 1/2). Las filas nivel 0 (overrides de nativas
-            # desactivadas) NO se tocan: el form no las maneja y borrarlas las perdería.
+            # Skills cargadas (nivel 1/2): se reemplazan por completo.
             if skills_data is not None:
                 await db.execute(
                     delete(OperarioProcesoSkill).where(
@@ -323,9 +406,6 @@ class OperarioService:
                     )
                 )
                 for s in skills_data:
-                    # Ignorar nivel 0 si llegara desde el form: las nativas no se cargan manualmente.
-                    if s.get("nivel") == 0:
-                        continue
                     db.add(OperarioProcesoSkill(
                         id_operario=id,
                         id_proceso=s["id_proceso"],
@@ -350,6 +430,14 @@ class OperarioService:
 
         try:
             resultado = await run_with_db_retry(db, _guardar, label=f"modificarOperario#{id}")
+        except BusinessException:
+            # Aviso para el usuario (ej. la skill ya está cargada): se devuelve tal cual,
+            # sin disfrazarlo de error de infraestructura.
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            raise
         except Exception as e:
             try:
                 await db.rollback()
