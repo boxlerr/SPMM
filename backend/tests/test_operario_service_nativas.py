@@ -153,6 +153,26 @@ async def test_put_permite_skill_sobre_nativa_sin_fila(session):
     assert skill is not None and skill.nivel == 1
 
 
+async def test_put_reemplaza_la_nativa_huerfana_sin_avisar(session):
+    """Una fila nivel 0 sobre un proceso que el rango ya NO da (200) no se ve en ninguna
+    pantalla: es un resto de cargas viejas. Avisar por algo invisible confunde, así que
+    se borra y la reemplaza la skill cargada."""
+    await seed_basico(session)  # el rango cubre 100 y 101; 200 quedó afuera
+    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=200, nivel=0, habilitado=False))
+    await session.commit()
+
+    service = OperarioService(session)
+    dto = OperarioRequestDTO(
+        nombre="Juan", apellido="Perez", categoria="OFICIAL",
+        skills=[ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True)],
+    )
+    resp = await service.modificarOperario(1, dto)
+
+    assert resp.status is True
+    skill = await _get_skill(session, 1, 200)
+    assert skill is not None and skill.nivel == 1 and skill.habilitado is True
+
+
 async def test_put_dedupe_procesos_repetidos(session):
     """El mismo proceso cargado en SKILLS 1 y SKILLS 2 generaba dos INSERT con la misma
     PK. Se queda una sola fila y gana el nivel 1."""

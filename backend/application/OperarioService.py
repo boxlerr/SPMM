@@ -96,25 +96,35 @@ def _normalizar_skills(skills):
     return list(por_proceso.values())
 
 
-async def _nativas_que_chocan(db, id_operario, skills_normalizadas):
+async def _clasificar_nativas_que_chocan(db, id_operario, skills_normalizadas):
     """
-    Devuelve [(nombre_proceso, habilitado)] de las filas nivel 0 ya persistidas para
-    los procesos que el form quiere cargar como SKILL 1/2.
+    Las filas nivel 0 de los procesos que el form quiere cargar como SKILL 1/2 chocan
+    contra la PK (id_operario, id_proceso) al insertar. Se parten en dos grupos según
+    lo que el usuario VE en pantalla:
 
-    Esas filas son las nativas y NO se borran al guardar (ver modificarOperario), así
-    que un INSERT sobre el mismo proceso choca contra la PK. En vez de pisarlas a
-    ciegas se corta con un aviso: el proceso ya está cargado en ese operario.
+      - visibles: el proceso sigue estando en algún rango del operario, así que figura
+        en su lista de SKILLS NATIVAS. Se avisa y no se guarda: el usuario ve la nativa
+        y decide (sacarla del form o apagar la nativa).
+      - huérfanas: el rango ya no da ese proceso, así que la fila no se muestra en
+        ninguna parte. Es un resto de cargas viejas, inerte para el planificador
+        (get_map_por_proceso solo mira nivel 1/2, y restar una nativa que el rango ya
+        no otorga no cambia nada). Avisar por algo invisible solo confunde: se borra
+        y la reemplaza la skill cargada.
+
+    Devuelve (visibles, ids_huerfanas) donde visibles es [(nombre_proceso, habilitado)].
     """
     ids = [s["id_proceso"] for s in skills_normalizadas]
     if not ids:
-        return []
+        return [], []
 
     from sqlalchemy import select
     from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+    from backend.domain.OperarioRango import OperarioRango
     from backend.domain.Proceso import Proceso
+    from backend.domain.RangoProceso import RangoProceso
 
-    result = await db.execute(
-        select(Proceso.nombre, OperarioProcesoSkill.habilitado)
+    filas = (await db.execute(
+        select(OperarioProcesoSkill.id_proceso, Proceso.nombre, OperarioProcesoSkill.habilitado)
         .join(Proceso, Proceso.id == OperarioProcesoSkill.id_proceso)
         .where(
             OperarioProcesoSkill.id_operario == id_operario,
@@ -122,8 +132,20 @@ async def _nativas_que_chocan(db, id_operario, skills_normalizadas):
             OperarioProcesoSkill.id_proceso.in_(ids),
         )
         .order_by(Proceso.nombre)
-    )
-    return [(nombre, habilitado) for nombre, habilitado in result.all()]
+    )).all()
+    if not filas:
+        return [], []
+
+    # Procesos que los rangos del operario le dan hoy: son los que ve como nativas.
+    derivados = set((await db.execute(
+        select(RangoProceso.id_proceso)
+        .join(OperarioRango, OperarioRango.id_rango == RangoProceso.id_rango)
+        .where(OperarioRango.id_operario == id_operario)
+    )).scalars().all())
+
+    visibles = [(n, h) for id_proceso, n, h in filas if id_proceso in derivados]
+    huerfanas = [id_proceso for id_proceso, _, _ in filas if id_proceso not in derivados]
+    return visibles, huerfanas
 
 
 def _mensaje_nativas_que_chocan(filas):
@@ -342,7 +364,7 @@ class OperarioService:
         # sola transacción con un único commit al final. Si algo falla a mitad de
         # camino (p. ej. la DB se desconecta), se hace rollback y NO queda un
         # guardado parcial: o se guarda todo o no se guarda nada.
-        from sqlalchemy import select, delete
+        from sqlalchemy import select, delete, or_
         from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
         from backend.domain.OperarioRango import OperarioRango
         from backend.infrastructure.db_retry import run_with_db_retry, motivo_error_db
@@ -385,10 +407,11 @@ class OperarioService:
             # de los procesos que vienen ya está cargado como nativa: sin ese aviso el
             # INSERT choca contra la PK (id_operario, id_proceso) y el usuario ve un error
             # de base de datos en vez de entender que ya la tenía cargada.
+            huerfanas = []
             if skills_data:
-                chocan = await _nativas_que_chocan(db, id, skills_data)
-                if chocan:
-                    raise BusinessException(_mensaje_nativas_que_chocan(chocan))
+                visibles, huerfanas = await _clasificar_nativas_que_chocan(db, id, skills_data)
+                if visibles:
+                    raise BusinessException(_mensaje_nativas_que_chocan(visibles))
 
             result = await db.execute(select(Operario).where(Operario.id == id))
             operario = result.scalar_one_or_none()
@@ -397,12 +420,17 @@ class OperarioService:
             for key, value in nueva_data.items():
                 setattr(operario, key, value)
 
-            # Skills cargadas (nivel 1/2): se reemplazan por completo.
+            # Skills cargadas (nivel 1/2): se reemplazan por completo. Las nativas
+            # huérfanas de esos mismos procesos se borran de paso: no las ve nadie y le
+            # dejan el lugar a la skill que se está cargando.
             if skills_data is not None:
+                condicion = OperarioProcesoSkill.nivel.in_([1, 2])
+                if huerfanas:
+                    condicion = or_(condicion, OperarioProcesoSkill.id_proceso.in_(huerfanas))
                 await db.execute(
                     delete(OperarioProcesoSkill).where(
                         OperarioProcesoSkill.id_operario == id,
-                        OperarioProcesoSkill.nivel.in_([1, 2]),
+                        condicion,
                     )
                 )
                 for s in skills_data:
