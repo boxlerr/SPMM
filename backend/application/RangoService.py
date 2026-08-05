@@ -38,6 +38,12 @@ class RangoService:
         rangos = await self.repository.find_all()
         return ResponseDTO(status=True, data=jsonable_encoder(rangos))
 
+    async def listarProcesosPorRango(self):
+        """Mapa {id_rango: [id_proceso, ...]} para derivar las SKILLS NATIVAS en la UI."""
+        logger.info("Service - Listar procesos por rango.")
+        mapa = await self.repository.find_procesos_por_rango()
+        return ResponseDTO(status=True, data=mapa)
+
     async def obtenerRangoPorId(self, id: int):
         logger.info(f"Service - Obtener rango ID: {id}")
         rango = await self.repository.find_by_id(id)

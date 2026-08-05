@@ -1,8 +1,13 @@
 """
-Tests del OperarioService para las skills nativas contra SQLite:
-  - actualizarEstadoSkillNativa: upsert al desactivar, delete al reactivar,
-    sin degradar skills cargadas nivel 1/2,
-  - modificarOperario (PUT) preserva los overrides nivel 0,
+Tests del OperarioService para las skills nativas contra SQLite.
+
+Modelo: las nativas (rango × procesos del rango) son el universo de lo que el operario
+puede hacer. `operario_proceso_skill` guarda overrides sobre ellas con dos ejes sueltos
+— prioridad (nivel 0/1/2) y apagado (habilitado).
+
+  - actualizarEstadoSkillNativa: upsert al desactivar (conservando la prioridad),
+    delete al reactivar solo si no quedaba nada que decir,
+  - modificarOperario (PUT) rechaza priorizar procesos que no son nativos,
   - obtenerOperarioPorId aflora la nativa desactivada (flujo completo).
 """
 import pytest
@@ -54,9 +59,9 @@ async def test_reactivar_nativa_borra_override(session):
     assert await _get_skill(session, 1, 100) is None
 
 
-async def test_no_degrada_skill_manual(session):
+async def test_apagar_nativa_conserva_la_prioridad(session):
     await seed_basico(session)
-    # Skill cargada nivel 1 sobre el proceso 100.
+    # Nativa 100 marcada como SKILL 1.
     session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=1, habilitado=True))
     await session.commit()
 
@@ -64,13 +69,27 @@ async def test_no_degrada_skill_manual(session):
     await service.actualizarEstadoSkillNativa(1, 100, habilitado=False)
 
     skill = await _get_skill(session, 1, 100)
-    # No se toca: sigue siendo nivel 1 habilitada.
-    assert skill.nivel == 1 and skill.habilitado is True
+    # Apagar y priorizar son ejes distintos: se apaga sin perder que era SKILL 1.
+    assert skill.nivel == 1 and skill.habilitado is False
 
 
-async def test_put_preserva_overrides_nativos(session):
+async def test_reactivar_nativa_priorizada_conserva_la_fila(session):
     await seed_basico(session)
-    # Override de nativa desactivada (nivel 0) + skill cargada (nivel 1).
+    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=2, habilitado=False))
+    await session.commit()
+
+    service = OperarioService(session)
+    await service.actualizarEstadoSkillNativa(1, 100, habilitado=True)
+
+    skill = await _get_skill(session, 1, 100)
+    # No se borra: sigue siendo SKILL 2, ahora prendida.
+    assert skill is not None and skill.nivel == 2 and skill.habilitado is True
+
+
+async def test_put_reemplaza_todos_los_overrides(session):
+    """El form manda el estado final de todas las nativas, así que lo que no viene
+    volvió al default. Es idempotente: se borra todo y se reinserta."""
+    await seed_basico(session)
     session.add_all([
         OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=0, habilitado=False),
         OperarioProcesoSkill(id_operario=1, id_proceso=101, nivel=1, habilitado=True),
@@ -84,12 +103,49 @@ async def test_put_preserva_overrides_nativos(session):
     )
     await service.modificarOperario(1, dto)
 
-    # El override nivel 0 sobre 100 NO se borró.
-    override = await _get_skill(session, 1, 100)
-    assert override is not None and override.nivel == 0 and override.habilitado is False
-    # La skill cargada nivel 1 sobre 101 sigue presente.
+    # 100 no vino en el payload -> vuelve al default derivado (sin fila, habilitada).
+    assert await _get_skill(session, 1, 100) is None
+    # 101 conserva su prioridad.
     manual = await _get_skill(session, 1, 101)
     assert manual is not None and manual.nivel == 1
+
+
+async def test_put_persiste_nativa_apagada(session):
+    """Apagar una nativa desde el form se persiste como override nivel 0 / habilitado
+    False, que es lo que el planificador resta del set de elegibles."""
+    await seed_basico(session)
+    service = OperarioService(session)
+
+    dto = OperarioRequestDTO(
+        nombre="Juan", apellido="Perez", categoria="OFICIAL",
+        skills=[ProcesoSkillDTO(id_proceso=100, nivel=0, habilitado=False)],
+    )
+    resp = await service.modificarOperario(1, dto)
+
+    assert resp.status is True
+    skill = await _get_skill(session, 1, 100)
+    assert skill is not None and skill.nivel == 0 and skill.habilitado is False
+
+
+async def test_put_no_persiste_nativas_en_estado_default(session):
+    """Una nativa habilitada y sin marcar es el default derivado del rango: guardar una
+    fila por cada una sería escribir ruido en la tabla."""
+    await seed_basico(session)
+    service = OperarioService(session)
+
+    dto = OperarioRequestDTO(
+        nombre="Juan", apellido="Perez", categoria="OFICIAL",
+        skills=[
+            ProcesoSkillDTO(id_proceso=100, nivel=0, habilitado=True),
+            ProcesoSkillDTO(id_proceso=101, nivel=0, habilitado=True),
+        ],
+    )
+    await service.modificarOperario(1, dto)
+
+    res = await session.execute(
+        select(OperarioProcesoSkill).where(OperarioProcesoSkill.id_operario == 1)
+    )
+    assert res.scalars().all() == []
 
 
 async def test_obtener_operario_aflora_nativa_desactivada(session):
@@ -108,38 +164,33 @@ async def test_obtener_operario_aflora_nativa_desactivada(session):
     assert skills[101]["nivel"] == 0 and skills[101]["habilitado"] is True
 
 
-async def test_put_avisa_si_el_proceso_ya_esta_cargado_como_nativa(session):
-    """Cargar una SKILL 1/2 sobre un proceso que ya tiene fila nivel 0 chocaba contra la
-    PK (id_operario, id_proceso) y el usuario veía un UniqueViolationError crudo. Ahora
-    se corta con un aviso entendible y sin tocar nada."""
-    await seed_basico(session)
-    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=0, habilitado=False))
-    await session.commit()
-
+async def test_put_rechaza_prioridad_sobre_proceso_no_nativo(session):
+    """Invariante del modelo: SKILLS 1/2 solo ordenan lo que el operario ya sabe hacer.
+    Priorizar un proceso que su rango no le da (200) sería habilitárselo por la ventana."""
+    await seed_basico(session)  # el rango cubre 100 y 101; 200 quedó afuera
     service = OperarioService(session)
+
     dto = OperarioRequestDTO(
         nombre="CAMBIADO", apellido="Perez", categoria="OFICIAL",
-        skills=[ProcesoSkillDTO(id_proceso=100, nivel=1, habilitado=True)],
+        skills=[ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True)],
     )
     with pytest.raises(BusinessException) as exc:
         await service.modificarOperario(1, dto)
 
-    # El aviso nombra el proceso y su estado, para que se sepa cuál sacar del form.
-    assert "Torneado" in str(exc.value)
-    assert "desactivada" in str(exc.value)
+    # El aviso nombra el proceso y dice cómo resolverlo.
+    assert "Fresado" in str(exc.value)
     assert "SKILL NATIVA" in str(exc.value)
+    assert "rango" in str(exc.value)
 
-    # No se guardó nada: ni el nombre ni la skill; la nativa quedó intacta.
+    # No se guardó nada: ni el nombre ni la skill.
     res = await session.execute(select(Operario).where(Operario.id == 1))
     assert res.scalar_one().nombre == "Juan"
-    nativa = await _get_skill(session, 1, 100)
-    assert nativa.nivel == 0 and nativa.habilitado is False
+    assert await _get_skill(session, 1, 200) is None
 
 
-async def test_put_permite_skill_sobre_nativa_sin_fila(session):
-    """Una nativa derivada del rango SIN fila persistida no bloquea nada: cargarla como
-    SKILL 1 es el caso normal (la mayoría de las skills cargadas caen sobre nativas)."""
-    await seed_basico(session)  # 101 es nativa por rango y no tiene fila
+async def test_put_permite_prioridad_sobre_nativa(session):
+    """El caso normal: marcar como SKILL 1 una nativa que el rango ya le da."""
+    await seed_basico(session)  # 101 es nativa por rango
     service = OperarioService(session)
 
     dto = OperarioRequestDTO(
@@ -153,24 +204,27 @@ async def test_put_permite_skill_sobre_nativa_sin_fila(session):
     assert skill is not None and skill.nivel == 1
 
 
-async def test_put_reemplaza_la_nativa_huerfana_sin_avisar(session):
-    """Una fila nivel 0 sobre un proceso que el rango ya NO da (200) no se ve en ninguna
-    pantalla: es un resto de cargas viejas. Avisar por algo invisible confunde, así que
-    se borra y la reemplaza la skill cargada."""
-    await seed_basico(session)  # el rango cubre 100 y 101; 200 quedó afuera
-    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=200, nivel=0, habilitado=False))
+async def test_put_valida_contra_los_rangos_del_mismo_guardado(session):
+    """Si el form cambia rangos y prioridades de una, la nativa se valida contra el rango
+    NUEVO: validar contra lo persistido rechazaría una skill que el rango nuevo sí da."""
+    await seed_basico(session)
+    # Rango 8 nuevo, que sí cubre el proceso 200.
+    from backend.domain.Rango import Rango
+    from backend.domain.RangoProceso import RangoProceso
+    session.add_all([Rango(id=8, nombre="Fresador"), RangoProceso(id_rango=8, id_proceso=200)])
     await session.commit()
 
     service = OperarioService(session)
     dto = OperarioRequestDTO(
         nombre="Juan", apellido="Perez", categoria="OFICIAL",
+        rangos=[8],
         skills=[ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True)],
     )
     resp = await service.modificarOperario(1, dto)
 
     assert resp.status is True
     skill = await _get_skill(session, 1, 200)
-    assert skill is not None and skill.nivel == 1 and skill.habilitado is True
+    assert skill is not None and skill.nivel == 1
 
 
 async def test_put_dedupe_procesos_repetidos(session):
@@ -182,8 +236,8 @@ async def test_put_dedupe_procesos_repetidos(session):
     dto = OperarioRequestDTO(
         nombre="Juan", apellido="Perez", categoria="OFICIAL",
         skills=[
-            ProcesoSkillDTO(id_proceso=200, nivel=2, habilitado=True),
-            ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True),
+            ProcesoSkillDTO(id_proceso=100, nivel=2, habilitado=True),
+            ProcesoSkillDTO(id_proceso=100, nivel=1, habilitado=True),
         ],
     )
     resp = await service.modificarOperario(1, dto)
@@ -194,7 +248,7 @@ async def test_put_dedupe_procesos_repetidos(session):
     )
     skills = res.scalars().all()
     assert len(skills) == 1
-    assert skills[0].id_proceso == 200 and skills[0].nivel == 1
+    assert skills[0].id_proceso == 100 and skills[0].nivel == 1
 
 
 async def test_modificar_operario_es_atomico_si_falla_commit(session):
@@ -217,7 +271,7 @@ async def test_modificar_operario_es_atomico_si_falla_commit(session):
 
     dto = OperarioRequestDTO(
         nombre="CAMBIADO", apellido="Perez", categoria="OFICIAL",
-        skills=[ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True)],
+        skills=[ProcesoSkillDTO(id_proceso=100, nivel=1, habilitado=True)],
     )
     with pytest.raises(InfrastructureException):
         await service.modificarOperario(1, dto)
@@ -257,7 +311,7 @@ async def test_modificar_operario_reintenta_ante_desconexion_transitoria(session
 
     dto = OperarioRequestDTO(
         nombre="Juan", apellido="Perez", categoria="OFICIAL",
-        skills=[ProcesoSkillDTO(id_proceso=200, nivel=1, habilitado=True)],
+        skills=[ProcesoSkillDTO(id_proceso=100, nivel=1, habilitado=True)],
     )
     resp = await service.modificarOperario(1, dto)
 
@@ -266,4 +320,74 @@ async def test_modificar_operario_reintenta_ante_desconexion_transitoria(session
     assert resp.status is True
     assert llamadas["n"] == 2  # falló una vez y reintentó
     # Tras el reintento, la skill quedó guardada.
-    assert await _get_skill(session, 1, 200) is not None
+    assert await _get_skill(session, 1, 100) is not None
+
+
+# --- agregarSkill: define la PRIORIDAD de una nativa, no da de alta habilidades ---
+
+class _SkillDTO:
+    """Stand-in de ProcesoSkillDTO: agregarSkill solo lee id_proceso y nivel."""
+    def __init__(self, id_proceso, nivel):
+        self.id_proceso = id_proceso
+        self.nivel = nivel
+
+
+async def test_agregar_skill_marca_prioridad_sobre_nativa(session):
+    await seed_basico(session)
+    service = OperarioService(session)
+
+    resp = await service.agregarSkill(1, _SkillDTO(100, 1))
+
+    assert resp.status is True
+    skill = await _get_skill(session, 1, 100)
+    assert skill.nivel == 1 and skill.habilitado is True
+
+
+async def test_agregar_skill_rechaza_proceso_no_nativo(session):
+    await seed_basico(session)  # 200 no lo da ningún rango del operario
+    service = OperarioService(session)
+
+    with pytest.raises(BusinessException) as exc:
+        await service.agregarSkill(1, _SkillDTO(200, 1))
+
+    assert "Fresado" in str(exc.value)
+    assert await _get_skill(session, 1, 200) is None
+
+
+async def test_agregar_skill_nivel_0_borra_la_fila(session):
+    """Quitar la prioridad de una nativa habilitada deja la fila sin nada que decir."""
+    await seed_basico(session)
+    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=1, habilitado=True))
+    await session.commit()
+
+    service = OperarioService(session)
+    await service.agregarSkill(1, _SkillDTO(100, 0))
+
+    assert await _get_skill(session, 1, 100) is None
+
+
+async def test_agregar_skill_nivel_0_conserva_la_marca_de_apagada(session):
+    """Si la nativa está apagada, quitarle la prioridad NO puede borrar el apagado:
+    borrar la fila la reactivaría de forma silenciosa."""
+    await seed_basico(session)
+    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=2, habilitado=False))
+    await session.commit()
+
+    service = OperarioService(session)
+    await service.agregarSkill(1, _SkillDTO(100, 0))
+
+    skill = await _get_skill(session, 1, 100)
+    assert skill is not None and skill.nivel == 0 and skill.habilitado is False
+
+
+async def test_agregar_skill_prioriza_y_reactiva(session):
+    """Marcar prioridad implica que la quiere asignable: prende la nativa apagada."""
+    await seed_basico(session)
+    session.add(OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=0, habilitado=False))
+    await session.commit()
+
+    service = OperarioService(session)
+    await service.agregarSkill(1, _SkillDTO(100, 2))
+
+    skill = await _get_skill(session, 1, 100)
+    assert skill.nivel == 2 and skill.habilitado is True

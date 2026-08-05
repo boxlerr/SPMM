@@ -2,13 +2,23 @@
 Auditoría de skills operario × proceso.
 
 Objetivo: detectar skills mal cargadas (ej. gente de Pañol con skills de
-mecanizado) y ver cómo queda cada proceso de cara al planificador:
+mecanizado) y ver cómo queda cada proceso de cara al planificador.
 
-  - "modo estricto": el proceso tiene al menos 1 skill EXPLÍCITA (nivel 1/2
-    habilitada). El planner SOLO deja a esos operarios. Ver PlanificacionService
-    (_crear_variables_y_dominios, rama `if op_skill_levels`).
-  - "modo rango/abierto": el proceso no tiene ninguna explícita → el planner cae
-    al camino por rango (y las tareas básicas quedan abiertas a cualquiera).
+⚠️ DESACTUALIZADO (5/8/2026): este reporte describe el modelo VIEJO, en el que
+SKILLS 1/2 era un catálogo aparte que restringía el proceso ("modo estricto") y
+las nativas solo aplicaban si nadie tenía skill cargada ("modo rango/abierto").
+Ese doble camino se eliminó. Hoy:
+
+  - la ELEGIBILIDAD la dan siempre las skills NATIVAS (rango del operario ×
+    rangos del proceso), menos las desactivadas explícitamente;
+  - SKILLS 1/2 solo ordenan la preferencia dentro de las nativas y no excluyen
+    a nadie (ver PlanificacionService._crear_variables_y_dominios y
+    _agregar_objetivo);
+  - una OT con plano adjunto exige operarios con interpreta_planos.
+
+La clasificación estricto/abierto que imprime abajo ya no se corresponde con lo
+que hace el planner. Además sigue conectándose por pyodbc a MSSQL, anterior a la
+migración a Supabase. Hay que reescribirlo antes de volver a usarlo.
 
 Genera:
   - resumen por consola

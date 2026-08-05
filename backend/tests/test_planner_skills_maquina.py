@@ -1,15 +1,20 @@
 """
-Skills = fuente de verdad para procesos de MÁQUINA (PRODUCCION_MAQUINA).
+Elegibilidad en el planificador = SKILLS NATIVAS (rango del operario × rangos del proceso).
+
+Modelo acordado con Lucas (5/8): la nativa dice quién PUEDE hacer el proceso;
+SKILLS 1 y 2 solo ordenan la preferencia dentro de ese conjunto y nunca restringen.
+Para que alguien no haga algo que su rango le habilita, se DESACTIVA esa nativa.
 
 Verifica _crear_variables_y_dominios (sin tocar la base):
-  - un proceso de máquina SIN skills cargadas queda "sin asignar" (solo DUMMY),
-    NO se abre por rango a cualquiera;
-  - con skills cargadas, solo esos operarios (+ DUMMY);
-  - un proceso NO-máquina (manual) sin skills sigue usando el camino por rango.
+  - un proceso de máquina se abre a los operarios con el rango, tengan o no
+    SKILL 1/2 cargada (antes quedaba sin asignar: era el "modo skill-map");
+  - tener SKILL 1/2 no excluye al resto de las nativas;
+  - desactivar la nativa sí saca al operario;
+  - un proceso sin ninguna nativa habilitada queda sin asignar (solo DUMMY).
 
-Contexto: reunión 8/7 (skills = lo que sigue fallando) + auditoría
-(backend/scripts/auditoria_skills.py): 98/137 procesos de máquina no tenían
-skills explícitas y se abrían por rango, mal-asignando (ej. fresadora F7).
+Contexto: reemplaza al modo skill-map anterior, que restringía el proceso a quienes
+tuvieran nivel 1/2 y dejaba fuera a nativas perfectamente capaces (98/137 procesos de
+máquina quedaban sin asignar — ver backend/scripts/auditoria_skills.py).
 """
 from ortools.sat.python import cp_model
 
@@ -34,26 +39,37 @@ def _dominio_operarios(nombre, usa_maquina, op_skill_levels, rangos_proc,
     return ret[OP_DOMAIN_VALS_IDX][(1, 1)]
 
 
-def test_maquina_sin_skills_queda_sin_asignar():
-    # CILINDRADO = PRODUCCION_MAQUINA. Sin skills cargadas, aunque los operarios
-    # tengan el rango [7], NO se asigna a nadie: solo DUMMY.
+def test_maquina_sin_skills_se_abre_a_las_nativas():
+    # CILINDRADO = PRODUCCION_MAQUINA. Sin SKILL 1/2 cargada, los operarios con el
+    # rango [7] son elegibles igual: el rango ya dice que saben hacerlo.
     dom = _dominio_operarios("CILINDRADO", True, {}, [7])
-    assert dom == [DUMMY_OP_ID]
-    assert 10 not in dom and 11 not in dom
+    assert 10 in dom and 11 in dom
 
 
-def test_maquina_con_skills_solo_el_skilled():
-    # Con skill cargada solo para el operario 10 -> solo 10 (+ DUMMY), nunca 11.
+def test_skill_cargada_no_excluye_a_las_demas_nativas():
+    # El operario 10 tiene SKILL 1; el 11 solo la nativa. Ambos siguen siendo
+    # elegibles — la marca de 10 se paga en la función objetivo, no en el dominio.
     dom = _dominio_operarios("CILINDRADO", True, {10: 1}, [7])
+    assert 10 in dom and 11 in dom
+
+
+def test_maquina_respeta_el_rango():
+    # El rango sigue mandando: un operario cuyo rango no habilita el proceso no entra.
+    dom = _dominio_operarios("CILINDRADO", True, {}, [7], operarios=[(10, 7), (11, 9)])
     assert 10 in dom
     assert 11 not in dom
-    assert DUMMY_OP_ID in dom
 
 
-def test_maquina_ignora_rango_sin_skill():
-    # Aunque el proceso tenga rango y operarios que lo cumplen, sin skill cargada
-    # el proceso de máquina no se abre por rango.
-    dom = _dominio_operarios("FRESADORA F7 + ROSCADO", True, {}, [7])
+def test_nativa_desactivada_sale_aunque_sea_maquina():
+    # Única forma de sacar a alguien de un proceso que su rango le da.
+    dom = _dominio_operarios("CILINDRADO", True, {}, [7], nativas_off={100: {10}})
+    assert 10 not in dom
+    assert 11 in dom
+
+
+def test_maquina_sin_ninguna_nativa_queda_sin_asignar():
+    # Si el rango del proceso no lo cubre nadie, no hay a quién asignarlo.
+    dom = _dominio_operarios("CILINDRADO", True, {}, [7], operarios=[(10, 9), (11, 9)])
     assert dom == [DUMMY_OP_ID]
 
 
@@ -68,3 +84,11 @@ def test_manual_sin_rango_ni_skill_abre_a_todos():
     # Regresión: proceso manual sin rango ni skills -> abierto (comportamiento previo).
     dom = _dominio_operarios("armado", False, {}, [])
     assert 10 in dom and 11 in dom
+
+
+def test_operario_con_varios_rangos_no_duplica_el_dominio():
+    # find_with_rangos devuelve una fila por (operario, rango): un operario con dos
+    # rangos que habilitan el proceso aparecía dos veces en el dominio del solver.
+    dom = _dominio_operarios("armado", False, {}, [7, 8], operarios=[(10, 7), (10, 8), (11, 7)])
+    assert dom.count(10) == 1
+    assert 11 in dom

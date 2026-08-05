@@ -32,6 +32,29 @@ class RangoRepository:
             logger.error(f"Repository - Error real en find_all Rango: {e}")
             raise InfrastructureException("Error al listar los Rangos.") from e
 
+    async def find_procesos_por_rango(self):
+        """
+        Devuelve {id_rango: [id_proceso, ...]} desde rango_proceso.
+
+        Las claves salen como str porque el destino es JSON: en JS las claves de objeto
+        son strings igual, y devolverlas ya normalizadas evita que el front tenga que
+        adivinar el tipo.
+        """
+        try:
+            from backend.domain.RangoProceso import RangoProceso
+
+            result = await self.db.execute(
+                select(RangoProceso.id_rango, RangoProceso.id_proceso)
+            )
+            mapa = {}
+            for id_rango, id_proceso in result.all():
+                mapa.setdefault(str(id_rango), []).append(id_proceso)
+            logger.info(f"Repository - Procesos por rango OK ({len(mapa)} rangos).")
+            return mapa
+        except Exception as e:
+            logger.error(f"Repository - Error en find_procesos_por_rango: {e}")
+            raise InfrastructureException("Error al listar los procesos por rango.") from e
+
     async def find_by_id(self, id: int):
         try:
             logger.info(f"Repository - Buscar rango por ID {id}.")

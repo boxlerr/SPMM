@@ -111,12 +111,16 @@ async def actualizar_estado_skill_nativa(id: int, id_proceso: int, dto: ProcesoS
     except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 🔹 POST /operarios/{id}/skills
+# 🔹 POST /operarios/{id}/skills — define la PRIORIDAD de una skill nativa
+#    (nivel 1 = SKILL 1, 2 = SKILL 2, 0 = sin marcar). No da de alta habilidades:
+#    el conjunto lo fijan los rangos del operario.
 @router.post("/operarios/{id}/skills")
 async def agregar_skill(id: int, dto: ProcesoSkillDTO, db=Depends(get_db)):
     try:
         service = OperarioService(db)
         return await service.agregarSkill(id, dto)
+    except BusinessException as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
 

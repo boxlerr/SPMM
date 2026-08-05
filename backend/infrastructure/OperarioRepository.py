@@ -144,3 +144,22 @@ class OperarioRepository:
         except Exception as e:
             print(f"Error en find_with_rangos: {e}")
             raise
+
+    async def find_interpreta_planos(self):
+        """
+        Devuelve {id_operario: bool} con quién sabe interpretar planos.
+
+        Lo consume el planificador: los procesos de una OT que tiene plano adjunto
+        (orden_trabajo.tiene_plano) solo pueden asignarse a operarios con esta
+        habilidad. Es transversal — no depende del proceso ni del rango.
+        """
+        try:
+            result = await self.db.execute(
+                select(Operario.id, Operario.interpreta_planos)
+            )
+            return {op_id: bool(flag) for op_id, flag in result.all()}
+        except Exception as e:
+            logger.error(f"Repository - Error en find_interpreta_planos: {e}")
+            raise InfrastructureException(
+                "Error al consultar la interpretación de planos de los operarios."
+            ) from e

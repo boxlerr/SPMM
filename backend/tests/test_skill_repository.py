@@ -1,7 +1,9 @@
 """
 Tests del OperarioProcesoSkillRepository contra SQLite:
-  - get_map_por_proceso excluye nivel 0 y habilitado=False,
-  - get_nativas_deshabilitadas devuelve solo nivel 0 / habilitado=False.
+  - get_map_por_proceso (mapa de PRIORIDAD) excluye nivel 0 y habilitado=False,
+  - get_nativas_deshabilitadas devuelve TODA fila con habilitado=False, sin importar
+    el nivel: una nativa marcada como SKILL 1/2 y después apagada también tiene que
+    salir del set de elegibles.
 """
 from backend.domain.Proceso import Proceso
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
@@ -41,5 +43,8 @@ async def test_get_nativas_deshabilitadas(session):
     repo = OperarioProcesoSkillRepository(session)
     off = await repo.get_nativas_deshabilitadas()
 
-    # Solo la fila nivel 0 / habilitado False (operario 5, proceso 101).
-    assert off == {101: {5}}
+    # Toda fila apagada, sin importar el nivel:
+    #  - proceso 101, operario 5: nativa sin marcar, apagada.
+    #  - proceso 100, operario 3: nativa marcada SKILL 1 y apagada. Antes se filtraba
+    #    por nivel == 0 y esta se escapaba: el operario seguía siendo asignable.
+    assert off == {100: {3}, 101: {5}}

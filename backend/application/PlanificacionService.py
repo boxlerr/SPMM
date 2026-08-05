@@ -262,6 +262,8 @@ def _crear_variables_y_dominios(
     nativas_off=None,
     cant_op_map=None,
     preseleccion_maq=None,
+    op_planos=None,
+    ots_con_plano=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -270,6 +272,10 @@ def _crear_variables_y_dominios(
     `cant_op_map`: dict {(orden_id, secuencia): cantidad_operarios}. Para procesos
     que requieren más de 1 operario se crean variables de operario adicionales
     ("slots") en `op_extra_vars`, con el mismo dominio que el operario principal.
+
+    `op_planos`: dict {id_operario: bool} — quién sabe interpretar planos.
+    `ots_con_plano`: set de orden_id con plano adjunto. Sus procesos solo se asignan
+    a operarios de `op_planos`.
     """
 
     inicio_vars, fin_vars, intervalo_vars = {}, {}, {}
@@ -280,6 +286,8 @@ def _crear_variables_y_dominios(
     cant_op_map = cant_op_map or {}
 
     nativas_off = nativas_off or {}
+    op_planos = op_planos or {}
+    ots_con_plano = ots_con_plano or set()
 
     op_to_rango = {op_id: r_id for (op_id, r_id) in operarios}
     REAL_OP_IDS = [op_id for (op_id, _) in operarios]
@@ -314,46 +322,59 @@ def _crear_variables_y_dominios(
         presente_vars[(orden_id, secuencia)] = model.NewBoolVar(f"pres_{orden_id}_{secuencia}")
 
         # ----------------- Operarios válidos -----------------
-        # Un proceso de MÁQUINA (PRODUCCION_MAQUINA que usa máquina) solo se puede
-        # asignar a operarios con la SKILL cargada. Las skills son la fuente de
-        # verdad: si nadie la tiene, el proceso queda "sin asignar" (dummy) en vez
-        # de abrirse por rango a cualquiera. Ver auditoría: backend/scripts/auditoria_skills.py
+        # ELEGIBILIDAD = SKILLS NATIVAS. Una nativa es la intersección entre el rango
+        # del operario y los rangos que habilitan el proceso: si el rango se lo da,
+        # el operario sabe hacerlo. Es el único criterio de "puede / no puede".
+        #
+        # SKILLS 1 y 2 NO participan acá: son prioridad dentro de las nativas, no un
+        # permiso aparte (ver _agregar_objetivo). Antes había un "modo skill-map" que
+        # restringía el proceso a quienes tuvieran nivel 1/2 cargado, dejando fuera a
+        # nativas perfectamente capaces; eso invertía el modelo y se eliminó.
+        #
+        # Para que alguien NO haga un proceso que su rango le da, se desactiva esa
+        # nativa en su perfil (nativas_off).
         es_proceso_maquina = usa_maquina and _get_tipo_proceso(nombre_proc) == "PRODUCCION_MAQUINA"
 
-        if op_skill_levels:
-            # Lógica de Skills primero (modo skill-map): solo los operarios con skill
-            # explícita nivel 1/2. Las nativas no aplican acá (ya están excluidas).
-            operarios_validos = list(op_skill_levels.keys())
-        elif es_proceso_maquina:
-            # Proceso de máquina SIN skills cargadas para nadie: no lo abrimos por
-            # rango (evita asignar a quien no sabe operar la máquina). Queda sin
-            # asignar + aviso, para que se cargue la skill del operario en la UI.
-            operarios_validos = []
+        if not rangos_proc:
+            operarios_validos = REAL_OP_IDS[:]
         else:
-            if not rangos_proc:
+            requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
+            requiere_especial  = any(r in RANGOS_ESPECIALIZADOS for r in rangos_proc)
+
+            if requiere_especial:
+                objetivo = set(rangos_proc) & RANGOS_ESPECIALIZADOS
+                operarios_validos = [op_id for (op_id, rango) in operarios if rango in objetivo]
+            elif requiere_basicos:
                 operarios_validos = REAL_OP_IDS[:]
             else:
-                requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
-                requiere_especial  = any(r in RANGOS_ESPECIALIZADOS for r in rangos_proc)
+                operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
 
-                if requiere_especial:
-                    objetivo = set(rangos_proc) & RANGOS_ESPECIALIZADOS
-                    operarios_validos = [op_id for (op_id, rango) in operarios if rango in objetivo]
-                elif requiere_basicos:
-                    operarios_validos = REAL_OP_IDS[:]
-                else:
-                    operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
+        # Un operario con varios rangos aparece repetido en `operarios`: deduplicar
+        # preservando el orden para que el dominio del solver no tenga valores dobles.
+        operarios_validos = list(dict.fromkeys(operarios_validos))
 
-            # Camino rango: restar las nativas desactivadas explícitamente para este proceso.
-            excluidos = nativas_off.get(proc_id)
-            if excluidos:
-                operarios_validos = [op_id for op_id in operarios_validos if op_id not in excluidos]
+        # Restar las nativas desactivadas explícitamente para este proceso.
+        excluidos = nativas_off.get(proc_id)
+        if excluidos:
+            operarios_validos = [op_id for op_id in operarios_validos if op_id not in excluidos]
+
+        # Interpretación de planos: si la OT trae plano adjunto, sus procesos exigen
+        # saber leerlo. Es un filtro DURO — quien no sabe, no puede hacer la tarea,
+        # por más que el rango se la habilite.
+        if orden_id in ots_con_plano:
+            antes = len(operarios_validos)
+            operarios_validos = [op_id for op_id in operarios_validos if op_planos.get(op_id, False)]
+            if antes and not operarios_validos:
+                logger.warning(
+                    f"Proceso {proc_id} ({nombre_proc}) de la OT {orden_id} requiere interpretar "
+                    f"planos y ninguno de los {antes} operarios habilitados sabe hacerlo -> SIN ASIGNAR."
+                )
 
         if not operarios_validos:
             if es_proceso_maquina:
                 logger.warning(
-                    f"Proceso máquina {proc_id} ({nombre_proc}) SIN skills cargadas -> "
-                    f"queda SIN ASIGNAR. Cargar la skill del operario en la UI."
+                    f"Proceso máquina {proc_id} ({nombre_proc}) sin ningún operario con la nativa "
+                    f"habilitada -> queda SIN ASIGNAR. Revisar rangos del proceso / de los operarios."
                 )
             else:
                 logger.warning(f"Proceso {proc_id} sin operarios válidos; usando dummy")
@@ -824,8 +845,21 @@ def _agregar_funcion_objetivo(
     total_obj = []
     now = datetime.now()
 
-    PENAL_SKILL1 = 2000
-    PENAL_SKILL2 = 5000
+    # Prioridad DENTRO de las nativas. Todos los candidatos que llegan acá ya son
+    # elegibles (tienen la nativa habilitada); esto solo ordena a quién preferir:
+    #
+    #   SKILL 1  <  SKILL 2  <  nativa sin marcar
+    #
+    # Antes la nativa sin marcar costaba 0 —ni siquiera entraba al término—, así que
+    # era la opción MÁS barata y marcar a alguien como SKILL 1 lo volvía menos
+    # probable. Invertido: ahora marcar mejora la preferencia.
+    #
+    # Las magnitudes son deliberadamente chicas frente al atraso (mult ≈ 200/min) y
+    # al dummy (1_000_000): la prioridad desempata entre operarios capaces, no
+    # justifica llegar tarde ni dejar el proceso sin asignar.
+    PENAL_SKILL1 = 0       # preferido
+    PENAL_SKILL2 = 2_000   # ~10 min de atraso
+    PENAL_NATIVA = 4_000   # ~20 min de atraso — sabe hacerlo, pero no está priorizado
 
     for (orden_id, proc_id, secuencia, fecha_prometida,
         peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,_familia_req,
@@ -836,6 +870,9 @@ def _agregar_funcion_objetivo(
 
         # --- Exactly-one operario (reales + dummy) ---
         pres_list = []
+        # (bool_pick, penalización) — se gatean por `presente` más abajo, una vez que
+        # existe el helper. Sin gatear, un proceso excedente pagaba prioridad igual.
+        penal_prioridad = []
         for op_id in op_to_rango.keys():
             if op_id == 999999:  # dummy, lo tratamos aparte
                 continue
@@ -844,13 +881,18 @@ def _agregar_funcion_objetivo(
             model.Add(op_var != op_id).OnlyEnforceIf(pres.Not())
             pres_list.append(pres)
 
-            # Penalización por Skill Level
-            if op_skill_levels and op_id in op_skill_levels:
-                nivel = op_skill_levels[op_id]
-                if nivel == 1:
-                    total_obj.append((pres, PENAL_SKILL1))
-                elif nivel == 2:
-                    total_obj.append((pres, PENAL_SKILL2))
+            # Penalización por prioridad de skill. Los operarios no elegibles quedan
+            # fuera del dominio de op_var, así que su `pres` es siempre 0 y el término
+            # no aporta nada: es seguro recorrer todos.
+            nivel = (op_skill_levels or {}).get(op_id)
+            if nivel == 1:
+                penal = PENAL_SKILL1
+            elif nivel == 2:
+                penal = PENAL_SKILL2
+            else:
+                penal = PENAL_NATIVA
+            if penal:
+                penal_prioridad.append((pres, penal))
 
         pick_dummy = model.NewBoolVar(f"pick_op_{orden_id}_{secuencia}_dummy")
         model.Add(op_var == 999999).OnlyEnforceIf(pick_dummy)
@@ -925,6 +967,12 @@ def _agregar_funcion_objetivo(
 
         late_eff = _gate_int(lateness, H * 10, f"late_eff_{orden_id}_{secuencia}")
         total_obj.append((late_eff, mult))
+
+        # Prioridad de skill (SKILL 1 < SKILL 2 < nativa), solo si el proceso entra
+        # al plan: un excedente no debe pagar preferencia de operario.
+        for _i, (pres_b, penal) in enumerate(penal_prioridad):
+            pres_eff = _gate_bool(pres_b, f"skillp_eff_{orden_id}_{secuencia}_{_i}")
+            total_obj.append((pres_eff, penal))
 
         base_prior = model.NewIntVar(0, 10000, f"base_{orden_id}_{secuencia}")
         model.Add(base_prior == (6 - min(peso_prioridad, 5)) * 100)
@@ -1188,7 +1236,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None):
     model = cp_model.CpModel()
 
     # Init Config
@@ -1288,6 +1336,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         nativas_off,
         cant_op_map,
         preseleccion_maq,
+        op_planos,
+        ots_con_plano,
     )
 
     # ---- Restricciones ----
@@ -1517,10 +1567,13 @@ async def planificar(
     if not repo_skill:
         repo_skill = OperarioProcesoSkillRepository(db)
 
-    # 🔹 Cargar mapa de skills (proceso_id -> {operario_id: nivel})
+    # 🔹 Mapa de PRIORIDAD (proceso_id -> {operario_id: nivel 1|2}). No define quién
+    #    puede: eso lo dan las nativas (rango). Solo ordena preferencia.
     mapa_skills = await repo_skill.get_map_por_proceso()
-    # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir en el camino rango
+    # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir de la elegibilidad
     nativas_off = await repo_skill.get_nativas_deshabilitadas()
+    # 🔹 Quién sabe interpretar planos (id_operario -> bool)
+    op_planos = await repo_operario.find_interpreta_planos()
 
     # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
     if not preview and plan:
@@ -1534,7 +1587,10 @@ async def planificar(
         ordenes = await repo_orden.find_with_procesos()
 
     operarios = await repo_operario.find_with_rangos()
-    
+
+    # OTs con plano adjunto: sus procesos exigen saber interpretar planos.
+    ots_con_plano = {o.id for o in ordenes if getattr(o, "tiene_plano", 0)}
+
     # Cargar maquinarias (con rangos)
     maquinarias_orm = await repo_maquinaria.find_with_rangos()
     maquinarias = []
@@ -1645,6 +1701,8 @@ async def planificar(
         nativas_off,
         cant_op_map,
         preseleccion_maq,
+        op_planos,
+        ots_con_plano,
     )
 
     planificados, excedentes = _split_resultados(resultados)
@@ -1686,6 +1744,10 @@ async def planificar_pendientes(
             return []
 
         operarios = await repo_operario.find_with_rangos()
+        op_planos = await repo_operario.find_interpreta_planos()
+
+        # OTs con plano adjunto: sus procesos exigen saber interpretar planos.
+        ots_con_plano = {o.id for o in ordenes if getattr(o, "tiene_plano", 0)}
 
         maquinarias_orm = await repo_maquinaria.find_with_rangos()
         #maquinarias = [
@@ -1739,6 +1801,9 @@ async def planificar_pendientes(
             fecha_hasta,
             nativas_off,
             cant_op_map,
+            None,           # preseleccion_maq: no aplica en pendientes
+            op_planos,
+            ots_con_plano,
         )
 
         planificados, excedentes = _split_resultados(resultados)

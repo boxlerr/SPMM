@@ -27,140 +27,169 @@ def _normalizar_dias_trabajo(valor):
 
 def _build_skills_payload(operario):
     """
-    Combina las skills cargadas manualmente (nivel 1 y 2) con las skills nativas
-    computadas desde los rangos del operario (nivel 0).
+    Devuelve la lista completa de habilidades del operario tal como las ve la UI.
 
-    - Las nivel 1/2 se emiten tal cual.
-    - Las nativas se derivan de operario.rangos × rango.procesos.
-    - Las filas persistidas nivel 0 NO se emiten como entradas sueltas: actúan como
-      override del estado `habilitado` de la nativa derivada (marca de "nativa
-      desactivada"). Una nativa sin override queda habilitada por defecto.
-    - Si un id_proceso aparece como cargado (nivel 1/2) y como nativo, gana el cargado.
+    Modelo: las SKILLS NATIVAS (rango del operario × procesos del rango) son el
+    universo de lo que sabe hacer. `operario_proceso_skill` no es un catálogo
+    paralelo, es una tabla de OVERRIDES sobre esas nativas, con dos ejes sueltos:
+
+      - `nivel`      -> prioridad: 0 = sin marcar, 1 = SKILL 1, 2 = SKILL 2
+      - `habilitado` -> si está apagada para este operario
+
+    Cada entrada sale como {id_proceso, nivel, habilitado, nativa}. Una nativa sin
+    fila de override queda en nivel 0 / habilitada.
+
+    Las filas nivel 1/2 sobre procesos que el rango YA NO da salen con nativa=False:
+    son restos del modelo viejo (SKILLS 1/2 como catálogo abierto). El planificador
+    las ignora —la prioridad solo pesa sobre quien ya es elegible— y el próximo
+    guardado las limpia, pero se emiten igual para no esconder datos que están en la
+    base.
     """
-    payload = []
-    procesos_vistos = set()
-    overrides_nativas = {}  # id_proceso -> habilitado (desde filas nivel 0 persistidas)
+    overrides = {
+        s.id_proceso: {"nivel": s.nivel or 0, "habilitado": s.habilitado}
+        for s in (operario.procesos_skill or [])
+    }
 
-    for s in (operario.procesos_skill or []):
-        if s.nivel == 0:
-            # Override de nativa: solo guarda el estado, no se emite por sí solo.
-            overrides_nativas[s.id_proceso] = s.habilitado
-            continue
-        payload.append({
-            "id_proceso": s.id_proceso,
-            "nivel": s.nivel,
-            "habilitado": s.habilitado,
-        })
-        procesos_vistos.add(s.id_proceso)
+    payload = []
+    nativos = set()
 
     for op_rango in (operario.rangos or []):
         rango = getattr(op_rango, "rango", None)
         if rango is None:
             continue
         for rp in (rango.procesos or []):
-            if rp.id_proceso in procesos_vistos:
+            if rp.id_proceso in nativos:
                 continue
+            nativos.add(rp.id_proceso)
+            ov = overrides.get(rp.id_proceso, {})
             payload.append({
                 "id_proceso": rp.id_proceso,
-                "nivel": 0,
-                "habilitado": overrides_nativas.get(rp.id_proceso, True),
+                "nivel": ov.get("nivel", 0),
+                "habilitado": ov.get("habilitado", True),
+                "nativa": True,
             })
-            procesos_vistos.add(rp.id_proceso)
+
+    for id_proceso, ov in overrides.items():
+        if id_proceso in nativos:
+            continue
+        payload.append({
+            "id_proceso": id_proceso,
+            "nivel": ov["nivel"],
+            "habilitado": ov["habilitado"],
+            "nativa": False,
+        })
 
     return payload
 
 
 def _normalizar_skills(skills):
     """
-    Normaliza las skills que manda el form: una sola entrada por proceso (gana
-    SKILL 1 sobre SKILL 2) y sin nivel 0 — las nativas se derivan del rango, no se
-    cargan a mano. Acepta dicts o DTOs.
+    Normaliza lo que manda el form: una sola entrada por proceso. Acepta dicts o DTOs.
+
+    Solo se persisten los overrides que dicen algo — prioridad marcada (nivel 1/2) o
+    nativa apagada (habilitado=False). Una nativa habilitada y sin marcar es el estado
+    por defecto derivado del rango: guardarla sería escribir una fila por cada proceso
+    de cada operario para no decir nada.
 
     La deduplicación no es cosmética: dos entradas del mismo proceso terminan en dos
-    INSERT con la misma PK (id_operario, id_proceso) y revientan el guardado.
+    INSERT con la misma PK (id_operario, id_proceso) y revientan el guardado. Ante
+    duplicados gana la prioridad más alta (SKILL 1 sobre SKILL 2).
     """
     por_proceso = {}
     for s in (skills or []):
         datos = s if isinstance(s, dict) else s.dict()
-        nivel = datos.get("nivel")
-        if nivel not in (1, 2):
+        nivel = datos.get("nivel") or 0
+        if nivel not in (0, 1, 2):
             continue
+        habilitado = datos.get("habilitado", True)
+        if nivel == 0 and habilitado:
+            continue  # estado por defecto: no hace falta fila
         id_proceso = datos.get("id_proceso")
+        if id_proceso is None:
+            continue
         previo = por_proceso.get(id_proceso)
-        if previo is None or nivel < previo["nivel"]:
+        # Menor nivel = mayor prioridad, pero 0 (sin marcar) nunca le gana a 1/2.
+        if previo is None or _rank_nivel(nivel) < _rank_nivel(previo["nivel"]):
             por_proceso[id_proceso] = {
                 "id_proceso": id_proceso,
                 "nivel": nivel,
-                "habilitado": datos.get("habilitado", True),
+                "habilitado": habilitado,
             }
     return list(por_proceso.values())
 
 
-async def _clasificar_nativas_que_chocan(db, id_operario, skills_normalizadas):
+def _rank_nivel(nivel):
+    """Orden de preferencia: SKILL 1 < SKILL 2 < sin marcar."""
+    return {1: 0, 2: 1}.get(nivel, 2)
+
+
+async def _procesos_nativos(db, id_operario, rangos_data=None):
     """
-    Las filas nivel 0 de los procesos que el form quiere cargar como SKILL 1/2 chocan
-    contra la PK (id_operario, id_proceso) al insertar. Se parten en dos grupos según
-    lo que el usuario VE en pantalla:
+    Devuelve el set de id_proceso que los rangos del operario le habilitan hoy: sus
+    SKILLS NATIVAS.
 
-      - visibles: el proceso sigue estando en algún rango del operario, así que figura
-        en su lista de SKILLS NATIVAS. Se avisa y no se guarda: el usuario ve la nativa
-        y decide (sacarla del form o apagar la nativa).
-      - huérfanas: el rango ya no da ese proceso, así que la fila no se muestra en
-        ninguna parte. Es un resto de cargas viejas, inerte para el planificador
-        (get_map_por_proceso solo mira nivel 1/2, y restar una nativa que el rango ya
-        no otorga no cambia nada). Avisar por algo invisible solo confunde: se borra
-        y la reemplaza la skill cargada.
-
-    Devuelve (visibles, ids_huerfanas) donde visibles es [(nombre_proceso, habilitado)].
+    `rangos_data` es la lista de rangos que viene en el MISMO guardado. Si está, manda
+    ella y no lo persistido: el form puede cambiar rangos y prioridades de una, y
+    validar contra los rangos viejos rechazaría una skill que el rango nuevo sí da
+    (o dejaría pasar una que ya no).
     """
-    ids = [s["id_proceso"] for s in skills_normalizadas]
-    if not ids:
-        return [], []
-
     from sqlalchemy import select
-    from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
     from backend.domain.OperarioRango import OperarioRango
-    from backend.domain.Proceso import Proceso
     from backend.domain.RangoProceso import RangoProceso
 
-    filas = (await db.execute(
-        select(OperarioProcesoSkill.id_proceso, Proceso.nombre, OperarioProcesoSkill.habilitado)
-        .join(Proceso, Proceso.id == OperarioProcesoSkill.id_proceso)
-        .where(
-            OperarioProcesoSkill.id_operario == id_operario,
-            OperarioProcesoSkill.nivel == 0,
-            OperarioProcesoSkill.id_proceso.in_(ids),
+    if rangos_data is not None:
+        rangos = [r for r in rangos_data if r is not None]
+        if not rangos:
+            return set()
+        stmt = select(RangoProceso.id_proceso).where(RangoProceso.id_rango.in_(rangos))
+    else:
+        stmt = (
+            select(RangoProceso.id_proceso)
+            .join(OperarioRango, OperarioRango.id_rango == RangoProceso.id_rango)
+            .where(OperarioRango.id_operario == id_operario)
         )
-        .order_by(Proceso.nombre)
-    )).all()
-    if not filas:
-        return [], []
-
-    # Procesos que los rangos del operario le dan hoy: son los que ve como nativas.
-    derivados = set((await db.execute(
-        select(RangoProceso.id_proceso)
-        .join(OperarioRango, OperarioRango.id_rango == RangoProceso.id_rango)
-        .where(OperarioRango.id_operario == id_operario)
-    )).scalars().all())
-
-    visibles = [(n, h) for id_proceso, n, h in filas if id_proceso in derivados]
-    huerfanas = [id_proceso for id_proceso, _, _ in filas if id_proceso not in derivados]
-    return visibles, huerfanas
+    return set((await db.execute(stmt)).scalars().all())
 
 
-def _mensaje_nativas_que_chocan(filas):
-    """Arma el aviso que ve el usuario cuando el proceso ya está cargado como nativa."""
-    detalle = ", ".join(
-        f"{nombre}{'' if habilitado else ' (desactivada)'}" for nombre, habilitado in filas
-    )
-    if len(filas) == 1:
-        return (
-            f"{detalle} ya está cargada como SKILL NATIVA en este operario. "
-            f"Quitala de SKILLS 1 / SKILLS 2, o eliminá la nativa desde el detalle del operario."
+async def _validar_prioridades_sobre_nativas(db, id_operario, skills_normalizadas, rangos_data=None):
+    """
+    Invariante del modelo: SKILLS 1 y 2 solo pueden marcar procesos que el operario ya
+    tiene como NATIVOS. Son un orden de preferencia dentro de lo que sabe hacer, no una
+    forma de habilitarle un proceso que su rango no le da — para eso se cambia el rango.
+
+    (El modelo anterior era el inverso: rechazaba marcar una nativa y dejaba cargar
+    cualquier proceso suelto. Eso hacía que SKILLS 1/2 fuera un universo aparte del de
+    las nativas, que es justo lo que se corrigió.)
+
+    Lanza BusinessException nombrando los procesos que no corresponden.
+    """
+    marcados = [s["id_proceso"] for s in skills_normalizadas if s["nivel"] in (1, 2)]
+    if not marcados:
+        return
+
+    nativos = await _procesos_nativos(db, id_operario, rangos_data)
+    intrusos = [p for p in marcados if p not in nativos]
+    if not intrusos:
+        return
+
+    from sqlalchemy import select
+    from backend.domain.Proceso import Proceso
+
+    nombres = (await db.execute(
+        select(Proceso.nombre).where(Proceso.id.in_(intrusos)).order_by(Proceso.nombre)
+    )).scalars().all()
+    detalle = ", ".join(nombres) if nombres else ", ".join(str(p) for p in intrusos)
+
+    if len(intrusos) == 1:
+        raise BusinessException(
+            f"{detalle} no es una SKILL NATIVA de este operario, así que no se le puede dar "
+            f"prioridad. Asignale un rango que incluya ese proceso y después marcalo como "
+            f"SKILL 1 o SKILL 2."
         )
-    return (
-        f"Estos procesos ya están cargados como SKILL NATIVA en este operario: {detalle}. "
-        f"Quitalos de SKILLS 1 / SKILLS 2, o eliminá las nativas desde el detalle del operario."
+    raise BusinessException(
+        f"Estos procesos no son SKILLS NATIVAS de este operario y no se les puede dar "
+        f"prioridad: {detalle}. Asignale los rangos que los incluyan y después marcalos "
+        f"como SKILL 1 o SKILL 2."
     )
 
 
@@ -206,13 +235,20 @@ class OperarioService:
             from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
             from backend.domain.OperarioRango import OperarioRango
 
+            skills_norm = _normalizar_skills(operario_dto.skills)
+            # El operario todavía no existe, así que las nativas se validan contra los
+            # rangos que vienen en el alta.
+            await _validar_prioridades_sobre_nativas(
+                db, None, skills_norm, operario_dto.rangos or []
+            )
+
             procesos_skill = [
                 OperarioProcesoSkill(
                     id_proceso=s["id_proceso"],
                     nivel=s["nivel"],
                     habilitado=s["habilitado"],
                 )
-                for s in _normalizar_skills(operario_dto.skills)
+                for s in skills_norm
             ]
 
             operario = Operario(
@@ -364,7 +400,7 @@ class OperarioService:
         # sola transacción con un único commit al final. Si algo falla a mitad de
         # camino (p. ej. la DB se desconecta), se hace rollback y NO queda un
         # guardado parcial: o se guarda todo o no se guarda nada.
-        from sqlalchemy import select, delete, or_
+        from sqlalchemy import select, delete
         from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
         from backend.domain.OperarioRango import OperarioRango
         from backend.infrastructure.db_retry import run_with_db_retry, motivo_error_db
@@ -402,16 +438,11 @@ class OperarioService:
         # así que reintentar es seguro. Se reconstruye todo adentro para que, tras un
         # rollback, no queden objetos ORM inválidos.
         async def _guardar():
-            # Las filas nivel 0 (nativas) NO se tocan al guardar: el form no las maneja y
-            # borrarlas las perdería. Por eso se chequea ANTES de escribir nada si alguno
-            # de los procesos que vienen ya está cargado como nativa: sin ese aviso el
-            # INSERT choca contra la PK (id_operario, id_proceso) y el usuario ve un error
-            # de base de datos en vez de entender que ya la tenía cargada.
-            huerfanas = []
+            # Se valida ANTES de escribir nada: marcar como SKILL 1/2 un proceso que no
+            # es nativo del operario es un error del usuario, no de la base, y tiene que
+            # llegarle como aviso entendible.
             if skills_data:
-                visibles, huerfanas = await _clasificar_nativas_que_chocan(db, id, skills_data)
-                if visibles:
-                    raise BusinessException(_mensaje_nativas_que_chocan(visibles))
+                await _validar_prioridades_sobre_nativas(db, id, skills_data, rangos_data)
 
             result = await db.execute(select(Operario).where(Operario.id == id))
             operario = result.scalar_one_or_none()
@@ -420,17 +451,14 @@ class OperarioService:
             for key, value in nueva_data.items():
                 setattr(operario, key, value)
 
-            # Skills cargadas (nivel 1/2): se reemplazan por completo. Las nativas
-            # huérfanas de esos mismos procesos se borran de paso: no las ve nadie y le
-            # dejan el lugar a la skill que se está cargando.
+            # Los overrides se reemplazan por completo: el form manda el estado final de
+            # todas las nativas (prioridad + apagadas), así que lo que no viene es que
+            # volvió al default. El borrado total también limpia de paso las filas
+            # huérfanas del modelo viejo (nivel 1/2 sobre procesos que el rango ya no da).
             if skills_data is not None:
-                condicion = OperarioProcesoSkill.nivel.in_([1, 2])
-                if huerfanas:
-                    condicion = or_(condicion, OperarioProcesoSkill.id_proceso.in_(huerfanas))
                 await db.execute(
                     delete(OperarioProcesoSkill).where(
                         OperarioProcesoSkill.id_operario == id,
-                        condicion,
                     )
                 )
                 for s in skills_data:
@@ -506,13 +534,16 @@ class OperarioService:
     # 🔹 Actualizar estado de una skill NATIVA (derivada del rango)
     async def actualizarEstadoSkillNativa(self, id_operario: int, id_proceso: int, habilitado: bool):
         """
-        Las nativas no tienen fila por defecto (se derivan del rango). Para desactivar
-        una, se persiste una fila nivel=0, habilitado=False como override. Reactivarla
-        borra la fila y vuelve al estado derivado por defecto.
+        Las nativas no tienen fila por defecto (se derivan del rango): la fila de
+        `operario_proceso_skill` es un OVERRIDE sobre la nativa derivada, y guarda dos
+        cosas independientes — si está apagada (`habilitado`) y qué prioridad tiene
+        (`nivel`: 0 = sin marcar, 1 = SKILL 1, 2 = SKILL 2).
 
-        Importante: al reactivar se BORRA la fila (no se pone habilitado=True). Una fila
-        nivel=0, habilitado=True entraría en get_map_por_proceso si no estuviera acotado
-        a nivel 1/2, y podría disparar el modo skill-map del planificador.
+        Apagar y priorizar son ejes distintos, así que el toggle NO pisa el nivel:
+        una nativa marcada como SKILL 1 que se apaga y se vuelve a prender tiene que
+        seguir siendo SKILL 1. Al reactivar solo se borra la fila si además no tenía
+        prioridad (nivel 0), porque ahí ya no aporta nada y conviene volver al estado
+        derivado limpio.
         """
         try:
             from sqlalchemy import select, delete
@@ -524,9 +555,10 @@ class OperarioService:
             )
             result = await self.repository.db.execute(stmt)
             skill = result.scalar_one_or_none()
+            nivel_resultante = 0
 
             if not habilitado:
-                # Desactivar nativa -> upsert override nivel=0, habilitado=False
+                # Desactivar nativa -> upsert habilitado=False, conservando la prioridad.
                 if skill is None:
                     self.repository.db.add(OperarioProcesoSkill(
                         id_operario=id_operario,
@@ -535,26 +567,32 @@ class OperarioService:
                         habilitado=False,
                     ))
                 else:
-                    # Solo override de nativas; no degradar una skill cargada nivel 1/2.
-                    if skill.nivel not in (1, 2):
-                        skill.nivel = 0
-                        skill.habilitado = False
+                    skill.habilitado = False
+                    nivel_resultante = skill.nivel or 0
             else:
-                # Reactivar nativa -> borrar el override (vuelve al default derivado).
-                # No tocar skills cargadas nivel 1/2.
-                if skill is not None and skill.nivel == 0:
-                    await self.repository.db.execute(
-                        delete(OperarioProcesoSkill).where(
-                            OperarioProcesoSkill.id_operario == id_operario,
-                            OperarioProcesoSkill.id_proceso == id_proceso,
-                            OperarioProcesoSkill.nivel == 0,
+                if skill is not None:
+                    if skill.nivel in (1, 2):
+                        # Tiene prioridad: se prende, pero la fila se conserva.
+                        skill.habilitado = True
+                        nivel_resultante = skill.nivel
+                    else:
+                        # Sin prioridad: la fila ya no dice nada -> volver al derivado.
+                        await self.repository.db.execute(
+                            delete(OperarioProcesoSkill).where(
+                                OperarioProcesoSkill.id_operario == id_operario,
+                                OperarioProcesoSkill.id_proceso == id_proceso,
+                            )
                         )
-                    )
 
             await self.repository.db.commit()
             return ResponseDTO(
                 status=True,
-                data={"id_operario": id_operario, "id_proceso": id_proceso, "habilitado": habilitado, "nivel": 0},
+                data={
+                    "id_operario": id_operario,
+                    "id_proceso": id_proceso,
+                    "habilitado": habilitado,
+                    "nivel": nivel_resultante,
+                },
                 errorDescription="",
             )
         except Exception as e:
@@ -562,40 +600,65 @@ class OperarioService:
             logger.error(f"Service - Error al actualizar estado de nativa: {e}")
             raise InfrastructureException("Error al actualizar la habilidad nativa.") from e
 
-    # 🔹 Agregar nueva habilidad a operario
+    # 🔹 Definir la PRIORIDAD de una skill nativa (SKILL 1 / SKILL 2 / sin marcar)
     async def agregarSkill(self, id_operario: int, dto):
+        """
+        Ya no "agrega" una habilidad: el conjunto de lo que el operario sabe hacer lo
+        fijan sus rangos (skills nativas). Esto marca la prioridad de una de ellas.
+
+        - nivel 1/2 -> se prioriza y queda habilitada.
+        - nivel 0   -> se quita la prioridad. Si además estaba habilitada, se borra la
+          fila: sin prioridad y sin apagado no queda nada que persistir.
+        """
         try:
-            from sqlalchemy import select
+            from sqlalchemy import select, delete
             from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
-            
-            # Check if it already exists
+
+            nivel = dto.nivel or 0
+            if nivel in (1, 2):
+                await _validar_prioridades_sobre_nativas(
+                    self.repository.db,
+                    id_operario,
+                    [{"id_proceso": dto.id_proceso, "nivel": nivel}],
+                )
+
             stmt = select(OperarioProcesoSkill).where(
                 OperarioProcesoSkill.id_operario == id_operario,
                 OperarioProcesoSkill.id_proceso == dto.id_proceso
             )
             result = await self.repository.db.execute(stmt)
             existing = result.scalar_one_or_none()
-            
-            if existing:
-                # Actualizar el nivel o la habilitacion si ya existe
-                existing.nivel = dto.nivel
+
+            if nivel == 0:
+                if existing is not None and existing.habilitado:
+                    await self.repository.db.execute(
+                        delete(OperarioProcesoSkill).where(
+                            OperarioProcesoSkill.id_operario == id_operario,
+                            OperarioProcesoSkill.id_proceso == dto.id_proceso,
+                        )
+                    )
+                elif existing is not None:
+                    existing.nivel = 0
+            elif existing:
+                existing.nivel = nivel
                 existing.habilitado = True
             else:
-                # Agregar nueva
-                nueva_skill = OperarioProcesoSkill(
+                self.repository.db.add(OperarioProcesoSkill(
                     id_operario=id_operario,
                     id_proceso=dto.id_proceso,
-                    nivel=dto.nivel,
-                    habilitado=True
-                )
-                self.repository.db.add(nueva_skill)
-                
+                    nivel=nivel,
+                    habilitado=True,
+                ))
+
             await self.repository.db.commit()
-            return ResponseDTO(status=True, data={"id_operario": id_operario, "id_proceso": dto.id_proceso, "nivel": dto.nivel}, errorDescription="")
+            return ResponseDTO(status=True, data={"id_operario": id_operario, "id_proceso": dto.id_proceso, "nivel": nivel}, errorDescription="")
+        except BusinessException:
+            await self.repository.db.rollback()
+            raise
         except Exception as e:
             await self.repository.db.rollback()
-            logger.error(f"Service - Error al agregar skill: {e}")
-            raise InfrastructureException("Error al agregar la habilidad.") from e
+            logger.error(f"Service - Error al definir la prioridad de la skill: {e}")
+            raise InfrastructureException("Error al actualizar la prioridad de la habilidad.") from e
 
     # 🔹 Eliminar habilidad de operario
     async def eliminarSkill(self, id_operario: int, id_proceso: int):

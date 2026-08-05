@@ -26,6 +26,22 @@ async def listar_rangos(db=Depends(get_db)):
     return await service.listarRangos()
 
 
+@router.get("/rangos/procesos")
+async def listar_procesos_por_rango(db=Depends(get_db)):
+    """
+    Mapa {id_rango: [id_proceso, ...]}: los procesos que habilita cada rango.
+
+    Lo usa el editor de habilidades del operario para recalcular las SKILLS NATIVAS
+    en vivo al cambiar los rangos, sin tener que guardar primero.
+
+    Va declarada ANTES de /rangos/{id}: si no, FastAPI matchea "procesos" contra {id}
+    y responde 422 por no poder parsearlo como int.
+    """
+    logger.info("API - Inicio GET /rangos/procesos")
+    service = RangoService(db)
+    return await service.listarProcesosPorRango()
+
+
 @router.get("/rangos/{id}")
 async def obtener_rango(id: int, db=Depends(get_db)):
     service = RangoService(db)

@@ -12,19 +12,26 @@ class OperarioProcesoSkillRepository:
 
     async def get_map_por_proceso(self):
         """
-        Devuelve un mapa anidado con la estructura:
+        Devuelve el mapa de PRIORIDADES por proceso:
         {
-          proceso_id: { operario_id: nivel }
+          proceso_id: { operario_id: nivel }   # nivel ∈ {1, 2}
         }
-        Filtra únicamente los registros habilitados y de nivel 1/2 (skills cargadas
-        manualmente). Las nivel 0 (nativas, derivadas del rango) NO entran al mapa:
-        no deben disparar el modo skill-map del planificador — pertenecen al camino
-        rango. Su desactivación se maneja por separado (get_nativas_deshabilitadas).
+
+        Ojo con la semántica: este mapa NO define quién puede hacer el proceso.
+        La elegibilidad la dan las skills NATIVAS (rango del operario × rangos del
+        proceso); una fila nivel 1/2 solo existe para una nativa y sirve para
+        ordenar preferencia dentro de ese conjunto (SKILL 1 antes que SKILL 2, y
+        ambas antes que una nativa sin marcar). El planificador lo usa únicamente
+        en la función objetivo — ver PlanificacionService._agregar_objetivo.
+
+        Las filas deshabilitadas quedan fuera: una nativa apagada no se asigna, así
+        que su prioridad es irrelevante (la exclusión la aporta
+        get_nativas_deshabilitadas).
         """
         try:
-            logger.info("Repository - Obteniendo mapa de habilidades por proceso.")
+            logger.info("Repository - Obteniendo mapa de prioridades por proceso.")
 
-            # Consulta: solo habilitadas y de nivel 1/2 (excluye nativas nivel 0)
+            # Solo prioridades vigentes: nivel 1/2 y no desactivadas.
             stmt = select(OperarioProcesoSkill).where(
                 OperarioProcesoSkill.habilitado == True,
                 OperarioProcesoSkill.nivel.in_([1, 2]),
@@ -47,17 +54,20 @@ class OperarioProcesoSkillRepository:
 
     async def get_nativas_deshabilitadas(self):
         """
-        Devuelve las skills nativas (nivel 0) que fueron explícitamente desactivadas:
+        Devuelve las skills nativas que fueron explícitamente desactivadas:
         {
           proceso_id: { operario_id, ... }
         }
-        Son filas persistidas con nivel = 0 AND habilitado = False, usadas como
-        "marca de nativa desactivada". El planificador las resta del set de operarios
-        válidos en el camino rango.
+        Son filas persistidas con habilitado = False, usadas como "marca de nativa
+        desactivada". El planificador las resta del set de operarios elegibles.
+
+        El filtro es por `habilitado`, sin mirar el nivel: una nativa que quedó
+        marcada como SKILL 1/2 y después se desactivó (nivel 1/2 + habilitado False)
+        tiene que salir igual del set. Filtrar por nivel == 0 la dejaba adentro y el
+        operario seguía siendo asignable pese a estar apagado.
         """
         try:
             stmt = select(OperarioProcesoSkill).where(
-                OperarioProcesoSkill.nivel == 0,
                 OperarioProcesoSkill.habilitado == False,
             )
             result = await self.db.execute(stmt)

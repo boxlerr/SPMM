@@ -1,6 +1,10 @@
 """
-Tests puros de _build_skills_payload: combina skills cargadas (nivel 1/2) con
-nativas derivadas del rango (nivel 0), aplicando overrides de desactivación.
+Tests puros de _build_skills_payload.
+
+El payload es la vista unificada que consume la UI: TODAS las skills nativas del
+operario (rango × procesos del rango), cada una con su prioridad (nivel 0/1/2) y si
+está apagada. Las filas de operario_proceso_skill son overrides sobre esas nativas,
+no un catálogo aparte.
 """
 from types import SimpleNamespace
 
@@ -27,34 +31,43 @@ def by_proceso(payload):
 def test_nativas_derivadas_del_rango():
     op = make_op(skills=[], rangos_procs=[[100, 101]])
     m = by_proceso(_build_skills_payload(op))
-    assert m[100] == {"id_proceso": 100, "nivel": 0, "habilitado": True}
-    assert m[101] == {"id_proceso": 101, "nivel": 0, "habilitado": True}
+    assert m[100] == {"id_proceso": 100, "nivel": 0, "habilitado": True, "nativa": True}
+    assert m[101] == {"id_proceso": 101, "nivel": 0, "habilitado": True, "nativa": True}
 
 
 def test_override_desactiva_nativa():
-    # Fila persistida nivel 0 / habilitado False -> override de desactivación.
+    # Fila persistida habilitado False -> la nativa queda apagada.
     op = make_op(skills=[(100, 0, False)], rangos_procs=[[100, 101]])
     m = by_proceso(_build_skills_payload(op))
     assert m[100]["nivel"] == 0 and m[100]["habilitado"] is False
     assert m[101]["habilitado"] is True
 
 
-def test_skill_manual_gana_a_nativa():
+def test_prioridad_se_aplica_sobre_la_nativa():
+    # Marcar SKILL 1 no crea una entrada aparte: anota la nativa que ya existía.
     op = make_op(skills=[(100, 1, True)], rangos_procs=[[100, 101]])
     payload = _build_skills_payload(op)
     m = by_proceso(payload)
-    # 100 aparece UNA sola vez, como nivel 1 (cargada), no como nativa.
     assert len([x for x in payload if x["id_proceso"] == 100]) == 1
-    assert m[100]["nivel"] == 1
+    assert m[100]["nivel"] == 1 and m[100]["nativa"] is True
     assert m[101]["nivel"] == 0
 
 
-def test_override_huerfano_fuera_de_rango_no_se_emite():
-    # Fila nivel 0 para un proceso que ya no está en el rango -> no se muestra.
-    op = make_op(skills=[(200, 0, False)], rangos_procs=[[100]])
+def test_nativa_puede_estar_priorizada_y_apagada():
+    # Ejes independientes: se conserva la prioridad aunque esté apagada.
+    op = make_op(skills=[(100, 2, False)], rangos_procs=[[100]])
     m = by_proceso(_build_skills_payload(op))
-    assert 200 not in m
-    assert m[100]["nivel"] == 0 and m[100]["habilitado"] is True
+    assert m[100]["nivel"] == 2 and m[100]["habilitado"] is False
+
+
+def test_override_huerfano_fuera_de_rango_se_emite_marcado():
+    # Resto del modelo viejo: una fila sobre un proceso que el rango ya no da. Se
+    # emite con nativa=False para no esconder lo que está en la base; el planificador
+    # la ignora y el próximo guardado la limpia.
+    op = make_op(skills=[(200, 1, True)], rangos_procs=[[100]])
+    m = by_proceso(_build_skills_payload(op))
+    assert m[200]["nativa"] is False and m[200]["nivel"] == 1
+    assert m[100]["nativa"] is True and m[100]["nivel"] == 0
 
 
 def test_dedupe_entre_rangos():

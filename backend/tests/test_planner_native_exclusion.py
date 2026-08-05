@@ -1,9 +1,10 @@
 """
 Tests de la exclusión de nativas desactivadas en el armado del modelo del solver
 (_crear_variables_y_dominios). Verifican que:
-  - en el camino rango se restan los operarios excluidos,
+  - se restan los operarios excluidos,
   - sin nativas_off no se excluye a nadie,
-  - el modo skill-map NO se ve afectado por nativas_off.
+  - tener SKILL 1/2 NO blinda contra la desactivación: apagar la nativa saca al
+    operario aunque esté priorizado (la prioridad ordena, no habilita).
 """
 from ortools.sat.python import cp_model
 
@@ -40,7 +41,16 @@ def test_sin_nativas_off_no_excluye():
     assert 10 in vals and 11 in vals
 
 
-def test_skillmap_no_afectado_por_nativas_off():
-    # En modo skill-map (hay op_skill_levels) la exclusión de nativas NO se aplica.
+def test_prioridad_no_blinda_contra_la_desactivacion():
+    # El operario 11 está marcado como SKILL 1 y además tiene la nativa apagada.
+    # Apagada gana: la prioridad decide a quién preferir entre los elegibles, no
+    # quién es elegible. (Antes el "modo skill-map" lo dejaba adentro.)
     vals = _dominio_operarios(op_skill_levels={11: 1}, nativas_off={100: {11}})
-    assert 11 in vals              # sigue válido pese a estar en nativas_off
+    assert 11 not in vals
+    assert 10 in vals
+
+
+def test_prioridad_no_excluye_a_las_demas_nativas():
+    # Marcar al 11 como SKILL 1 no saca al 10, que tiene la misma nativa sin marcar.
+    vals = _dominio_operarios(op_skill_levels={11: 1}, nativas_off={})
+    assert 10 in vals and 11 in vals
