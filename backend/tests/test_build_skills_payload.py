@@ -13,10 +13,13 @@ from backend.application.OperarioService import _build_skills_payload
 
 def make_op(skills, rangos_procs):
     """
-    skills: lista de (id_proceso, nivel, habilitado) persistidas.
+    skills: lista de (id_proceso, nivel, habilitado) o (id_proceso, nivel, habilitado, orden).
     rangos_procs: lista de listas de id_proceso, una por rango del operario.
     """
-    procesos_skill = [SimpleNamespace(id_proceso=p, nivel=n, habilitado=h) for (p, n, h) in skills]
+    procesos_skill = [
+        SimpleNamespace(id_proceso=t[0], nivel=t[1], habilitado=t[2], orden=(t[3] if len(t) > 3 else None))
+        for t in skills
+    ]
     rangos = []
     for procs in rangos_procs:
         rango = SimpleNamespace(procesos=[SimpleNamespace(id_proceso=pid) for pid in procs])
@@ -31,8 +34,8 @@ def by_proceso(payload):
 def test_nativas_derivadas_del_rango():
     op = make_op(skills=[], rangos_procs=[[100, 101]])
     m = by_proceso(_build_skills_payload(op))
-    assert m[100] == {"id_proceso": 100, "nivel": 0, "habilitado": True, "nativa": True}
-    assert m[101] == {"id_proceso": 101, "nivel": 0, "habilitado": True, "nativa": True}
+    assert m[100] == {"id_proceso": 100, "nivel": 0, "habilitado": True, "orden": None, "nativa": True}
+    assert m[101] == {"id_proceso": 101, "nivel": 0, "habilitado": True, "orden": None, "nativa": True}
 
 
 def test_override_desactiva_nativa():

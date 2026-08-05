@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { User, Phone, Activity, Calendar, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench, Trash2, Plus, Briefcase } from "lucide-react";
+import { User, Phone, Activity, Calendar, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench, Trash2, Plus, Briefcase, Search, X } from "lucide-react";
 import { Operario, ProcesoSkill } from "../_types";
 import { PlanificacionItem } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,32 +40,34 @@ const GRUPOS_SKILL = [
   {
     value: "skill1",
     titulo: "SKILLS 1",
-    barra: "bg-emerald-500",
+    barra: "bg-gradient-to-b from-emerald-500 to-teal-500",
     vacio: "Ninguna marcada como SKILL 1",
-    filtro: (s: ProcesoSkill) => s.habilitado && s.nivel === 1,
+    filtro: (s: ProcesoSkill) => s.nivel === 1,
   },
   {
     value: "skill2",
     titulo: "SKILLS 2",
-    barra: "bg-sky-500",
+    barra: "bg-gradient-to-b from-indigo-500 to-sky-500",
     vacio: "Ninguna marcada como SKILL 2",
-    filtro: (s: ProcesoSkill) => s.habilitado && s.nivel === 2,
+    filtro: (s: ProcesoSkill) => s.nivel === 2,
   },
   {
-    value: "sin-prioridad",
-    titulo: "SIN PRIORIDAD",
-    barra: "bg-slate-400",
-    vacio: "Ninguna sin prioridad",
-    filtro: (s: ProcesoSkill) => s.habilitado && (s.nivel ?? 0) === 0,
-  },
-  {
-    value: "apagadas",
-    titulo: "DESACTIVADAS",
-    barra: "bg-gray-300",
-    vacio: "Ninguna desactivada",
-    filtro: (s: ProcesoSkill) => !s.habilitado,
+    // El pool: las nativas que no están priorizadas. No es un estado aparte —
+    // es simplemente "no la mandaste a ninguna lista".
+    value: "nativas",
+    titulo: "SKILLS NATIVAS",
+    barra: "bg-gradient-to-b from-slate-400 to-slate-300",
+    vacio: "Todas están priorizadas",
+    filtro: (s: ProcesoSkill) => (s.nivel ?? 0) === 0,
   },
 ];
+
+/** Dentro de SKILLS 1/2 manda la posición; en el pool, el alfabético. */
+const ordenarSkills = (a: ProcesoSkill, b: ProcesoSkill, nombre: (s: ProcesoSkill) => string) => {
+  const oa = a.orden ?? Number.MAX_SAFE_INTEGER;
+  const ob = b.orden ?? Number.MAX_SAFE_INTEGER;
+  return oa - ob || nombre(a).localeCompare(nombre(b));
+};
 
 export default function DetalleOperario({ operario, tasks: initialTasks = [], onClose, onCambiarEstado, onOperatorUpdated }: DetalleOperarioProps) {
   const { showToast } = useToast();
@@ -75,6 +77,15 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   const [procesosMap, setProcesosMap] = useState<Record<number, string>>({});
   const [updatingSkills, setUpdatingSkills] = useState<Set<number>>(new Set());
   const [renderTrigger, setRenderTrigger] = useState(0); // For optimistic UI updates
+  const [busquedaSkill, setBusquedaSkill] = useState("");
+
+  // Filtro del buscador de habilidades. Sin acentos: los procesos vienen en
+  // mayuscula y con tildes inconsistentes.
+  const coincideBusqueda = useMemo(() => {
+    const norm = (x: string) => x.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const q = norm(busquedaSkill.trim());
+    return (nombre: string) => !q || norm(nombre).includes(q);
+  }, [busquedaSkill]);
 
   // Local state for tasks to allow optimistic updates
   const [tasks, setTasks] = useState<PlanificacionItem[]>(initialTasks);
@@ -555,11 +566,30 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   <button
                     type="button"
                     onClick={() => setIsEditing(true)}
-                    className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-purple-300 bg-purple-50/50 px-2 py-1.5 text-[11px] font-medium text-purple-700 hover:bg-purple-100/60"
+                    className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-violet-300 bg-violet-50/60 px-2 py-1.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100/70"
                   >
                     <Pencil className="h-3 w-3" />
-                    Arrastrar para priorizar (en Editar)
+                    Arrastrar y reordenar (en Editar)
                   </button>
+                  <div className="relative mb-2">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                    <input
+                      value={busquedaSkill}
+                      onChange={(e) => setBusquedaSkill(e.target.value)}
+                      placeholder="Buscar habilidad..."
+                      className="h-8 w-full rounded-md border border-gray-200 bg-white pl-8 pr-7 text-[11px] focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    />
+                    {busquedaSkill && (
+                      <button
+                        type="button"
+                        onClick={() => setBusquedaSkill("")}
+                        aria-label="Limpiar busqueda"
+                        className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                   {(operario.skills || []).length === 0 ? (
                     <p className="text-muted-foreground italic text-xs px-2 mb-2">
                       Sin habilidades: el operario no tiene rangos asignados.
@@ -567,10 +597,13 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   ) : (
                     <Accordion type="multiple" className="w-full" defaultValue={GRUPOS_SKILL.map(g => g.value)}>
                       {GRUPOS_SKILL.map(grupo => {
+                        const nombreSkill = (x: ProcesoSkill) =>
+                          x.nombre_proceso || procesosMap[x.id_proceso] || `Proceso #${x.id_proceso}`;
+                        const total = (operario.skills || []).filter(grupo.filtro).length;
                         const items = (operario.skills || [])
                           .filter(grupo.filtro)
-                          .sort((a, b) => (a.nombre_proceso || procesosMap[a.id_proceso] || "")
-                            .localeCompare(b.nombre_proceso || procesosMap[b.id_proceso] || ""));
+                          .filter(x => coincideBusqueda(nombreSkill(x)))
+                          .sort((a, b) => ordenarSkills(a, b, nombreSkill));
                         return (
                           <AccordionItem
                             key={grupo.value}
@@ -582,13 +615,15 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                               <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
                                 <span className="truncate pr-2">{grupo.titulo}</span>
                                 <span className="text-[10px] font-normal uppercase tracking-wide text-gray-500 shrink-0 pr-1">
-                                  {items.length}
+                                  {busquedaSkill.trim() ? `${items.length} de ${total}` : total}
                                 </span>
                               </div>
                             </AccordionTrigger>
                             <AccordionContent className="pt-0 pb-2 ml-1">
                               {items.length === 0 ? (
-                                <p className="text-xs text-gray-500 italic py-1 text-center">{grupo.vacio}</p>
+                                <p className="text-xs text-gray-500 italic py-1 text-center">
+                                  {busquedaSkill.trim() ? "Ninguna coincide con la busqueda" : grupo.vacio}
+                                </p>
                               ) : (
                                 <div className="flex flex-col gap-1">
                                   {items.map(skill => {

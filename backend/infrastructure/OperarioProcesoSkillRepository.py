@@ -14,8 +14,10 @@ class OperarioProcesoSkillRepository:
         """
         Devuelve el mapa de PRIORIDADES por proceso:
         {
-          proceso_id: { operario_id: nivel }   # nivel ∈ {1, 2}
+          proceso_id: { operario_id: (nivel, orden) }   # nivel ∈ {1, 2}
         }
+        `orden` es la posición dentro de la lista de ese nivel (0 = primero =
+        más preferido); None cuando la fila no tiene posición asignada.
 
         Ojo con la semántica: este mapa NO define quién puede hacer el proceso.
         La elegibilidad la dan las skills NATIVAS (rango del operario × rangos del
@@ -43,7 +45,7 @@ class OperarioProcesoSkillRepository:
             for s in skills:
                 if s.id_proceso not in mapping:
                     mapping[s.id_proceso] = {}
-                mapping[s.id_proceso][s.id_operario] = s.nivel
+                mapping[s.id_proceso][s.id_operario] = (s.nivel, s.orden)
 
             logger.info(f"Repository - Mapa generado. Procesos encontrados: {len(mapping)}")
             return mapping

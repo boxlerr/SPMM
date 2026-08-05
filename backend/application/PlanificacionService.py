@@ -861,6 +861,31 @@ def _agregar_funcion_objetivo(
     PENAL_SKILL2 = 2_000   # ~10 min de atraso
     PENAL_NATIVA = 4_000   # ~20 min de atraso — sabe hacerlo, pero no está priorizado
 
+    # Desempate FINO por posición dentro de la lista (0 = primero = más preferido).
+    # El tope es menor que el salto entre niveles a propósito: un SKILL 1 al fondo de
+    # una lista larga tiene que seguir ganándole a un SKILL 2 al tope. Sin el tope,
+    # una lista de 74 skills haría que la posición pesara más que el nivel.
+    PENAL_POR_POSICION = 30
+    TOPE_PENAL_POSICION = 1_500  # < PENAL_SKILL2 - PENAL_SKILL1
+
+    def _penal_prioridad(entrada):
+        """
+        entrada = (nivel, orden) del mapa de skills, o None si no está priorizado.
+
+        Acepta también un nivel pelado (int): el mapa pasó a emitir tuplas cuando se
+        agregó `orden`, y desempaquetar a ciegas rompe con cualquier llamador viejo.
+        """
+        if not entrada:
+            return PENAL_NATIVA
+        if isinstance(entrada, int):
+            entrada = (entrada, None)
+        nivel, orden = entrada
+        base = PENAL_SKILL1 if nivel == 1 else PENAL_SKILL2 if nivel == 2 else PENAL_NATIVA
+        if orden is None:
+            # Sin posición asignada: va al final de su lista.
+            return base + TOPE_PENAL_POSICION
+        return base + min(orden * PENAL_POR_POSICION, TOPE_PENAL_POSICION)
+
     for (orden_id, proc_id, secuencia, fecha_prometida,
         peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquina,_familia_req,
         op_skill_levels) in procesos_norm:
@@ -884,13 +909,7 @@ def _agregar_funcion_objetivo(
             # Penalización por prioridad de skill. Los operarios no elegibles quedan
             # fuera del dominio de op_var, así que su `pres` es siempre 0 y el término
             # no aporta nada: es seguro recorrer todos.
-            nivel = (op_skill_levels or {}).get(op_id)
-            if nivel == 1:
-                penal = PENAL_SKILL1
-            elif nivel == 2:
-                penal = PENAL_SKILL2
-            else:
-                penal = PENAL_NATIVA
+            penal = _penal_prioridad((op_skill_levels or {}).get(op_id))
             if penal:
                 penal_prioridad.append((pres, penal))
 

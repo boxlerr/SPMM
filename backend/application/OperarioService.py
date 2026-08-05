@@ -46,7 +46,11 @@ def _build_skills_payload(operario):
     base.
     """
     overrides = {
-        s.id_proceso: {"nivel": s.nivel or 0, "habilitado": s.habilitado}
+        s.id_proceso: {
+            "nivel": s.nivel or 0,
+            "habilitado": s.habilitado,
+            "orden": s.orden,
+        }
         for s in (operario.procesos_skill or [])
     }
 
@@ -66,6 +70,7 @@ def _build_skills_payload(operario):
                 "id_proceso": rp.id_proceso,
                 "nivel": ov.get("nivel", 0),
                 "habilitado": ov.get("habilitado", True),
+                "orden": ov.get("orden"),
                 "nativa": True,
             })
 
@@ -76,6 +81,7 @@ def _build_skills_payload(operario):
             "id_proceso": id_proceso,
             "nivel": ov["nivel"],
             "habilitado": ov["habilitado"],
+            "orden": ov["orden"],
             "nativa": False,
         })
 
@@ -110,10 +116,13 @@ def _normalizar_skills(skills):
         previo = por_proceso.get(id_proceso)
         # Menor nivel = mayor prioridad, pero 0 (sin marcar) nunca le gana a 1/2.
         if previo is None or _rank_nivel(nivel) < _rank_nivel(previo["nivel"]):
+            orden = datos.get("orden")
             por_proceso[id_proceso] = {
                 "id_proceso": id_proceso,
                 "nivel": nivel,
                 "habilitado": habilitado,
+                # Solo tiene sentido posicionar dentro de SKILLS 1/2.
+                "orden": int(orden) if nivel in (1, 2) and orden is not None else None,
             }
     return list(por_proceso.values())
 
@@ -247,6 +256,7 @@ class OperarioService:
                     id_proceso=s["id_proceso"],
                     nivel=s["nivel"],
                     habilitado=s["habilitado"],
+                    orden=s.get("orden"),
                 )
                 for s in skills_norm
             ]
@@ -467,6 +477,7 @@ class OperarioService:
                         id_proceso=s["id_proceso"],
                         nivel=s["nivel"],
                         habilitado=s.get("habilitado", True),
+                        orden=s.get("orden"),
                     ))
 
             # Rangos (operario_rango): borrar y reinsertar deduplicado.

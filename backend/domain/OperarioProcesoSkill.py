@@ -21,6 +21,10 @@ class OperarioProcesoSkill(Base):
     )
     nivel = Column(SmallInteger, nullable=False, default=0)
     habilitado = Column(Boolean, nullable=False, default=True)
+    # Posición dentro de la lista de su nivel: 0 = primero = más preferido.
+    # NULL = sin posición, se trata como el final. El planificador la usa como
+    # desempate fino DENTRO del nivel (el nivel sigue mandando).
+    orden = Column(SmallInteger, nullable=True)
 
     # Relationships
     operario = relationship("Operario", back_populates="procesos_skill")

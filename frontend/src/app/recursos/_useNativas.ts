@@ -96,7 +96,7 @@ export function estadosDesdeSkills(skills: ProcesoSkill[] | undefined): Record<n
         // Las que están en su estado por defecto no hace falta guardarlas: así el
         // diff de "¿hubo cambios?" no se ensucia con entradas que no dicen nada.
         if (nivel === 0 && habilitado) continue;
-        estados[s.id_proceso] = { nivel, habilitado };
+        estados[s.id_proceso] = { nivel, habilitado, orden: s.orden ?? null };
     }
     return estados;
 }
@@ -114,7 +114,13 @@ export function skillsPayloadDesdeEstados(
 ) {
     const idsNativos = new Set(nativas.map((n) => n.id));
     return Object.entries(estados)
-        .map(([id, estado]) => ({ id_proceso: Number(id), ...estado }))
+        .map(([id, estado]) => ({
+            id_proceso: Number(id),
+            nivel: estado.nivel,
+            habilitado: estado.habilitado,
+            // La posición solo aplica dentro de SKILLS 1/2; en el pool no significa nada.
+            orden: estado.nivel === 0 ? null : estado.orden ?? null,
+        }))
         .filter((s) => idsNativos.has(s.id_proceso))
         .filter((s) => s.nivel !== 0 || !s.habilitado)
         .sort((a, b) => a.id_proceso - b.id_proceso);

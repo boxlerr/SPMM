@@ -33,7 +33,8 @@ async def test_get_map_excluye_nivel0_y_deshabilitadas(session):
     mapa = await repo.get_map_por_proceso()
 
     # Proceso 100: solo operarios 1 y 2 (nivel 1/2 habilitados). El 3 (deshabilitado) fuera.
-    assert mapa.get(100) == {1: 1, 2: 2}
+    # El valor es (nivel, orden); orden None = sin posición asignada.
+    assert mapa.get(100) == {1: (1, None), 2: (2, None)}
     # Proceso 101: ninguna fila nivel 1/2 -> no aparece (las nivel 0 no entran).
     assert 101 not in mapa
 

@@ -17,6 +17,10 @@ export interface ProcesoSkill {
   nombre_proceso?: string;
   nivel: number;
   habilitado: boolean;
+  /** Posición dentro de SKILLS 1/2 (0 = primero = más preferido). null = al final. */
+  orden?: number | null;
+  /** Solo lectura: si el proceso lo dan los rangos del operario. */
+  nativa?: boolean;
 }
 
 export interface Operario {

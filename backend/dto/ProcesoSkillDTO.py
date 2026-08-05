@@ -13,6 +13,8 @@ class ProcesoSkillDTO(BaseModel):
         solo se puede marcar 1/2 sobre un proceso que ya es nativo del operario.
       - `habilitado`: False apaga la nativa — el planificador deja de asignarle
         ese proceso aunque el rango se lo dé.
+      - `orden`: posición dentro de la lista de su nivel (0 = primero = más
+        preferido). Desempata DENTRO del nivel; el nivel sigue mandando.
     """
     id_proceso: int = Field(..., description="ID del proceso")
     nivel: int = Field(
@@ -22,6 +24,11 @@ class ProcesoSkillDTO(BaseModel):
         description="Prioridad: 0 = nativa sin marcar, 1 = SKILL 1, 2 = SKILL 2",
     )
     habilitado: Optional[bool] = True
+    orden: Optional[int] = Field(
+        None,
+        ge=0,
+        description="Posición dentro de SKILLS 1/2 (0 = primero). None = al final",
+    )
     nativa: Optional[bool] = Field(
         None,
         description="Solo lectura: si el proceso proviene de los rangos del operario",
