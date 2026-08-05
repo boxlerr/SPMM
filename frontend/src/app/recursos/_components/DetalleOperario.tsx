@@ -12,6 +12,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { useToast } from "@/components/ui/toast";
 import { useNotifications } from "@/contexts/NotificationContext";
 import OperarioEditForm from "./OperarioEditForm";
+import { parseApiError } from "@/lib/utils";
 import { API_URL } from "@/config"
 
 const getAuthHeaders = (): HeadersInit => {
@@ -28,6 +29,44 @@ interface DetalleOperarioProps {
   onOperatorUpdated?: () => void;
 }
 
+/**
+ * Vistas del MISMO conjunto de skills nativas, agrupadas por prioridad.
+ *
+ * No son listas independientes: una nativa marcada como SKILL 1 sigue siendo nativa,
+ * solo que el planificador la prefiere. Por eso se filtra por `nivel` sobre la lista
+ * completa en vez de mantener tres colecciones separadas.
+ */
+const GRUPOS_SKILL = [
+  {
+    value: "skill1",
+    titulo: "SKILLS 1",
+    barra: "bg-emerald-500",
+    vacio: "Ninguna marcada como SKILL 1",
+    filtro: (s: ProcesoSkill) => s.habilitado && s.nivel === 1,
+  },
+  {
+    value: "skill2",
+    titulo: "SKILLS 2",
+    barra: "bg-sky-500",
+    vacio: "Ninguna marcada como SKILL 2",
+    filtro: (s: ProcesoSkill) => s.habilitado && s.nivel === 2,
+  },
+  {
+    value: "sin-prioridad",
+    titulo: "SIN PRIORIDAD",
+    barra: "bg-slate-400",
+    vacio: "Ninguna sin prioridad",
+    filtro: (s: ProcesoSkill) => s.habilitado && (s.nivel ?? 0) === 0,
+  },
+  {
+    value: "apagadas",
+    titulo: "DESACTIVADAS",
+    barra: "bg-gray-300",
+    vacio: "Ninguna desactivada",
+    filtro: (s: ProcesoSkill) => !s.habilitado,
+  },
+];
+
 export default function DetalleOperario({ operario, tasks: initialTasks = [], onClose, onCambiarEstado, onOperatorUpdated }: DetalleOperarioProps) {
   const { showToast } = useToast();
   const { addNotification } = useNotifications();
@@ -36,9 +75,6 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   const [procesosMap, setProcesosMap] = useState<Record<number, string>>({});
   const [updatingSkills, setUpdatingSkills] = useState<Set<number>>(new Set());
   const [renderTrigger, setRenderTrigger] = useState(0); // For optimistic UI updates
-  const [addingPrimarySkill, setAddingPrimarySkill] = useState(false);
-  const [addingSecondarySkill, setAddingSecondarySkill] = useState(false);
-  const [newSkillId, setNewSkillId] = useState("");
 
   // Local state for tasks to allow optimistic updates
   const [tasks, setTasks] = useState<PlanificacionItem[]>(initialTasks);
@@ -116,6 +152,12 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   }, [tasks]);
 
   if (!operario) return null; // MOVED CHECK HERE
+
+  // Abrir/cerrar todas de una: el uso real es mirar varias OT juntas, no una por vez.
+  const todasExpandidas = groupedTasks.length > 0 && expandedOrders.size === groupedTasks.length;
+  const toggleTodasLasOrdenes = () => {
+    setExpandedOrders(todasExpandidas ? new Set() : new Set(groupedTasks.map(g => g.orderId)));
+  };
 
   const toggleOrder = (orderId: number) => {
     const newExpanded = new Set(expandedOrders);
@@ -257,44 +299,25 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
     }
   };
 
-  const handleDeleteSkill = async (id_proceso: number) => {
-    if (!confirm("¿Seguro que deseas eliminar esta habilidad?")) return;
+  /**
+   * Cambia la PRIORIDAD de una skill nativa (0 = sin marcar, 1 = SKILL 1, 2 = SKILL 2).
+   *
+   * No existe "eliminar habilidad": el conjunto de lo que el operario sabe hacer lo
+   * fijan sus rangos. Para que no se la asignen se apaga la nativa (el toggle).
+   */
+  const handleCambiarNivel = async (id_proceso: number, nivel: number) => {
+    if (updatingSkills.has(id_proceso)) return;
+    setUpdatingSkills(prev => new Set(prev).add(id_proceso));
 
-    // Optimistic Update
-    const skillList = operario.skills || [];
-    const skillToUpdate = skillList.find(x => x.id_proceso === id_proceso);
-    const updatedSkills = skillList.filter(x => x.id_proceso !== id_proceso);
-
-    if (skillToUpdate) {
-      operario.skills = updatedSkills;
+    const skill = (operario.skills || []).find(x => x.id_proceso === id_proceso);
+    const nivelPrevio = skill?.nivel ?? 0;
+    const habilitadoPrevio = skill?.habilitado ?? true;
+    if (skill) {
+      skill.nivel = nivel;
+      if (nivel !== 0) skill.habilitado = true;
       setRenderTrigger(r => r + 1);
     }
 
-    try {
-      const cleanUrl = API_URL.replace(/\/$/, "");
-      const response = await fetch(`${cleanUrl}/operarios/${operario.id}/skills/${id_proceso}`, {
-        method: "DELETE",
-        headers: getAuthHeaders() as Record<string, string>,
-      });
-
-      if (response.ok) {
-        showToast("Habilidad eliminada", 'success');
-        onOperatorUpdated?.();
-      } else {
-        // Revert
-        if (skillToUpdate) operario.skills = [...updatedSkills, skillToUpdate];
-        setRenderTrigger(r => r + 1);
-        showToast("Error al eliminar la habilidad", 'error');
-      }
-    } catch (error) {
-      // Revert
-      if (skillToUpdate) operario.skills = [...updatedSkills, skillToUpdate];
-      setRenderTrigger(r => r + 1);
-      showToast("Error de conexión al eliminar la habilidad", 'error');
-    }
-  };
-
-  const handleAddSkill = async (id_proceso: number, nivel: number) => {
     try {
       const cleanUrl = API_URL.replace(/\/$/, "");
       const response = await fetch(`${cleanUrl}/operarios/${operario.id}/skills`, {
@@ -304,19 +327,27 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
       });
 
       if (response.ok) {
-        showToast("Habilidad agregada", 'success');
-
-        // Cierra los popups (manejaremos los estados después)
-        setAddingPrimarySkill(false);
-        setAddingSecondarySkill(false);
-        setNewSkillId("");
-
+        showToast(
+          nivel === 0 ? "Prioridad quitada" : `Marcada como SKILL ${nivel}`,
+          'success'
+        );
         onOperatorUpdated?.();
       } else {
-        showToast("Error al agregar la habilidad", 'error');
+        if (skill) { skill.nivel = nivelPrevio; skill.habilitado = habilitadoPrevio; }
+        setRenderTrigger(r => r + 1);
+        const bodyText = await response.text().catch(() => "");
+        showToast(parseApiError(bodyText) || "Error al cambiar la prioridad", 'error');
       }
     } catch (error) {
-      showToast("Error de conexión al agregar la habilidad", 'error');
+      if (skill) { skill.nivel = nivelPrevio; skill.habilitado = habilitadoPrevio; }
+      setRenderTrigger(r => r + 1);
+      showToast("Error de conexión al cambiar la prioridad", 'error');
+    } finally {
+      setUpdatingSkills(prev => {
+        const next = new Set(prev);
+        next.delete(id_proceso);
+        return next;
+      });
     }
   };
 
@@ -514,187 +545,82 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     <Wrench className="h-4 w-4 text-purple-500" />
                     <h4 className="font-semibold text-gray-800">Habilidades</h4>
                   </div>
-                  {(!operario.skills || operario.skills.length === 0) && !addingPrimarySkill && !addingSecondarySkill ? (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-muted-foreground italic text-xs px-2 mb-2">Sin habilidades registradas</p>
-                      <div className="flex flex-wrap gap-2 px-2">
-                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddingPrimarySkill(true)}>
-                          <Plus className="h-3 w-3 mr-1" /> Principal
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddingSecondarySkill(true)}>
-                          <Plus className="h-3 w-3 mr-1" /> Secundaria
-                        </Button>
-                      </div>
-                    </div>
+                  <p className="text-[11px] text-muted-foreground px-1 mb-1.5">
+                    Todas salen de los rangos del operario. SKILLS 1 y 2 solo le dicen al
+                    planificador a quién preferir; el toggle apaga la habilidad.
+                  </p>
+                  {(operario.skills || []).length === 0 ? (
+                    <p className="text-muted-foreground italic text-xs px-2 mb-2">
+                      Sin habilidades: el operario no tiene rangos asignados.
+                    </p>
                   ) : (
-                    <Accordion type="multiple" className="w-full" defaultValue={["native", "primary", "secondary"]}>
-                      <AccordionItem value="native" className="border-b-0 mb-1.5 bg-white rounded-lg border shadow-sm px-2.5 relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-                        <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
-                          <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
-                            <span className="truncate pr-2">SKILLS NATIVAS</span>
-                            <span className="text-[10px] font-normal uppercase tracking-wide text-emerald-600 shrink-0 pr-1">Del rango</span>
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent className="pt-0 pb-2 ml-1">
-                          <div className="flex flex-col gap-1">
-                            {(operario.skills || []).filter(s => s.nivel === 0).map(skill => (
-                              <div key={skill.id_proceso} className="flex justify-between items-center py-0.5 gap-2">
-                                <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
-                                  <span className={`font-medium text-xs truncate flex-1 ${skill.habilitado ? 'text-gray-900' : 'text-gray-400 line-through'}`} title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
-                                    {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
-                                  </span>
-                                  <span className="text-[9px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0 rounded-full shrink-0">Nativa</span>
+                    <Accordion type="multiple" className="w-full" defaultValue={GRUPOS_SKILL.map(g => g.value)}>
+                      {GRUPOS_SKILL.map(grupo => {
+                        const items = (operario.skills || [])
+                          .filter(grupo.filtro)
+                          .sort((a, b) => (a.nombre_proceso || procesosMap[a.id_proceso] || "")
+                            .localeCompare(b.nombre_proceso || procesosMap[b.id_proceso] || ""));
+                        return (
+                          <AccordionItem
+                            key={grupo.value}
+                            value={grupo.value}
+                            className="border-b-0 mb-1.5 bg-white rounded-lg border shadow-sm px-2.5 relative overflow-hidden"
+                          >
+                            <div className={`absolute top-0 left-0 w-1 h-full ${grupo.barra}`}></div>
+                            <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
+                              <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
+                                <span className="truncate pr-2">{grupo.titulo}</span>
+                                <span className="text-[10px] font-normal uppercase tracking-wide text-gray-500 shrink-0 pr-1">
+                                  {items.length}
+                                </span>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="pt-0 pb-2 ml-1">
+                              {items.length === 0 ? (
+                                <p className="text-xs text-gray-500 italic py-1 text-center">{grupo.vacio}</p>
+                              ) : (
+                                <div className="flex flex-col gap-1">
+                                  {items.map(skill => {
+                                    const nombre = skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`;
+                                    const ocupado = updatingSkills.has(skill.id_proceso);
+                                    return (
+                                      <div key={skill.id_proceso} className="flex justify-between items-center py-0.5 gap-2">
+                                        <span
+                                          className={`font-medium text-xs truncate flex-1 min-w-0 ${skill.habilitado ? 'text-gray-900' : 'text-gray-400 line-through'}`}
+                                          title={nombre}
+                                        >
+                                          {nombre}
+                                        </span>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          {[1, 2, 0].filter(n => n !== (skill.nivel ?? 0)).map(n => (
+                                            <button
+                                              key={n}
+                                              disabled={ocupado}
+                                              onClick={() => handleCambiarNivel(skill.id_proceso, n)}
+                                              title={n === 0 ? "Quitar prioridad" : `Marcar como SKILL ${n}`}
+                                              className="h-5 w-5 rounded-full bg-slate-100 hover:bg-slate-200 text-[10px] font-semibold text-slate-600 flex items-center justify-center disabled:opacity-40 disabled:cursor-wait"
+                                            >
+                                              {n === 0 ? "–" : n}
+                                            </button>
+                                          ))}
+                                          <button
+                                            disabled={ocupado}
+                                            onClick={() => handleNativeSkillToggle(skill.id_proceso, skill.habilitado)}
+                                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                            title={skill.habilitado ? "Desactivar habilidad" : "Activar habilidad"}
+                                          >
+                                            <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                                <button
-                                  disabled={updatingSkills.has(skill.id_proceso)}
-                                  onClick={() => handleNativeSkillToggle(skill.id_proceso, skill.habilitado)}
-                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-emerald-500' : 'bg-slate-300'}`}
-                                  title={skill.habilitado ? "Desactivar habilidad nativa" : "Activar habilidad nativa"}
-                                >
-                                  <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          {(!operario.skills || !operario.skills.some(s => s.nivel === 0)) && (
-                            <p className="text-xs text-gray-500 italic py-1 text-center">No hay SKILLS NATIVAS</p>
-                          )}
-                        </AccordionContent>
-                      </AccordionItem>
-                      <AccordionItem value="primary" className="border-b-0 mb-1.5 bg-white rounded-lg border shadow-sm px-2.5 relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
-                        <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
-                          <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
-                            <span className="truncate pr-2">SKILLS 1</span>
-                            <div
-                              role="button"
-                              className="h-7 w-7 p-0 rounded-full hover:bg-blue-100 text-blue-600 shrink-0 flex items-center justify-center cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); setAddingPrimarySkill(true); }}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </div>
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent className="pt-0 pb-2 ml-1">
-                          {addingPrimarySkill && (
-                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3 bg-blue-50/50 p-2.5 rounded-md border border-blue-100">
-                              <div className="flex-1 min-w-0">
-                                <Select value={newSkillId} onValueChange={setNewSkillId}>
-                                  <SelectTrigger className="h-8 text-xs bg-white w-full">
-                                    <SelectValue placeholder="Seleccionar..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {Object.entries(procesosMap).filter(([id]) => !operario.skills?.find(s => s.id_proceso === parseInt(id))).map(([id, nombre]) => (
-                                      <SelectItem key={id} value={id}>{nombre}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="flex items-center gap-2 justify-end shrink-0">
-                                <Button size="sm" className="h-8 py-0 px-3" disabled={!newSkillId} onClick={() => handleAddSkill(parseInt(newSkillId), 1)}>Añadir</Button>
-                                <Button size="sm" variant="ghost" className="h-8 py-0 px-3" onClick={() => { setAddingPrimarySkill(false); setNewSkillId(""); }}>Cancelar</Button>
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex flex-col gap-1">
-                            {(operario.skills || []).filter(s => s.nivel === 1).map(skill => (
-                              <div key={skill.id_proceso} className="flex justify-between items-center py-0.5 gap-2">
-                                <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
-                                  <span className="font-medium text-gray-900 text-xs truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
-                                    {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
-                                  </span>
-                                  <button
-                                    className="text-red-400 hover:text-red-600 transition-colors bg-red-50 hover:bg-red-100 p-1 rounded-full shrink-0"
-                                    onClick={() => handleDeleteSkill(skill.id_proceso)}
-                                    title="Eliminar habilidad"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                                <button
-                                  disabled={updatingSkills.has(skill.id_proceso)}
-                                  onClick={() => handleSkillToggle(skill.id_proceso, skill.habilitado)}
-                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-green-500' : 'bg-slate-300'}`}
-                                  title={skill.habilitado ? "Desactivar Habilidad" : "Activar Habilidad"}
-                                >
-                                  <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          {(!operario.skills || !operario.skills.some(s => s.nivel === 1)) && !addingPrimarySkill && (
-                             <p className="text-xs text-gray-500 italic py-1 text-center">No hay SKILLS 1</p>
-                          )}
-                        </AccordionContent>
-                      </AccordionItem>
-
-                      <AccordionItem value="secondary" className="border-b-0 bg-white rounded-lg border shadow-sm px-3 relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div>
-                        <AccordionTrigger className="py-2 hover:no-underline text-[13px] font-semibold text-gray-800 ml-1">
-                          <div className="flex flex-1 items-center justify-between mr-2 min-w-0">
-                            <span className="truncate pr-2">SKILLS 2</span>
-                            <div
-                              role="button"
-                              className="h-7 w-7 p-0 rounded-full hover:bg-slate-200 text-slate-600 shrink-0 flex items-center justify-center cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); setAddingSecondarySkill(true); }}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </div>
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent className="pt-0 pb-2 ml-1">
-                          {addingSecondarySkill && (
-                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3 bg-slate-50 p-2.5 rounded-md border border-slate-200">
-                              <div className="flex-1 min-w-0">
-                                <Select value={newSkillId} onValueChange={setNewSkillId}>
-                                  <SelectTrigger className="h-8 text-xs bg-white w-full">
-                                    <SelectValue placeholder="Seleccionar..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {Object.entries(procesosMap).filter(([id]) => !operario.skills?.find(s => s.id_proceso === parseInt(id))).map(([id, nombre]) => (
-                                      <SelectItem key={id} value={id}>{nombre}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="flex items-center gap-2 justify-end shrink-0">
-                                <Button size="sm" className="h-8 py-0 px-3 bg-slate-800 hover:bg-slate-700 text-white" disabled={!newSkillId} onClick={() => handleAddSkill(parseInt(newSkillId), 2)}>Añadir</Button>
-                                <Button size="sm" variant="ghost" className="h-8 py-0 px-3" onClick={() => { setAddingSecondarySkill(false); setNewSkillId(""); }}>Cancelar</Button>
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex flex-col gap-3">
-                            {(operario.skills || []).filter(s => s.nivel === 2).map((skill, idx) => (
-                              <div key={skill.id_proceso} className={`flex justify-between items-center py-1.5 gap-2 ${idx !== 0 ? 'border-t border-gray-100 pt-3' : ''}`}>
-                                <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
-                                  <span className="font-medium text-gray-900 text-xs truncate flex-1" title={skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}>
-                                    {skill.nombre_proceso || procesosMap[skill.id_proceso] || `Proceso #${skill.id_proceso}`}
-                                  </span>
-                                  <button
-                                    className="text-red-400 hover:text-red-600 transition-colors bg-red-50 hover:bg-red-100 p-1 rounded-full shrink-0"
-                                    onClick={() => handleDeleteSkill(skill.id_proceso)}
-                                    title="Eliminar habilidad"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                                <button
-                                  disabled={updatingSkills.has(skill.id_proceso)}
-                                  onClick={() => handleSkillToggle(skill.id_proceso, skill.habilitado)}
-                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-green-500' : 'bg-slate-300'}`}
-                                  title={skill.habilitado ? "Desactivar Habilidad" : "Activar Habilidad"}
-                                >
-                                  <span className={`pointer-events-none block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform ${skill.habilitado ? 'translate-x-[8px]' : '-translate-x-[8px]'}`} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          {(!operario.skills || !operario.skills.some(s => s.nivel === 2)) && !addingSecondarySkill && (
-                            <p className="text-xs text-gray-500 italic py-1 text-center">No hay SKILLS 2</p>
-                          )}
-                        </AccordionContent>
-                      </AccordionItem>
+                              )}
+                            </AccordionContent>
+                          </AccordionItem>
+                        );
+                      })}
                     </Accordion>
                   )}
                 </div>
@@ -703,28 +629,24 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
               {/* Main Content Right: Stats & Tasks */}
               <div className="flex-1 flex flex-col bg-white overflow-hidden">
                 {/* Stats Overview */}
-                <div className="grid grid-cols-3 gap-2 px-3 py-2 border-b bg-white shrink-0">
-                  <Card className="shadow-sm border-slate-100 bg-slate-50">
-                    <CardContent className="px-2.5 py-1.5 flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-blue-600 shrink-0" />
-                      <span className="text-base font-bold text-slate-800 leading-none">{totalHours.toFixed(1)}h</span>
-                      <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Horas</span>
-                    </CardContent>
-                  </Card>
-                  <Card className="shadow-sm border-slate-100 bg-slate-50">
-                    <CardContent className="px-2.5 py-1.5 flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                      <span className="text-base font-bold text-slate-800 leading-none">{totalTasks}</span>
-                      <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Tareas</span>
-                    </CardContent>
-                  </Card>
-                  <Card className="shadow-sm border-slate-100 bg-slate-50">
-                    <CardContent className="px-2.5 py-1.5 flex items-center gap-2">
-                      <Activity className="h-4 w-4 text-orange-600 shrink-0" />
-                      <span className="text-base font-bold text-slate-800 leading-none">{inProgressTasks}</span>
-                      <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">En Proceso</span>
-                    </CardContent>
-                  </Card>
+                {/* Stats en una sola línea: los números no necesitan tres tarjetas,
+                    y cada píxel que se ahorra acá es una OT más visible abajo. */}
+                <div className="flex items-center gap-5 px-4 py-1.5 border-b bg-white shrink-0">
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                    <span className="text-[13px] font-bold text-slate-800">{totalHours.toFixed(1)}h</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Horas</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                    <span className="text-[13px] font-bold text-slate-800">{totalTasks}</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Tareas</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Activity className="h-3.5 w-3.5 text-orange-600 shrink-0" />
+                    <span className="text-[13px] font-bold text-slate-800">{inProgressTasks}</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">En Proceso</span>
+                  </span>
                 </div>
 
                 {/* Tasks List (Grouped by OT) */}
@@ -734,9 +656,21 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       <Calendar className="h-3.5 w-3.5 text-gray-500" />
                       Órdenes Asignadas
                     </h4>
-                    <Badge variant="secondary" className="text-[11px] bg-gray-100">
-                      {groupedTasks.length} Órdenes ({tasks.length} procesos)
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-[11px] bg-gray-100">
+                        {groupedTasks.length} Órdenes ({tasks.length} procesos)
+                      </Badge>
+                      {groupedTasks.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-[11px] px-2"
+                          onClick={toggleTodasLasOrdenes}
+                        >
+                          {todasExpandidas ? "Contraer todas" : "Desplegar todas"}
+                        </Button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex-1 px-3 py-2 bg-gray-50/30 overflow-y-auto">
@@ -766,32 +700,24 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                             >
                               <CardContent className="p-0">
                                 {/* Order Header */}
-                                <div className="px-3 py-2 flex gap-3 items-center">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <Badge variant="outline" className="font-mono text-[11px] font-bold text-slate-700 border-slate-300 bg-slate-50 px-1.5 py-0">
-                                        OT #{group.orderId}
-                                      </Badge>
-                                      <span className="text-[13px] font-semibold text-gray-900 line-clamp-1">
-                                        {group.article || "Sin Artículo"}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-[11px] text-gray-500 leading-tight">
-                                      <span className="flex items-center gap-1">
-                                        <Activity className="h-2.5 w-2.5" /> {group.tasks.length} procesos
-                                      </span>
-                                      <span>
-                                        Entrega: <span className="font-medium text-gray-700">{formatDate(group.date)}</span>
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <Badge className={`${groupStatusColor} whitespace-nowrap text-[11px] px-2 py-0`}>
-                                      {groupStatus}
-                                    </Badge>
-                                    {isExpanded ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-                                  </div>
+                                {/* Cabecera de la OT en UN renglón: código, artículo, procesos y
+                                    entrega juntos, para que entren varias OT desplegadas a la vez. */}
+                                <div className="px-2.5 py-1.5 flex gap-2 items-center">
+                                  <Badge variant="outline" className="font-mono text-[11px] font-bold text-slate-700 border-slate-300 bg-slate-50 px-1.5 py-0 shrink-0">
+                                    OT #{group.orderId}
+                                  </Badge>
+                                  <span className="text-[13px] font-semibold text-gray-900 truncate flex-1 min-w-0">
+                                    {group.article || "Sin Artículo"}
+                                  </span>
+                                  <span className="text-[11px] text-gray-500 whitespace-nowrap shrink-0 hidden sm:inline">
+                                    {group.tasks.length} proc · {formatDate(group.date)}
+                                  </span>
+                                  <Badge className={`${groupStatusColor} whitespace-nowrap text-[11px] px-2 py-0 shrink-0`}>
+                                    {groupStatus}
+                                  </Badge>
+                                  {isExpanded
+                                    ? <ChevronUp className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                                    : <ChevronDown className="h-3.5 w-3.5 text-gray-400 shrink-0" />}
                                 </div>
 
                                 {/* Expanded Processes List */}

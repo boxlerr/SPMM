@@ -10,7 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { capitalizeName, parseApiError } from "@/lib/utils";
-import { User, Briefcase, Phone, Wrench, Clock } from "lucide-react";
+import { User, Briefcase, Phone, Clock } from "lucide-react";
+import SkillsEditor, { type EstadoSkill } from "./SkillsEditor";
+import { useNativas, estadosDesdeSkills, skillsPayloadDesdeEstados } from "../_useNativas";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -52,11 +54,12 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     const [rangosCatalog, setRangosCatalog] = useState<{ id: number; nombre: string }[]>([]);
     const [selectedRangos, setSelectedRangos] = useState<number[]>([]);
     const [principalRango, setPrincipalRango] = useState<number | null>(null);
-    const [procesos, setProcesos] = useState<{ id: number, nombre: string }[]>([]);
-    const [primarySkills, setPrimarySkills] = useState<string[]>([]);
-    const [secondarySkills, setSecondarySkills] = useState<string[]>([]);
+    // Prioridad (SKILLS 1/2) y apagado de cada nativa, por id_proceso.
+    const [skillsEstados, setSkillsEstados] = useState<Record<number, EstadoSkill>>({});
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [isSaving, setIsSaving] = useState(false);
+
+    const { nativas, fallo: falloNativas } = useNativas(cleanUrl, selectedRangos);
 
     useEffect(() => {
         if (data && !isCreating) {
@@ -78,8 +81,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 min_almuerzo: (data as any)?.min_almuerzo ?? 30,
                 interpreta_planos: (data as any)?.interpreta_planos ?? false,
             });
-            setPrimarySkills(data.skills?.filter(s => s.nivel === 1).map(s => s.id_proceso.toString()) || []);
-            setSecondarySkills(data.skills?.filter(s => s.nivel === 2).map(s => s.id_proceso.toString()) || []);
+            setSkillsEstados(estadosDesdeSkills(data.skills));
             setSelectedRangos(data.rangos || []);
         } else {
             setFormData({
@@ -100,8 +102,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 min_almuerzo: 30,
                 interpreta_planos: false,
             });
-            setPrimarySkills([]);
-            setSecondarySkills([]);
+            setSkillsEstados({});
             setSelectedRangos([]);
         }
     }, [data, isCreating]);
@@ -146,34 +147,9 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 console.error("Error al obtener rangos:", error);
             }
 
-            try {
-                const procRes = await fetch(`${cleanUrl}/procesos`, { headers: getAuthHeaders() });
-                if (procRes.ok) {
-                    const payload = await procRes.json();
-                    const pdata = payload?.data || [];
-                    setProcesos(Array.isArray(pdata) ? pdata : []);
-                }
-            } catch (error) {
-                console.error("Error al obtener procesos:", error);
-            }
         };
         loadOptions();
     }, [cleanUrl, data]);
-
-    // SKILLS NATIVAS que ya tiene el operario (nivel 0, derivadas del rango). Se muestran
-    // acá mismo para que se vea qué ya tiene cargado antes de sumar una SKILL 1 / 2: si el
-    // proceso ya está cargado como nativa, el backend corta el guardado y avisa.
-    const nativas = new Map<number, boolean>(
-        (data?.skills || []).filter(s => s.nivel === 0).map(s => [s.id_proceso, s.habilitado])
-    );
-    const nombreProceso = (id: number) =>
-        procesos.find(p => p.id === id)?.nombre
-        || (data?.skills || []).find(s => s.id_proceso === id)?.nombre_proceso
-        || `Proceso #${id}`;
-    const nativasOrdenadas = Array.from(nativas.keys())
-        .map(id => ({ id, nombre: nombreProceso(id), habilitado: nativas.get(id) !== false }))
-        .sort((a, b) => a.nombre.localeCompare(b.nombre));
-    const esNativa = (skillId: string) => !!skillId && nativas.has(parseInt(skillId));
 
     const onlyDigits = (v: string) => v.replace(/\D/g, "");
     const isValidEmail = (v: string) => !v || /.+@.+\..+/.test(v);
@@ -213,24 +189,14 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             dni: formData.dni ? onlyDigits(formData.dni) : null,
         } as any;
 
-        const skillsPayload: any[] = [];
-        primarySkills.forEach(skillId => {
-            if (skillId && skillId !== "none") {
-                skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 1, habilitado: true });
-            }
-        });
-        secondarySkills.forEach(skillId => {
-            if (skillId && skillId !== "none") {
-                // Preferir principal si ya está cargada
-                if (!skillsPayload.find(s => s.id_proceso === parseInt(skillId))) {
-                    skillsPayload.push({ id_proceso: parseInt(skillId), nivel: 2, habilitado: true });
-                }
-            }
-        });
-        const uniqueSkills = skillsPayload.filter((value, index, self) =>
-            index === self.findIndex((t) => (t.id_proceso === value.id_proceso))
-        );
-        payload.skills = uniqueSkills;
+        // Solo los overrides que dicen algo (prioridad marcada o nativa apagada) y que
+        // caen sobre una nativa vigente de los rangos elegidos.
+        const uniqueSkills = skillsPayloadDesdeEstados(skillsEstados, nativas);
+        // Si no se pudo cargar qué procesos da cada rango, no sabemos cuáles son las
+        // nativas y `uniqueSkills` sale vacío. Mandarlo así BORRA las prioridades y las
+        // nativas apagadas, porque el PUT reemplaza los overrides por completo.
+        // Omitir el campo deja las skills como estaban.
+        if (!falloNativas) payload.skills = uniqueSkills;
 
         if (!isCreating && data) {
             const originalTelefono = data.telefono ? onlyDigits(data.telefono) : null;
@@ -254,7 +220,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 (((data as any).min_almuerzo ?? 30)) !== (payload.min_almuerzo ?? 30) ||
                 (((data as any).interpreta_planos ?? false)) !== (payload.interpreta_planos ?? false) ||
                 JSON.stringify([...(data.rangos || [])].sort((a, b) => a - b)) !== JSON.stringify([...selectedRangos].sort((a, b) => a - b)) ||
-                JSON.stringify(data.skills?.filter(s => s.nivel === 1 || s.nivel === 2).map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso)) !== JSON.stringify(uniqueSkills.map(s => ({ id_proceso: s.id_proceso, nivel: s.nivel })).sort((a, b) => a.id_proceso - b.id_proceso));
+                JSON.stringify(skillsPayloadDesdeEstados(estadosDesdeSkills(data.skills), nativas)) !== JSON.stringify(uniqueSkills);
 
             setIsSaving(true);
             try {
@@ -326,30 +292,6 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     const disabled = isCreating
         ? baseDisabled || !formData.fecha_nacimiento || !formData.fecha_ingreso
         : baseDisabled;
-
-    const handlePrimaryChange = (index: number, val: string) => {
-        const newSkills = [...primarySkills];
-        newSkills[index] = val === "none" ? "" : val;
-        setPrimarySkills(newSkills); // don't filter out empties immediately so deleting works
-    };
-
-    const handleSecondaryChange = (index: number, val: string) => {
-        const newSkills = [...secondarySkills];
-        newSkills[index] = val === "none" ? "" : val;
-        setSecondarySkills(newSkills);
-    };
-
-    const removePrimarySkill = (index: number) => {
-        const newSkills = [...primarySkills];
-        newSkills.splice(index, 1);
-        setPrimarySkills(newSkills);
-    };
-
-    const removeSecondarySkill = (index: number) => {
-        const newSkills = [...secondarySkills];
-        newSkills.splice(index, 1);
-        setSecondarySkills(newSkills);
-    };
 
     return (
         <div className="flex flex-col w-full">
@@ -609,153 +551,15 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     </div>
                 </div>
 
-                {/* Skills Info */}
-                <div className="bg-white rounded-lg border shadow-sm p-4 md:col-span-2">
-                    <div className="flex items-center gap-2 mb-4">
-                        <div className="h-8 w-8 rounded-full bg-purple-50 flex items-center justify-center shrink-0">
-                            <Wrench className="h-4 w-4 text-purple-600" />
-                        </div>
-                        <h3 className="text-base font-semibold text-gray-900">Habilidades</h3>
-                    </div>
-
-                    <p className="text-xs text-muted-foreground mb-3">Las SKILLS NATIVAS se derivan automáticamente de los rangos asignados en Información Laboral.</p>
-                    {nativasOrdenadas.length > 0 && (
-                        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50/40 px-3 py-2">
-                            <p className="text-xs font-medium text-emerald-800 mb-2">
-                                Ya tiene {nativasOrdenadas.length} SKILLS NATIVAS (del rango) — no hace falta volver a cargarlas
-                            </p>
-                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                                {nativasOrdenadas.map(n => (
-                                    <span
-                                        key={n.id}
-                                        title={n.habilitado ? n.nombre : `${n.nombre} (desactivada)`}
-                                        className={`text-[11px] px-2 py-0.5 rounded-full border ${n.habilitado
-                                            ? "bg-white border-emerald-200 text-emerald-800"
-                                            : "bg-white border-gray-200 text-gray-400 line-through"}`}
-                                    >
-                                        {n.nombre}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                    <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50/50 px-3 py-2 cursor-pointer w-fit mb-3">
-                        <Checkbox
-                            checked={formData.interpreta_planos}
-                            onCheckedChange={(v) => setFormData({ ...formData, interpreta_planos: v === true })}
-                        />
-                        <span className="text-sm font-medium text-gray-700">Interpretación de planos</span>
-                        <span className="text-xs text-muted-foreground">(sabe leer planos)</span>
-                    </label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <Label className="text-gray-700">SKILLS 1</Label>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 text-xs"
-                                        onClick={() => setPrimarySkills([...primarySkills, ""])}
-                                    >
-                                        + Añadir SKILLS 1
-                                    </Button>
-                                </div>
-                                <div className="flex flex-col gap-3">
-                                    {primarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay SKILLS 1</p>}
-                                    {primarySkills.map((skillId, idx) => (
-                                        <div key={`param-${idx}`} className="flex flex-col gap-1">
-                                            <div className="flex gap-2 items-center">
-                                                <Select value={skillId || "none"} onValueChange={(val) => handlePrimaryChange(idx, val)}>
-                                                    <SelectTrigger className="bg-gray-50/50 flex-1">
-                                                        <SelectValue placeholder="Seleccionar" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="none">Seleccionar proceso</SelectItem>
-                                                        {procesos.map(p => (
-                                                            <SelectItem key={p.id} value={p.id.toString()}>
-                                                                {p.nombre}{nativas.has(p.id) ? " · ya la tiene (nativa)" : ""}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                    onClick={() => removePrimarySkill(idx)}
-                                                >
-                                                    X
-                                                </Button>
-                                            </div>
-                                            {esNativa(skillId) && (
-                                                <p className="text-[11px] text-amber-700 pl-1">
-                                                    Este proceso ya está cargado como SKILL NATIVA en este operario.
-                                                </p>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                        </div>
-
-                        <div>
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <Label className="text-gray-700">SKILLS 2</Label>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 text-xs"
-                                        onClick={() => setSecondarySkills([...secondarySkills, ""])}
-                                    >
-                                        + Añadir SKILLS 2
-                                    </Button>
-                                </div>
-                                <div className="flex flex-col gap-3">
-                                    {secondarySkills.length === 0 && <p className="text-sm text-gray-500 italic">No hay SKILLS 2</p>}
-                                    {secondarySkills.map((skillId, idx) => (
-                                        <div key={`sec-${idx}`} className="flex flex-col gap-1">
-                                            <div className="flex gap-2 items-center">
-                                                <Select value={skillId || "none"} onValueChange={(val) => handleSecondaryChange(idx, val)}>
-                                                    <SelectTrigger className="bg-gray-50/50 flex-1">
-                                                        <SelectValue placeholder="Seleccionar habilidad" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="none">Seleccionar proceso</SelectItem>
-                                                        {procesos.map(p => (
-                                                            <SelectItem key={p.id} value={p.id.toString()}>
-                                                                {p.nombre}{nativas.has(p.id) ? " · ya la tiene (nativa)" : ""}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="h-10 w-10 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                    onClick={() => removeSecondarySkill(idx)}
-                                                >
-                                                    X
-                                                </Button>
-                                            </div>
-                                            {esNativa(skillId) && (
-                                                <p className="text-[11px] text-amber-700 pl-1">
-                                                    Este proceso ya está cargado como SKILL NATIVA en este operario.
-                                                </p>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <SkillsEditor
+                    nativas={nativas}
+                    estados={skillsEstados}
+                    onEstadosChange={setSkillsEstados}
+                    interpretaPlanos={formData.interpreta_planos}
+                    onInterpretaPlanosChange={(v) => setFormData({ ...formData, interpreta_planos: v })}
+                    sinRangos={selectedRangos.length === 0}
+                    fallo={falloNativas}
+                />
 
             </div>
 
