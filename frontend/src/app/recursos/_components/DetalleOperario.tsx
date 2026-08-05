@@ -549,6 +549,17 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     Todas salen de los rangos del operario. SKILLS 1 y 2 solo le dicen al
                     planificador a quién preferir; el toggle apaga la habilidad.
                   </p>
+                  {/* El editor con arrastrar no entra en esta columna: vive en el modal de
+                      edición, que tiene ancho para las dos listas. Sin este aviso no se
+                      encuentra y parece que la pantalla no cambió. */}
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-purple-300 bg-purple-50/50 px-2 py-1.5 text-[11px] font-medium text-purple-700 hover:bg-purple-100/60"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Arrastrar para priorizar (en Editar)
+                  </button>
                   {(operario.skills || []).length === 0 ? (
                     <p className="text-muted-foreground italic text-xs px-2 mb-2">
                       Sin habilidades: el operario no tiene rangos asignados.
@@ -592,17 +603,28 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                           {nombre}
                                         </span>
                                         <div className="flex items-center gap-1 shrink-0">
-                                          {[1, 2, 0].filter(n => n !== (skill.nivel ?? 0)).map(n => (
-                                            <button
-                                              key={n}
-                                              disabled={ocupado}
-                                              onClick={() => handleCambiarNivel(skill.id_proceso, n)}
-                                              title={n === 0 ? "Quitar prioridad" : `Marcar como SKILL ${n}`}
-                                              className="h-5 w-5 rounded-full bg-slate-100 hover:bg-slate-200 text-[10px] font-semibold text-slate-600 flex items-center justify-center disabled:opacity-40 disabled:cursor-wait"
-                                            >
-                                              {n === 0 ? "–" : n}
-                                            </button>
-                                          ))}
+                                          {/* Los botones "1 / 2 / –" sueltos no decían nada. Como las
+                                              filas YA están agrupadas por prioridad, repetir el nivel
+                                              actual sobra y solo come ancho al nombre: el control ofrece
+                                              el movimiento. El arrastrar vive en el modal de edición,
+                                              que tiene lugar para las dos columnas. */}
+                                          <select
+                                            disabled={ocupado || !skill.habilitado}
+                                            value=""
+                                            onChange={(e) => handleCambiarNivel(skill.id_proceso, parseInt(e.target.value, 10))}
+                                            aria-label={`Mover ${nombre} a otra prioridad`}
+                                            title="Mover a otra prioridad"
+                                            className="h-6 text-[11px] rounded-md border border-gray-200 bg-white pl-1.5 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-gray-400 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                                          >
+                                            <option value="" disabled>Mover</option>
+                                            {[1, 2, 0]
+                                              .filter(n => n !== (skill.nivel ?? 0))
+                                              .map(n => (
+                                                <option key={n} value={n}>
+                                                  {n === 0 ? "Sin prioridad" : `SKILL ${n}`}
+                                                </option>
+                                              ))}
+                                          </select>
                                           <button
                                             disabled={ocupado}
                                             onClick={() => handleNativeSkillToggle(skill.id_proceso, skill.habilitado)}
