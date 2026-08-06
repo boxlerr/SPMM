@@ -161,7 +161,7 @@ export default function SkillsEditor({
 
     return (
         <Marco nativas={nativas} interpretaPlanos={interpretaPlanos} onInterpretaPlanosChange={onInterpretaPlanosChange}>
-            <div className="relative mb-3">
+            <div className="relative mb-2">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
                     value={busqueda}
@@ -191,7 +191,7 @@ export default function SkillsEditor({
                     onAlternar={alternarApagado}
                 />
 
-                <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <div className="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
                     <ListaPrioridad
                         droppableId={LISTA_1}
                         titulo="SKILLS 1"
@@ -237,7 +237,7 @@ function Marco({
     children: React.ReactNode;
 }) {
     return (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:col-span-2">
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm md:col-span-2">
             <div className="mb-1 flex items-center gap-2.5">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-sm">
                     <Wrench className="h-4 w-4 text-white" />
@@ -247,14 +247,14 @@ function Marco({
                     {nativas.length} nativas
                 </span>
             </div>
-            <p className="mb-3 text-xs leading-relaxed text-slate-500">
+            <p className="mb-2.5 text-xs leading-relaxed text-slate-500">
                 Todas salen de los rangos del operario. Arrastralas a{" "}
                 <strong className="text-emerald-700">SKILLS 1</strong> o{" "}
                 <strong className="text-indigo-700">SKILLS 2</strong> para decirle al planificador a
                 quién preferir, y ordenalas dentro de cada lista: más arriba, más preferido.
             </p>
 
-            <label className="mb-3 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 px-3 py-2.5 transition-colors hover:border-amber-300">
+            <label className="mb-2.5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 px-3 py-2.5 transition-colors hover:border-amber-300">
                 <Checkbox
                     checked={interpretaPlanos}
                     onCheckedChange={(v) => onInterpretaPlanosChange(v === true)}
@@ -314,8 +314,11 @@ function Pool({
                         <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
                             {filtrando ? `${visibles.length} de ${items.length}` : items.length}
                         </span>
+                        {/* Se aclara acá porque es el punto que más se malinterpreta:
+                            estar en el pool NO es estar excluido. Para excluir hay
+                            que apagar la skill con el switch. */}
                         <span className="ml-auto text-[11px] text-slate-400">
-                            sin priorizar
+                            sin priorizar · se asignan si no hay nadie priorizado
                         </span>
                     </div>
 
@@ -372,7 +375,6 @@ const TONOS = {
         fondo: "bg-emerald-50/40",
         activo: "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-200",
         titulo: "text-emerald-800",
-        barra: "from-emerald-500 to-teal-500",
         fila: "border-emerald-100 bg-white hover:border-emerald-300",
         indice: "bg-emerald-100 text-emerald-800",
     },
@@ -381,7 +383,6 @@ const TONOS = {
         fondo: "bg-indigo-50/40",
         activo: "border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200",
         titulo: "text-indigo-800",
-        barra: "from-indigo-500 to-sky-500",
         fila: "border-indigo-100 bg-white hover:border-indigo-300",
         indice: "bg-indigo-100 text-indigo-800",
     },
@@ -423,7 +424,6 @@ function ListaPrioridad({
                         snapshot.isDraggingOver ? t.activo : `${t.borde} ${t.fondo}`
                     }`}
                 >
-                    <div className={`h-1 w-full bg-gradient-to-r ${t.barra}`} />
                     <div className="flex items-baseline gap-2 px-3 pt-2.5">
                         <span className={`text-sm font-bold tracking-tight ${t.titulo}`}>{titulo}</span>
                         <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">

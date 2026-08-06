@@ -38,27 +38,27 @@ interface DetalleOperarioProps {
  */
 const GRUPOS_SKILL = [
   {
+    // Primero el pool: es de donde salen las otras dos. Verlo tercero, debajo de
+    // listas que se arman a partir de él, se lee al revés de como se trabaja.
+    value: "nativas",
+    titulo: "SKILLS NATIVAS",
+    barra: "bg-slate-300",
+    vacio: "Todas están priorizadas",
+    filtro: (s: ProcesoSkill) => (s.nivel ?? 0) === 0,
+  },
+  {
     value: "skill1",
     titulo: "SKILLS 1",
-    barra: "bg-gradient-to-b from-emerald-500 to-teal-500",
+    barra: "bg-emerald-500",
     vacio: "Ninguna marcada como SKILL 1",
     filtro: (s: ProcesoSkill) => s.nivel === 1,
   },
   {
     value: "skill2",
     titulo: "SKILLS 2",
-    barra: "bg-gradient-to-b from-indigo-500 to-sky-500",
+    barra: "bg-indigo-500",
     vacio: "Ninguna marcada como SKILL 2",
     filtro: (s: ProcesoSkill) => s.nivel === 2,
-  },
-  {
-    // El pool: las nativas que no están priorizadas. No es un estado aparte —
-    // es simplemente "no la mandaste a ninguna lista".
-    value: "nativas",
-    titulo: "SKILLS NATIVAS",
-    barra: "bg-gradient-to-b from-slate-400 to-slate-300",
-    vacio: "Todas están priorizadas",
-    filtro: (s: ProcesoSkill) => (s.nivel ?? 0) === 0,
   },
 ];
 
