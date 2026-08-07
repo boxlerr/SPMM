@@ -25,6 +25,11 @@ class OperarioProcesoSkill(Base):
     # NULL = sin posición, se trata como el final. El planificador la usa como
     # desempate fino DENTRO del nivel (el nivel sigue mandando).
     orden = Column(SmallInteger, nullable=True)
+    # De dónde sale la habilidad. False = override sobre una NATIVA (la da el rango);
+    # True = la cargó alguien a mano y habilita el proceso para ESTE operario aunque
+    # su rango no lo incluya. Es el único eje que agrega elegibilidad: `nivel` solo
+    # ordena preferencia y `habilitado` solo saca.
+    manual = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # Relationships
     operario = relationship("Operario", back_populates="procesos_skill")

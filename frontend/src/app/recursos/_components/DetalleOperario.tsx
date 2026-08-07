@@ -557,7 +557,8 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     <h4 className="font-semibold text-gray-800">Habilidades</h4>
                   </div>
                   <p className="text-[11px] text-muted-foreground px-1 mb-1.5">
-                    Todas salen de los rangos del operario. SKILLS 1 y 2 solo le dicen al
+                    Salen de los rangos del operario, más las <strong className="text-amber-700">manuales</strong>{" "}
+                    que se le hayan cargado en Editar. SKILLS 1 y 2 solo le dicen al
                     planificador a quién preferir; el toggle apaga la habilidad.
                   </p>
                   {/* El editor con arrastrar no entra en esta columna: vive en el modal de
@@ -569,7 +570,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-violet-300 bg-violet-50/60 px-2 py-1.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100/70"
                   >
                     <Pencil className="h-3 w-3" />
-                    Arrastrar y reordenar (en Editar)
+                    Agregar manuales y reordenar (en Editar)
                   </button>
                   <div className="relative mb-2">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
@@ -637,6 +638,17 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                         >
                                           {nombre}
                                         </span>
+                                        {/* Sin esta marca una manual se lee como nativa, y la
+                                            diferencia importa: la manual la sacás de acá, la
+                                            nativa solo cambiándole el rango. */}
+                                        {skill.manual && (
+                                          <span
+                                            title="Habilidad cargada a mano: el rango no la da"
+                                            className="shrink-0 rounded bg-amber-100 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-amber-800"
+                                          >
+                                            manual
+                                          </span>
+                                        )}
                                         <div className="flex items-center gap-1 shrink-0">
                                           {/* Los botones "1 / 2 / –" sueltos no decían nada. Como las
                                               filas YA están agrupadas por prioridad, repetir el nivel

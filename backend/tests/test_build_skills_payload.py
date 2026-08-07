@@ -34,8 +34,10 @@ def by_proceso(payload):
 def test_nativas_derivadas_del_rango():
     op = make_op(skills=[], rangos_procs=[[100, 101]])
     m = by_proceso(_build_skills_payload(op))
-    assert m[100] == {"id_proceso": 100, "nivel": 0, "habilitado": True, "orden": None, "nativa": True}
-    assert m[101] == {"id_proceso": 101, "nivel": 0, "habilitado": True, "orden": None, "nativa": True}
+    assert m[100] == {"id_proceso": 100, "nivel": 0, "habilitado": True, "orden": None,
+                      "nativa": True, "manual": False}
+    assert m[101] == {"id_proceso": 101, "nivel": 0, "habilitado": True, "orden": None,
+                      "nativa": True, "manual": False}
 
 
 def test_override_desactiva_nativa():

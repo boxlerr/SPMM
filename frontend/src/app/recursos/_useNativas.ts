@@ -84,7 +84,39 @@ export function useNativas(cleanUrl: string, rangosSeleccionados: number[]) {
         }));
     }, [rangosSeleccionados, mapaRangoProcesos, nombrePorId]);
 
-    return { nativas, cargando, fallo };
+    // `catalogo` son TODOS los procesos: es de donde se eligen las habilidades manuales
+    // (justamente las que el rango no contempla, así que no salen de `nativas`).
+    const catalogo: NativaItem[] = useMemo(
+        () => procesos.map((p) => ({ id: p.id, nombre: p.nombre })),
+        [procesos]
+    );
+
+    return { nativas, catalogo, cargando, fallo };
+}
+
+/** Ids de las habilidades cargadas a mano que ya tiene el operario. */
+export function manualesDesdeSkills(skills: ProcesoSkill[] | undefined): number[] {
+    return (skills || []).filter((s) => s.manual === true).map((s) => s.id_proceso);
+}
+
+/**
+ * Da de alta un proceso en el catálogo y lo devuelve listo para agregar como manual.
+ *
+ * Es para la habilidad que no existe en ningún lado: el buscador no la encuentra
+ * porque nunca se cargó. El proceso queda disponible para todos (es un catálogo
+ * global), pero la habilidad la tiene solo el operario al que se la agreguen.
+ */
+export async function crearProceso(cleanUrl: string, nombre: string): Promise<NativaItem | null> {
+    const res = await fetch(`${cleanUrl}/procesos`, {
+        method: "POST",
+        headers: { ...(getAuthHeaders() as Record<string, string>), "Content-Type": "application/json" },
+        body: JSON.stringify({ nombre: nombre.trim() }),
+    });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const creado = payload?.data;
+    if (!creado?.id) return null;
+    return { id: creado.id, nombre: creado.nombre || nombre.trim() };
 }
 
 /** Convierte las skills que devuelve la API al estado que maneja el editor. */
@@ -104,24 +136,46 @@ export function estadosDesdeSkills(skills: ProcesoSkill[] | undefined): Record<n
 /**
  * Arma el payload de skills para la API.
  *
- * Solo van los overrides sobre procesos que HOY son nativos: mandar una prioridad
- * sobre un proceso que el rango ya no da hace que el backend corte el guardado con un
- * error, y es un resto que igual se limpia solo al reemplazar las filas.
+ * Solo van filas sobre procesos que el operario tiene HOY: nativos de sus rangos o
+ * cargados a mano. Mandar una prioridad sobre un proceso que no tiene hace que el
+ * backend corte el guardado con un error, y es un resto que igual se limpia solo al
+ * reemplazar las filas.
+ *
+ * Diferencia clave entre las dos: de una nativa solo se manda lo que dice algo
+ * (priorizada o apagada), porque el default se deriva del rango. De una MANUAL se
+ * manda siempre la fila, aunque esté sin priorizar y encendida: ahí no hay nada
+ * derivado atrás, la fila es la habilidad. Si no se manda, se borra.
  */
 export function skillsPayloadDesdeEstados(
     estados: Record<number, EstadoSkill>,
-    nativas: NativaItem[]
+    nativas: NativaItem[],
+    manuales: number[] = []
 ) {
     const idsNativos = new Set(nativas.map((n) => n.id));
-    return Object.entries(estados)
-        .map(([id, estado]) => ({
-            id_proceso: Number(id),
-            nivel: estado.nivel,
-            habilitado: estado.habilitado,
-            // La posición solo aplica dentro de SKILLS 1/2; en el pool no significa nada.
-            orden: estado.nivel === 0 ? null : estado.orden ?? null,
-        }))
-        .filter((s) => idsNativos.has(s.id_proceso))
-        .filter((s) => s.nivel !== 0 || !s.habilitado)
-        .sort((a, b) => a.id_proceso - b.id_proceso);
+    // Ser nativa manda: si el rango terminó dando un proceso que estaba cargado a mano,
+    // deja de ser manual. El backend hace la misma resolución.
+    const idsManuales = new Set(manuales.filter((id) => !idsNativos.has(id)));
+
+    const fila = (id: number, estado: EstadoSkill) => ({
+        id_proceso: id,
+        nivel: estado.nivel,
+        habilitado: estado.habilitado,
+        // La posición solo aplica dentro de SKILLS 1/2; en el pool no significa nada.
+        orden: estado.nivel === 0 ? null : estado.orden ?? null,
+        manual: idsManuales.has(id),
+    });
+    const filas = new Map<number, ReturnType<typeof fila>>();
+
+    for (const [clave, estado] of Object.entries(estados)) {
+        const id = Number(clave);
+        if (!idsNativos.has(id) && !idsManuales.has(id)) continue;
+        if (!idsManuales.has(id) && estado.nivel === 0 && estado.habilitado) continue;
+        filas.set(id, fila(id, estado));
+    }
+    // Las manuales sin estado propio (recién agregadas, sin prioridad) igual viajan.
+    for (const id of idsManuales) {
+        if (!filas.has(id)) filas.set(id, fila(id, { nivel: 0, habilitado: true, orden: null }));
+    }
+
+    return Array.from(filas.values()).sort((a, b) => a.id_proceso - b.id_proceso);
 }

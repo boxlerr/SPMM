@@ -264,6 +264,7 @@ def _crear_variables_y_dominios(
     preseleccion_maq=None,
     op_planos=None,
     ots_con_plano=None,
+    skills_manuales=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -276,6 +277,9 @@ def _crear_variables_y_dominios(
     `op_planos`: dict {id_operario: bool} — quién sabe interpretar planos.
     `ots_con_plano`: set de orden_id con plano adjunto. Sus procesos solo se asignan
     a operarios de `op_planos`.
+
+    `skills_manuales`: dict {proceso_id: {operario_id}} — habilidades cargadas a mano.
+    Suman elegibilidad sobre lo que da el rango (ver más abajo).
     """
 
     inicio_vars, fin_vars, intervalo_vars = {}, {}, {}
@@ -288,6 +292,7 @@ def _crear_variables_y_dominios(
     nativas_off = nativas_off or {}
     op_planos = op_planos or {}
     ots_con_plano = ots_con_plano or set()
+    skills_manuales = skills_manuales or {}
 
     op_to_rango = {op_id: r_id for (op_id, r_id) in operarios}
     REAL_OP_IDS = [op_id for (op_id, _) in operarios]
@@ -322,11 +327,12 @@ def _crear_variables_y_dominios(
         presente_vars[(orden_id, secuencia)] = model.NewBoolVar(f"pres_{orden_id}_{secuencia}")
 
         # ----------------- Operarios válidos -----------------
-        # ELEGIBILIDAD = SKILLS NATIVAS. Una nativa es la intersección entre el rango
-        # del operario y los rangos que habilitan el proceso: si el rango se lo da,
-        # el operario sabe hacerlo. Es el único criterio de "puede / no puede".
+        # ELEGIBILIDAD = SKILLS NATIVAS + MANUALES. Una nativa es la intersección entre
+        # el rango del operario y los rangos que habilitan el proceso: si el rango se lo
+        # da, el operario sabe hacerlo. Una manual es una habilidad cargada a mano en su
+        # perfil, para lo que el rango no contempla; suma solo a ESE operario.
         #
-        # SKILLS 1 y 2 NO participan acá: son prioridad dentro de las nativas, no un
+        # SKILLS 1 y 2 NO participan acá: son prioridad dentro de lo elegible, no un
         # permiso aparte (ver _agregar_objetivo). Antes había un "modo skill-map" que
         # restringía el proceso a quienes tuvieran nivel 1/2 cargado, dejando fuera a
         # nativas perfectamente capaces; eso invertía el modelo y se eliminó.
@@ -349,11 +355,28 @@ def _crear_variables_y_dominios(
             else:
                 operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
 
+        # Sumar a quienes tienen el proceso cargado a mano. Se filtra contra REAL_OP_IDS
+        # porque `operarios` sale de operario_rango: un operario sin ningún rango no
+        # existe para el resto del modelo (no tiene calendario ni no-overlap), y meterlo
+        # en el dominio lo dejaría asignable sin ninguna de esas restricciones.
+        manuales = skills_manuales.get(proc_id)
+        if manuales:
+            reales = set(REAL_OP_IDS)
+            operarios_validos += [op_id for op_id in manuales if op_id in reales]
+            sin_rango = [op_id for op_id in manuales if op_id not in reales]
+            if sin_rango:
+                logger.warning(
+                    f"Proceso {proc_id} ({nombre_proc}): operarios {sin_rango} tienen la "
+                    f"habilidad cargada a mano pero no tienen rango asignado -> se ignoran. "
+                    f"Asignales al menos un rango para que entren en la planificación."
+                )
+
         # Un operario con varios rangos aparece repetido en `operarios`: deduplicar
         # preservando el orden para que el dominio del solver no tenga valores dobles.
         operarios_validos = list(dict.fromkeys(operarios_validos))
 
-        # Restar las nativas desactivadas explícitamente para este proceso.
+        # Restar las habilidades desactivadas explícitamente para este proceso (vale
+        # tanto para nativas como para manuales: apagada es apagada).
         excluidos = nativas_off.get(proc_id)
         if excluidos:
             operarios_validos = [op_id for op_id in operarios_validos if op_id not in excluidos]
@@ -1255,7 +1278,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None):
     model = cp_model.CpModel()
 
     # Init Config
@@ -1357,6 +1380,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         preseleccion_maq,
         op_planos,
         ots_con_plano,
+        skills_manuales,
     )
 
     # ---- Restricciones ----
@@ -1591,6 +1615,9 @@ async def planificar(
     mapa_skills = await repo_skill.get_map_por_proceso()
     # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir de la elegibilidad
     nativas_off = await repo_skill.get_nativas_deshabilitadas()
+    # 🔹 Habilidades cargadas a mano (proceso_id -> {operario_id}): suman elegibilidad
+    #    donde el rango no llega.
+    skills_manuales = await repo_skill.get_manuales_por_proceso()
     # 🔹 Quién sabe interpretar planos (id_operario -> bool)
     op_planos = await repo_operario.find_interpreta_planos()
 
@@ -1722,6 +1749,7 @@ async def planificar(
         preseleccion_maq,
         op_planos,
         ots_con_plano,
+        skills_manuales,
     )
 
     planificados, excedentes = _split_resultados(resultados)
@@ -1754,6 +1782,7 @@ async def planificar_pendientes(
         
         mapa_skills = await repo_skill.get_map_por_proceso()
         nativas_off = await repo_skill.get_nativas_deshabilitadas()
+        skills_manuales = await repo_skill.get_manuales_por_proceso()
 
         # 🔹 SOLO órdenes con procesos pendientes
         ordenes = await repo_orden.find_with_pending_procesos(ordenes_ids)
@@ -1823,6 +1852,7 @@ async def planificar_pendientes(
             None,           # preseleccion_maq: no aplica en pendientes
             op_planos,
             ots_con_plano,
+            skills_manuales,
         )
 
         planificados, excedentes = _split_resultados(resultados)

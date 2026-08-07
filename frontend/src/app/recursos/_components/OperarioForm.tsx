@@ -12,7 +12,13 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/components/ui/toast";
 import { capitalizeName, parseApiError } from "@/lib/utils"
 import SkillsEditor, { type EstadoSkill } from "./SkillsEditor";
-import { useNativas, estadosDesdeSkills, skillsPayloadDesdeEstados } from "../_useNativas";
+import {
+  useNativas,
+  estadosDesdeSkills,
+  skillsPayloadDesdeEstados,
+  manualesDesdeSkills,
+  crearProceso,
+} from "../_useNativas";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -52,12 +58,14 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
   const [rangosCatalog, setRangosCatalog] = useState<{ id: number; nombre: string }[]>([]);
   const [selectedRangos, setSelectedRangos] = useState<number[]>([]);
   const [principalRango, setPrincipalRango] = useState<number | null>(null);
-  // Prioridad (SKILLS 1/2) y apagado de cada nativa, por id_proceso.
+  // Prioridad (SKILLS 1/2) y apagado de cada habilidad, por id_proceso.
   const [skillsEstados, setSkillsEstados] = useState<Record<number, EstadoSkill>>({});
+  // Habilidades cargadas a mano: las que el rango no contempla.
+  const [manuales, setManuales] = useState<number[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
 
-  const { nativas, fallo: falloNativas } = useNativas(cleanUrl, selectedRangos);
+  const { nativas, catalogo, fallo: falloNativas } = useNativas(cleanUrl, selectedRangos);
 
   useEffect(() => {
     // Conservar el sector actual aunque no esté en la lista canónica de Met Long
@@ -80,6 +88,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         interpreta_planos: (data as any)?.interpreta_planos ?? false,
       });
       setSkillsEstados(estadosDesdeSkills(data.skills));
+      setManuales(manualesDesdeSkills(data.skills));
       setSelectedRangos(data.rangos || []);
     } else {
       setFormData({
@@ -98,6 +107,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         interpreta_planos: false,
       });
       setSkillsEstados({});
+      setManuales([]);
       setSelectedRangos([]);
     }
   }, [data, open]);
@@ -187,12 +197,12 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
       dni: formData.dni ? onlyDigits(formData.dni) : null,
     } as any;
 
-    // Solo los overrides que dicen algo (prioridad marcada o nativa apagada) y que
-    // caen sobre una nativa vigente de los rangos elegidos.
-    const uniqueSkills = skillsPayloadDesdeEstados(skillsEstados, nativas);
+    // Las manuales completas + los overrides que dicen algo (prioridad marcada o
+    // habilidad apagada) sobre las nativas vigentes de los rangos elegidos.
+    const uniqueSkills = skillsPayloadDesdeEstados(skillsEstados, nativas, manuales);
     // Si no se pudo cargar qué procesos da cada rango, no sabemos cuáles son las
-    // nativas y `uniqueSkills` sale vacío. Mandarlo así BORRA las prioridades y las
-    // nativas apagadas, porque el PUT reemplaza los overrides por completo.
+    // nativas y `uniqueSkills` sale vacío. Mandarlo así BORRA las prioridades, las
+    // nativas apagadas y las manuales, porque el PUT reemplaza las filas por completo.
     // Omitir el campo deja las skills como estaban.
     if (!falloNativas) payload.skills = uniqueSkills;
 
@@ -400,6 +410,10 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
             onInterpretaPlanosChange={(v) => setFormData({ ...formData, interpreta_planos: v })}
             sinRangos={selectedRangos.length === 0}
             fallo={falloNativas}
+            manuales={manuales}
+            onManualesChange={setManuales}
+            catalogo={catalogo}
+            onCrearProceso={(nombre) => crearProceso(cleanUrl, nombre)}
           />
 
           <div className="space-y-4">

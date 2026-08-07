@@ -12,7 +12,13 @@ import { useToast } from "@/components/ui/toast";
 import { capitalizeName, parseApiError } from "@/lib/utils";
 import { User, Briefcase, Phone, Clock } from "lucide-react";
 import SkillsEditor, { type EstadoSkill } from "./SkillsEditor";
-import { useNativas, estadosDesdeSkills, skillsPayloadDesdeEstados } from "../_useNativas";
+import {
+    useNativas,
+    estadosDesdeSkills,
+    skillsPayloadDesdeEstados,
+    manualesDesdeSkills,
+    crearProceso,
+} from "../_useNativas";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -54,12 +60,14 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
     const [rangosCatalog, setRangosCatalog] = useState<{ id: number; nombre: string }[]>([]);
     const [selectedRangos, setSelectedRangos] = useState<number[]>([]);
     const [principalRango, setPrincipalRango] = useState<number | null>(null);
-    // Prioridad (SKILLS 1/2) y apagado de cada nativa, por id_proceso.
+    // Prioridad (SKILLS 1/2) y apagado de cada habilidad, por id_proceso.
     const [skillsEstados, setSkillsEstados] = useState<Record<number, EstadoSkill>>({});
+    // Habilidades cargadas a mano: las que el rango no contempla.
+    const [manuales, setManuales] = useState<number[]>([]);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const { nativas, fallo: falloNativas } = useNativas(cleanUrl, selectedRangos);
+    const { nativas, catalogo, fallo: falloNativas } = useNativas(cleanUrl, selectedRangos);
 
     useEffect(() => {
         if (data && !isCreating) {
@@ -82,6 +90,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 interpreta_planos: (data as any)?.interpreta_planos ?? false,
             });
             setSkillsEstados(estadosDesdeSkills(data.skills));
+            setManuales(manualesDesdeSkills(data.skills));
             setSelectedRangos(data.rangos || []);
         } else {
             setFormData({
@@ -103,6 +112,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 interpreta_planos: false,
             });
             setSkillsEstados({});
+            setManuales([]);
             setSelectedRangos([]);
         }
     }, [data, isCreating]);
@@ -189,13 +199,13 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
             dni: formData.dni ? onlyDigits(formData.dni) : null,
         } as any;
 
-        // Solo los overrides que dicen algo (prioridad marcada o nativa apagada) y que
-        // caen sobre una nativa vigente de los rangos elegidos.
-        const uniqueSkills = skillsPayloadDesdeEstados(skillsEstados, nativas);
+        // Las manuales completas + los overrides que dicen algo (prioridad marcada o
+        // habilidad apagada) sobre las nativas vigentes de los rangos elegidos.
+        const uniqueSkills = skillsPayloadDesdeEstados(skillsEstados, nativas, manuales);
         // Si no se pudo cargar qué procesos da cada rango, no sabemos cuáles son las
-        // nativas y `uniqueSkills` sale vacío. Mandarlo así BORRA las prioridades y las
-        // nativas apagadas, porque el PUT reemplaza los overrides por completo.
-        // Omitir el campo deja las skills como estaban.
+        // nativas y `uniqueSkills` sale vacío. Mandarlo así BORRA las prioridades, las
+        // nativas apagadas y las manuales, porque el PUT reemplaza las filas por
+        // completo. Omitir el campo deja las skills como estaban.
         if (!falloNativas) payload.skills = uniqueSkills;
 
         if (!isCreating && data) {
@@ -220,7 +230,7 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                 (((data as any).min_almuerzo ?? 30)) !== (payload.min_almuerzo ?? 30) ||
                 (((data as any).interpreta_planos ?? false)) !== (payload.interpreta_planos ?? false) ||
                 JSON.stringify([...(data.rangos || [])].sort((a, b) => a - b)) !== JSON.stringify([...selectedRangos].sort((a, b) => a - b)) ||
-                JSON.stringify(skillsPayloadDesdeEstados(estadosDesdeSkills(data.skills), nativas)) !== JSON.stringify(uniqueSkills);
+                JSON.stringify(skillsPayloadDesdeEstados(estadosDesdeSkills(data.skills), nativas, manualesDesdeSkills(data.skills))) !== JSON.stringify(uniqueSkills);
 
             setIsSaving(true);
             try {
@@ -559,6 +569,10 @@ export default function OperarioEditForm({ data, onCancel, onSuccess, cleanUrl, 
                     onInterpretaPlanosChange={(v) => setFormData({ ...formData, interpreta_planos: v })}
                     sinRangos={selectedRangos.length === 0}
                     fallo={falloNativas}
+                    manuales={manuales}
+                    onManualesChange={setManuales}
+                    catalogo={catalogo}
+                    onCrearProceso={(nombre) => crearProceso(cleanUrl, nombre)}
                 />
 
             </div>

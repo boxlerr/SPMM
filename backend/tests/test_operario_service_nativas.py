@@ -166,7 +166,8 @@ async def test_obtener_operario_aflora_nativa_desactivada(session):
 
 async def test_put_rechaza_prioridad_sobre_proceso_no_nativo(session):
     """Invariante del modelo: SKILLS 1/2 solo ordenan lo que el operario ya sabe hacer.
-    Priorizar un proceso que su rango no le da (200) sería habilitárselo por la ventana."""
+    Priorizar un proceso que no tiene (ni nativo ni manual) no habilitaría nada: el
+    planificador ignora la prioridad de quien no es elegible."""
     await seed_basico(session)  # el rango cubre 100 y 101; 200 quedó afuera
     service = OperarioService(session)
 
@@ -177,9 +178,9 @@ async def test_put_rechaza_prioridad_sobre_proceso_no_nativo(session):
     with pytest.raises(BusinessException) as exc:
         await service.modificarOperario(1, dto)
 
-    # El aviso nombra el proceso y dice cómo resolverlo.
+    # El aviso nombra el proceso y da los dos caminos para resolverlo.
     assert "Fresado" in str(exc.value)
-    assert "SKILL NATIVA" in str(exc.value)
+    assert "manual" in str(exc.value)
     assert "rango" in str(exc.value)
 
     # No se guardó nada: ni el nombre ni la skill.

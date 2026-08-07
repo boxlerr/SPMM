@@ -86,6 +86,41 @@ class OperarioProcesoSkillRepository:
             logger.error(f"Repository - Error en get_nativas_deshabilitadas: {e}")
             raise InfrastructureException("Error al consultar las nativas desactivadas.") from e
 
+    async def get_manuales_por_proceso(self):
+        """
+        Devuelve las habilidades MANUALES vigentes:
+        {
+          proceso_id: { operario_id, ... }
+        }
+
+        Son filas cargadas a mano (manual = True): el operario sabe hacer ese proceso
+        aunque su rango no se lo dé. El planificador las SUMA al set de elegibles —es
+        el único mecanismo que agrega elegibilidad fuera del rango; `nivel` solo ordena
+        preferencia y `habilitado` solo saca—.
+
+        Se filtran las apagadas: una manual desactivada no se asigna, igual que una
+        nativa apagada. Sumarla acá y restarla después vía get_nativas_deshabilitadas
+        daría el mismo resultado, pero conviene que el mapa diga solo lo vigente.
+        """
+        try:
+            stmt = select(OperarioProcesoSkill).where(
+                OperarioProcesoSkill.manual == True,
+                OperarioProcesoSkill.habilitado == True,
+            )
+            result = await self.db.execute(stmt)
+            skills = result.scalars().all()
+
+            mapping = {}
+            for s in skills:
+                mapping.setdefault(s.id_proceso, set()).add(s.id_operario)
+
+            logger.info(f"Repository - Habilidades manuales. Procesos afectados: {len(mapping)}")
+            return mapping
+
+        except Exception as e:
+            logger.error(f"Repository - Error en get_manuales_por_proceso: {e}")
+            raise InfrastructureException("Error al consultar las habilidades manuales.") from e
+
     async def save(self, skill: OperarioProcesoSkill):
         """
         Guarda o actualiza una habilidad de operario.

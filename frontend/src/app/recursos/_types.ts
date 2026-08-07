@@ -19,6 +19,8 @@ export interface ProcesoSkill {
   habilitado: boolean;
   /** Posición dentro de SKILLS 1/2 (0 = primero = más preferido). null = al final. */
   orden?: number | null;
+  /** Cargada a mano: habilita el proceso aunque el rango del operario no lo dé. */
+  manual?: boolean;
   /** Solo lectura: si el proceso lo dan los rangos del operario. */
   nativa?: boolean;
 }
