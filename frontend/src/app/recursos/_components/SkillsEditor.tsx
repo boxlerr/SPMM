@@ -4,8 +4,9 @@ import { useMemo, useState } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Wrench, FileText, GripVertical, X, Sparkles, Plus, Loader2 } from "lucide-react";
+import { Search, Wrench, FileText, GripVertical, X, Sparkles } from "lucide-react";
 import { aplicarMovimientoSkill, POOL, LISTA_1, LISTA_2 } from "../_reordenSkills";
+import AgregarHabilidad from "./AgregarHabilidad";
 
 export type NivelSkill = 0 | 1 | 2;
 
@@ -176,9 +177,15 @@ export default function SkillsEditor({
         onEstadosChange({ ...estados, [id]: { ...actual, habilitado: !actual.habilitado } });
     };
 
+    /** Lo que el operario ya tiene: el buscador de agregar no lo vuelve a ofrecer. */
+    const idsQueYaTiene = useMemo(
+        () => new Set<number>([...idsNativos, ...manuales]),
+        [idsNativos, manuales]
+    );
+
     const agregarManual = (item: NativaItem) => {
         if (!onManualesChange) return;
-        if (idsNativos.has(item.id) || manuales.includes(item.id)) return;
+        if (idsQueYaTiene.has(item.id)) return;
         onManualesChange([...manuales, item.id]);
     };
 
@@ -234,11 +241,10 @@ export default function SkillsEditor({
                         Asigná al menos un rango en Información Laboral: las habilidades se derivan de ahí.
                     </p>
                     {puedeAgregar && (
-                        <div className="mx-auto mt-3 max-w-sm text-left">
-                            <AgregarManual
+                        <div className="mt-3 flex justify-center">
+                            <AgregarHabilidad
                                 catalogo={catalogo}
-                                excluidos={idsNativos}
-                                yaCargados={manuales}
+                                yaTiene={idsQueYaTiene}
                                 onAgregar={agregarManual}
                                 onCrearProceso={onCrearProceso}
                             />
@@ -258,37 +264,37 @@ export default function SkillsEditor({
             interpretaPlanos={interpretaPlanos}
             onInterpretaPlanosChange={onInterpretaPlanosChange}
         >
-            <div className="relative mb-2">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                    value={busqueda}
-                    onChange={(e) => setBusqueda(e.target.value)}
-                    placeholder="Buscar habilidad..."
-                    className="border-slate-200 bg-white pl-9 pr-9 shadow-sm focus-visible:ring-violet-400"
-                />
-                {filtrando && (
-                    <button
-                        type="button"
-                        onClick={() => setBusqueda("")}
-                        aria-label="Limpiar búsqueda"
-                        className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                    >
-                        <X className="h-3.5 w-3.5" />
-                    </button>
-                )}
-            </div>
-
-            {puedeAgregar && (
-                <div className="mb-2">
-                    <AgregarManual
+            {/* Un solo buscador a la vista: el de "agregar" vive DENTRO del menú
+                flotante. Dos campos de búsqueda apilados no se entendían. */}
+            <div className="mb-2 flex items-center gap-2">
+                <div className="relative flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                        value={busqueda}
+                        onChange={(e) => setBusqueda(e.target.value)}
+                        placeholder="Buscar habilidad..."
+                        className="border-slate-200 bg-white pl-9 pr-9 shadow-sm focus-visible:ring-violet-400"
+                    />
+                    {filtrando && (
+                        <button
+                            type="button"
+                            onClick={() => setBusqueda("")}
+                            aria-label="Limpiar búsqueda"
+                            className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                    )}
+                </div>
+                {puedeAgregar && (
+                    <AgregarHabilidad
                         catalogo={catalogo}
-                        excluidos={idsNativos}
-                        yaCargados={manuales}
+                        yaTiene={idsQueYaTiene}
                         onAgregar={agregarManual}
                         onCrearProceso={onCrearProceso}
                     />
-                </div>
-            )}
+                )}
+            </div>
 
             <DragDropContext onDragEnd={onDragEnd}>
                 <Pool
@@ -369,11 +375,10 @@ function Marco({
                 </span>
             </div>
             <p className="mb-2.5 text-xs leading-relaxed text-slate-500">
-                Salen de los rangos del operario; lo que el rango no contempla se agrega como{" "}
-                <strong className="text-amber-700">manual</strong>. Arrastralas a{" "}
-                <strong className="text-emerald-700">SKILLS 1</strong> o{" "}
+                Arrastralas a <strong className="text-emerald-700">SKILLS 1</strong> o{" "}
                 <strong className="text-indigo-700">SKILLS 2</strong> para decirle al planificador a
-                quién preferir, y ordenalas dentro de cada lista: más arriba, más preferido.
+                quién preferir: más arriba, más preferido. Las que el rango no contempla se agregan
+                a mano.
             </p>
 
             <label className="mb-2.5 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/60 px-3 py-2.5 transition-colors hover:border-amber-300">
@@ -399,161 +404,12 @@ function Marco({
     );
 }
 
-/**
- * Buscador para sumar una habilidad que el rango no da.
- *
- * Busca sobre el catálogo completo de procesos, no sobre las nativas: el punto es
- * justamente lo que no está ahí. Si no aparece nada, se puede dar de alta el proceso
- * en el momento, porque si no la habilidad no existe en ningún lado y no habría cómo
- * cargarla sin irse a la pantalla de Procesos.
- */
-function AgregarManual({
-    catalogo,
-    excluidos,
-    yaCargados,
-    onAgregar,
-    onCrearProceso,
-}: {
-    catalogo: NativaItem[];
-    excluidos: Set<number>;
-    yaCargados: number[];
-    onAgregar: (item: NativaItem) => void;
-    onCrearProceso?: (nombre: string) => Promise<NativaItem | null>;
-}) {
-    const [abierto, setAbierto] = useState(false);
-    const [texto, setTexto] = useState("");
-    const [creando, setCreando] = useState(false);
-    const [error, setError] = useState("");
-
-    const disponibles = useMemo(() => {
-        const fuera = new Set([...excluidos, ...yaCargados]);
-        const q = normalizar(texto.trim());
-        return catalogo
-            .filter((p) => !fuera.has(p.id))
-            .filter((p) => !q || normalizar(p.nombre).includes(q))
-            .sort((a, b) => a.nombre.localeCompare(b.nombre))
-            .slice(0, 40); // el catálogo es largo; con 40 alcanza para elegir o afinar
-    }, [catalogo, excluidos, yaCargados, texto]);
-
-    const nombreNuevo = texto.trim();
-    const yaExiste = useMemo(
-        () => catalogo.some((p) => normalizar(p.nombre) === normalizar(nombreNuevo)),
-        [catalogo, nombreNuevo]
-    );
-    const puedeCrear = !!onCrearProceso && nombreNuevo.length >= 3 && !yaExiste;
-
-    const cerrar = () => {
-        setAbierto(false);
-        setTexto("");
-        setError("");
-    };
-
-    const crear = async () => {
-        if (!onCrearProceso || !puedeCrear || creando) return;
-        setCreando(true);
-        setError("");
-        try {
-            const creado = await onCrearProceso(nombreNuevo);
-            if (creado) {
-                onAgregar(creado);
-                cerrar();
-            } else {
-                setError("No se pudo crear el proceso. Probá de nuevo.");
-            }
-        } finally {
-            setCreando(false);
-        }
-    };
-
-    if (!abierto) {
-        return (
-            <button
-                type="button"
-                onClick={() => setAbierto(true)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2 text-[11px] font-semibold text-amber-800 transition-colors hover:border-amber-400 hover:bg-amber-100/70"
-            >
-                <Plus className="h-3.5 w-3.5" />
-                Agregar habilidad que el rango no contempla
-            </button>
-        );
-    }
-
-    return (
-        <div className="rounded-lg border border-amber-300 bg-amber-50/50 p-2">
-            <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-amber-500" />
-                    <input
-                        autoFocus
-                        value={texto}
-                        onChange={(e) => {
-                            setTexto(e.target.value);
-                            setError("");
-                        }}
-                        placeholder="Buscar en todos los procesos..."
-                        className="h-8 w-full rounded-md border border-amber-200 bg-white pl-8 pr-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-amber-400"
-                    />
-                </div>
-                <button
-                    type="button"
-                    onClick={cerrar}
-                    aria-label="Cerrar"
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-amber-700 hover:bg-amber-100"
-                >
-                    <X className="h-3.5 w-3.5" />
-                </button>
-            </div>
-
-            <div className="mt-1.5 max-h-40 overflow-y-auto">
-                {disponibles.map((p) => (
-                    <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                            onAgregar(p);
-                            setTexto("");
-                        }}
-                        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-amber-100/80 hover:text-amber-900"
-                    >
-                        <Plus className="h-3 w-3 shrink-0 text-amber-600" />
-                        <span className="truncate">{p.nombre}</span>
-                    </button>
-                ))}
-                {disponibles.length === 0 && (
-                    <p className="px-2 py-2 text-[11px] italic text-slate-500">
-                        {texto.trim()
-                            ? "Ningún proceso coincide."
-                            : "El operario ya tiene todos los procesos del catálogo."}
-                    </p>
-                )}
-            </div>
-
-            {puedeCrear && (
-                <button
-                    type="button"
-                    onClick={crear}
-                    disabled={creando}
-                    className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-400 bg-white px-2 py-1.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
-                >
-                    {creando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-                    Crear proceso «{nombreNuevo}» y agregarlo
-                </button>
-            )}
-            {error && <p className="mt-1 px-1 text-[11px] text-red-700">{error}</p>}
-            <p className="mt-1 px-1 text-[10px] leading-snug text-amber-800/70">
-                La habilidad queda solo para este operario: habilita el proceso sin tocarle el
-                rango ni el de sus compañeros.
-            </p>
-        </div>
-    );
-}
-
 /** Chip/fila manual: se marca y se puede sacar. Las nativas no, salen del rango. */
 function MarcaManual() {
     return (
         <span
             title="Habilidad cargada a mano: el rango no la da"
-            className="shrink-0 rounded bg-amber-100 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-amber-800"
+            className="shrink-0 rounded border border-amber-200 bg-amber-50 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-700"
         >
             manual
         </span>
@@ -652,7 +508,7 @@ function Pool({
                                                 !est.habilitado
                                                     ? "border-slate-200 bg-slate-100 text-slate-400 line-through"
                                                     : item.manual
-                                                    ? "border-amber-300 bg-amber-50 text-amber-900 hover:border-amber-400"
+                                                    ? "border-amber-200 bg-amber-50/70 text-slate-800 hover:border-amber-300"
                                                     : "border-slate-200 bg-white text-slate-700 hover:border-violet-300 hover:text-violet-800"
                                             } ${ds.isDragging ? "scale-105 border-violet-400 shadow-lg ring-2 ring-violet-200" : ""}`}
                                         >
@@ -773,7 +629,7 @@ function ListaPrioridad({
                                             ref={dp.innerRef}
                                             {...dp.draggableProps}
                                             className={`group flex items-center gap-1.5 rounded-lg border px-1.5 py-1.5 transition-all ${
-                                                item.manual ? "border-amber-200 bg-amber-50/60 hover:border-amber-300" : t.fila
+                                                item.manual ? "border-amber-200 bg-amber-50/40 hover:border-amber-300" : t.fila
                                             } ${
                                                 ds.isDragging ? "scale-[1.02] shadow-lg ring-2 ring-slate-300" : ""
                                             } ${atenuado ? "opacity-30" : ""} ${
