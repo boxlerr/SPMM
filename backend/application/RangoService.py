@@ -171,7 +171,28 @@ class RangoService:
         return ResponseDTO(status=True, data=jsonable_encoder(rango_actualizado))
 
     async def eliminarRango(self, id: int):
+        """
+        Borra el rango junto con los procesos y maquinarias que tenía asignados.
+
+        Si algún operario lo tiene, corta antes: borrarlo dejaría gente sin categoría
+        y sin ninguna habilidad nativa, que es un destrozo silencioso. Mejor obligar a
+        reasignarlos primero y decir cuántos son.
+        """
         logger.info(f"Service - Eliminar rango ID: {id}")
+
+        rango = await self.repository.find_by_id(id)
+        if not rango:
+            raise NotFoundException(f"No se encontró el rango con ID {id}")
+
+        detalle = await self.repository.find_detalle(id)
+        en_uso = detalle["operarios_count"]
+        if en_uso:
+            raise BusinessException(
+                f"No se puede eliminar «{rango.nombre}»: {en_uso} operario"
+                f"{'' if en_uso == 1 else 's'} lo tiene"
+                f"{'' if en_uso == 1 else 'n'} asignado. Cambiales el rango primero."
+            )
+
         ok = await self.repository.delete(id)
         if not ok:
             raise NotFoundException(f"No se encontró el rango con ID {id}")

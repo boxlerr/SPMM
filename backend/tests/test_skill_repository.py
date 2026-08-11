@@ -5,6 +5,9 @@ Tests del OperarioProcesoSkillRepository contra SQLite:
     el nivel: una nativa marcada como SKILL 1/2 y después apagada también tiene que
     salir del set de elegibles.
 """
+from datetime import time
+
+from backend.domain.Operario import Operario
 from backend.domain.Proceso import Proceso
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProcesoSkillRepository
@@ -14,6 +17,14 @@ async def _seed_skills(session):
     session.add_all([
         Proceso(id=100, nombre="Torneado"),
         Proceso(id=101, nombre="Roscado"),
+        # Los operarios existían solo como id suelto en las skills. Con las FK activadas
+        # en el harness (ver conftest) hay que crearlos: antes pasaba porque SQLite no
+        # chequeaba nada, no porque el dato fuera válido.
+        *[
+            Operario(id=i, nombre=f"Op{i}", apellido="Test", categoria="OFICIAL",
+                     hora_inicio=time(7, 0), hora_fin=time(16, 0))
+            for i in range(1, 6)
+        ],
         # nivel 1/2 habilitadas -> deben entrar al mapa
         OperarioProcesoSkill(id_operario=1, id_proceso=100, nivel=1, habilitado=True),
         OperarioProcesoSkill(id_operario=2, id_proceso=100, nivel=2, habilitado=True),

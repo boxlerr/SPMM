@@ -213,6 +213,64 @@ async def test_sacar_un_proceso_del_rango_no_borra_la_habilidad_manual(session):
     assert manual.habilitado is True
 
 
+# --------------------------------------------------------------------------
+# Borrado
+# --------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_borrar_un_rango_con_procesos_se_lleva_sus_filas(session):
+    """
+    Sin cascade en Rango.procesos esto explota con "tried to blank-out primary key
+    column 'rango_proceso.id_rango'": la FK del hijo es parte de su PK y SQLAlchemy
+    intenta anularla. Se rompía en produccion con cualquier rango que tuviera procesos.
+    """
+    await seed_basico(session)
+    # Se le saca el operario para que no corte por estar en uso.
+    from backend.domain.OperarioRango import OperarioRango
+    from sqlalchemy import delete as sa_delete
+    await session.execute(sa_delete(OperarioRango).where(OperarioRango.id_rango == 7))
+    await session.commit()
+
+    service = RangoService(session)
+    resp = await service.eliminarRango(7)
+
+    assert resp.data == {"deleted": 7}
+    assert await _ids_procesos(session, 7) == []
+
+
+@pytest.mark.asyncio
+async def test_borrar_un_rango_con_maquinarias_se_lleva_sus_filas(session):
+    await seed_basico(session)
+    from backend.domain.OperarioRango import OperarioRango
+    from sqlalchemy import delete as sa_delete
+    await session.execute(sa_delete(OperarioRango).where(OperarioRango.id_rango == 7))
+    session.add_all([
+        Maquinaria(id=50, nombre="Torno 1", cod_maquina="TORY-1"),
+        RangoMaquinaria(id_rango=7, id_maquinaria=50),
+    ])
+    await session.commit()
+
+    service = RangoService(session)
+    await service.eliminarRango(7)
+
+    assert await _ids_maquinarias(session, 7) == []
+
+
+@pytest.mark.asyncio
+async def test_no_se_puede_borrar_un_rango_que_alguien_tiene(session):
+    # seed_basico deja al operario 1 con el rango 7.
+    await seed_basico(session)
+    service = RangoService(session)
+
+    with pytest.raises(BusinessException) as exc:
+        await service.eliminarRango(7)
+
+    # El mensaje tiene que decir cuántos son, si no el usuario no sabe qué reasignar.
+    assert "1 operario" in str(exc.value)
+    # Y no puede haber borrado nada.
+    assert await _ids_procesos(session, 7) == [100, 101]
+
+
 @pytest.mark.asyncio
 async def test_editar_el_rango_no_toca_las_filas_de_skill_nativas(session):
     """

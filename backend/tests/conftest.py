@@ -5,6 +5,7 @@ conexión entre create_all y la sesión) para no tocar la base real SMPP.
 from datetime import time
 
 import pytest_asyncio
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -43,6 +44,15 @@ async def session():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
+
+    # SQLite ignora las FK (y sus ON DELETE CASCADE) salvo que se pidan explícitamente.
+    # Sin esto el harness es más permisivo que Postgres y deja pasar borrados que en
+    # producción dejan filas huérfanas —o al revés, esconde que el cascade funciona.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _activar_fks(dbapi_conn, _):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=TEST_TABLES))
 
