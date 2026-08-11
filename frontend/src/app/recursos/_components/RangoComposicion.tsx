@@ -36,6 +36,13 @@ interface MaquinaRef extends ItemRef {
     cod_maquina?: string | null;
 }
 
+interface OperarioRef {
+    id: number;
+    nombre: string;
+    apellido: string;
+    disponible: boolean;
+}
+
 interface Props {
     idRango: number;
     nombreRango: string;
@@ -65,7 +72,8 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [guardando, setGuardando] = useState(false);
-    const [alcance, setAlcance] = useState(0);
+    const [operarios, setOperarios] = useState<OperarioRef[]>([]);
+    const alcance = operarios.length;
 
     // `original` es lo que hay en la base; `procesos`/`maquinarias` es lo que se está
     // editando. La diferencia entre ambos es lo que habilita el botón de guardar.
@@ -99,7 +107,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
             setOriginal({ procesos: procs, maquinarias: maqs });
             setProcesos(procs);
             setMaquinarias(maqs);
-            setAlcance(data.operarios_count ?? 0);
+            setOperarios(data.operarios ?? []);
 
             const procJson = await procRes.json().catch(() => null);
             setCatProcesos(procJson?.data ?? procJson ?? []);
@@ -209,18 +217,39 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
     }
 
     return (
-        <div className="space-y-5 bg-muted/30 px-6 py-5">
+        <div className="space-y-3.5 bg-muted/30 px-4 py-4">
             {alcance > 0 && (
-                <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>
-                        Lo que cambies acá aplica a los{" "}
-                        <strong>
-                            {alcance} operario{alcance === 1 ? "" : "s"}
-                        </strong>{" "}
-                        que tienen este rango, no a uno solo. Para habilitar a una sola persona
-                        usá una habilidad manual desde su ficha.
-                    </span>
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+                    <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>
+                            Lo que cambies acá aplica a{" "}
+                            <strong>
+                                {alcance === 1 ? "este operario" : `estos ${alcance} operarios`}
+                            </strong>
+                            , no a uno solo. Para habilitar a una sola persona usá una
+                            habilidad manual desde su ficha.
+                        </span>
+                    </div>
+                    {/* Con los nombres a la vista se ve si el cambio toca a quien uno cree
+                        que toca. Un número suelto no alcanza para decidir. */}
+                    <div className="mt-1.5 flex flex-wrap gap-1 pl-6">
+                        {operarios.map((o) => (
+                            <span
+                                key={o.id}
+                                title={o.disponible ? undefined : "Inactivo"}
+                                className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${
+                                    o.disponible
+                                        ? "border-amber-300 bg-white/70 text-amber-900"
+                                        : "border-amber-200 bg-amber-100/50 text-amber-700/60 line-through"
+                                }`}
+                            >
+                                {/* "Nombre Apellido" para leerse igual que en la pestaña
+                                    de Operarios. El orden lo pone el backend por apellido. */}
+                                {o.nombre} {o.apellido}
+                            </span>
+                        ))}
+                    </div>
                 </div>
             )}
 

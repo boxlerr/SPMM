@@ -56,6 +56,47 @@ async def test_detalle_trae_procesos_y_alcance(session):
 
 
 @pytest.mark.asyncio
+async def test_detalle_dice_quienes_tienen_el_rango(session):
+    """
+    No alcanza con el numero: la UI muestra los nombres para que se vea si el cambio
+    toca a quien uno cree que toca antes de guardar.
+    """
+    await seed_basico(session)
+    service = RangoService(session)
+
+    resp = await service.obtenerDetalleRango(7)
+
+    assert resp.data["operarios"] == [
+        {"id": 1, "nombre": "Juan", "apellido": "Perez", "disponible": True}
+    ]
+    # El contador tiene que seguir coincidiendo con la lista, si no el aviso miente.
+    assert resp.data["operarios_count"] == len(resp.data["operarios"])
+
+
+@pytest.mark.asyncio
+async def test_detalle_ordena_operarios_por_apellido(session):
+    from datetime import time
+    from backend.domain.Operario import Operario
+    from backend.domain.OperarioRango import OperarioRango
+
+    await seed_basico(session)
+    session.add_all([
+        Operario(id=2, nombre="Ana", apellido="Alvarez", categoria="OFICIAL",
+                 hora_inicio=time(7, 0), hora_fin=time(16, 0), disponible=False),
+        OperarioRango(id_operario=2, id_rango=7),
+    ])
+    await session.commit()
+    service = RangoService(session)
+
+    resp = await service.obtenerDetalleRango(7)
+
+    assert [o["apellido"] for o in resp.data["operarios"]] == ["Alvarez", "Perez"]
+    # `disponible` viaja para poder marcar a los inactivos: 2 personas de las cuales
+    # una esta de baja no es el mismo alcance real que 2 activas.
+    assert resp.data["operarios"][0]["disponible"] is False
+
+
+@pytest.mark.asyncio
 async def test_detalle_de_rango_inexistente_es_404(session):
     await seed_basico(session)
     service = RangoService(session)

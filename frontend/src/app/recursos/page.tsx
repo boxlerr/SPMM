@@ -358,25 +358,25 @@ export default function RecursosPage() {
                 <table className="w-full">
                   <thead className="border-b bg-muted/50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Código</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Limitación</th>
-                      <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                      <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Nombre</th>
+                      <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Código</th>
+                      <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Limitación</th>
+                      <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {maquinas.map((maquina) => (
                       <tr key={maquina.id} className="hover:bg-muted/50 transition-colors">
-                        <td className="px-6 py-4 text-sm font-medium">{maquina.nombre}</td>
-                        <td className="px-6 py-4 text-sm">{maquina.cod_maquina || "-"}</td>
-                        <td className="px-6 py-4 text-sm">
+                        <td className="px-4 py-2 text-sm font-medium">{maquina.nombre}</td>
+                        <td className="px-4 py-2 text-sm">{maquina.cod_maquina || "-"}</td>
+                        <td className="px-4 py-2 text-sm">
                           {maquina.limitacion ? (
                             maquina.limitacion
                           ) : (
                             <span className="text-muted-foreground text-xs italic">Sin limitación</span>
                           )}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-2">
                           <div className="flex justify-end gap-2">
                             <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
                               <Pencil className="h-4 w-4" />
@@ -494,17 +494,17 @@ export default function RecursosPage() {
                 <table className="w-full">
                   <thead className="border-b bg-muted/50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Descripción</th>
-                      <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                      <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Nombre</th>
+                      <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Descripción</th>
+                      <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {paginatedProcesos.map((proceso) => (
                       <tr key={proceso.id} className="hover:bg-muted/50 transition-colors">
-                        <td className="px-6 py-4 text-sm font-medium">{proceso.nombre}</td>
-                        <td className="px-6 py-4 text-sm">{proceso.descripcion || "-"}</td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-2 text-sm font-medium">{proceso.nombre}</td>
+                        <td className="px-4 py-2 text-sm">{proceso.descripcion || "-"}</td>
+                        <td className="px-4 py-2">
                           <div className="flex justify-end gap-2">
                             <Button variant="ghost" size="icon" onClick={() => handleEditar("proceso", proceso)} className="h-8 w-8">
                               <Pencil className="h-4 w-4" />

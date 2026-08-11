@@ -12,6 +12,7 @@
  */
 
 import { Fragment, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -242,11 +243,11 @@ export default function CatalogoSimple({
           <table className="w-full">
             <thead className="border-b bg-muted/50">
               <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground w-16">#</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">
+                <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground w-16">#</th>
+                <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">
                   Nombre
                 </th>
-                <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">
+                <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">
                   Acciones
                 </th>
               </tr>
@@ -257,34 +258,38 @@ export default function CatalogoSimple({
                 return (
                   <Fragment key={item.id}>
                     <tr
+                      onClick={
+                        esExpandible
+                          ? () => setExpandido(abierto ? null : item.id)
+                          : undefined
+                      }
+                      aria-expanded={esExpandible ? abierto : undefined}
                       className={`transition-colors ${
-                        abierto ? "bg-muted/60" : "hover:bg-muted/50"
-                      }`}
+                        esExpandible ? "cursor-pointer" : ""
+                      } ${abierto ? "bg-muted/60" : "hover:bg-muted/50"}`}
                     >
-                      <td className="px-6 py-4 text-sm text-muted-foreground font-mono">
+                      <td className="px-4 py-2 text-sm text-muted-foreground font-mono">
                         {idx + 1}
                       </td>
-                      <td className="px-6 py-4 text-sm font-medium">
-                        {esExpandible ? (
-                          <button
-                            type="button"
-                            onClick={() => setExpandido(abierto ? null : item.id)}
-                            aria-expanded={abierto}
-                            className="flex items-center gap-2 text-left hover:text-foreground/80"
-                          >
+                      <td className="px-4 py-2 text-sm font-medium">
+                        <div className="flex items-center gap-2">
+                          {esExpandible && (
                             <ChevronRight
-                              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${
                                 abierto ? "rotate-90" : ""
                               }`}
                             />
-                            {item.nombre}
-                          </button>
-                        ) : (
-                          item.nombre
-                        )}
+                          )}
+                          {item.nombre}
+                        </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex justify-end gap-2">
+                      <td className="px-4 py-2">
+                        {/* stopPropagation: sin esto, editar o borrar también
+                            desplegaría la fila, porque el click sube hasta el <tr>. */}
+                        <div
+                          className="flex justify-end gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <Button
                             variant="ghost"
                             size="icon"
@@ -304,15 +309,32 @@ export default function CatalogoSimple({
                         </div>
                       </td>
                     </tr>
-                    {esExpandible && abierto && (
-                      <tr>
-                        {/* El panel se monta recién al abrir: así cada uno pide su
-                            detalle solo cuando alguien lo mira. */}
-                        <td colSpan={3} className="p-0">
-                          {renderExpanded!(item)}
-                        </td>
-                      </tr>
-                    )}
+                    {/* El panel se monta recién al abrir: cada uno pide su detalle solo
+                        cuando alguien lo mira. La altura se anima con framer en vez de
+                        con una transición CSS porque "auto" no es animable a mano. */}
+                    <AnimatePresence initial={false}>
+                      {esExpandible && abierto && (
+                        <motion.tr
+                          key={`exp-${item.id}`}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.15 }}
+                        >
+                          <td colSpan={3} className="p-0">
+                            <motion.div
+                              initial={{ height: 0 }}
+                              animate={{ height: "auto" }}
+                              exit={{ height: 0 }}
+                              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                              className="overflow-hidden"
+                            >
+                              {renderExpanded!(item)}
+                            </motion.div>
+                          </td>
+                        </motion.tr>
+                      )}
+                    </AnimatePresence>
                   </Fragment>
                 );
               })}

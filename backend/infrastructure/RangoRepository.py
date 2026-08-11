@@ -1,4 +1,4 @@
-from sqlalchemy import select, delete as sa_delete, func
+from sqlalchemy import select, delete as sa_delete
 from backend.domain.Rango import Rango
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -74,17 +74,21 @@ class RangoRepository:
 
     async def find_detalle(self, id: int):
         """
-        Rango con sus procesos y maquinarias resueltos a nombre, más cuántos operarios
-        lo tienen asignado.
+        Rango con sus procesos y maquinarias resueltos a nombre, y QUIÉNES lo tienen.
 
-        Ese contador no es decorativo: editar los procesos de un rango cambia qué puede
-        hacer TODA la gente que lo tiene, así que la UI necesita mostrar el alcance antes
-        de que alguien toque algo.
+        La lista de operarios no es decorativa: editar los procesos de un rango cambia
+        qué puede hacer toda esa gente, y un número suelto ("3 operarios") no alcanza
+        para decidir. Con los nombres a la vista se ve si el cambio toca a quien uno
+        cree que toca antes de guardar.
+
+        Va `disponible` porque un rango con gente inactiva no tiene el mismo alcance
+        real que el mismo número de gente activa.
         """
         try:
             from backend.domain.RangoProceso import RangoProceso
             from backend.domain.RangoMaquinaria import RangoMaquinaria
             from backend.domain.OperarioRango import OperarioRango
+            from backend.domain.Operario import Operario
             from backend.domain.Proceso import Proceso
             from backend.domain.Maquinaria import Maquinaria
 
@@ -105,8 +109,11 @@ class RangoRepository:
             )).all()
 
             operarios = (await self.db.execute(
-                select(func.count()).select_from(OperarioRango).where(OperarioRango.id_rango == id)
-            )).scalar_one()
+                select(Operario.id, Operario.nombre, Operario.apellido, Operario.disponible)
+                .join(OperarioRango, OperarioRango.id_operario == Operario.id)
+                .where(OperarioRango.id_rango == id)
+                .order_by(Operario.apellido, Operario.nombre)
+            )).all()
 
             return {
                 "procesos": [{"id": p_id, "nombre": nombre} for p_id, nombre in procesos],
@@ -114,7 +121,18 @@ class RangoRepository:
                     {"id": m_id, "nombre": nombre, "cod_maquina": cod}
                     for m_id, nombre, cod in maquinarias
                 ],
-                "operarios_count": int(operarios or 0),
+                "operarios": [
+                    {
+                        "id": o_id,
+                        "nombre": nombre,
+                        "apellido": apellido,
+                        "disponible": bool(disponible),
+                    }
+                    for o_id, nombre, apellido, disponible in operarios
+                ],
+                # Se mantiene el contador aparte: ya lo consumen el aviso de alcance y
+                # la validación de borrado, y derivarlo del largo en cada lugar es ruido.
+                "operarios_count": len(operarios),
             }
         except Exception as e:
             logger.error(f"Repository - Error en find_detalle Rango: {e}")
