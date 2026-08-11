@@ -13,7 +13,7 @@ export interface Notification {
   motivo?: string; // Motivo o detalles adicionales (solo para cambio de estado)
 }
 
-import { API_URL, WS_URL } from "@/config";
+import { API_URL } from "@/config";
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -115,65 +115,47 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // 🔹 CONEXIÓN WEBSOCKET
+  // 🔹 POLLING DE NOTIFICACIONES
+  //
+  // Antes esto era un WebSocket contra /ws/notifications. Se sacó por dos motivos:
+  //
+  // 1. Costo: Cloud Run factura CPU + RAM durante toda la vida de una conexión, y
+  //    una conexión abierta se cobra igual que un request procesando, aunque no
+  //    pase nada por ella. Con la app abierta toda la jornada eran ~14 h de
+  //    instancia facturadas por día, contra ~20 s de todo el resto de la API junta.
+  //
+  // 2. Correctitud: el WSManager guardaba las conexiones en memoria de la instancia.
+  //    Con maxScale > 1 un broadcast desde una instancia no llegaba a los clientes
+  //    conectados a otra, así que las notificaciones ya se perdían en silencio.
+  //
+  // Toda notificación se persiste en la base ANTES de emitirse (ver
+  // NotificationHandlers), así que el GET /notificaciones es la fuente de verdad
+  // completa. Lo único que se pierde es inmediatez: hasta POLL_MS de demora.
   useEffect(() => {
-    // Solo conectar si ya cargó inicialmente (para tener historial) y estamos en cliente
-    if (!isLoaded || typeof window === 'undefined') return;
+    if (!isLoaded || typeof window === 'undefined' || !token) return;
 
-    // Usar la URL derivada dinámicamente en config.ts
-    // Esto manejará automáticamente localhost vs producción y http/https vs ws/wss
-    const wsUrl = `${WS_URL}/ws/notifications`;
+    const POLL_MS = 30_000;
 
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: NodeJS.Timeout;
-
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        console.log("✅ WS Notificaciones Conectado");
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log("🔔 WS Notificación Recibida:", data);
-
-          // Mapear el DTO del backend a la estructura del frontend
-          const newNotif: Notification = {
-            id: `${Date.now()}-${Math.random()}`, // ID temporal local
-            message: data.message,
-            type: data.type, // WORK_ORDER_CREATED, etc.
-            timestamp: new Date(data.created_at || Date.now()),
-            read: false,
-            // entity podría tener info extra
-            motivo: data.entity ? JSON.stringify(data.entity) : undefined
-          };
-
-          setNotifications(prev => [newNotif, ...prev]);
-        } catch (err) {
-          console.error("Error procesando mensaje WS:", err);
-        }
-      };
-
-      ws.onclose = () => {
-        console.log("❌ WS Desconectado. Reintentando en 3s...");
-        reconnectTimeout = setTimeout(connect, 3000); // Reconnect
-      };
-
-      ws.onerror = (err) => {
-        console.error("⚠️ WS Error:", err);
-        ws?.close();
-      };
+    // Con la pestaña en segundo plano no se consulta: en la planta las máquinas
+    // quedan con SPMM abierto todo el día y ahí no hay nadie mirando el campanita.
+    const poll = () => {
+      if (document.hidden) return;
+      reloadNotifications();
     };
 
-    connect();
+    const interval = setInterval(poll, POLL_MS);
+
+    // Al volver a la pestaña se consulta enseguida, para no esperar el ciclo.
+    const onVisible = () => {
+      if (!document.hidden) reloadNotifications();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      if (ws) ws.close();
-      clearTimeout(reconnectTimeout);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isLoaded]); // Dependencia isLoaded para asegurar que no pise la carga inicial
+  }, [isLoaded, token]);
 
   // Exponer la función para recargar manualmente
   useEffect(() => {

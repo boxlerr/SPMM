@@ -1,9 +1,13 @@
 name: Keep Alive
 
 on:
-  schedule:
-    - cron: '*/10 * * * *' # Cada 10 minutos
-  workflow_dispatch: # Permite ejecución manual
+  # Cron DESACTIVADO (ago 2026). Esto existía para Render, cuyo free tier dormía
+  # el servicio tras 15 min sin tráfico. Cloud Run no se duerme: escala a cero, y
+  # escalar a cero es justamente lo que mantiene el costo dentro de la capa gratis.
+  # Pinguear cada 10 min mantenía una instancia viva 24/7 pagando CPU+RAM al pedo.
+  # schedule:
+  #   - cron: '*/10 * * * *'
+  workflow_dispatch: # Queda solo el disparo manual
 
 jobs:
   ping:

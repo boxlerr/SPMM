@@ -23,7 +23,7 @@ from backend.presentation.ConfigAPI import router as config_router
 from backend.presentation.PiezaAPI import router as pieza_router
 from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
 from backend.presentation.RangoAPI import router as rango_router
-from backend.presentation.ws_routes import router as ws_router, get_ws_manager
+from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
 from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
@@ -101,7 +101,20 @@ app.include_router(notificacion_router, tags=["notificaciones"], dependencies=pr
 app.include_router(dashboard_router, tags=["dashboard"], dependencies=protected_deps)
 app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
 app.include_router(incidencia_router, tags=["incidencias"], dependencies=protected_deps)
-app.include_router(ws_router, tags=["websocket"])
+# WebSocket DESREGISTRADO (ago 2026). El endpoint /ws/notifications era, de lejos,
+# el mayor costo del servicio: Cloud Run factura CPU + RAM mientras la conexión está
+# abierta, y cada una vivía hasta el timeout de 600 s sin transmitir casi nada. Eran
+# ~14 h de instancia por día contra ~20 s de todo el resto de la API.
+#
+# Además nunca funcionó del todo: WSManager mantiene las conexiones en memoria de la
+# instancia, así que con maxScale > 1 un broadcast no alcanzaba a los clientes
+# conectados a otra instancia.
+#
+# El frontend ahora consulta GET /notificaciones cada 30 s. No se pierde ninguna
+# notificación: NotificationHandlers las persiste ANTES de emitirlas.
+# Para reactivarlo hay que resolver primero el estado compartido entre instancias
+# (Redis pub/sub, o Supabase Realtime, que ya está pago y no cuesta tiempo de Cloud Run).
+# app.include_router(ws_router, tags=["websocket"])
 
 app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)
 app.include_router(config_router, tags=["configuracion"], dependencies=protected_deps)
