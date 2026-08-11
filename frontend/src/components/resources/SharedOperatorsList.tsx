@@ -66,12 +66,12 @@ export function SharedOperatorsList({
                 <table className="w-full">
                     <thead className="border-b bg-muted/50">
                         <tr>
-                            <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Nombre</th>
-                            <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Rango</th>
-                            <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Sector</th>
-                            <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Teléfono</th>
-                            <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">Estado</th>
-                            <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                            <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Nombre</th>
+                            <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Rango</th>
+                            <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Sector</th>
+                            <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Teléfono</th>
+                            <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Estado</th>
+                            <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -81,28 +81,28 @@ export function SharedOperatorsList({
                                 className="hover:bg-muted/50 transition-colors cursor-pointer bg-white"
                                 onClick={() => onView(operario)}
                             >
-                                <td className="px-6 py-4 text-sm font-medium">
+                                <td className="px-4 py-2 text-sm font-medium">
                                     {capitalizeName(operario.nombre)} {capitalizeName(operario.apellido)}
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-4 py-2">
                                     <Badge variant="secondary" className="text-xs">{operario.categoria}</Badge>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-4 py-2">
                                     {operario.sector ? (
                                         <Badge variant="secondary" className="text-xs">{operario.sector}</Badge>
                                     ) : (
                                         <span className="text-muted-foreground text-xs italic">Sin sector</span>
                                     )}
                                 </td>
-                                <td className="px-6 py-4 text-sm">
+                                <td className="px-4 py-2 text-sm">
                                     {formatPhone(operario.celular) || formatPhone(operario.telefono) || <span className="text-muted-foreground text-xs italic">Sin teléfono</span>}
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-4 py-2">
                                     <Badge className={getEstadoColor(operario.disponible)}>
                                         {operario.disponible ? "Activo" : "Ausente"}
                                     </Badge>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-4 py-2">
                                     <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                         <Button variant="ghost" size="icon" onClick={() => onView(operario)} className="h-8 w-8">
                                             <Eye className="h-4 w-4" />
