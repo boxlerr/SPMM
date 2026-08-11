@@ -222,13 +222,24 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
                     <div className="flex items-start gap-2">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                        {/* En singular la coletilla "no a uno solo" se contradice sola,
+                            así que el texto cambia entero, no solo el plural. */}
                         <span>
-                            Lo que cambies acá aplica a{" "}
-                            <strong>
-                                {alcance === 1 ? "este operario" : `estos ${alcance} operarios`}
-                            </strong>
-                            , no a uno solo. Para habilitar a una sola persona usá una
-                            habilidad manual desde su ficha.
+                            {alcance === 1 ? (
+                                <>
+                                    Lo que cambies acá aplica a{" "}
+                                    <strong>este operario</strong>. Si querés habilitarlo
+                                    sin tocarle el rango, usá una habilidad manual desde su
+                                    ficha.
+                                </>
+                            ) : (
+                                <>
+                                    Lo que cambies acá aplica a{" "}
+                                    <strong>estos {alcance} operarios</strong>, no a uno
+                                    solo. Para habilitar a una sola persona usá una
+                                    habilidad manual desde su ficha.
+                                </>
+                            )}
                         </span>
                     </div>
                     {/* Con los nombres a la vista se ve si el cambio toca a quien uno cree
