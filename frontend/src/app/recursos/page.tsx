@@ -13,6 +13,7 @@ import OperarioForm from "./_components/OperarioForm";
 import MaquinaForm from "./_components/MaquinaForm";
 import ProcesoForm from "./_components/ProcesoForm";
 import CatalogoSimple from "./_components/CatalogoSimple";
+import RangoComposicion from "./_components/RangoComposicion";
 import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
 import CambiarEstado from "./_components/CambiarEstado";
@@ -602,8 +603,11 @@ export default function RecursosPage() {
           resource="rangos"
           singular="Rango"
           titulo="Rangos"
-          descripcion="Gestión de rangos (categorías de operarios, máquinas y procesos)."
+          descripcion="Clic en un rango para ver y editar qué procesos y máquinas habilita."
           icon={<Target className="h-5 w-5 text-muted-foreground" />}
+          renderExpanded={(rango) => (
+            <RangoComposicion idRango={rango.id} nombreRango={rango.nombre} />
+          )}
         />
       )}
 

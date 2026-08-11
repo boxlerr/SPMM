@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from backend.application.RangoService import RangoService
 from backend.dto.RangoRequestDTO import RangoRequestDTO
+from backend.dto.RangoAsignacionDTO import RangoProcesosDTO, RangoMaquinariasDTO
 from backend.infrastructure.db import SessionLocal
 from backend.commons.loggers.logger import logger
 
@@ -40,6 +41,47 @@ async def listar_procesos_por_rango(db=Depends(get_db)):
     logger.info("API - Inicio GET /rangos/procesos")
     service = RangoService(db)
     return await service.listarProcesosPorRango()
+
+
+@router.get("/rangos/maquinarias")
+async def listar_maquinarias_por_rango(db=Depends(get_db)):
+    """
+    Mapa {id_rango: [id_maquinaria, ...]}.
+
+    Igual que /rangos/procesos, va declarada ANTES de /rangos/{id} o FastAPI intenta
+    parsear "maquinarias" como int y responde 422.
+    """
+    logger.info("API - Inicio GET /rangos/maquinarias")
+    service = RangoService(db)
+    return await service.listarMaquinariasPorRango()
+
+
+@router.get("/rangos/{id}/detalle")
+async def obtener_detalle_rango(id: int, db=Depends(get_db)):
+    """El rango con sus procesos y maquinarias resueltos, y a cuántos operarios alcanza."""
+    logger.info(f"API - Inicio GET /rangos/{id}/detalle")
+    service = RangoService(db)
+    return await service.obtenerDetalleRango(id)
+
+
+@router.put("/rangos/{id}/procesos")
+async def modificar_procesos_rango(id: int, dto: RangoProcesosDTO, db=Depends(get_db)):
+    """
+    Reemplaza el conjunto de procesos que habilita el rango.
+
+    Cambia qué puede hacer todo operario que tenga este rango, no uno solo.
+    """
+    logger.info(f"API - Inicio PUT /rangos/{id}/procesos")
+    service = RangoService(db)
+    return await service.modificarProcesosRango(id, dto.procesos)
+
+
+@router.put("/rangos/{id}/maquinarias")
+async def modificar_maquinarias_rango(id: int, dto: RangoMaquinariasDTO, db=Depends(get_db)):
+    """Reemplaza el conjunto de maquinarias del rango."""
+    logger.info(f"API - Inicio PUT /rangos/{id}/maquinarias")
+    service = RangoService(db)
+    return await service.modificarMaquinariasRango(id, dto.maquinarias)
 
 
 @router.get("/rangos/{id}")

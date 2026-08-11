@@ -11,11 +11,11 @@
  *   DELETE {cleanUrl}/{resource}/{id}   -> ResponseDTO con data: { deleted: id }
  */
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { Pencil, Trash2, Plus, RefreshCw } from "lucide-react";
+import { Pencil, Trash2, Plus, RefreshCw, ChevronRight } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +43,18 @@ interface CatalogoSimpleProps {
   titulo: string;
   /** Descripción debajo del título. */
   descripcion?: string;
+  /**
+   * Si viene, cada fila se puede desplegar y muestra esto adentro.
+   *
+   * Lo usa Rangos para editar los procesos y maquinarias que habilita, que es la parte
+   * del recurso que no entra en un campo de texto. Sectores no lo pasa y queda como
+   * estaba: un ABM de nombre y nada más.
+   *
+   * Se despliega de a uno. Cada panel sale a buscar su propio detalle al abrirse, así
+   * que permitir varios abiertos serían N requests por una lista que casi siempre se
+   * mira de a un rango por vez.
+   */
+  renderExpanded?: (item: Item) => React.ReactNode;
 }
 
 const getAuthHeaders = (): HeadersInit => {
@@ -59,6 +71,7 @@ export default function CatalogoSimple({
   icon,
   titulo,
   descripcion,
+  renderExpanded,
 }: CatalogoSimpleProps) {
   const cleanUrl = API_URL.replace(/\/$/, "");
   const { showToast } = useToast();
@@ -74,6 +87,9 @@ export default function CatalogoSimple({
 
   const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const [expandido, setExpandido] = useState<number | null>(null);
+  const esExpandible = !!renderExpanded;
 
   const fetchItems = async () => {
     setLoading(true);
@@ -236,34 +252,70 @@ export default function CatalogoSimple({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {items.map((item, idx) => (
-                <tr key={item.id} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-muted-foreground font-mono">
-                    {idx + 1}
-                  </td>
-                  <td className="px-6 py-4 text-sm font-medium">{item.nombre}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => abrirEditar(item)}
-                        className="h-8 w-8"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setConfirmDelete(item)}
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {items.map((item, idx) => {
+                const abierto = expandido === item.id;
+                return (
+                  <Fragment key={item.id}>
+                    <tr
+                      className={`transition-colors ${
+                        abierto ? "bg-muted/60" : "hover:bg-muted/50"
+                      }`}
+                    >
+                      <td className="px-6 py-4 text-sm text-muted-foreground font-mono">
+                        {idx + 1}
+                      </td>
+                      <td className="px-6 py-4 text-sm font-medium">
+                        {esExpandible ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandido(abierto ? null : item.id)}
+                            aria-expanded={abierto}
+                            className="flex items-center gap-2 text-left hover:text-foreground/80"
+                          >
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                                abierto ? "rotate-90" : ""
+                              }`}
+                            />
+                            {item.nombre}
+                          </button>
+                        ) : (
+                          item.nombre
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => abrirEditar(item)}
+                            className="h-8 w-8"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setConfirmDelete(item)}
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                    {esExpandible && abierto && (
+                      <tr>
+                        {/* El panel se monta recién al abrir: así cada uno pide su
+                            detalle solo cuando alguien lo mira. */}
+                        <td colSpan={3} className="p-0">
+                          {renderExpanded!(item)}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

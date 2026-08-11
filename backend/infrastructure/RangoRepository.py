@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete, func
 from backend.domain.Rango import Rango
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -54,6 +54,122 @@ class RangoRepository:
         except Exception as e:
             logger.error(f"Repository - Error en find_procesos_por_rango: {e}")
             raise InfrastructureException("Error al listar los procesos por rango.") from e
+
+    async def find_maquinarias_por_rango(self):
+        """Mapa {id_rango: [id_maquinaria, ...]}, mismo criterio que find_procesos_por_rango."""
+        try:
+            from backend.domain.RangoMaquinaria import RangoMaquinaria
+
+            result = await self.db.execute(
+                select(RangoMaquinaria.id_rango, RangoMaquinaria.id_maquinaria)
+            )
+            mapa = {}
+            for id_rango, id_maquinaria in result.all():
+                mapa.setdefault(str(id_rango), []).append(id_maquinaria)
+            logger.info(f"Repository - Maquinarias por rango OK ({len(mapa)} rangos).")
+            return mapa
+        except Exception as e:
+            logger.error(f"Repository - Error en find_maquinarias_por_rango: {e}")
+            raise InfrastructureException("Error al listar las maquinarias por rango.") from e
+
+    async def find_detalle(self, id: int):
+        """
+        Rango con sus procesos y maquinarias resueltos a nombre, más cuántos operarios
+        lo tienen asignado.
+
+        Ese contador no es decorativo: editar los procesos de un rango cambia qué puede
+        hacer TODA la gente que lo tiene, así que la UI necesita mostrar el alcance antes
+        de que alguien toque algo.
+        """
+        try:
+            from backend.domain.RangoProceso import RangoProceso
+            from backend.domain.RangoMaquinaria import RangoMaquinaria
+            from backend.domain.OperarioRango import OperarioRango
+            from backend.domain.Proceso import Proceso
+            from backend.domain.Maquinaria import Maquinaria
+
+            logger.info(f"Repository - Detalle del rango {id}.")
+
+            procesos = (await self.db.execute(
+                select(Proceso.id, Proceso.nombre)
+                .join(RangoProceso, RangoProceso.id_proceso == Proceso.id)
+                .where(RangoProceso.id_rango == id)
+                .order_by(Proceso.nombre)
+            )).all()
+
+            maquinarias = (await self.db.execute(
+                select(Maquinaria.id, Maquinaria.nombre, Maquinaria.cod_maquina)
+                .join(RangoMaquinaria, RangoMaquinaria.id_maquinaria == Maquinaria.id)
+                .where(RangoMaquinaria.id_rango == id)
+                .order_by(Maquinaria.nombre)
+            )).all()
+
+            operarios = (await self.db.execute(
+                select(func.count()).select_from(OperarioRango).where(OperarioRango.id_rango == id)
+            )).scalar_one()
+
+            return {
+                "procesos": [{"id": p_id, "nombre": nombre} for p_id, nombre in procesos],
+                "maquinarias": [
+                    {"id": m_id, "nombre": nombre, "cod_maquina": cod}
+                    for m_id, nombre, cod in maquinarias
+                ],
+                "operarios_count": int(operarios or 0),
+            }
+        except Exception as e:
+            logger.error(f"Repository - Error en find_detalle Rango: {e}")
+            raise InfrastructureException("Error al obtener el detalle del Rango.") from e
+
+    async def set_procesos(self, id_rango: int, ids_proceso: list[int]):
+        """
+        Reemplaza el conjunto de procesos del rango por el que se pasa.
+
+        Se hace borrar-e-insertar y no un diff porque la tabla es un par de enteros sin
+        payload: no hay nada en la fila que valga la pena conservar, y el conjunto entero
+        entra en una sola transacción.
+
+        NO toca `operario_proceso_skill`. Sacar un proceso del rango le quita la
+        elegibilidad nativa a todos sus operarios, pero las filas de nivel que hayan
+        quedado son inertes: en este modelo `nivel` solo ordena preferencia, no habilita.
+        Y las habilidades manuales siguen valiendo, que es justamente para lo que están.
+        """
+        try:
+            from backend.domain.RangoProceso import RangoProceso
+
+            logger.info(f"Repository - Set procesos del rango {id_rango}: {len(ids_proceso)} procesos.")
+            await self.db.execute(
+                sa_delete(RangoProceso).where(RangoProceso.id_rango == id_rango)
+            )
+            for id_proceso in dict.fromkeys(ids_proceso):  # dedup preservando orden
+                self.db.add(RangoProceso(id_rango=id_rango, id_proceso=id_proceso))
+            await self.db.commit()
+            logger.info(f"Repository - Procesos del rango {id_rango} actualizados.")
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en set_procesos: {e}")
+            raise InfrastructureException("Error al actualizar los procesos del Rango.") from e
+
+    async def set_maquinarias(self, id_rango: int, ids_maquinaria: list[int]):
+        """Reemplaza el conjunto de maquinarias del rango. Mismo criterio que set_procesos."""
+        try:
+            from backend.domain.RangoMaquinaria import RangoMaquinaria
+
+            logger.info(
+                f"Repository - Set maquinarias del rango {id_rango}: {len(ids_maquinaria)} maquinarias."
+            )
+            await self.db.execute(
+                sa_delete(RangoMaquinaria).where(RangoMaquinaria.id_rango == id_rango)
+            )
+            for id_maquinaria in dict.fromkeys(ids_maquinaria):
+                self.db.add(RangoMaquinaria(id_rango=id_rango, id_maquinaria=id_maquinaria))
+            await self.db.commit()
+            logger.info(f"Repository - Maquinarias del rango {id_rango} actualizadas.")
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en set_maquinarias: {e}")
+            raise InfrastructureException("Error al actualizar las maquinarias del Rango.") from e
 
     async def find_by_id(self, id: int):
         try:

@@ -18,6 +18,16 @@ interface Props {
     /** Alta de un proceso que no existe en el catálogo. */
     onCrearProceso?: (nombre: string) => Promise<ProcesoItem | null>;
     disabled?: boolean;
+    /**
+     * Los tres de abajo existen para que el mismo buscador sirva en el editor del
+     * operario y en el del rango, que dicen cosas distintas aunque el mecanismo sea
+     * idéntico. Los defaults son los textos del operario, que fue el caso original.
+     */
+    etiqueta?: string;
+    /** Aclaración al pie del menú: el alcance de lo que se está por agregar. */
+    nota?: string;
+    /** Singular de lo que se busca, para los mensajes ("proceso", "maquinaria"). */
+    sustantivo?: string;
 }
 
 const normalizar = (s: string) =>
@@ -46,6 +56,9 @@ export default function AgregarHabilidad({
     onAgregar,
     onCrearProceso,
     disabled = false,
+    etiqueta = "Agregar habilidad",
+    nota = "Queda solo para este operario, sin tocarle el rango.",
+    sustantivo = "proceso",
 }: Props) {
     const [abierto, setAbierto] = useState(false);
     const [texto, setTexto] = useState("");
@@ -205,7 +218,7 @@ export default function AgregarHabilidad({
                 } disabled:opacity-50`}
             >
                 <Plus className="h-3.5 w-3.5" />
-                Agregar habilidad
+                {etiqueta}
             </button>
 
             {abierto && pos && destino &&
@@ -231,7 +244,7 @@ export default function AgregarHabilidad({
                                     setTexto(e.target.value);
                                     setError("");
                                 }}
-                                placeholder="Buscar en todos los procesos..."
+                                placeholder={`Buscar ${sustantivo}...`}
                                 className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
                             />
                         </div>
@@ -258,8 +271,8 @@ export default function AgregarHabilidad({
                             {disponibles.length === 0 && (
                                 <p className="px-2.5 py-3 text-[13px] text-slate-500">
                                     {nombreNuevo
-                                        ? <>Ningún proceso se llama <span className="font-medium text-slate-700">«{nombreNuevo}»</span>.</>
-                                        : "Ya tiene todos los procesos del catálogo."}
+                                        ? <>Ningún {sustantivo} se llama <span className="font-medium text-slate-700">«{nombreNuevo}»</span>.</>
+                                        : `No queda ningún ${sustantivo} para agregar.`}
                                 </p>
                             )}
 
@@ -283,7 +296,7 @@ export default function AgregarHabilidad({
 
                         <div className="flex items-center gap-1.5 border-t border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[11px] text-slate-500">
                             <CornerDownLeft className="h-3 w-3 shrink-0" />
-                            Queda solo para este operario, sin tocarle el rango.
+                            {nota}
                         </div>
                     </div>,
                     destino

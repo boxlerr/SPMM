@@ -1,4 +1,4 @@
-from sqlalchemy import update
+from sqlalchemy import update, select
 
 from backend.domain.Rango import Rango
 from backend.domain.Operario import Operario
@@ -43,6 +43,85 @@ class RangoService:
         logger.info("Service - Listar procesos por rango.")
         mapa = await self.repository.find_procesos_por_rango()
         return ResponseDTO(status=True, data=mapa)
+
+    async def listarMaquinariasPorRango(self):
+        """Mapa {id_rango: [id_maquinaria, ...]}."""
+        logger.info("Service - Listar maquinarias por rango.")
+        mapa = await self.repository.find_maquinarias_por_rango()
+        return ResponseDTO(status=True, data=mapa)
+
+    async def obtenerDetalleRango(self, id: int):
+        """Rango + sus procesos y maquinarias + cuántos operarios lo tienen."""
+        logger.info(f"Service - Detalle del rango ID: {id}")
+        rango = await self.repository.find_by_id(id)
+        if not rango:
+            raise NotFoundException(f"No se encontró el rango con ID {id}")
+
+        detalle = await self.repository.find_detalle(id)
+        return ResponseDTO(
+            status=True,
+            data={"id": rango.id, "nombre": rango.nombre, **detalle},
+        )
+
+    async def _validar_ids(self, modelo, ids: list[int], etiqueta: str):
+        """
+        Corta con un error de negocio si alguno de los IDs no existe.
+
+        Sin esto el fallo sale como violación de FK, que llega al usuario como un 500
+        ilegible en vez de decirle cuál de los que eligió no está.
+        """
+        if not ids:
+            return
+        existentes = set(
+            (await self.db.execute(select(modelo.id).where(modelo.id.in_(ids)))).scalars().all()
+        )
+        faltantes = [i for i in dict.fromkeys(ids) if i not in existentes]
+        if faltantes:
+            raise BusinessException(
+                f"Estos {etiqueta} no existen: {', '.join(str(i) for i in faltantes)}."
+            )
+
+    async def modificarProcesosRango(self, id: int, ids_proceso: list[int]):
+        """
+        Reemplaza los procesos que habilita el rango.
+
+        Es la operación de mayor alcance del módulo: cambia qué puede hacer TODA la gente
+        que tiene el rango, no un operario. Por eso la respuesta devuelve el detalle
+        completo recalculado, para que la UI muestre en el acto a cuántos alcanzó.
+        """
+        from backend.domain.Proceso import Proceso
+
+        logger.info(f"Service - Modificar procesos del rango ID: {id}")
+        rango = await self.repository.find_by_id(id)
+        if not rango:
+            raise NotFoundException(f"No se encontró el rango con ID {id}")
+
+        await self._validar_ids(Proceso, ids_proceso, "procesos")
+        await self.repository.set_procesos(id, ids_proceso)
+
+        detalle = await self.repository.find_detalle(id)
+        return ResponseDTO(
+            status=True,
+            data={"id": rango.id, "nombre": rango.nombre, **detalle},
+        )
+
+    async def modificarMaquinariasRango(self, id: int, ids_maquinaria: list[int]):
+        """Reemplaza las maquinarias del rango. Mismo alcance que modificarProcesosRango."""
+        from backend.domain.Maquinaria import Maquinaria
+
+        logger.info(f"Service - Modificar maquinarias del rango ID: {id}")
+        rango = await self.repository.find_by_id(id)
+        if not rango:
+            raise NotFoundException(f"No se encontró el rango con ID {id}")
+
+        await self._validar_ids(Maquinaria, ids_maquinaria, "maquinarias")
+        await self.repository.set_maquinarias(id, ids_maquinaria)
+
+        detalle = await self.repository.find_detalle(id)
+        return ResponseDTO(
+            status=True,
+            data={"id": rango.id, "nombre": rango.nombre, **detalle},
+        )
 
     async def obtenerRangoPorId(self, id: int):
         logger.info(f"Service - Obtener rango ID: {id}")

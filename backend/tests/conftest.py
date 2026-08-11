@@ -19,8 +19,11 @@ from backend.domain.Rango import Rango
 from backend.domain.RangoProceso import RangoProceso
 from backend.domain.Proceso import Proceso
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+from backend.domain.Maquinaria import Maquinaria
+from backend.domain.RangoMaquinaria import RangoMaquinaria
 
-# Solo las tablas que tocan las skills nativas (evita tipos MSSQL de otros modelos).
+# Solo las tablas que tocan las skills nativas y la composición del rango
+# (evita tipos MSSQL de otros modelos).
 TEST_TABLES = [
     Proceso.__table__,
     Rango.__table__,
@@ -28,6 +31,8 @@ TEST_TABLES = [
     RangoProceso.__table__,
     OperarioRango.__table__,
     OperarioProcesoSkill.__table__,
+    Maquinaria.__table__,
+    RangoMaquinaria.__table__,
 ]
 
 
