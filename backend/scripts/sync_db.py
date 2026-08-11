@@ -18,6 +18,7 @@ existe y se actualiza sólo lo que cambió.
 
 import asyncio
 import os
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import quote_plus
@@ -89,6 +90,29 @@ def _clave(valor):
     """Las claves de texto se comparan sin distinguir mayúsculas ni espacios, como
     hacía SQL Server (su collation por defecto es case-insensitive)."""
     return valor.strip().upper() if isinstance(valor, str) else valor
+
+
+def _nombre_proceso(valor):
+    """
+    Normaliza el nombre de un proceso antes de meterlo al catálogo: recorta las
+    puntas y colapsa los espacios de adentro.
+
+    El catálogo se COSECHA de texto libre del legacy (Q_PROCESOS saca un DISTINCT de
+    lo que alguien tipeó en cada línea de OT), así que cada variante de tipeo entra
+    como un proceso NUEVO. Y un proceso nuevo nace sin rango, que para el
+    planificador significa "lo puede hacer cualquiera" — ver
+    PlanificacionService._crear_variables_y_dominios. Así aparecieron gemelos como
+    'FRESADORA  ENGRASADO' y 'FRESADORA ENGRASADO'.
+
+    `_clave` ya empareja por mayúsculas y espacios de las puntas, pero NO por los de
+    adentro: 'A  B' y 'A B' le daban claves distintas y se insertaban las dos.
+
+    Los errores de tipeo de verdad ('TORNO T3c' por 'TORNO T3') esto no los puede
+    atrapar: para eso está la auditoría (scripts/auditoria_procesos_sin_rango.py).
+    """
+    if not isinstance(valor, str):
+        return valor
+    return re.sub(r"\s+", " ", valor).strip()
 
 
 async def _upsert(session, tabla, filas, claves, columnas, cols_update=None):
@@ -352,8 +376,15 @@ async def run_sync():
             await session.commit()
 
             # 5. Catálogo de procesos (sólo inserta los que faltan).
+            #    Los nombres se normalizan (ver _nombre_proceso): vienen de texto libre
+            #    del legacy y cada variante de tipeo crea un proceso nuevo, que nace sin
+            #    rango y por lo tanto asignable a cualquiera.
             logger.info("Actualizando catálogo de procesos...")
-            nombres = [r for r in await _leer(Q_PROCESOS) if (r["nombre"] or "").strip()]
+            nombres = []
+            for r in await _leer(Q_PROCESOS):
+                nombre = _nombre_proceso(r["nombre"] or "")
+                if nombre:
+                    nombres.append({**r, "nombre": nombre})
             n, _ = await _upsert(session, "proceso", nombres, ["nombre"], ["nombre"])
             logger.info(f"  -> procesos nuevos: {n}")
             await session.commit()

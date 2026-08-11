@@ -1649,6 +1649,7 @@ async def planificar(
     procesos_para_solver = []
     cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
     preseleccion_maq = {}  # (orden_id, secuencia) -> id_maquinaria forzada (preselección Metlo)
+    procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
 
     # -----------------------
     # Procesar cada orden
@@ -1708,6 +1709,15 @@ async def planificar(
                         rangos_validos = list(rangos_maquina)
                         break
 
+            # Un proceso sin rangos es asignable a CUALQUIERA (más abajo:
+            # `if not rangos_proc: operarios_validos = REAL_OP_IDS[:]`). Es lo
+            # contrario de lo que uno esperaría: el silencio habilita a todos en vez
+            # de a nadie. Se acumula para avisarlo UNA vez al final —son decenas de
+            # líneas y un log por línea no lo lee nadie— porque si no el problema es
+            # invisible: el plan sale igual, solo que con la persona equivocada.
+            if not rangos_validos:
+                procesos_sin_rango[rel.proceso.id] = rel.proceso.nombre or f"#{rel.proceso.id}"
+
             # -------------------------------
             # Agregar al solver
             # -------------------------------
@@ -1726,6 +1736,15 @@ async def planificar(
             ))
 
             # print(f"PROCESO: {rel.proceso.id} {nombre_proceso} usa_maquina={usa_maquina}")
+
+    if procesos_sin_rango:
+        detalle = ", ".join(f"{n} (#{i})" for i, n in sorted(procesos_sin_rango.items(), key=lambda x: x[1]))
+        logger.warning(
+            f"PLANIFICADOR: {len(procesos_sin_rango)} procesos entran SIN RANGO, así que "
+            f"se los puede asignar a CUALQUIER operario: {detalle}. "
+            f"Cargales el rango en Recursos > Procesos, o corré "
+            f"backend/scripts/auditoria_procesos_sin_rango.py para verlos ordenados por impacto."
+        )
 
     # -------------------------------
     # Ejecutar el solver en otro hilo
@@ -1810,6 +1829,7 @@ async def planificar_pendientes(
 
         procesos_para_solver = []
         cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
+        procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
 
         for orden in ordenes:
             prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
@@ -1825,6 +1845,11 @@ async def planificar_pendientes(
                 usa_maquina = proceso_usa_maquina(nombre_proceso)
                 rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
                 familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
+                # Sin rangos = asignable a cualquiera. Acá ni siquiera está el rescate
+                # por nombre de máquina que sí hace planificar(), así que el aviso
+                # importa más todavía.
+                if not rangos_validos:
+                    procesos_sin_rango[rel.proceso.id] = rel.proceso.nombre or f"#{rel.proceso.id}"
                 #agregue familia req
                 procesos_para_solver.append((
                     orden.id,
@@ -1839,6 +1864,13 @@ async def planificar_pendientes(
                     familia_req,
                     mapa_skills.get(rel.proceso.id, {}) # op_skill_levels
                 ))
+
+        if procesos_sin_rango:
+            detalle = ", ".join(f"{n} (#{i})" for i, n in sorted(procesos_sin_rango.items(), key=lambda x: x[1]))
+            logger.warning(
+                f"PLANIFICADOR (pendientes): {len(procesos_sin_rango)} procesos entran SIN "
+                f"RANGO, así que se los puede asignar a CUALQUIER operario: {detalle}."
+            )
 
         resultados = await asyncio.to_thread(
             _resolver_planificacion,
