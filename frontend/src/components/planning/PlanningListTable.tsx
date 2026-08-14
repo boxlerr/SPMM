@@ -90,14 +90,18 @@ const materialRank = (estado?: string | null) => {
     }
 };
 
-/** Avance de procesos de una OT: -1 si no tiene procesos cargados, si no 0..1
- *  (proporción de procesos finalizados). Así, ascendente: primero las que no
- *  tienen procesos, después las menos avanzadas, y al final las terminadas. */
+/** Ranking de la columna Proceso: manda la CANTIDAD de procesos de la OT (una OT
+ *  de 6 procesos antes que una de 2), y entre OTs con la misma cantidad desempata
+ *  la que tiene más procesos terminados.
+ *
+ *  Antes ordenaba solo por avance (finalizados/total) y no se movía nada: en la
+ *  planificación casi todas las OTs arrancan en 0 terminados, así que empataban
+ *  todas en 0 (pedido de Lucas 14/08). */
 const procesoRank = (item: WorkOrder) => {
     const total = item.procesos?.length || 0;
-    if (total === 0) return -1;
+    if (total === 0) return 0;
     const finalizados = item.procesos.filter(p => p.estado_proceso?.id === 3).length;
-    return finalizados / total;
+    return total * 1000 + finalizados;
 };
 
 /** Estado derivado de la OT según el avance de sus procesos.
@@ -114,6 +118,16 @@ const getOrderStatus = (order: WorkOrder) => {
 
     return 'Pendiente';
 };
+
+/** Columnas donde el PRIMER click ordena de mayor a menor (pedido de Lucas: "que
+ *  me las ordene de mayor a menor"). Son las que son una cantidad: la OT más
+ *  nueva, la mayor cantidad de piezas, la prioridad más alta, la OT con más
+ *  procesos. Las demás arrancan al revés a propósito:
+ *    - Material / Plano / Entrega: primero lo que FALTA (sin stock, sin plano,
+ *      sin entregar), que es lo accionable.
+ *    - Fechas: la más próxima primero.
+ *    - Texto: A → Z. */
+const PRIMER_CLICK_DESC: SortColumn[] = ['id', 'id_otvieja', 'unidades', 'prioridad', 'proceso'];
 
 /** Proporción entregada (0..1). Sin unidades cargadas se considera 0. */
 const entregaRank = (item: WorkOrder) => {
@@ -304,13 +318,16 @@ function _PlanningListTable({
     };
 
     const handleSort = (key: SortColumn) => {
-        let direction: 'asc' | 'desc' | null = 'asc'; // 1st click: asc (default)
+        // Cada columna arranca para el lado que más sirve (ver PRIMER_CLICK_DESC).
+        // 1er click: dirección natural · 2do: la inversa · 3ro: sin ordenar.
+        const primera: 'asc' | 'desc' = PRIMER_CLICK_DESC.includes(key) ? 'desc' : 'asc';
+        let direction: 'asc' | 'desc' | null = primera;
 
         if (sortConfig.key === key) {
-            if (sortConfig.direction === 'asc') {
-                direction = 'desc'; // 2nd click: desc
-            } else if (sortConfig.direction === 'desc') {
-                direction = null; // 3rd click: default (null)
+            if (sortConfig.direction === primera) {
+                direction = primera === 'asc' ? 'desc' : 'asc';
+            } else if (sortConfig.direction) {
+                direction = null;
             }
         }
 
@@ -1043,7 +1060,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('unidades')}
-                                    title="Ordenar por cantidad"
+                                    title="Ordenar por cantidad (de mayor a menor)"
                                 >
                                     <div className="flex items-center justify-center">
                                         Cant.
@@ -1053,7 +1070,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('prioridad')}
-                                    title="Ordenar por prioridad"
+                                    title="Ordenar por prioridad (primero las más urgentes)"
                                 >
                                     <div className="flex items-center justify-center">
                                         Prioridad
@@ -1073,7 +1090,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('proceso')}
-                                    title="¿La OT tiene procesos cargados? Ordena por avance: primero las que no tienen procesos, después las menos avanzadas"
+                                    title="¿La OT tiene procesos cargados? Ordena por cantidad de procesos, de mayor a menor (el número de abajo es terminados/total)"
                                 >
                                     <div className="flex items-center justify-center">
                                         Proceso
@@ -1104,7 +1121,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('entrega')}
-                                    title="Ordenar por % entregado"
+                                    title="Ordenar por % entregado (primero lo que menos se entregó)"
                                 >
                                     <div className="flex items-center justify-center">
                                         Entrega

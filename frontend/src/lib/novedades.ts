@@ -83,7 +83,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones › Planificación",
         titulo: "Se puede ordenar por cualquier columna de la lista de planificadas",
         detalle:
-            "Antes solo ordenaban algunas. Ahora también N° Pedido, Material (primero lo que falta), Proceso, Plano, Entrega, Aprobado x y Pedido x. La columna Proceso ordena por avance y muestra cuántos procesos están terminados sobre el total.",
+            "Antes solo ordenaban algunas. Ahora también N° Pedido, Material, Proceso, Plano, Entrega, Aprobado x y Pedido x. Cada columna arranca para el lado que sirve: las cantidades (Cant., Prioridad, Proceso, OT) de mayor a menor, y Material, Plano y Entrega mostrando primero lo que falta. Proceso ordena por cantidad de procesos de la OT y abajo del 'Sí' te dice cuántos están terminados sobre el total.",
         href: "/operaciones",
     },
     {
