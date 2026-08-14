@@ -15,7 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
-  Briefcase
+  Briefcase,
+  Sparkles
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
@@ -52,6 +53,13 @@ const sidebarItems: SidebarItem[] = [
     name: "Configuración",
     href: "/configuracion",
     icon: Settings
+  },
+  {
+    // Novedades: el changelog para el equipo de la planta. Va último a propósito
+    // (no es una pantalla de trabajo), pero fijo en el menú para que se encuentre.
+    name: "Novedades",
+    href: "/novedades",
+    icon: Sparkles
   }
 ];
 

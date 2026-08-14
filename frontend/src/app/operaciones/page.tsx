@@ -19,7 +19,7 @@ import { OperatorLoadTab } from "./_components/OperatorLoadTab"
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { cn } from "@/lib/utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2, ChevronDown } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2, ChevronDown, CheckCircle2 } from "lucide-react"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
@@ -108,6 +108,18 @@ export default function OperacionesPage() {
   // Delete Planning Batch State
   const [isDeleteLoteDialogOpen, setIsDeleteLoteDialogOpen] = useState(false)
   const [isDeletingLote, setIsDeletingLote] = useState(false)
+
+  // Sub-tab activa dentro de Planificación (Planificadas / Semanal / ... ).
+  // Es controlada para poder limpiar la selección de OTs al cambiar de pestaña
+  // (si no, uno selecciona en "Planificadas", cambia de tab y el tachito borraría
+  // OTs que ya no está viendo).
+  const [planSubTab, setPlanSubTab] = useState<string>("general")
+
+  // OTs tildadas en la tabla de Planificadas/Completadas. Se usan para sacarlas
+  // de la planificación con el tachito de la barra de acciones.
+  const [selectedPlanIds, setSelectedPlanIds] = useState<number[]>([])
+  const [isQuitarOtsDialogOpen, setIsQuitarOtsDialogOpen] = useState(false)
+  const [isQuitandoOts, setIsQuitandoOts] = useState(false)
 
 
 
@@ -327,9 +339,25 @@ export default function OperacionesPage() {
     return deliveryDate.getFullYear() > 1950;
   };
 
+  /** "Completada" = ya no tiene sentido verla en Planificadas:
+   *    - la marcó el legacy como entregada/finalizada (isOrderDelivered), o
+   *    - se entregó todo lo pedido (lo mismo que muestra la columna Entrega
+   *      como "Entrega completa": cantidad_entregada >= unidades).
+   *  Estas OTs se mueven a la pestaña "Completadas" en vez de seguir mezcladas
+   *  con el trabajo pendiente (pedido de Lucas, 14/08). */
+  const isOrderCompleted = (order: WorkOrder) => {
+    if (isOrderDelivered(order)) return true;
+    const total = Number(order.unidades) || 0;
+    const entregado = Number(order.cantidad_entregada) || 0;
+    return total > 0 && entregado >= total;
+  };
+
   // Use filteredPlanificacion for deriving planned orders to reflect the history selection
   const plannedOrderIds = new Set(filteredPlanificacion.map(p => p.orden_id));
   const plannedOrdenes = ordenesTrabajo.filter(o => plannedOrderIds.has(o.id));
+
+  /** Planificadas ya completadas (entregadas) — van a su propia pestaña. */
+  const completedPlannedOrdenes = plannedOrdenes.filter(isOrderCompleted);
 
   // Set de fechas (YYYY-MM-DD) que tienen al menos un proceso planificado.
   // Se usa en el calendario del banner para mostrar un punto rojo en esos días,
@@ -1093,6 +1121,39 @@ export default function OperacionesPage() {
     }
   };
 
+  /** Saca del plan las OTs tildadas (se planificaron por error / ya no van).
+   *  El lote sigue existiendo con el resto; las OTs vuelven a "No Planificadas". */
+  const handleQuitarOtsSeleccionadas = async () => {
+    if (selectedPlanIds.length === 0) return;
+
+    try {
+      setIsQuitandoOts(true);
+      const response = await fetch(`${API_URL}/planificacion/quitar-ordenes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          orden_ids: selectedPlanIds,
+          // Si se está viendo una planificación puntual, solo se saca de esa;
+          // con "Todas las Planificaciones" se saca de todas donde aparezca.
+          id_lote: selectedLoteId !== "all" ? selectedLoteId : null,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Error al quitar las OTs de la planificación");
+
+      const n = selectedPlanIds.length;
+      toast.success(n === 1 ? "OT quitada de la planificación" : `${n} OTs quitadas de la planificación`);
+      setSelectedPlanIds([]);
+      await fetchData();
+    } catch (error) {
+      console.error("Error removing orders from planning:", error);
+      toast.error("Error al quitar las OTs de la planificación");
+    } finally {
+      setIsQuitandoOts(false);
+      setIsQuitarOtsDialogOpen(false);
+    }
+  };
+
   const handleDeleteLote = async () => {
     if (selectedLoteId === "all") return;
 
@@ -1274,7 +1335,11 @@ export default function OperacionesPage() {
               />
             )}
             {activeTab === "lista_planificacion" && (
-              <Tabs defaultValue="general" className="w-full flex-1 flex flex-col">
+              <Tabs
+                value={planSubTab}
+                onValueChange={(v) => { setPlanSubTab(v); setSelectedPlanIds([]); }}
+                className="w-full flex-1 flex flex-col"
+              >
                 {/* Header de sub-tabs: `lg:flex-row` para que tabs y acciones queden lado a lado
                     desde 1024px. Prioridad de ancho: los tabs son navegación principal y NO
                     ceden (`lg:shrink-0` dentro de ScrollableTabsBar); si no entra todo, lo que
@@ -1299,6 +1364,18 @@ export default function OperacionesPage() {
                       className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
                     >
                       Diaria
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="completadas"
+                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
+                      title="OTs planificadas que ya se entregaron completas"
+                    >
+                      Completadas
+                      {completedPlannedOrdenes.length > 0 && (
+                        <span className="ml-1.5 rounded-full bg-green-100 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                          {completedPlannedOrdenes.length}
+                        </span>
+                      )}
                     </TabsTrigger>
                     <TabsTrigger
                       value="finalizadas"
@@ -1398,21 +1475,39 @@ export default function OperacionesPage() {
                       <span className="hidden lg:inline">Re-planificar</span>
                     </Button>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsDeleteLoteDialogOpen(true)}
-                      className={cn(
-                        "bg-white border-red-200 transition-colors",
-                        selectedLoteId === "all"
-                          ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
-                          : "text-red-600 hover:bg-red-50"
-                      )}
-                      disabled={selectedLoteId === "all" || isDeletingLote}
-                      title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Eliminar este lote de planificación"}
-                    >
-                      <Trash2 className={cn("h-3.5 w-3.5", selectedLoteId === "all" ? "text-gray-400" : "text-red-600")} />
-                    </Button>
+                    {/* Tachito con doble función:
+                          - Con OTs tildadas → las saca de la planificación (una o varias).
+                          - Sin nada tildado → elimina el lote entero (comportamiento viejo). */}
+                    {(() => {
+                      const haySeleccion = selectedPlanIds.length > 0;
+                      const deshabilitado = (!haySeleccion && selectedLoteId === "all") || isDeletingLote || isQuitandoOts;
+                      return (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => haySeleccion ? setIsQuitarOtsDialogOpen(true) : setIsDeleteLoteDialogOpen(true)}
+                          className={cn(
+                            "bg-white border-red-200 transition-colors gap-1.5",
+                            deshabilitado
+                              ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                              : "text-red-600 hover:bg-red-50"
+                          )}
+                          disabled={deshabilitado}
+                          title={
+                            haySeleccion
+                              ? `Quitar ${selectedPlanIds.length} OT${selectedPlanIds.length === 1 ? "" : "s"} de la planificación`
+                              : selectedLoteId === "all"
+                                ? "Tildá OTs para quitarlas, o elegí una planificación para eliminarla entera"
+                                : "Eliminar este lote de planificación"
+                          }
+                        >
+                          <Trash2 className={cn("h-3.5 w-3.5", deshabilitado ? "text-gray-400" : "text-red-600")} />
+                          {haySeleccion && (
+                            <span className="text-xs font-semibold">{selectedPlanIds.length}</span>
+                          )}
+                        </Button>
+                      );
+                    })()}
 
                     <Select value={selectedLoteId} onValueChange={setSelectedLoteId}>
                       <SelectTrigger className="w-[180px] lg:w-[220px] xl:w-[260px] bg-white border-gray-200 text-xs lg:text-sm">
@@ -1449,14 +1544,17 @@ export default function OperacionesPage() {
                     de búsqueda ni los banners de Semanal/Diaria. */}
                 <div className="flex-1 p-0">
                   <TabsContent value="general" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    {/* General: Show all that are NOT fully finalized */}
+                    {/* General: todas las que NO están terminadas ni entregadas.
+                        Las entregadas completas se mudan a la pestaña "Completadas". */}
                     <PlanningListTable
                       tableZoom={planZoom}
                       data={plannedOrdenes.filter(order => {
                         // Exclude if all processes are finalized
                         const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
-                        return !allFinalized;
+                        return !allFinalized && !isOrderCompleted(order);
                       })}
+                      selectedIds={selectedPlanIds}
+                      onSelectionChange={setSelectedPlanIds}
                       isLoading={isLoading}
                       onProcessStatusChange={handleProcessStatusChange}
                       onProcessReorder={handleProcessReorder}
@@ -1813,6 +1911,38 @@ export default function OperacionesPage() {
                     />
                   </TabsContent>
 
+                  <TabsContent value="completadas" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
+                    {/* Completadas: OTs planificadas con la entrega completa (o ya marcadas
+                        como entregadas por el legacy). Salen de "Planificadas" y caen acá,
+                        así la lista de trabajo pendiente queda limpia. */}
+                    <div className="mb-3 flex items-start gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                      <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                      <p className="text-xs text-green-800">
+                        OTs de esta planificación que ya se entregaron completas. Se sacan automáticamente de
+                        <span className="font-semibold"> Planificadas</span> para que ahí quede solo lo que falta hacer.
+                      </p>
+                    </div>
+                    <PlanningListTable
+                      tableZoom={planZoom}
+                      data={completedPlannedOrdenes}
+                      selectedIds={selectedPlanIds}
+                      onSelectionChange={setSelectedPlanIds}
+                      isLoading={isLoading}
+                      onProcessStatusChange={handleProcessStatusChange}
+                      onProcessReorder={handleProcessReorder}
+                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
+                      onMachineryChange={handleMachineryChange}
+                      operarios={rawOperarios}
+                      maquinarias={rawMaquinarias}
+                      planificacion={rawPlanificacion}
+                      onRowClick={(item) => {
+                        setOrderToEdit(item);
+                        setIsCreateModalOpen(true);
+                      }}
+                      onDataChange={fetchData}
+                    />
+                  </TabsContent>
+
                   <TabsContent value="finalizadas" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
                     {/* Finalizadas: Filter where ALL processes are status 3 (Finalizado) */}
                     <PlanningListTable
@@ -1927,6 +2057,23 @@ export default function OperacionesPage() {
           variant="destructive"
         />
       )}
+      <ConfirmationDialog
+        isOpen={isQuitarOtsDialogOpen}
+        onClose={() => setIsQuitarOtsDialogOpen(false)}
+        onConfirm={handleQuitarOtsSeleccionadas}
+        title={selectedPlanIds.length === 1 ? "¿Quitar la OT de la planificación?" : `¿Quitar ${selectedPlanIds.length} OTs de la planificación?`}
+        description={
+          (selectedPlanIds.length === 1
+            ? "La OT se saca de la planificación y vuelve a estar disponible para planificar. "
+            : "Las OTs se sacan de la planificación y vuelven a estar disponibles para planificar. ") +
+          (selectedLoteId !== "all"
+            ? "El resto de la planificación no se toca."
+            : "Como estás viendo TODAS las planificaciones, se quitan de todas donde aparezcan.")
+        }
+        confirmText={isQuitandoOts ? "Quitando..." : "Sí, quitar"}
+        cancelText="Cancelar"
+        variant="destructive"
+      />
       <ConfirmationDialog
         isOpen={isDeleteLoteDialogOpen}
         onClose={() => setIsDeleteLoteDialogOpen(false)}

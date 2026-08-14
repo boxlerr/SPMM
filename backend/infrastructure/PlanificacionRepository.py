@@ -116,6 +116,45 @@ class PlanificacionRepository:
                 "Error al guardar la planificación en la base de datos."
             ) from e
 
+    async def eliminar_ordenes(self, orden_ids: list[int], id_lote: str | None = None):
+        """
+        Saca OTs puntuales de la planificación (se planificaron por error o ya no van).
+        A diferencia de `eliminar_lote`, acá el lote sigue existiendo con el resto de
+        las OTs; solo desaparecen los procesos de las órdenes indicadas.
+
+        Si `id_lote` viene, se acota el borrado a ese lote; si no, la OT se saca de
+        todas las planificaciones donde aparezca.
+        """
+        if not orden_ids:
+            return 0
+
+        logger.info(
+            f"Repository - Quitando {len(orden_ids)} orden(es) de la planificación "
+            f"(lote={id_lote or 'TODOS'}): {orden_ids}"
+        )
+
+        # IN con placeholders nombrados (no interpolamos los ids en el SQL) para que
+        # funcione igual con cualquier driver.
+        placeholders = ", ".join(f":oid_{i}" for i in range(len(orden_ids)))
+        sql = f"DELETE FROM planificacion WHERE orden_id IN ({placeholders})"
+        params: dict = {f"oid_{i}": oid for i, oid in enumerate(orden_ids)}
+        if id_lote:
+            sql += " AND id_planificacion_lote = :id_lote"
+            params["id_lote"] = id_lote
+
+        try:
+            result = await self.db.execute(text(sql), params)
+            await self.db.commit()
+            borrados = result.rowcount or 0
+            logger.info(f"Repository - {borrados} registro(s) de planificación eliminados.")
+            return borrados
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error al quitar órdenes de la planificación: {e}")
+            raise InfrastructureException(
+                "Error al quitar las órdenes de la planificación."
+            ) from e
+
     async def eliminar_lote(self, id_lote: str):
         """
         Elimina los registros de planificación asociados a un ID de lote,

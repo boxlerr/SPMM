@@ -72,6 +72,57 @@ interface PlanningListTableProps {
     tableZoom?: number;
 }
 
+/** Columnas ordenables de la tabla. TODAS las columnas con dato ordenan; las que
+ *  no muestran un valor "ordenable" obvio (Material, Proceso, Plano, Entrega) usan
+ *  un ranking explícito — ver `getSortValue`. */
+type SortColumn =
+    | 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion'
+    | 'n_pedido' | 'unidades' | 'prioridad' | 'material' | 'proceso' | 'plano'
+    | 'estado' | 'entrega' | 'fecha_prometida' | 'fecha_entrega'
+    | 'aprobado_por' | 'requerido_por';
+
+/** Ranking del estado de material: peor primero (asc = "qué me falta"). */
+const materialRank = (estado?: string | null) => {
+    switch (estado) {
+        case 'ok': return 2;
+        case 'pedido': return 1;
+        default: return 0; // sin_stock / sin datos
+    }
+};
+
+/** Avance de procesos de una OT: -1 si no tiene procesos cargados, si no 0..1
+ *  (proporción de procesos finalizados). Así, ascendente: primero las que no
+ *  tienen procesos, después las menos avanzadas, y al final las terminadas. */
+const procesoRank = (item: WorkOrder) => {
+    const total = item.procesos?.length || 0;
+    if (total === 0) return -1;
+    const finalizados = item.procesos.filter(p => p.estado_proceso?.id === 3).length;
+    return finalizados / total;
+};
+
+/** Estado derivado de la OT según el avance de sus procesos.
+ *  Vive a nivel de módulo (y no adentro del componente) porque el ordenamiento por
+ *  la columna Estado lo necesita ANTES, durante el `useMemo` de `sortedData`. */
+const getOrderStatus = (order: WorkOrder) => {
+    if (!order.procesos || order.procesos.length === 0) return 'Pendiente';
+
+    const allFinalized = order.procesos.every(p => p.estado_proceso.id === 3);
+    if (allFinalized) return 'Finalizado';
+
+    const hasProgress = order.procesos.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3);
+    if (hasProgress) return 'En Proceso';
+
+    return 'Pendiente';
+};
+
+/** Proporción entregada (0..1). Sin unidades cargadas se considera 0. */
+const entregaRank = (item: WorkOrder) => {
+    const total = Number(item.unidades) || 0;
+    const entregado = Number(item.cantidad_entregada) || 0;
+    if (total <= 0) return entregado > 0 ? 1 : 0;
+    return Math.min(entregado / total, 1);
+};
+
 export const PlanningListTable = React.memo(_PlanningListTable);
 
 function _PlanningListTable({
@@ -97,7 +148,7 @@ function _PlanningListTable({
 
 
     const [sortConfig, setSortConfig] = React.useState<{
-        key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega' | null;
+        key: SortColumn | null;
         direction: 'asc' | 'desc' | null
     }>({
         key: null,
@@ -252,7 +303,7 @@ function _PlanningListTable({
         }
     };
 
-    const handleSort = (key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega') => {
+    const handleSort = (key: SortColumn) => {
         let direction: 'asc' | 'desc' | null = 'asc'; // 1st click: asc (default)
 
         if (sortConfig.key === key) {
@@ -302,53 +353,58 @@ function _PlanningListTable({
 
         if (!sortConfig.key || !sortConfig.direction) return dataWithSortedProcesses;
 
-        return [...dataWithSortedProcesses].sort((a, b) => {
-            switch (sortConfig.key) {
-                case 'id':
-                    return sortConfig.direction === 'asc' ? a.id - b.id : b.id - a.id;
-                case 'id_otvieja':
-                    const valViejaA = a.id_otvieja || 0;
-                    const valViejaB = b.id_otvieja || 0;
-                    return sortConfig.direction === 'asc' ? valViejaA - valViejaB : valViejaB - valViejaA;
-                case 'fecha_entrada':
-                    return sortConfig.direction === 'asc'
-                        ? new Date(a.fecha_entrada || 0).getTime() - new Date(b.fecha_entrada || 0).getTime()
-                        : new Date(b.fecha_entrada || 0).getTime() - new Date(a.fecha_entrada || 0).getTime();
-                case 'cliente':
-                    return sortConfig.direction === 'asc'
-                        ? (a.cliente?.nombre || "").localeCompare(b.cliente?.nombre || "")
-                        : (b.cliente?.nombre || "").localeCompare(a.cliente?.nombre || "");
-                case 'codigo':
-                    return sortConfig.direction === 'asc'
-                        ? (a.articulo?.cod_articulo || "").localeCompare(b.articulo?.cod_articulo || "")
-                        : (b.articulo?.cod_articulo || "").localeCompare(a.articulo?.cod_articulo || "");
-                case 'descripcion':
-                    return sortConfig.direction === 'asc'
-                        ? (a.articulo?.descripcion || "").localeCompare(b.articulo?.descripcion || "")
-                        : (b.articulo?.descripcion || "").localeCompare(a.articulo?.descripcion || "");
-                case 'unidades':
-                    const valA = a.unidades || 0;
-                    const valB = b.unidades || 0;
-                    return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
-                case 'prioridad':
-                    const prioA = a.id_prioridad || 0;
-                    const prioB = b.id_prioridad || 0;
-                    return sortConfig.direction === 'asc' ? prioA - prioB : prioB - prioA;
-                case 'estado':
-                    const statusA = getOrderStatus(a);
-                    const statusB = getOrderStatus(b);
-                    return sortConfig.direction === 'asc' ? statusA.localeCompare(statusB) : statusB.localeCompare(statusA);
+        const key = sortConfig.key;
+        const dir = sortConfig.direction === 'asc' ? 1 : -1;
+
+        // Valor comparable de cada columna. Devuelve número o string; las fechas
+        // vacías van SIEMPRE al final (independiente de la dirección) para que no
+        // ensucien el arranque de la lista.
+        const getSortValue = (item: WorkOrder): number | string => {
+            switch (key) {
+                case 'id': return item.id;
+                case 'id_otvieja': return item.id_otvieja || 0;
+                case 'fecha_entrada': return new Date(item.fecha_entrada || 0).getTime();
+                case 'cliente': return item.cliente?.nombre || "";
+                case 'codigo': return item.articulo?.cod_articulo || "";
+                case 'descripcion': return getEditableProductDescription(item) || "";
+                case 'n_pedido': return String(item.n_pedido || item.n_ped_l || "");
+                case 'unidades': return item.unidades || 0;
+                case 'prioridad': return item.id_prioridad || 0;
+                case 'material': return materialRank(item.estado_material);
+                case 'proceso': return procesoRank(item);
+                case 'plano': return Number(item.tiene_plano) === 1 ? 1 : 0;
+                case 'estado': return getOrderStatus(item);
+                case 'entrega': return entregaRank(item);
+                case 'aprobado_por': return item.aprobado_por || "";
+                case 'requerido_por': return item.requerido_por || "";
                 case 'fecha_prometida':
-                    return sortConfig.direction === 'asc'
-                        ? new Date(a.fecha_prometida || '2100-01-01').getTime() - new Date(b.fecha_prometida || '2100-01-01').getTime()
-                        : new Date(b.fecha_prometida || '1970-01-01').getTime() - new Date(a.fecha_prometida || '1970-01-01').getTime();
-                case 'fecha_entrega':
-                    return sortConfig.direction === 'asc'
-                        ? new Date(a.fecha_entrega || '2100-01-01').getTime() - new Date(b.fecha_entrega || '2100-01-01').getTime()
-                        : new Date(b.fecha_entrega || '1970-01-01').getTime() - new Date(a.fecha_entrega || '1970-01-01').getTime();
-                default:
-                    return 0;
+                case 'fecha_entrega': {
+                    const raw = key === 'fecha_prometida' ? item.fecha_prometida : item.fecha_entrega;
+                    // '1950-01-01' es el sentinel del legacy para "sin fecha".
+                    if (!raw || raw.startsWith('1950')) return Number.NaN;
+                    const t = new Date(raw).getTime();
+                    return isNaN(t) ? Number.NaN : t;
+                }
+                default: return 0;
             }
+        };
+
+        return [...dataWithSortedProcesses].sort((a, b) => {
+            const va = getSortValue(a);
+            const vb = getSortValue(b);
+
+            // Vacíos (fechas sin cargar) siempre al fondo.
+            const emptyA = typeof va === 'number' && isNaN(va);
+            const emptyB = typeof vb === 'number' && isNaN(vb);
+            if (emptyA && emptyB) return 0;
+            if (emptyA) return 1;
+            if (emptyB) return -1;
+
+            if (typeof va === 'string' || typeof vb === 'string') {
+                // `numeric: true` para que N° Pedido / códigos ordenen 2 < 10 y no "10" < "2".
+                return dir * String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' });
+            }
+            return dir * (va - vb);
         });
     }, [filteredData, sortConfig]);
 
@@ -373,8 +429,6 @@ function _PlanningListTable({
         };
     }, [sortedData.length]);
 
-    type SortColumn = 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'estado' | 'fecha_prometida' | 'fecha_entrega';
-
     const SortIcon = ({ column }: { column: SortColumn }) => {
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
         return (
@@ -382,18 +436,6 @@ function _PlanningListTable({
                 {sortConfig.direction === 'asc' ? '↑' : '↓'}
             </span>
         );
-    };
-
-    const getOrderStatus = (order: WorkOrder) => {
-        if (!order.procesos || order.procesos.length === 0) return 'Pendiente';
-
-        const allFinalized = order.procesos.every(p => p.estado_proceso.id === 3);
-        if (allFinalized) return 'Finalizado';
-
-        const hasProgress = order.procesos.some(p => p.estado_proceso.id === 2 || p.estado_proceso.id === 3);
-        if (hasProgress) return 'En Proceso';
-
-        return 'Pendiente';
     };
 
     const renderStatusBadge = (status: string) => {
@@ -988,8 +1030,15 @@ function _PlanningListTable({
                                         <SortIcon column="descripcion" />
                                     </div>
                                 </th>
-                                <th className="px-3 py-3 font-bold text-gray-600">
-                                    N° Pedido
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('n_pedido')}
+                                    title="Ordenar por N° de pedido"
+                                >
+                                    <div className="flex items-center">
+                                        N° Pedido
+                                        <SortIcon column="n_pedido" />
+                                    </div>
                                 </th>
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
@@ -1011,14 +1060,35 @@ function _PlanningListTable({
                                         <SortIcon column="prioridad" />
                                     </div>
                                 </th>
-                                <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
-                                    Material
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('material')}
+                                    title="Ordenar por estado de material (primero lo que falta: Sin Stock → Pedido → OK)"
+                                >
+                                    <div className="flex items-center justify-center">
+                                        Material
+                                        <SortIcon column="material" />
+                                    </div>
                                 </th>
-                                <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene procesos cargados?">
-                                    Proceso
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('proceso')}
+                                    title="¿La OT tiene procesos cargados? Ordena por avance: primero las que no tienen procesos, después las menos avanzadas"
+                                >
+                                    <div className="flex items-center justify-center">
+                                        Proceso
+                                        <SortIcon column="proceso" />
+                                    </div>
                                 </th>
-                                <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tiene plano cargado?">
-                                    Plano
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('plano')}
+                                    title="¿La OT tiene plano cargado? Ordena primero las que NO tienen"
+                                >
+                                    <div className="flex items-center justify-center">
+                                        Plano
+                                        <SortIcon column="plano" />
+                                    </div>
                                 </th>
                                 {!hideStatus && (
                                     <th
@@ -1031,8 +1101,15 @@ function _PlanningListTable({
                                         </div>
                                     </th>
                                 )}
-                                <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group">
-                                    Entrega
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('entrega')}
+                                    title="Ordenar por % entregado"
+                                >
+                                    <div className="flex items-center justify-center">
+                                        Entrega
+                                        <SortIcon column="entrega" />
+                                    </div>
                                 </th>
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
@@ -1052,11 +1129,25 @@ function _PlanningListTable({
                                         <SortIcon column="fecha_entrega" />
                                     </div>
                                 </th>
-                                <th className="px-3 py-3 font-bold text-gray-600">
-                                    Aprobado x
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('aprobado_por')}
+                                    title="Ordenar por quién aprobó"
+                                >
+                                    <div className="flex items-center">
+                                        Aprobado x
+                                        <SortIcon column="aprobado_por" />
+                                    </div>
                                 </th>
-                                <th className="px-3 py-3 font-bold text-gray-600">
-                                    Pedido x
+                                <th
+                                    className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group"
+                                    onClick={() => handleSort('requerido_por')}
+                                    title="Ordenar por quién pidió"
+                                >
+                                    <div className="flex items-center">
+                                        Pedido x
+                                        <SortIcon column="requerido_por" />
+                                    </div>
                                 </th>
                             </tr>
                         </thead>
@@ -1215,10 +1306,19 @@ function _PlanningListTable({
                                                     </Badge>
                                                 )}
                                             </td>
-                                            {/* Proceso: Sí (verde) si tiene procesos cargados. */}
+                                            {/* Proceso: Sí (verde) si tiene procesos cargados + cuántos terminados
+                                                (ese x/y es justamente el criterio con el que ordena la columna). */}
                                             <td className="px-3 py-3 text-center">
                                                 {(item.procesos && item.procesos.length > 0) ? (
-                                                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                    <div className="flex flex-col items-center gap-0.5">
+                                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                        <span
+                                                            className="text-[10px] font-mono text-gray-500"
+                                                            title="Procesos finalizados / total"
+                                                        >
+                                                            {item.procesos.filter(p => p.estado_proceso?.id === 3).length}/{item.procesos.length}
+                                                        </span>
+                                                    </div>
                                                 ) : (
                                                     <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                 )}

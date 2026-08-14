@@ -12,6 +12,7 @@ from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
 from backend.dto.PlanificacionUpdateDTO import PlanificacionUpdateDTO
+from backend.dto.QuitarOrdenesPlanificacionDTO import QuitarOrdenesPlanificacionDTO
 
 from sqlalchemy import text
 
@@ -232,6 +233,23 @@ async def actualizar_planificacion(id: int, dto: PlanificacionUpdateDTO, db = De
     await db.commit()
     
     return {"message": "Planificación actualizada correctamente"}
+
+@router.post("/planificacion/quitar-ordenes")
+async def quitar_ordenes_planificacion(dto: QuitarOrdenesPlanificacionDTO, db = Depends(get_db)):
+    """Saca OTs puntuales de la planificación sin tocar el resto del lote.
+
+    Se usa cuando se planificó una OT por error: la OT vuelve a estar disponible
+    para planificar y desaparece de las vistas de planificación.
+    """
+    if not dto.orden_ids:
+        raise HTTPException(status_code=400, detail="No se recibieron órdenes para quitar.")
+
+    repo_planificacion = PlanificacionRepository(db)
+    borrados = await repo_planificacion.eliminar_ordenes(dto.orden_ids, dto.id_lote)
+    return {
+        "message": f"{len(dto.orden_ids)} orden(es) quitadas de la planificación",
+        "registros_eliminados": borrados,
+    }
 
 @router.delete("/planificacion/lote/{id_lote}")
 async def eliminar_planificacion_lote(id_lote: str, db = Depends(get_db)):
