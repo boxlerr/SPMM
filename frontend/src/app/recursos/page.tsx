@@ -374,7 +374,8 @@ export default function RecursosPage() {
                     <span>
                       Hay <strong>{sinRango.length} de {maquinas.length} máquinas sin rango cargado</strong>: el
                       planificador no se las asigna a nadie y el trabajo sale “sin máquina”. Son{" "}
-                      {sinRango.map((m) => m.nombre).join(", ")}. El rango se carga desde la pestaña Rangos.
+                      {sinRango.map((m) => m.nombre).join(", ")}. Tocá el aviso de cada una en la
+                      columna Rangos para cargarlo acá mismo.
                     </span>
                   </AlertDescription>
                 </Alert>
