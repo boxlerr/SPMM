@@ -8,6 +8,25 @@ class PlanoRepository:
     def __init__(self, db):
         self.db = db
 
+    async def find_ordenes_con_plano(self) -> set[int]:
+        """IDs de las OTs que tienen al menos un plano REALMENTE adjunto.
+
+        Lo consume el planificador. Antes miraba `orden_trabajo.tiene_plano`, que
+        viene del legacy (sync_db lo copia de v.tplano) y está en 1 en la enorme
+        mayoría de las OTs aunque no haya ningún archivo cargado. Como el filtro de
+        interpretación de planos es DURO, eso dejaba fuera de la planificación a
+        todos los operarios que no leen planos —pasantes, ayudantes, tercerizados—
+        en OTs que en realidad no tienen plano ninguno.
+        """
+        try:
+            result = await self.db.execute(select(Plano.id_orden_trabajo).distinct())
+            return {row[0] for row in result.all() if row[0] is not None}
+        except Exception as e:
+            logger.error(f"Repository - Error en find_ordenes_con_plano: {e}")
+            raise InfrastructureException(
+                "Error al consultar qué órdenes tienen plano adjunto."
+            ) from e
+
     async def save(self, plano: Plano):
         try:
             logger.info("Repository - Crear Plano.")

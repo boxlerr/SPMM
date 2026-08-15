@@ -10,6 +10,7 @@ from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 from backend.infrastructure.ConfigRepository import ConfigRepository
 from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProcesoSkillRepository
+from backend.infrastructure.PlanoRepository import PlanoRepository
 from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -38,6 +39,17 @@ TRAMOS_LV_LAB = [
 TRAMOS_SAB_LAB = [
     (0, 300),
 ]
+
+# Tramo laboral más largo de un día de semana. Es el techo real de lo que puede durar
+# un proceso: _agregar_ventanas_horarias solo le ofrece a un proceso las ventanas
+# donde entra entero, así que uno más largo que esto no entra en NINGUNA y queda
+# forzado a excedente —arrastrando, por la cadena de presencia, a todo lo que sigue
+# en su OT—. Los procesos que lo superan se parten en tramos (ver _partir_procesos_largos).
+MAX_MIN_TRAMO = max(fin - ini for ini, fin in TRAMOS_LV_LAB)
+
+# Separación de claves al partir: la secuencia pasa a ser `orden * ESCALA_SECUENCIA + parte`,
+# que mantiene el orden relativo entre procesos y entre partes de un mismo proceso.
+ESCALA_SECUENCIA = 1000
 # ------------------------------------------------------------------
 #Funcion para ventanas semanales en tiempo.
 def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None):
@@ -252,6 +264,89 @@ def _normalizar_procesos(procesos, prioridad_pesos):
     return procesos_norm, H
 
 
+def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=None):
+    """Parte los procesos que no entran en ningún tramo laboral.
+
+    Un proceso de 12 horas no cabe en ninguna ventana, así que el modelo lo dejaba
+    afuera y —por la cadena de presencia— se llevaba puesto todo el resto de la OT.
+    En la corrida de prueba eso dejaba fuera 103 de 241 procesos con la fábrica a
+    menos de la mitad de su capacidad.
+
+    Acá el proceso se corta en partes que sí entran en el horario disponible. Las
+    partes quedan encadenadas (una detrás de la otra) y, en el modelo, atadas al
+    MISMO operario y la MISMA máquina, así que sigue siendo un solo trabajo hecho
+    por una sola persona: lo único que cambia es que ocupa varios tramos.
+
+    El corte es parejo (750 min -> 3 partes de 250, no 270+270+210) para que no
+    quede una última parte mínima colgando y para repartir mejor entre días.
+
+    Devuelve (procesos_norm, cant_op_map, preseleccion_maq, partes), donde `partes`
+    mapea la clave original a las claves nuevas:
+        {(orden_id, secuencia_orig): {"orig": tupla, "claves": [(orden_id, sec_new), ...]}}
+    """
+    cant_op_map = cant_op_map or {}
+    preseleccion_maq = preseleccion_maq or {}
+
+    nuevos, partes = [], {}
+    nuevo_cant_op, nueva_presel = {}, {}
+
+    for proc in procesos_norm:
+        (orden_id, proc_id, secuencia, fecha_prometida, peso, dur,
+         rangos, nombre, usa_maquina, familia, skills) = proc
+
+        n_partes = max(1, math.ceil(dur / MAX_MIN_TRAMO))
+        base = dur // n_partes
+        resto = dur % n_partes
+        duraciones = [base + (1 if i < resto else 0) for i in range(n_partes)]
+        # Con duraciones enteras y reparto parejo ninguna parte puede quedar en 0.
+        duraciones = [d for d in duraciones if d > 0] or [dur]
+
+        clave_orig = (orden_id, secuencia)
+        claves = []
+        for i, d in enumerate(duraciones):
+            sec_nueva = secuencia * ESCALA_SECUENCIA + i
+            nuevos.append((orden_id, proc_id, sec_nueva, fecha_prometida, peso, d,
+                           rangos, nombre, usa_maquina, familia, skills))
+            claves.append((orden_id, sec_nueva))
+
+            if clave_orig in cant_op_map:
+                nuevo_cant_op[(orden_id, sec_nueva)] = cant_op_map[clave_orig]
+            if clave_orig in preseleccion_maq:
+                nueva_presel[(orden_id, sec_nueva)] = preseleccion_maq[clave_orig]
+
+        partes[clave_orig] = {"orig": proc, "claves": claves}
+
+        if len(duraciones) > 1:
+            logger.info(
+                f"PLANIFICADOR: '{nombre}' de la OT {orden_id} dura {dur} min y no entra "
+                f"en un tramo (máx {MAX_MIN_TRAMO}); se parte en {len(duraciones)} tramos "
+                f"de {duraciones} min, mismo operario y misma máquina."
+            )
+
+    return nuevos, nuevo_cant_op, nueva_presel, partes
+
+
+def _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars=None):
+    """Las partes de un proceso partido van al mismo operario y a la misma máquina.
+
+    El encadenamiento temporal y la cadena de presencia ya salen de las restricciones
+    de secuencia, porque las partes son consecutivas en el orden. Lo que falta es que
+    no se repartan entre personas o máquinas distintas: media pieza torneada por uno
+    y media por otro, en dos tornos distintos, no es un plan.
+    """
+    for datos in partes.values():
+        claves = datos["claves"]
+        if len(claves) < 2:
+            continue
+        primera = claves[0]
+        for clave in claves[1:]:
+            model.Add(operario_vars[clave] == operario_vars[primera])
+            model.Add(maq_vars[clave] == maq_vars[primera])
+            for ev_a, ev_b in zip((op_extra_vars or {}).get(primera, []),
+                                  (op_extra_vars or {}).get(clave, [])):
+                model.Add(ev_b == ev_a)
+
+
 def _crear_variables_y_dominios(
     model,
     procesos_norm,
@@ -307,8 +402,9 @@ def _crear_variables_y_dominios(
 
     maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n, _cod) in maquinarias}
 
-    # NUEVO: familia/tipo de cada máquina según cod_maquina
-    maq_to_familia = {m_id: familia_from_cod_maquina(_cod) for (m_id, _rs, _n, _cod) in maquinarias}
+    # Familia/tipo de cada máquina. Sale del nombre (el código es una abreviatura
+    # que no matchea ninguna familia) — ver familia_from_maquina.
+    maq_to_familia = {m_id: familia_from_maquina(_n, _cod) for (m_id, _rs, _n, _cod) in maquinarias}
 
     op_domain_vals = {}
     maq_domain_vals = {}
@@ -341,19 +437,26 @@ def _crear_variables_y_dominios(
         # nativa en su perfil (nativas_off).
         es_proceso_maquina = usa_maquina and _get_tipo_proceso(nombre_proc) == "PRODUCCION_MAQUINA"
 
+        # La elegibilidad es la INTERSECCIÓN: rango del operario ∈ rangos del proceso.
+        #
+        # Antes había dos atajos sobre esa regla y los dos mentían:
+        #   - Si el proceso admitía un rango "básico", `operarios_validos` pasaba a ser
+        #     REAL_OP_IDS —o sea, TODOS—. Con 25 procesos que admiten AYUDANTE y 25 que
+        #     admiten INGRESANTE, eso hacía que EMBALADO, PINTURA o REBARBADO se los
+        #     pudiera llevar cualquiera, y en la práctica caían en oficiales.
+        #   - Si admitía un rango "especializado", se quedaba SOLO con ese y descartaba
+        #     los demás rangos que el proceso sí habilita.
+        # Además las constantes estaban desfasadas del catálogo (PEON_ID = 1 es hoy
+        # AYUDANTE, y AYUDANTE_ID = 11 es INGRESANTE), así que el atajo se disparaba
+        # para rangos distintos de los que decía el nombre.
+        #
+        # Para que un rango alto no termine haciendo tareas básicas está la penalización
+        # por sobre-cualificación en la función objetivo: eso ordena preferencias sin
+        # inventar permisos.
         if not rangos_proc:
             operarios_validos = REAL_OP_IDS[:]
         else:
-            requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
-            requiere_especial  = any(r in RANGOS_ESPECIALIZADOS for r in rangos_proc)
-
-            if requiere_especial:
-                objetivo = set(rangos_proc) & RANGOS_ESPECIALIZADOS
-                operarios_validos = [op_id for (op_id, rango) in operarios if rango in objetivo]
-            elif requiere_basicos:
-                operarios_validos = REAL_OP_IDS[:]
-            else:
-                operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
+            operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
 
         # Sumar a quienes tienen el proceso cargado a mano. Se filtra contra REAL_OP_IDS
         # porque `operarios` sale de operario_rango: un operario sin ningún rango no
@@ -721,11 +824,39 @@ def _agregar_no_solape_maquinas(
         model.AddNoOverlap(pres_intervals)
 
 
+def _setup_de_esta_produccion(proc_setup, proc_prod) -> bool:
+    """True si `proc_setup` es la preparación de `proc_prod`.
+
+    No alcanza con que uno sea SETUP y el que le sigue PRODUCCION_MAQUINA: en la
+    secuencia de una OT puede haber una preparación seguida de un proceso que no
+    tiene nada que ver. Se exige además que compartan familia de máquina, que es
+    lo que hace que "preparar la fresadora" y "fresar" sean efectivamente la misma
+    máquina y la misma persona.
+
+    La familia se deriva del NOMBRE de cada proceso y no del campo ya calculado de
+    la tupla: el paso de herencia le pisa la familia al setup con la de la
+    producción, así que mirar el campo haría que después todo par pareciera
+    relacionado. Con el nombre, los dos lugares deciden igual.
+
+    Tupla: (orden_id, proc_id, secuencia, fecha_prometida, peso, dur, rangos,
+            nombre, usa_maquina, familia_req, skills)
+    """
+    if _get_tipo_proceso(proc_setup[7]) != "SETUP":
+        return False
+    if _get_tipo_proceso(proc_prod[7]) != "PRODUCCION_MAQUINA":
+        return False
+    fam_setup = familia_requerida_from_proceso(proc_setup[7] or "")
+    fam_prod = familia_requerida_from_proceso(proc_prod[7] or "")
+    return bool(fam_setup) and fam_setup == fam_prod
+
+
 def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None):
     """
     Fuerza a que procesos coordinados (ej: Programacion + Produccion)
     usen la misma máquina y, si se pasa `operario_vars`, el MISMO operario
     (el que prepara la máquina es el que la usa). Ver A2 (feedback 06/07).
+
+    Solo para pares realmente relacionados: ver _setup_de_esta_produccion.
     """
     # Agrupar por OT
     ord_ids = set(p[0] for p in procesos_norm)
@@ -746,12 +877,9 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_var
             name_s = sig[7]
             usa_m_s= sig[8]
             
-            # Si el actual es SETUP y el siguiente es PRODUCCIÓN
+            # Si el actual es la preparación del siguiente (misma familia de máquina)
             # Y ambos están marcados para usar máquina
-            tipo_act = _get_tipo_proceso(name_a)
-            tipo_sig = _get_tipo_proceso(name_s)
-            
-            if tipo_act == "SETUP" and tipo_sig == "PRODUCCION_MAQUINA" and usa_m_a and usa_m_s:
+            if _setup_de_esta_produccion(act, sig) and usa_m_a and usa_m_s:
                 # Forzamos igualdad de la variable de máquina
                 model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
                 logger.info(f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y Seq {seq_s} ({name_s}) en OT {oid}")
@@ -777,11 +905,20 @@ def _agregar_compatibilidad_op_maq(
     maq_to_familia,
     DUMMY_OP_ID,
     DUMMY_MAQ_ID,
+    op_to_rangos=None,
 ):
     """
     Añade restricciones de compatibilidad Operario–Maquinaria
     mediante AddAllowedAssignments.
+
+    `op_to_rangos` es {id_operario: {rangos}}. Hace falta aparte de `op_to_rango`
+    porque ese es un dict armado sobre una lista de pares (operario, rango): a un
+    operario con varios rangos le sobrevive UNO SOLO, el último que aparece. Con
+    eso, Iván —OFICIAL y OFICIAL CNC— podía quedar registrado solo como OFICIAL y
+    entonces ninguna máquina CNC le resultaba compatible, así que el proceso se iba
+    a la máquina dummy. Para la compatibilidad hay que mirar TODOS sus rangos.
     """
+    op_to_rangos = op_to_rangos or {}
     for (orden_id, proc_id, secuencia, _fp,
         _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
 
@@ -809,7 +946,7 @@ def _agregar_compatibilidad_op_maq(
                     allowed_pairs.append([DUMMY_OP_ID, DUMMY_MAQ_ID])
                 continue
 
-            rango_op = op_to_rango.get(op_id)
+            rangos_op = op_to_rangos.get(op_id) or {op_to_rango.get(op_id)}
 
             for m_id in maqs_dom:
                 # dummy-maq → permitido para cualquier operario
@@ -820,9 +957,9 @@ def _agregar_compatibilidad_op_maq(
                 if familia_req:
                     if maq_to_familia.get(m_id) != familia_req:
                         continue
-                    
+
                 mrangos = maq_to_rangos.get(m_id, set())
-                if rango_op in mrangos and (not needs or (needs & mrangos)):
+                if (rangos_op & mrangos) and (not needs or (needs & mrangos)):
                     allowed_pairs.append([op_id, m_id])
 
         # Evitar conjunto vacío
@@ -849,14 +986,15 @@ def _agregar_funcion_objetivo(
     maq_to_rangos,
     atraso_mult_por_prioridad,
     RANGOS_BÁSICOS,
-    PEON_ID,
-    AYUDANTE_ID,
+    _AYUDANTE_ID,      # se conservan por compatibilidad de firma; la penalización
+    _INGRESANTE_ID,    # de sobre-cualificación ahora mira el rango del operario
     PENAL_OVERQUAL,
     PENAL_DUMMY,
     PENAL_DUMMY_MAQ,
     H,
     presente_vars=None,
     op_extra_vars=None,
+    op_to_rangos=None,
 ):
     # Pesos de prioridad para excedentes (más agresivo: prio 1 vale 100x prio 5)
     PESO_EXCED_POR_PRIO = {1: 10000, 2: 5000, 3: 1000, 4: 300, 5: 100}
@@ -921,6 +1059,9 @@ def _agregar_funcion_objetivo(
         # (bool_pick, penalización) — se gatean por `presente` más abajo, una vez que
         # existe el helper. Sin gatear, un proceso excedente pagaba prioridad igual.
         penal_prioridad = []
+        # Tarea que admite rangos básicos: preferimos que la haga alguien de rango
+        # básico y no un oficial (ver PENAL_OVERQUAL más abajo).
+        tarea_basica = bool(rangos_proc) and any(rid in RANGOS_BÁSICOS for rid in rangos_proc)
         for op_id in op_to_rango.keys():
             if op_id == 999999:  # dummy, lo tratamos aparte
                 continue
@@ -935,6 +1076,16 @@ def _agregar_funcion_objetivo(
             penal = _penal_prioridad((op_skill_levels or {}).get(op_id))
             if penal:
                 penal_prioridad.append((pres, penal))
+
+            # Sobre-cualificación: la tarea admite rango básico y esta persona no tiene
+            # ninguno. Se mira el RANGO del operario; antes se comparaba `op_var` (que
+            # lleva ids de operario) contra PEON_ID/AYUDANTE_ID (que son ids de RANGO),
+            # así que la condición no significaba nada y la penalización caía siempre
+            # igual sobre todos los candidatos.
+            if tarea_basica:
+                rangos_op = (op_to_rangos or {}).get(op_id) or {op_to_rango.get(op_id)}
+                if not (rangos_op & RANGOS_BÁSICOS):
+                    penal_prioridad.append((pres, PENAL_OVERQUAL))
 
         pick_dummy = model.NewBoolVar(f"pick_op_{orden_id}_{secuencia}_dummy")
         model.Add(op_var == 999999).OnlyEnforceIf(pick_dummy)
@@ -1041,22 +1192,8 @@ def _agregar_funcion_objetivo(
             total_obj.append((ev_eff, PENAL_DUMMY))
 
 
-        # Penalización por sobre-cualificación en tareas básicas
-        if rangos_proc and any(rid in RANGOS_BÁSICOS for rid in rangos_proc):
-            is_over = model.NewBoolVar(f"overq_{orden_id}_{secuencia}")
-            not_b1 = model.NewBoolVar(f"not_peon_{orden_id}_{secuencia}")
-            not_b2 = model.NewBoolVar(f"not_ayud_{orden_id}_{secuencia}")
-            model.Add(op_var != PEON_ID).OnlyEnforceIf(not_b1)
-            model.Add(op_var == PEON_ID).OnlyEnforceIf(not_b1.Not())
-            model.Add(op_var != AYUDANTE_ID).OnlyEnforceIf(not_b2)
-            model.Add(op_var == AYUDANTE_ID).OnlyEnforceIf(not_b2.Not())
-            model.Add(is_over <= not_b1)
-            model.Add(is_over <= not_b2)
-            tmp = model.NewIntVar(0, 2, f"tmp_over_{orden_id}_{secuencia}")
-            model.Add(tmp == not_b1 + not_b2)
-            model.Add(is_over >= tmp - 1)
-            over_eff = _gate_bool(is_over, f"over_eff_{orden_id}_{secuencia}")
-            total_obj.append((over_eff, PENAL_OVERQUAL))
+        # (la penalización por sobre-cualificación se arma arriba, junto a los picks
+        #  de operario, porque necesita el rango de cada candidato)
 
         # --- Término dominante: excedente ---
         if presente is not None:
@@ -1130,7 +1267,7 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None, partes=None):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
@@ -1138,20 +1275,38 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
     Procesos que requieren N operarios: emiten una fila por operario asignado. La fila
     principal conserva la máquina; las filas de los operarios adicionales van sin máquina
     (comparten la del proceso) para no marcar la misma máquina como ocupada N veces.
+
+    `partes` mapea cada proceso original a las claves de sus tramos (ver
+    _partir_procesos_largos). Un proceso partido vuelve a salir como UNA fila: arranca
+    cuando arranca el primer tramo y termina cuando termina el último. Que por dentro
+    hayan sido tres tirones de 250 minutos es cosa del modelo, no del plan que se lee.
     """
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        for (orden_id, proc_id, secuencia, fecha_prometida,
-            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria,_familia_req, _skills) in procesos_norm:
+        if partes is None:
+            partes = {
+                (p[0], p[2]): {"orig": p, "claves": [(p[0], p[2])]}
+                for p in procesos_norm
+            }
 
-            op_id  = solver.Value(operario_vars[(orden_id, secuencia)])
-            maq_id = solver.Value(maq_vars[(orden_id, secuencia)])
+        for clave_orig, datos in partes.items():
+            (orden_id, proc_id, _sec_modelo, fecha_prometida,
+             peso_prioridad, dur, rangos_proc, nombre_proceso, usa_maquinaria,
+             _familia_req, _skills) = datos["orig"]
+            secuencia = clave_orig[1]
+            claves = datos["claves"]
+            primera = claves[0]
 
-            inicio_m = solver.Value(inicio_vars[(orden_id, secuencia)])
-            fin_m = solver.Value(fin_vars[(orden_id, secuencia)])
+            op_id  = solver.Value(operario_vars[primera])
+            maq_id = solver.Value(maq_vars[primera])
+
+            inicio_m = min(solver.Value(inicio_vars[k]) for k in claves)
+            fin_m = max(solver.Value(fin_vars[k]) for k in claves)
 
             if presente_vars is not None:
-                excedente = (solver.Value(presente_vars[(orden_id, secuencia)]) == 0)
+                # Si algún tramo no entra, el proceso no se puede completar: va entero
+                # a excedentes. Dejarlo como planificado a medias sería mentir.
+                excedente = any(solver.Value(presente_vars[k]) == 0 for k in claves)
             else:
                 excedente = False
 
@@ -1182,11 +1337,13 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "excedente": excedente,
                 "fecha_inicio_estimada": fecha_ini_est,
                 "fecha_fin_estimada": fecha_fin_est,
+                # En cuántos tramos se tuvo que repartir (1 = entró de una).
+                "cantidad_tramos": len(claves),
             })
 
             # Operarios adicionales del proceso (slots extra). Una fila por cada operario
             # real asignado; los slots que quedaron en DUMMY (sin gente) se omiten.
-            for ev in (op_extra_vars or {}).get((orden_id, secuencia), []):
+            for ev in (op_extra_vars or {}).get(primera, []):
                 ev_id = solver.Value(ev)
                 if ev_id == DUMMY_OP_ID:
                     continue
@@ -1315,12 +1472,17 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     atraso_mult_por_prioridad = {1: 1000, 2: 800, 3: 500, 4: 300, 5: 200}
 
     # IDs de rangos (los que ya usabas)
-    PEON_ID = 1
-    AYUDANTE_ID = 11
+    # IDs de rangos según el catálogo actual (tabla `rango`). Los nombres viejos
+    # (PEON_ID = 1, AYUDANTE_ID = 11) quedaron de un catálogo anterior y no
+    # coincidían con lo que hay: 1 es AYUDANTE y 11 es INGRESANTE.
+    AYUDANTE_ID = 1
+    INGRESANTE_ID = 11
     OFICIAL_ESP_ID = 8
     TECNICO_ID = 14
 
-    RANGOS_BÁSICOS = {PEON_ID, AYUDANTE_ID}
+    # Solo se usan para la penalización por sobre-cualificación: la elegibilidad es
+    # siempre la intersección rango operario × rangos del proceso.
+    RANGOS_BÁSICOS = {AYUDANTE_ID, INGRESANTE_ID}
     RANGOS_ESPECIALIZADOS = {OFICIAL_ESP_ID, TECNICO_ID}
 
     PENAL_OVERQUAL = 50
@@ -1330,16 +1492,28 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # ---- Normalizar procesos ----
     procesos_norm, H_local = _normalizar_procesos(procesos, prioridad_pesos)
 
+    # ---- Partir los que no entran en un tramo laboral ----
+    # H no cambia: la suma total de trabajo es la misma, solo se reparte en más piezas.
+    procesos_norm, cant_op_map, preseleccion_maq, partes = _partir_procesos_largos(
+        procesos_norm, cant_op_map, preseleccion_maq
+    )
+
     # ---- Coordinación de dominios: SETUP hereda de PRODUCCIÓN ----
-    # Si un SETUP precede a una PRODUCCIÓN, debe usar el mismo dominio de máquinas
+    # Si un SETUP precede a una PRODUCCIÓN de la MISMA familia de máquina, comparten
+    # dominio: preparar la fresadora y fresar son la misma máquina y la misma persona.
+    #
+    # La condición de familia no estaba y alcanzaba con que fueran consecutivos en la
+    # secuencia. Eso emparejaba cosas que no tienen nada que ver: en la OT 7541,
+    # "PREPARACION DE SOLDADORA MIG" (rangos MEDIO OFICIAL / OPERARIO CALIFICADO) estaba
+    # seguida de "TORNO T2", así que heredaba el rango OFICIAL del torno y la preparación
+    # de la soldadora se la terminaba llevando el tornero.
     procesos_norm_list = [list(p) for p in procesos_norm]
     for oid in set(p[0] for p in procesos_norm):
         idxs = sorted([i for i, p in enumerate(procesos_norm) if p[0] == oid], key=lambda i: procesos_norm[i][2])
         for j in range(len(idxs)-1):
             idx_a = idxs[j]
             idx_s = idxs[j+1]
-            if (_get_tipo_proceso(procesos_norm[idx_a][7]) == "SETUP" and 
-                _get_tipo_proceso(procesos_norm[idx_s][7]) == "PRODUCCION_MAQUINA"):
+            if _setup_de_esta_produccion(procesos_norm[idx_a], procesos_norm[idx_s]):
                 # Heredar familia (idx 9) y rangos (idx 6)
                 procesos_norm_list[idx_a][9] = procesos_norm[idx_s][9]
                 procesos_norm_list[idx_a][6] = procesos_norm[idx_s][6]
@@ -1389,8 +1563,14 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     _agregar_distintos_operarios(model, operario_vars, op_extra_vars, DUMMY_OP_ID)
     _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars, presente_vars=presente_vars, op_extra_vars=op_extra_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars, presente_vars=presente_vars)
-    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
+    # Todos los rangos de cada operario (op_to_rango se queda con uno solo).
+    op_to_rangos = {}
+    for _op_id, _r_id in operarios:
+        op_to_rangos.setdefault(_op_id, set()).add(_r_id)
+
+    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos)
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
+    _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----
     num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
     ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta)
@@ -1418,14 +1598,15 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         maq_to_rangos,
         atraso_mult_por_prioridad,
         RANGOS_BÁSICOS,
-        PEON_ID,
         AYUDANTE_ID,
+        INGRESANTE_ID,
         PENAL_OVERQUAL,
         PENAL_DUMMY,
         PENAL_DUMMY_MAQ,
         H,
         presente_vars=presente_vars,
         op_extra_vars=op_extra_vars,
+        op_to_rangos=op_to_rangos,
     )
 
 
@@ -1454,6 +1635,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         ahora_ref,
         presente_vars=presente_vars,
         op_extra_vars=op_extra_vars,
+        partes=partes,
     )
 
     return resultados
@@ -1480,6 +1662,25 @@ def familia_from_cod_maquina(cod: str) -> str:
     if c.startswith("RECTIFICADORA"): return "RECTIFICADORA"
     if c.startswith("OXICORTE") or c.startswith("SOPLETE"): return "OXICORTE"
     return ""
+
+def familia_from_maquina(nombre: str, cod: str) -> str:
+    """Familia de la máquina, sacada del NOMBRE y no del código.
+
+    `cod_maquina` son abreviaturas ("TORY-1", "FCNCY-1", "PLE-1", "GUI-1") y
+    familia_from_cod_maquina compara contra palabras enteras ("TORNO",
+    "FRESADORA"), así que devolvía "" para las 31 máquinas. Con la familia vacía,
+    el filtro por familia de _crear_variables_y_dominios dejaba CERO candidatos y
+    todo proceso de producción terminaba en la máquina dummy: el plan salía sin
+    máquina y, como el no-solape solo corre sobre máquinas reales, dos OTs podían
+    quedar agendadas en el mismo torno a la misma hora.
+
+    El nombre sí es descriptivo ("TORNO 1", "FRESADORA CNC"), y clasificarlo es
+    exactamente lo que ya hace familia_requerida_from_proceso. Se reusa esa para
+    que máquina y proceso hablen el mismo idioma —si mañana se agrega una familia,
+    entra por los dos lados a la vez—. El código queda como fallback por si alguna
+    máquina tiene un nombre poco claro pero un código explícito.
+    """
+    return familia_requerida_from_proceso(nombre or "") or familia_from_cod_maquina(cod or "")
 
 def familia_requerida_from_proceso(nombre_proc: str) -> str:
     n = _norm(nombre_proc)
@@ -1634,8 +1835,10 @@ async def planificar(
 
     operarios = await repo_operario.find_with_rangos()
 
-    # OTs con plano adjunto: sus procesos exigen saber interpretar planos.
-    ots_con_plano = {o.id for o in ordenes if getattr(o, "tiene_plano", 0)}
+    # OTs con plano REALMENTE adjunto: sus procesos exigen saber interpretar planos.
+    # Se mira la tabla `plano`, no la bandera `tiene_plano` del legacy — ver
+    # PlanoRepository.find_ordenes_con_plano.
+    ots_con_plano = await PlanoRepository(db).find_ordenes_con_plano()
 
     # Cargar maquinarias (con rangos)
     maquinarias_orm = await repo_maquinaria.find_with_rangos()
@@ -1813,8 +2016,8 @@ async def planificar_pendientes(
         operarios = await repo_operario.find_with_rangos()
         op_planos = await repo_operario.find_interpreta_planos()
 
-        # OTs con plano adjunto: sus procesos exigen saber interpretar planos.
-        ots_con_plano = {o.id for o in ordenes if getattr(o, "tiene_plano", 0)}
+        # OTs con plano REALMENTE adjunto (tabla `plano`, no la bandera del legacy).
+        ots_con_plano = await PlanoRepository(db).find_ordenes_con_plano()
 
         maquinarias_orm = await repo_maquinaria.find_with_rangos()
         #maquinarias = [

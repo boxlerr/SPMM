@@ -39,6 +39,22 @@ async def crear_plano(
     return result
 
 
+# 🔹 Qué OTs tienen plano REALMENTE adjunto
+#
+# Va declarado ANTES que /planos/{id}: FastAPI resuelve por orden y, si no,
+# "ordenes-con-plano" entraría como el parámetro {id} y devolvería 422.
+#
+# Lo usa el planificador en el front para distinguir la OT que está marcada con
+# plano en el legacy (orden_trabajo.tiene_plano) de la que tiene el archivo
+# cargado de verdad. Solo esta última restringe a operarios que leen planos.
+@router.get("/planos/ordenes-con-plano")
+async def obtener_ordenes_con_plano(db=Depends(get_db)):
+    logger.info("API - Inicio GET /planos/ordenes-con-plano")
+    from backend.infrastructure.PlanoRepository import PlanoRepository
+    ordenes = await PlanoRepository(db).find_ordenes_con_plano()
+    return {"ordenes_con_plano": sorted(ordenes)}
+
+
 # 🔹 Obtener plano por ID
 @router.get("/planos/{id}")
 async def obtener_plano(id: int, db=Depends(get_db)):
