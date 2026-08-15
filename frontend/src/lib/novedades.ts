@@ -47,6 +47,56 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "fechas-dentro-del-turno",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Las fechas del plan ya no se pasan del horario del taller",
+        detalle:
+            "El plan calculaba días de 555 minutos y mostraba trabajos terminando 17:30 o 18:00, cuando el turno cierra 16:00. Ahora usa la jornada real (07:00 a 16:00 con desayuno y almuerzo), así que las fechas que ves —y las que le prometés al cliente— son las que se pueden cumplir. Como consecuencia el mismo trabajo ocupa más días que antes: no es que haya más trabajo, es que antes la cuenta estaba mal.",
+        href: "/operaciones",
+    },
+    {
+        id: "horarios-por-operario",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El plan respeta el horario de cada uno y no planifica sábados",
+        detalle:
+            "El horario que cargás en la ficha del operario ahora se usa: a quien entra 09:00 no se le pone trabajo a las 07:00. Y como hoy nadie tiene el sábado marcado como día de trabajo, el plan dejó de usarlo — antes contaba 5 horas por persona por semana que en realidad no existen.",
+        href: "/operaciones",
+    },
+    {
+        id: "tercerizados-marcados",
+        fecha: "2026-08-15",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los trabajos tercerizados se ven como tercerizados",
+        detalle:
+            "Aparecían en rojo como “sin operario asignado”, igual que un proceso al que le falta cargar un rango. Ahora llevan la etiqueta Tercerizado: siguen en el plan porque ocupan lugar en la secuencia de la OT y hay que esperarlos, pero no los hace nadie del taller y no hay nada que corregir.",
+        href: "/operaciones",
+    },
+    {
+        id: "vacantes-fuera-del-plan",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los puestos “VACANTE — A CUBRIR” dejaron de recibir trabajo",
+        detalle:
+            "El plan les cargaba horas como si fueran personas, así que ese trabajo figuraba hecho y en realidad no lo hacía nadie. Ahora quedan fuera del plan y, cuando un proceso solo lo podía hacer un puesto vacante, el aviso te dice qué rango hace falta cubrir. Los puestos siguen en Recursos, marcados como no disponibles.",
+        href: "/recursos",
+    },
+    {
+        id: "feriados-no-se-pierden",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Disponibilidad",
+        titulo: "Los feriados que cargás ya no se borran solos",
+        detalle:
+            "Los días no laborables se guardaban en un archivo del servidor y se perdían cada vez que se actualizaba el sistema: cargabas un feriado, andaba un rato, y después el día volvía a aparecer como laborable. Ahora se guardan como el resto de los datos. Los que ya tenías cargados se pasaron solos.",
+        href: "/operaciones",
+    },
+    {
         id: "por-que-no-entra",
         fecha: "2026-08-15",
         tipo: "nuevo",

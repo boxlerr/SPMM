@@ -43,6 +43,8 @@ interface PlanificacionResult {
     fecha_prometida?: string | null;
     sin_asignar: boolean;
     sin_maquinaria: boolean;
+    /** Lo hace un tercero: va sin operario y sin máquina a propósito. */
+    tercerizado?: boolean;
     secuencia?: number;
     fecha_inicio_estimada?: string;
     fecha_fin_estimada?: string;
@@ -1371,10 +1373,25 @@ export function PlanningPreviewModal({
                                                                                             <span className="font-medium text-gray-800">{capitalize(effectiveItem.nombre_proceso)}</span>
                                                                                             <div className="flex items-center gap-2 mt-0.5">
                                                                                                 <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
+                                                                                                {/* Tercerizado: sale sin operario y sin máquina a propósito, porque
+                                                                                                    lo hace un tercero. Sin esta marca se lee como un hueco por
+                                                                                                    falta de rango, que es un problema distinto. */}
+                                                                                                {effectiveItem.tercerizado && (
+                                                                                                    <span
+                                                                                                        className="text-xs text-violet-700 bg-violet-50 border border-violet-200 px-1.5 rounded font-medium"
+                                                                                                        title="Lo hace un tercero. Ocupa lugar en la secuencia de la OT, pero no lo hace nadie del taller: por eso va sin operario y sin máquina."
+                                                                                                    >
+                                                                                                        Tercerizado
+                                                                                                    </span>
+                                                                                                )}
                                                                                             </div>
                                                                                             {/* A1 (feedback 06/07): motivo SIEMPRE visible en procesos sin operario asignado,
-                                                                                                aunque la orden se haya planificado (antes solo quedaba el selector vacío, sin explicación). */}
-                                                                                            {!effectiveItem.id_operario && (() => {
+                                                                                                aunque la orden se haya planificado (antes solo quedaba el selector vacío, sin explicación).
+
+                                                                                                En los tercerizados no va: ahí no falta nadie ni falta un rango, lo
+                                                                                                hace un tercero. Marcarlo en rojo como si fuera un problema manda a
+                                                                                                buscar un rango que no hay que cargar. */}
+                                                                                            {!effectiveItem.id_operario && !effectiveItem.tercerizado && (() => {
                                                                                                 const diag = diagnoseUnfitProcess(item);
                                                                                                 return (
                                                                                                     <div className="mt-1 flex items-start gap-1 text-[11px] text-red-600 leading-tight" title={diag.hint}>

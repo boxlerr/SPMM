@@ -12,6 +12,7 @@ from backend.infrastructure.ConfigRepository import ConfigRepository
 from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProcesoSkillRepository
 from backend.infrastructure.PlanoRepository import PlanoRepository
 from backend.infrastructure.RangoRepository import RangoRepository
+from backend.infrastructure.DiaBloqueadoRepository import DiaBloqueadoRepository
 from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -26,20 +27,81 @@ import math
 
 import re
 import unicodedata
+from collections import namedtuple
 
 ##Variables:
-MIN_LABORAL_DIA = 555
-MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 3075
+# Jornada real del taller: 07:00 a 16:00 con 15' de desayuno y 30' de almuerzo, o sea
+# 495 minutos de trabajo efectivo. Antes acá decía 555, que no es ni la jornada neta ni
+# la bruta (07:00–16:00 son 540 de reloj): el modelo se creía casi una hora más de
+# trabajo por día del que hay. Como _convertir_minutos_a_fecha le suma encima los
+# minutos muertos, un día completo terminaba dando las 18:00 y las fechas prometidas
+# salían sistemáticamente optimistas.
+MIN_DESAYUNO = 15
+MIN_ALMUERZO = 30
 
+# (inicio, fin) en minutos trabajados del día. Los cortes son las pausas:
+#   07:00–09:00 (120) · desayuno · 09:15–12:00 (165) · almuerzo · 12:30–16:00 (210)
 TRAMOS_LV_LAB = [
     (0, 120),
     (120, 285),
-    (285, 555),
+    (285, 495),
 ]
 
+# Sábado: 07:00 a 12:00 de corrido.
 TRAMOS_SAB_LAB = [
     (0, 300),
 ]
+
+MIN_LABORAL_DIA = TRAMOS_LV_LAB[-1][1]          # 495
+MIN_LABORAL_SABADO = TRAMOS_SAB_LAB[-1][1]      # 300
+MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + MIN_LABORAL_SABADO
+
+
+HORA_APERTURA = time(7, 0)
+
+# Una ventana del horizonte. `ini`/`fin` son minutos del timeline comprimido; el resto
+# ubica la ventana en el calendario para poder cruzarla con el horario de cada persona.
+Ventana = namedtuple("Ventana", "ini fin weekday ini_dia fin_dia")
+
+# Nombres de día como los guarda operario.dias_trabajo ("MON,TUE,...").
+_DIAS = {"MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6}
+
+
+def minutos_modelo_desde_hora(hora, es_sabado: bool = False) -> int:
+    """Pasa una hora de reloj al minuto de TRABAJO del día que le corresponde.
+
+    El solver cuenta minutos trabajados, no minutos de reloj: las 09:00 de un día de
+    semana son el minuto 120, y las 12:30 el 285 (porque entre medio hubo pausas).
+    Hace falta para poder comparar el horario de un operario contra los tramos.
+    """
+    tramos = TRAMOS_SAB_LAB if es_sabado else TRAMOS_LV_LAB
+    reloj = (hora.hour * 60 + hora.minute) - (HORA_APERTURA.hour * 60 + HORA_APERTURA.minute)
+    if reloj <= 0:
+        return 0
+    for ini, fin in tramos:
+        ancho = fin - ini
+        muertos = minutos_muertos_del_dia(ini + 1, es_sabado)
+        # Minutos de reloj consumidos hasta el final de este tramo (trabajo + pausas).
+        if reloj <= fin + muertos:
+            return min(fin, max(ini, reloj - muertos))
+    return tramos[-1][1]
+
+
+def minutos_muertos_del_dia(minutos_trabajados: int, es_sabado: bool = False) -> int:
+    """Pausas acumuladas antes de llegar a ese minuto de trabajo del día.
+
+    Sirve para pasar de "minuto de trabajo" a hora de reloj. Se deriva de los tramos
+    para que no haya dos versiones de la misma jornada dando vueltas: cambiar
+    TRAMOS_LV_LAB alcanza para que la conversión a fecha siga en sincronía.
+    """
+    if es_sabado:
+        return 0
+    muertos = 0
+    if minutos_trabajados > TRAMOS_LV_LAB[0][1]:
+        muertos += MIN_DESAYUNO
+    if minutos_trabajados > TRAMOS_LV_LAB[1][1]:
+        muertos += MIN_ALMUERZO
+    return muertos
 
 # Tramo laboral más largo de un día de semana. Es el techo real de lo que puede durar
 # un proceso: _agregar_ventanas_horarias solo le ofrece a un proceso las ventanas
@@ -53,7 +115,34 @@ MAX_MIN_TRAMO = max(fin - ini for ini, fin in TRAMOS_LV_LAB)
 ESCALA_SECUENCIA = 1000
 # ------------------------------------------------------------------
 #Funcion para ventanas semanales en tiempo.
-def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None):
+def calendarios_de_operarios(operarios_orm):
+    """Traduce el horario cargado de cada operario a algo que el solver pueda usar.
+
+    Devuelve {id_operario: {"dias": {0..6}, "desde": min_trabajo, "hasta": min_trabajo}}.
+
+    Los horarios existían en la ficha del operario desde siempre, pero el planificador
+    usaba un único calendario para todos: Argañaraz entra 09:00 y el plan le podía
+    poner trabajo a las 07:00, y nadie trabaja los sábados aunque el modelo los
+    planificaba igual —300 minutos por persona por semana de capacidad que no existe—.
+    """
+    calendarios = {}
+    for o in operarios_orm:
+        dias = {
+            _DIAS[d.strip().upper()]
+            for d in (o.dias_trabajo or "").split(",")
+            if d.strip().upper() in _DIAS
+        }
+        calendarios[o.id] = {
+            "dias": dias or {0, 1, 2, 3, 4},
+            "desde": minutos_modelo_desde_hora(o.hora_inicio) if o.hora_inicio else 0,
+            "hasta": minutos_modelo_desde_hora(o.hora_fin) if o.hora_fin else MIN_LABORAL_DIA,
+            "desde_sab": minutos_modelo_desde_hora(o.hora_inicio, True) if o.hora_inicio else 0,
+            "hasta_sab": minutos_modelo_desde_hora(o.hora_fin, True) if o.hora_fin else MIN_LABORAL_SABADO,
+        }
+    return calendarios
+
+
+def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None, incluir_sabado: bool = True):
     """
     Construye las ventanas horarias del horizonte.
     Si `fecha_hasta` viene, limita el horizonte a (fecha_hasta - start_date) días INCLUSIVE.
@@ -123,7 +212,7 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
             day_capacity = MIN_LABORAL_DIA
         elif weekday == 5: # Sat
             tramos = TRAMOS_SAB_LAB
-            day_capacity = 300 # Approx
+            day_capacity = MIN_LABORAL_SABADO
         else:
             tramos = [] # Sun
             day_capacity = 0
@@ -208,13 +297,26 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
             
             pass 
             
+        elif weekday == 5 and not incluir_sabado:
+            # Nadie trabaja los sábados: el día no aporta capacidad. Antes se generaba
+            # igual y el modelo se creía 300 minutos por persona por semana que no
+            # existen, con lo cual toda fecha prometida salía optimista.
+            logger.info(f"SABADO SIN GENTE: {day_str} (sin ventanas)")
         else:
-             # Add segments for this day
+             # Add segments for this day. Se guarda además el día de la semana y el
+             # tramo dentro del día: hace falta para poder decir "este operario no
+             # trabaja los sábados" o "no entra antes de las 9".
              for ini, fin in tramos:
-                 ventanas.append((current_base_minutes + ini, current_base_minutes + fin))
-             
+                 ventanas.append(Ventana(
+                     ini=current_base_minutes + ini,
+                     fin=current_base_minutes + fin,
+                     weekday=weekday,
+                     ini_dia=ini,
+                     fin_dia=fin,
+                 ))
+
              # Advance base minutes
-             day_duration = MIN_LABORAL_DIA if weekday < 5 else 300
+             day_duration = MIN_LABORAL_DIA if weekday < 5 else MIN_LABORAL_SABADO
              current_base_minutes += day_duration
         
         # Advance calendar
@@ -260,7 +362,7 @@ def _normalizar_procesos(procesos, prioridad_pesos):
     # Horizonte en minutos laborales:
     # suma total de trabajo + margen (1 día laboral)
     total_trabajo = sum(p[5] for p in procesos_norm)
-    H = total_trabajo + 495
+    H = total_trabajo + MIN_LABORAL_DIA
 
     return procesos_norm, H
 
@@ -1223,16 +1325,22 @@ def _agregar_funcion_objetivo(
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
 
-def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
+def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_dates=None):
     """
     Convierte minutos de trabajo lógicos a una fecha real del calendario físico.
-    Alineado a jornada física de 07:00 a 18:00 con 105 minutos muertos.
+
+    La jornada sale de TRAMOS_LV_LAB / TRAMOS_SAB_LAB, no de números sueltos: es la
+    misma que usa el solver para armar las ventanas. Antes acá había una copia con
+    555 y 105 escritos a mano, así que un día entero de trabajo caía a las 18:00
+    —dos horas después de que el taller cierra— y la fecha prometida al cliente
+    heredaba ese error.
     """
     from datetime import timedelta
-    
-    # Load blocked dates first
-    config_repo = ConfigRepository()
-    blocked_dates = set(config_repo.get_blocked_dates())
+
+    # Los días bloqueados llegan de afuera (los lee el servicio, que sí tiene sesión de
+    # base). Antes esta función abría el archivo de configuración cada vez que la
+    # llamaban: dos lecturas de disco POR FILA del resultado.
+    blocked_dates = set(blocked_dates or ())
 
     ahora = ahora_ref if ahora_ref else datetime.now()
     inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
@@ -1254,38 +1362,31 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
         wd = tiempo_actual.weekday()
         
         if wd < 5:
-            capacidad_hoy = 555
+            capacidad_hoy = MIN_LABORAL_DIA
         elif wd == 5:
-            capacidad_hoy = 300
+            capacidad_hoy = MIN_LABORAL_SABADO
         else:
             capacidad_hoy = 0
-            
+
         if capacidad_hoy == 0:
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             continue
-            
+
         if minutos_restantes >= capacidad_hoy:
             minutos_restantes -= capacidad_hoy
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
         else:
-            if wd < 5:
-                if minutos_restantes <= 120:
-                    tiempo_actual += timedelta(minutes=minutos_restantes)
-                elif minutos_restantes <= 285:
-                    tiempo_actual += timedelta(minutes=minutos_restantes + 15)
-                else:
-                    tiempo_actual += timedelta(minutes=minutos_restantes + 105)
-            elif wd == 5:
-                tiempo_actual += timedelta(minutes=minutos_restantes)
-                
+            tiempo_actual += timedelta(
+                minutes=minutos_restantes + minutos_muertos_del_dia(minutos_restantes, es_sabado=(wd == 5))
+            )
             minutos_restantes = 0
-            
+
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None, partes=None):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None, partes=None, blocked_dates=None):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
@@ -1333,8 +1434,8 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 if isinstance(fecha_prometida, (date, datetime))
                 else (fecha_prometida if isinstance(fecha_prometida, str) else None)
             )
-            fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref)
-            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref)
+            fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref, blocked_dates)
+            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref, blocked_dates)
 
             resultados.append({
                 "orden_id": orden_id,
@@ -1357,6 +1458,11 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "fecha_fin_estimada": fecha_fin_est,
                 # En cuántos tramos se tuvo que repartir (1 = entró de una).
                 "cantidad_tramos": len(claves),
+                # Trabajo que hace un tercero. Se planifica igual —ocupa lugar en la
+                # secuencia de la OT y hay que esperarlo— pero no lo hace nadie del
+                # taller, así que salir "sin asignar" no es un problema a resolver:
+                # es lo que corresponde. Sin esta marca se confunde con un hueco.
+                "tercerizado": _get_tipo_proceso(nombre_proceso) == "ADMIN",
             })
 
             # Operarios adicionales del proceso (slots extra). Una fila por cada operario
@@ -1407,24 +1513,46 @@ def _split_resultados(resultados: list[dict]) -> tuple[list[dict], list[dict]]:
     return planificados, excedentes
 
 
-def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None):
+def _ventana_prohibida_para(cal, v: "Ventana") -> bool:
+    """True si el calendario de ese operario no le permite trabajar en esa ventana."""
+    if v.weekday not in cal["dias"]:
+        return True
+    if v.weekday == 5:
+        desde, hasta = cal["desde_sab"], cal["hasta_sab"]
+    else:
+        desde, hasta = cal["desde"], cal["hasta"]
+    # La ventana tiene que caer entera dentro del horario de la persona.
+    return v.ini_dia < desde or v.fin_dia > hasta
+
+
+def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None,
+                               operario_vars=None, calendarios=None):
     """
     Obliga a que cada proceso:
     - empiece dentro de una ventana laboral
     - termine antes de que esa ventana cierre
     Si presente_vars está, solo aplica cuando el proceso está presente.
     Si un proceso NO entra en ninguna ventana del horizonte → presente = 0.
+
+    Con `calendarios` ({id_operario: horario}) se agrega además el horario de cada
+    persona: si una ventana cae fuera de su turno o en un día que no trabaja, ese
+    operario no puede quedar asignado a un proceso que caiga ahí. Solo se generan
+    restricciones para quienes tienen un horario distinto del general —hoy es uno
+    solo— así que el modelo casi no crece.
     """
+    calendarios = calendarios or {}
 
     for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
         key = (orden_id, secuencia)
         start = inicio_vars[key]
         dur = dur_map[key]
+        op_var = (operario_vars or {}).get(key)
 
         # Un booleano por ventana donde el proceso podría caber
         en_ventana = []
 
-        for idx, (v_ini, v_fin) in enumerate(ventanas):
+        for idx, v in enumerate(ventanas):
+            v_ini, v_fin = v.ini, v.fin
             if dur > (v_fin - v_ini):
                 continue  # No cabe en esta ventana → no la considero
 
@@ -1433,6 +1561,12 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
             model.Add(start >= v_ini).OnlyEnforceIf(b)
             model.Add(start < v_fin).OnlyEnforceIf(b)
             en_ventana.append(b)
+
+            # Nadie que no trabaje en ese horario puede quedarse con este proceso.
+            if op_var is not None:
+                for op_id, cal in calendarios.items():
+                    if _ventana_prohibida_para(cal, v):
+                        model.Add(op_var != op_id).OnlyEnforceIf(b)
 
         if presente_vars is not None:
             presente = presente_vars[key]
@@ -1453,12 +1587,11 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None):
     model = cp_model.CpModel()
 
-    # Init Config
-    config_repo = ConfigRepository()
-    blocked_dates = config_repo.get_blocked_dates()
+    # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
+    blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
 
     # Determine start date
@@ -1590,9 +1723,29 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
     _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----
-    num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
-    ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta)
-    logger.info(f"PLANIFICADOR: ventanas generadas = {len(ventanas)} (fecha_hasta={fecha_hasta})")
+    # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar
+    # más semanas para el mismo trabajo; si lo dejáramos como antes, el horizonte se
+    # quedaría corto y sobrarían procesos por una razón inventada.
+    # Solo los que entran al plan: `calendarios` viene de todos los operarios, y los
+    # que no están disponibles no tienen ni dominio ni no-solape, así que restringirles
+    # ventanas sería agregar restricciones sobre alguien que no existe para el modelo.
+    calendarios = {op: c for op, c in (calendarios or {}).items() if op in set(REAL_OP_IDS)}
+    hay_sabado = any(5 in c["dias"] for c in calendarios.values()) if calendarios else True
+    min_semana = 5 * MIN_LABORAL_DIA + (MIN_LABORAL_SABADO if hay_sabado else 0)
+
+    num_semanas = math.ceil(H / min_semana) + 1
+    ventanas = construir_ventanas_semanales(
+        num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta, incluir_sabado=hay_sabado
+    )
+    con_horario_propio = sum(
+        1 for c in calendarios.values()
+        if c["desde"] > 0 or c["hasta"] < MIN_LABORAL_DIA or c["dias"] != {0, 1, 2, 3, 4}
+    )
+    logger.info(
+        f"PLANIFICADOR: ventanas generadas = {len(ventanas)} (fecha_hasta={fecha_hasta}, "
+        f"sábados={'sí' if hay_sabado else 'no, nadie trabaja'}, "
+        f"operarios con horario propio={con_horario_propio})"
+    )
 
     # ---- Restricciones de ventanas horarias ----
     _agregar_ventanas_horarias(
@@ -1602,6 +1755,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         dur_map,
         ventanas,
         presente_vars=presente_vars,
+        operario_vars=operario_vars,
+        calendarios=calendarios,
     )
 
     # ---- Función objetivo ----
@@ -1654,6 +1809,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         presente_vars=presente_vars,
         op_extra_vars=op_extra_vars,
         partes=partes,
+        blocked_dates=blocked_dates,
     )
 
     return resultados
@@ -1839,6 +1995,10 @@ async def planificar(
     skills_manuales = await repo_skill.get_manuales_por_proceso()
     # 🔹 Quién sabe interpretar planos (id_operario -> bool)
     op_planos = await repo_operario.find_interpreta_planos()
+    # 🔹 Horario de cada uno: turno y días que trabaja.
+    calendarios = calendarios_de_operarios(await repo_operario.find_all())
+    # 🔹 Feriados / días de mantenimiento, ahora desde la base.
+    blocked_dates = await DiaBloqueadoRepository(db).listar()
 
     # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
     if not preview and plan:
@@ -1990,6 +2150,8 @@ async def planificar(
         op_planos,
         ots_con_plano,
         skills_manuales,
+        calendarios,
+        blocked_dates,
     )
 
     planificados, excedentes = _split_resultados(resultados)
@@ -2055,6 +2217,8 @@ async def planificar_pendientes(
 
         operarios = await repo_operario.find_with_rangos()
         op_planos = await repo_operario.find_interpreta_planos()
+        calendarios = calendarios_de_operarios(await repo_operario.find_all())
+        blocked_dates = await DiaBloqueadoRepository(db).listar()
 
         # OTs con plano REALMENTE adjunto (tabla `plano`, no la bandera del legacy).
         ots_con_plano = await PlanoRepository(db).find_ordenes_con_plano()
@@ -2128,6 +2292,8 @@ async def planificar_pendientes(
             op_planos,
             ots_con_plano,
             skills_manuales,
+            calendarios,
+            blocked_dates,
         )
 
         planificados, excedentes = _split_resultados(resultados)

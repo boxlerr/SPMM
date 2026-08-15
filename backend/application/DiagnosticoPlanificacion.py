@@ -18,6 +18,7 @@ from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
     familia_requerida_from_proceso,
     familia_from_maquina,
+    _get_tipo_proceso,
 )
 
 BLOQUEANTE = "bloqueante"
@@ -91,6 +92,7 @@ def construir_diagnosticos(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
     )
     diagnosticos += _procesos_sin_rango(procesos)
+    diagnosticos += _trabajo_tercerizado(procesos)
     diagnosticos += _trabajo_en_puestos_vacantes(resultados, nombre_operario)
 
     orden = {BLOQUEANTE: 0, ADVERTENCIA: 1}
@@ -120,6 +122,10 @@ def _procesos_que_nadie_puede_hacer(
     por_proceso = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, usa_maq, familia, _sk) in procesos:
         if not rangos:
+            continue
+        # Los tercerizados salen sin nadie a propósito: los cuenta _trabajo_tercerizado.
+        # Marcarlos acá como bloqueo mandaría a cargar un rango que no hace falta.
+        if _get_tipo_proceso(nombre or "") == "ADMIN":
             continue
         d = por_proceso.setdefault(proc_id, {
             "nombre": (nombre or f"#{proc_id}").strip(),
@@ -504,6 +510,58 @@ def _procesos_sin_rango(procesos):
             "donde": "Recursos › Procesos",
         }],
     } for proc_id, d in sin_rango.items()]
+
+
+def _trabajo_tercerizado(procesos):
+    """Trabajo que hace un tercero, no el taller.
+
+    Se planifica igual: ocupa lugar en la secuencia de la OT y hay que esperarlo para
+    seguir. Pero no lo hace nadie de adentro, así que sale "sin asignar" y sin máquina.
+    Eso no es un hueco a tapar —es lo que corresponde— y conviene decirlo para que no
+    se lo confunda con un problema de rangos.
+    """
+    tercerizados = {}
+    for (orden_id, proc_id, _sec, _fp, _prio, dur, _rangos, nombre, _um, _fam, _sk) in procesos:
+        if _get_tipo_proceso(nombre or "") != "ADMIN":
+            continue
+        d = tercerizados.setdefault(proc_id, {"nombre": (nombre or f"#{proc_id}").strip(),
+                                              "ots": set(), "minutos": 0, "procesos": 0})
+        d["ots"].add(orden_id)
+        d["minutos"] += dur
+        d["procesos"] += 1
+
+    if not tercerizados:
+        return []
+
+    ots = sorted({o for d in tercerizados.values() for o in d["ots"]})
+    total = sum(d["minutos"] for d in tercerizados.values())
+    cuantos = sum(d["procesos"] for d in tercerizados.values())
+
+    return [{
+        "id": "trabajo-tercerizado",
+        "tipo": "trabajo_tercerizado",
+        "severidad": ADVERTENCIA,
+        "titulo": f"{cuantos} proceso(s) del plan son trabajo tercerizado",
+        "detalle": (
+            f"{_listar(sorted(d['nombre'] for d in tercerizados.values()))}. "
+            "Quedan en el plan porque ocupan lugar en la secuencia de la OT y hay que "
+            "esperarlos para seguir, pero no los hace nadie del taller: por eso salen sin "
+            "operario y sin máquina. No es un rango que falte cargar."
+        ),
+        "impacto": {
+            "procesos": cuantos,
+            "ots": ots,
+            "minutos": total,
+            "resumen": f"{cuantos} proceso(s) en {len(ots)} OT(s) — {_jornadas(total)}",
+        },
+        "soluciones": [{
+            "texto": (
+                "Si querés que además figure a nombre de alguien —el que lo gestiona o el "
+                "proveedor— asignale el rango TERCERIZADO a esa persona."
+            ),
+            "donde": "Recursos › Operarios",
+        }],
+    }]
 
 
 def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
