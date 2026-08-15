@@ -1797,7 +1797,37 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     solver.parameters.num_search_workers = int(os.getenv("SOLVER_WORKERS", "0")) or max(2, min(8, os.cpu_count() or 2))
     solver.parameters.log_search_progress = False
 
-    status = solver.Solve(model)
+    # Corte por estancamiento: si el solver lleva un rato sin encontrar nada mejor,
+    # se corta y se usa lo que hay. Sin esto, el tiempo de respuesta era SIEMPRE el
+    # máximo (60s): la solución final aparecía a los pocos segundos y el resto era
+    # el solver intentando demostrar que no hay nada mejor — una garantía que al
+    # taller no le cambia el plan pero sí lo tiene un minuto mirando el spinner.
+    import threading
+    import time as _t
+
+    _ultima_mejora = {"t": None}
+
+    class _RegistroMejoras(cp_model.CpSolverSolutionCallback):
+        def on_solution_callback(self):
+            _ultima_mejora["t"] = _t.monotonic()
+
+    corte_seg = int(os.getenv("SOLVER_CORTE_SIN_MEJORA_SEG", "10"))
+    _fin_vigia = threading.Event()
+
+    def _vigia():
+        while not _fin_vigia.wait(1.0):
+            ultima = _ultima_mejora["t"]
+            if ultima is not None and (_t.monotonic() - ultima) > corte_seg:
+                # stop_search es el camino documentado para frenar desde otro hilo.
+                getattr(solver, "stop_search", getattr(solver, "StopSearch", lambda: None))()
+                return
+
+    hilo_vigia = threading.Thread(target=_vigia, daemon=True)
+    hilo_vigia.start()
+    try:
+        status = solver.Solve(model, _RegistroMejoras())
+    finally:
+        _fin_vigia.set()
 
     ahora_ref = inicio_base
 
