@@ -55,6 +55,14 @@ const sidebarItems: SidebarItem[] = [
     icon: Settings
   },
   {
+    // Auditoría: cada intento de planificación (salga bien o mal) y cada borrado
+    // quedan acá. Antes un intento fallado no dejaba rastro en la app y había que
+    // ir a los logs del servidor para saber qué pasó.
+    name: "Auditoría",
+    href: "/auditoria",
+    icon: ClipboardList
+  },
+  {
     // Novedades: el changelog para el equipo de la planta. Va último a propósito
     // (no es una pantalla de trabajo), pero fijo en el menú para que se encuentre.
     name: "Novedades",

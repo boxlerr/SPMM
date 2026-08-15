@@ -1,5 +1,6 @@
 # backend/application/PlanificacionService.py
 import asyncio
+import os
 from ortools.sat.python import cp_model
 from datetime import datetime, time,date
 
@@ -1785,8 +1786,15 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
 
     # ---- Resolver ----
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 60
-    solver.parameters.num_search_workers = 8
+    # Presupuesto de tiempo y de hilos ajustados a la máquina REAL, no a la de
+    # desarrollo. Esto estaba fijo en 8 workers, pensado para una laptop: en Cloud
+    # Run el servicio tiene 1-2 vCPU, así que 8 hilos peleándose la misma CPU hacían
+    # al solver MÁS lento (el intento de Lucas del 15/08 se comió los 60s enteros
+    # para 6 OTs que localmente salen en 10s) y multiplicaban la memoria — cada
+    # worker mantiene su propia copia del modelo, y el contenedor murió por OOM con
+    # 1115 MiB. Con workers = cpus, en Cloud Run son 2 y en la laptop los que haya.
+    solver.parameters.max_time_in_seconds = int(os.getenv("SOLVER_MAX_SEG", "60"))
+    solver.parameters.num_search_workers = int(os.getenv("SOLVER_WORKERS", "0")) or max(2, min(8, os.cpu_count() or 2))
     solver.parameters.log_search_progress = False
 
     status = solver.Solve(model)

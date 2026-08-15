@@ -840,9 +840,14 @@ export default function OperacionesPage() {
     // Call API for preview
     try {
       toast.loading("Calculando planificación...");
+      // Con timeout: el 15/08 el servidor murió a mitad de un cálculo y el
+      // "Calculando planificación..." quedó clavado para siempre — sin límite,
+      // un request muerto es indistinguible de uno lento. 3 minutos alcanza de
+      // sobra (el solver corta a los 60s) y si no llegó, algo se rompió.
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(180_000),
         body: JSON.stringify({
           ordenes_ids: ids,
           preview: true,
@@ -855,7 +860,7 @@ export default function OperacionesPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        toast.error(errorData.detail || "Error al calcular planificación");
+        toast.error(errorData.detail || `El servidor respondió con un error (${response.status}). Probá de nuevo o con menos OTs.`);
         return;
       }
 
@@ -957,7 +962,15 @@ export default function OperacionesPage() {
       setIsPreviewOpen(true);
 
     } catch (error) {
-      toast.error("Error al calcular la planificación");
+      toast.dismiss();
+      // Distinguir "tardó demasiado / se cortó" de cualquier otro error: son
+      // acciones distintas para el usuario (esperar y reintentar vs avisar).
+      const esTimeout = error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
+      toast.error(
+        esTimeout
+          ? "El cálculo tardó demasiado y se cortó. Probá con menos OTs o un rango de fechas más corto."
+          : "No se pudo calcular la planificación: se cortó la conexión con el servidor. Probá de nuevo."
+      );
     }
   };
 
@@ -989,6 +1002,7 @@ export default function OperacionesPage() {
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(180_000),
         body: JSON.stringify({
           ordenes_ids: ids,
           preview: true,
@@ -1094,6 +1108,7 @@ export default function OperacionesPage() {
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(180_000),
         body: JSON.stringify({
           ordenes_ids: finalOrdenIds,
           preview: false,

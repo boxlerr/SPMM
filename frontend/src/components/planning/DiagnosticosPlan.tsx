@@ -3,24 +3,17 @@
 /**
  * Qué traba este plan y cómo se destraba.
  *
- * El planificador siempre devolvió un resultado; lo que no podía asignar salía como
- * "sin asignar" o "sin máquina" y el motivo quedaba en los logs del servidor. Desde
- * la pantalla era imposible distinguir "falta cargar un rango" de "hay una sola
- * máquina para dos semanas de trabajo", que se arreglan de maneras opuestas.
+ * La primera versión era una tarjeta grande con cajas anidadas y párrafos: Lucas
+ * lo dijo directo — "marea tanto texto". Esta es la versión legible: cada aviso es
+ * UNA línea (punto de color + título + impacto), y el detalle aparece recién al
+ * tocarla. Las soluciones son una línea cada una con el lugar donde se hacen.
  *
- * Decisiones de la vista:
- *  - Lo que BLOQUEA va arriba y abierto; lo que es aviso va abajo y cerrado. Si hay
- *    siete cosas, el usuario tiene que poder leer las dos que importan sin scrollear.
- *  - Cada ítem dice a cuánto trabajo afecta. Sin eso no se puede priorizar: no es lo
- *    mismo un proceso de 1 minuto que seis jornadas de torno.
- *  - Las soluciones van numeradas y con la pantalla donde se hacen. Son opciones, no
- *    pasos de un instructivo: la primera suele ser la más barata, pero cuál conviene
- *    lo sabe el taller.
+ * Lo que bloquea va arriba; los avisos abajo. Nada arranca expandido: la lista
+ * entera se tiene que poder barrer de un vistazo.
  */
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, Info, ChevronDown, ChevronRight, Wrench } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { useState } from "react";
+import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface DiagnosticoSolucion {
@@ -48,158 +41,86 @@ export function DiagnosticosPlan({ diagnosticos }: { diagnosticos?: Diagnostico[
     const bloqueantes = items.filter((d) => d.severidad === "bloqueante");
     const avisos = items.filter((d) => d.severidad !== "bloqueante");
 
-    const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
+    const [abierto, setAbierto] = useState<string | null>(null);
     const [colapsado, setColapsado] = useState(false);
-
-    // El primer bloqueante arranca abierto para que se vea de entrada el detalle y el
-    // "cómo se arregla"; el resto queda en una línea, que es lo que hace que la lista
-    // se pueda barrer de un vistazo.
-    //
-    // Va en un efecto y no en el estado inicial porque el modal se monta ANTES de que
-    // llegue la respuesta del planificador: en el primer render `diagnosticos` está
-    // vacío, así que calcularlo ahí dejaba todo cerrado para siempre.
-    const claves = items.map((d) => d.id).join("|");
-    useEffect(() => {
-        setAbiertos(new Set(bloqueantes.slice(0, 1).map((d) => d.id)));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [claves]);
 
     if (items.length === 0) return null;
 
-    const toggle = (id: string) =>
-        setAbiertos((prev) => {
-            const s = new Set(prev);
-            s.has(id) ? s.delete(id) : s.add(id);
-            return s;
-        });
-
     const hayBloqueantes = bloqueantes.length > 0;
+    const resumenHeader = [
+        bloqueantes.length > 0 && `${bloqueantes.length} ${bloqueantes.length === 1 ? "traba" : "trabas"}`,
+        avisos.length > 0 && `${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"}`,
+    ].filter(Boolean).join(" · ");
 
     return (
-        <div
-            className={cn(
-                "m-4 rounded-lg border-2 overflow-hidden shadow-sm",
-                hayBloqueantes ? "border-rose-300 bg-rose-50" : "border-amber-300 bg-amber-50"
-            )}
-        >
+        <div className="mx-4 mt-4 mb-2 rounded-lg border bg-white overflow-hidden">
             <button
                 type="button"
                 onClick={() => setColapsado((c) => !c)}
-                className={cn(
-                    "w-full px-4 py-3 flex items-start gap-3 text-left transition-colors",
-                    hayBloqueantes ? "bg-rose-100/70 hover:bg-rose-100" : "bg-amber-100/70 hover:bg-amber-100"
-                )}
+                className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-muted/40 transition-colors"
             >
-                <AlertTriangle
-                    className={cn("w-5 h-5 mt-0.5 shrink-0", hayBloqueantes ? "text-rose-700" : "text-amber-700")}
-                />
-                <div className="flex-1 min-w-0">
-                    <div className={cn("font-semibold text-sm", hayBloqueantes ? "text-rose-900" : "text-amber-900")}>
-                        {hayBloqueantes
-                            ? `${bloqueantes.length} ${bloqueantes.length === 1 ? "cosa traba" : "cosas traban"} este plan`
-                            : `${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"} sobre este plan`}
-                        {hayBloqueantes && avisos.length > 0 && (
-                            <span className="font-normal"> · {avisos.length} aviso(s) más</span>
-                        )}
-                    </div>
-                    <div className={cn("text-xs mt-0.5", hayBloqueantes ? "text-rose-800" : "text-amber-800")}>
-                        {hayBloqueantes
-                            ? "El plan se puede guardar igual, pero eso que falta no lo va a hacer nadie. Cada uno dice cómo se arregla."
-                            : "Nada impide guardar el plan. Son cosas para mirar cuando puedas."}
-                    </div>
-                </div>
+                <span className={cn("w-2 h-2 rounded-full shrink-0", hayBloqueantes ? "bg-rose-500" : "bg-amber-400")} />
+                <span className="text-sm font-semibold text-gray-800">{resumenHeader}</span>
+                <span className="text-xs text-gray-500 hidden sm:inline">
+                    {hayBloqueantes ? "— lo marcado en rojo no lo va a hacer nadie" : "— nada impide guardar"}
+                </span>
+                <span className="flex-1" />
                 {colapsado ? (
-                    <ChevronRight className="w-4 h-4 mt-0.5 shrink-0 opacity-60" />
+                    <ChevronRight className="w-4 h-4 opacity-50" />
                 ) : (
-                    <ChevronDown className="w-4 h-4 mt-0.5 shrink-0 opacity-60" />
+                    <ChevronDown className="w-4 h-4 opacity-50" />
                 )}
             </button>
 
             {!colapsado && (
-                <div className="divide-y divide-black/5 bg-white/60">
+                <ul className="divide-y border-t">
                     {[...bloqueantes, ...avisos].map((d) => {
-                        const abierto = abiertos.has(d.id);
-                        const esBloqueante = d.severidad === "bloqueante";
+                        const activo = abierto === d.id;
+                        const esBloq = d.severidad === "bloqueante";
                         return (
-                            <div key={d.id} className="px-4 py-3">
+                            <li key={d.id}>
                                 <button
                                     type="button"
-                                    onClick={() => toggle(d.id)}
-                                    className="w-full flex items-start gap-2.5 text-left group"
-                                >
-                                    {esBloqueante ? (
-                                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-600" />
-                                    ) : (
-                                        <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+                                    onClick={() => setAbierto(activo ? null : d.id)}
+                                    className={cn(
+                                        "w-full px-3 py-1.5 flex items-center gap-2 text-left transition-colors",
+                                        activo ? "bg-muted/40" : "hover:bg-muted/30"
                                     )}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <span className="text-sm font-semibold text-gray-900 group-hover:underline">
-                                                {d.titulo}
-                                            </span>
-                                            <Badge
-                                                variant="outline"
-                                                className="shrink-0 text-[11px] font-normal bg-white text-gray-600"
-                                                title={`OTs afectadas: ${d.impacto.ots.join(", ")}`}
-                                            >
-                                                {d.impacto.resumen}
-                                            </Badge>
-                                        </div>
-                                        {!abierto && (
-                                            <p className="text-xs text-gray-600 mt-0.5 line-clamp-1">{d.detalle}</p>
-                                        )}
-                                    </div>
-                                    {abierto ? (
-                                        <ChevronDown className="w-4 h-4 mt-0.5 shrink-0 opacity-50" />
+                                >
+                                    <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", esBloq ? "bg-rose-500" : "bg-amber-400")} />
+                                    <span className="text-[13px] text-gray-800 truncate">{d.titulo}</span>
+                                    <span className="flex-1" />
+                                    <span className="text-[11px] text-gray-400 tabular-nums shrink-0" title={`OTs: ${d.impacto.ots.join(", ")}`}>
+                                        {d.impacto.resumen}
+                                    </span>
+                                    {activo ? (
+                                        <ChevronDown className="w-3.5 h-3.5 opacity-40 shrink-0" />
                                     ) : (
-                                        <ChevronRight className="w-4 h-4 mt-0.5 shrink-0 opacity-50" />
+                                        <ChevronRight className="w-3.5 h-3.5 opacity-40 shrink-0" />
                                     )}
                                 </button>
 
-                                {abierto && (
-                                    <div className="mt-2 ml-6.5 pl-0.5 space-y-2.5">
-                                        <p className="text-xs text-gray-700 leading-relaxed">{d.detalle}</p>
-
-                                        {d.soluciones.length > 0 && (
-                                            <div className="rounded-md border border-gray-200 bg-white p-3">
-                                                <div className="flex items-center gap-1.5 mb-2">
-                                                    <Wrench className="w-3.5 h-3.5 text-emerald-700" />
-                                                    <span className="text-xs font-semibold text-emerald-800">
-                                                        Cómo se arregla
-                                                    </span>
-                                                </div>
-                                                <ol className="space-y-2">
-                                                    {d.soluciones.map((s, i) => (
-                                                        <li key={i} className="flex gap-2 text-xs text-gray-700">
-                                                            <span className="shrink-0 w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold flex items-center justify-center mt-px">
-                                                                {i + 1}
-                                                            </span>
-                                                            <span className="flex-1 leading-relaxed">
-                                                                {s.texto}
-                                                                <Badge
-                                                                    variant="outline"
-                                                                    className="ml-1.5 align-middle text-[10px] font-normal bg-gray-50 text-gray-600"
-                                                                >
-                                                                    {s.donde}
-                                                                </Badge>
-                                                            </span>
-                                                        </li>
-                                                    ))}
-                                                </ol>
-                                            </div>
-                                        )}
-
-                                        {d.impacto.ots.length > 0 && (
-                                            <p className="text-[11px] text-gray-500">
-                                                OTs afectadas: {d.impacto.ots.join(", ")}
+                                {activo && (
+                                    <div className="px-3 pb-2.5 pl-7 space-y-1.5">
+                                        <p className="text-xs text-gray-600 leading-relaxed">{d.detalle}</p>
+                                        {d.soluciones.map((s, i) => (
+                                            <p key={i} className="text-xs text-gray-700 flex items-start gap-1.5">
+                                                <Wrench className="w-3 h-3 mt-0.5 shrink-0 text-emerald-600" />
+                                                <span>
+                                                    {s.texto}{" "}
+                                                    <span className="text-gray-400">· {s.donde}</span>
+                                                </span>
                                             </p>
+                                        ))}
+                                        {d.impacto.ots.length > 0 && (
+                                            <p className="text-[11px] text-gray-400">OTs: {d.impacto.ots.join(", ")}</p>
                                         )}
                                     </div>
                                 )}
-                            </div>
+                            </li>
                         );
                     })}
-                </div>
+                </ul>
             )}
         </div>
     );

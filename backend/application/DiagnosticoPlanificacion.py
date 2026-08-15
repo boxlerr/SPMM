@@ -1,18 +1,16 @@
 """Diagnóstico de lo que traba una planificación, contado para quien planifica.
 
 El planificador siempre devolvió un resultado: lo que no podía asignar salía como
-"sin asignar" o "sin máquina" y listo. El motivo quedaba en los logs del servidor,
-así que desde la pantalla era imposible saber si faltaba cargar un rango, si sobraba
-trabajo para una sola máquina o si el proceso directamente no lo podía hacer nadie.
-
-Acá se arma esa explicación: qué traba, a cuánto trabajo afecta y —lo que importa—
-qué hay que tocar para destrabarlo, con la pantalla y el dato concreto. Las
-sugerencias se calculan contra los datos reales (quién tiene qué rango, qué máquinas
-hay de esa familia), no son texto genérico.
-
-Las sugerencias se ofrecen como opciones, no como órdenes: el sistema puede decir
-"hay otras 3 fresadoras sin habilitar", pero si esas fresadoras pueden hacer ese
+"sin asignar" o "sin máquina" y el motivo quedaba en los logs del servidor. Acá se
+arma la explicación: qué traba, a cuánto trabajo afecta y qué tocar para
+destrabarlo. Las sugerencias se calculan contra los datos reales, no son texto
+genérico — pero se ofrecen como opciones: si una fresadora puede o no hacer un
 trabajo lo sabe el taller, no el planificador.
+
+Los textos son deliberadamente CORTOS. La primera versión explicaba cada aviso en
+un párrafo y Lucas lo dijo sin vueltas: marea tanto texto. El título dice el
+problema, el detalle una o dos frases, cada solución una línea. El que quiere el
+porqué largo lo tiene en los comentarios de este archivo, que para eso están.
 """
 from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
@@ -25,18 +23,18 @@ BLOQUEANTE = "bloqueante"
 ADVERTENCIA = "advertencia"
 
 
-def _jornadas(minutos: int) -> str:
-    """Minutos en lenguaje de taller. 'jornadas' comunica mejor que 4.320 minutos."""
-    j = minutos / MIN_LABORAL_DIA
-    if j < 1:
+def _corto(minutos: int) -> str:
+    """Tiempo en lenguaje de taller, lo más corto posible."""
+    if minutos < 60:
         return f"{minutos} min"
-    if j < 2:
-        return f"{minutos} min (poco más de una jornada)"
-    return f"{minutos} min (unas {j:.0f} jornadas)"
+    if minutos < MIN_LABORAL_DIA:
+        h, m = divmod(minutos, 60)
+        return f"{h}h {m:02d}m" if m else f"{h}h"
+    j = minutos / MIN_LABORAL_DIA
+    return f"{j:.0f} jornada{'s' if j >= 1.5 else ''}"
 
 
-def _listar(nombres, tope=4):
-    """Enumera en castellano, cortando si son muchos."""
+def _listar(nombres, tope=3):
     nombres = list(nombres)
     if not nombres:
         return ""
@@ -45,6 +43,11 @@ def _listar(nombres, tope=4):
     if len(nombres) == 1:
         return nombres[0]
     return ", ".join(nombres[:-1]) + " y " + nombres[-1]
+
+
+def _resumen(procesos: int, ots, minutos: int) -> str:
+    n_ots = len(ots)
+    return f"{procesos} proc · {n_ots} OT · {_corto(minutos)}"
 
 
 def construir_diagnosticos(
@@ -62,8 +65,6 @@ def construir_diagnosticos(
     operarios     : [(id_operario, id_rango)] — solo los disponibles
     maquinarias   : [(id, {rangos}, nombre, cod_maquina)]
     resultados    : lista de dicts que devolvió el solver
-    nombre_rango  : {id: nombre}
-    nombre_operario: {id: "NOMBRE APELLIDO"}
     """
     skills_manuales = skills_manuales or {}
     nativas_off = nativas_off or {}
@@ -101,30 +102,31 @@ def construir_diagnosticos(
 
 
 def _es_vacante(nombre: str) -> bool:
-    """Los puestos "VACANTE ... A CUBRIR" no son personas.
-
-    Importa acá porque tener el rango cargado los hace pasar por candidatos válidos:
-    para los tornos CNC, los únicos con OFICIAL ESPECIALIZADO y TÉCNICO son vacantes,
-    así que el hueco quedaba tapado —el sistema creía que había quien los usara—.
-    """
+    """Los puestos "VACANTE ... A CUBRIR" no son personas. Tener el rango cargado
+    los hacía pasar por candidatos válidos y tapaban el hueco real."""
     return (nombre or "").upper().startswith("VACANTE")
+
+
+def _primer_nombre(completo: str) -> str:
+    """'IVAN BALMACEDA' -> 'IVAN B.' — alcanza para reconocerlo y ocupa la mitad."""
+    partes = (completo or "").split()
+    if len(partes) < 2:
+        return completo or ""
+    return f"{partes[0]} {partes[1][0]}."
 
 
 def _procesos_que_nadie_puede_hacer(
     procesos, ops_por_rango, rangos_por_op, skills_manuales, nativas_off,
     maq_familia, maq_nombre, maq_rangos, nombre_rango, nombre_operario,
 ):
-    """El caso de los tornos CNC: el proceso pide rangos que no tiene ninguna persona.
-
-    Es el más caro de descubrir a ojo, porque el rango existe, la máquina existe y
-    la gente existe: lo que no existe es el cruce.
-    """
+    """El proceso pide rangos que no tiene ninguna persona disponible. Es el más
+    caro de descubrir a ojo: el rango existe, la máquina existe, la gente existe —
+    lo que no existe es el cruce."""
     por_proceso = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, usa_maq, familia, _sk) in procesos:
         if not rangos:
             continue
         # Los tercerizados salen sin nadie a propósito: los cuenta _trabajo_tercerizado.
-        # Marcarlos acá como bloqueo mandaría a cargar un rango que no hace falta.
         if _get_tipo_proceso(nombre or "") == "ADMIN":
             continue
         d = por_proceso.setdefault(proc_id, {
@@ -144,104 +146,67 @@ def _procesos_que_nadie_puede_hacer(
         elegibles |= set(skills_manuales.get(proc_id, set()))
         elegibles -= set(nativas_off.get(proc_id, set()))
 
-        # Los puestos vacantes no cuentan como gente. Si son los únicos candidatos, el
-        # proceso está igual de trabado que si no hubiera ninguno, pero se ve peor:
-        # el plan sale "asignado" a alguien que no existe.
         vacantes = {op for op in elegibles if _es_vacante(nombre_operario.get(op))}
         personas = elegibles - vacantes
         if personas:
             continue
 
-        solo_vacantes = bool(vacantes)
         pedidos = [nombre_rango.get(r, f"#{r}") for r in sorted(d["rangos"])]
 
-        # Máquinas de la familia que el proceso necesita: el arreglo tiene que
-        # servirle también a la máquina, no solo al proceso.
+        # El arreglo tiene que servirle también a la máquina, no solo al proceso.
         familia = d["familia"] or (familia_requerida_from_proceso(d["nombre"]) if d["usa_maquina"] else "")
         maquinas_familia = [m for m, f in maq_familia.items() if familia and f == familia]
         rangos_de_esas_maquinas = set()
         for m in maquinas_familia:
             rangos_de_esas_maquinas |= maq_rangos.get(m, set())
 
-        # Rangos que la gente SÍ tiene, ordenados por cuánta gente los tiene. Sin contar
-        # los vacantes: sugerir un rango que solo tienen ellos sería mover el problema.
+        # Rangos que la gente SÍ tiene (sin vacantes), por cuánta gente los tiene.
         candidatos = sorted(
-            (
-                (r, len([o for o in ops if not _es_vacante(nombre_operario.get(o))]))
-                for r, ops in ops_por_rango.items()
-            ),
+            ((r, len([o for o in ops if not _es_vacante(nombre_operario.get(o))]))
+             for r, ops in ops_por_rango.items()),
             key=lambda x: -x[1],
         )
         candidatos = [(r, n) for r, n in candidatos if n > 0]
-        # Preferimos el que además ya está habilitado en la máquina: ese arreglo es
-        # de un solo paso.
         directo = [(r, n) for r, n in candidatos if r in rangos_de_esas_maquinas]
 
         soluciones = []
         if directo:
             r, n = directo[0]
             soluciones.append({
-                "texto": (
-                    f"Agregá {nombre_rango.get(r, f'#{r}')} a los rangos del proceso: "
-                    f"lo tienen {n} operario(s) y ya está habilitado en "
-                    f"{_listar([maq_nombre[m] for m in maquinas_familia if r in maq_rangos.get(m, set())])}."
-                ),
+                "texto": f"Sumale {nombre_rango.get(r, f'#{r}')} al proceso: lo tienen {n} y ya está en la máquina.",
                 "donde": "Recursos › Procesos",
             })
         elif candidatos and maquinas_familia:
             r, n = candidatos[0]
             soluciones.append({
-                "texto": (
-                    f"Agregá {nombre_rango.get(r, f'#{r}')} —lo tienen {n} operario(s)— al proceso "
-                    f"Y TAMBIÉN a {_listar([maq_nombre[m] for m in maquinas_familia])}. "
-                    f"Si lo cargás solo en el proceso, la máquina lo sigue rechazando."
-                ),
-                "donde": "Recursos › Procesos y Recursos › Rangos",
+                "texto": f"Sumale {nombre_rango.get(r, f'#{r}')} al proceso y también a {_listar([maq_nombre[m] for m in maquinas_familia], 2)}.",
+                "donde": "Recursos › Procesos y Rangos",
             })
-
         soluciones.append({
-            "texto": (
-                f"O asignale {_listar(pedidos)} a quien ya hace este trabajo. "
-                f"Es el camino si el rango describe bien la tarea y lo que falta es reconocérselo a la persona."
-            ),
+            "texto": f"O dale {_listar(pedidos, 2)} a quien hace este trabajo.",
             "donde": "Recursos › Operarios",
         })
         soluciones.append({
-            "texto": (
-                "O cargale la habilidad a mano en el perfil del operario: suma solo a esa persona, "
-                "sin cambiarle el rango ni tocar lo que puede hacer el resto."
-            ),
-            "donde": "Recursos › Operarios › Habilidades",
+            "texto": "O cargale la skill en su ficha (habilita solo a esa persona).",
+            "donde": "Recursos › Operarios",
         })
-
-        if solo_vacantes:
-            detalle = (
-                f"El proceso lo habilita {_listar(pedidos)}. Nadie del taller tiene ese rango: "
-                f"los únicos que lo tienen son puestos vacantes "
-                f"({_listar(sorted(nombre_operario.get(v, f'#{v}') for v in vacantes))}), "
-                f"que son registros de prueba y no personas. El plan se lo va a asignar igual, "
-                f"y ese trabajo no lo va a hacer nadie."
-            )
-        else:
-            detalle = (
-                f"El proceso lo habilita {_listar(pedidos)}, y ningún operario disponible tiene "
-                f"ese rango. Los procesos quedan en el plan como «sin asignar»: nadie los va a hacer."
-            )
 
         salida.append({
             "id": f"nadie-puede-{proc_id}",
             "tipo": "proceso_sin_operarios",
             "severidad": BLOQUEANTE,
-            "titulo": (
-                f"«{d['nombre']}»: el único que tiene el rango es un puesto vacante"
-                if solo_vacantes else f"Nadie puede hacer «{d['nombre']}»"
+            "titulo": f"Nadie puede hacer «{d['nombre']}»",
+            "detalle": (
+                f"Pide {_listar(pedidos, 2)} y "
+                + ("solo lo tiene un puesto vacante, que no es una persona. "
+                   if vacantes else "ningún operario disponible lo tiene. ")
+                + "Va a salir «sin asignar»."
             ),
-            "detalle": detalle,
             "impacto": {
                 "procesos": d["procesos"],
                 "ots": sorted(d["ots"]),
                 "minutos": d["minutos"],
-                "resumen": f"{d['procesos']} proceso(s) en {len(d['ots'])} OT(s) — {_jornadas(d['minutos'])}",
+                "resumen": _resumen(d["procesos"], d["ots"], d["minutos"]),
             },
             "soluciones": soluciones,
         })
@@ -252,15 +217,13 @@ def _gente_sin_habilitacion_en_la_maquina(
     procesos, ops_por_rango, rangos_por_op, skills_manuales, nativas_off,
     maq_familia, maq_nombre, maq_rangos, nombre_rango, nombre_operario,
 ):
-    """Hay quien sabe hacerlo, pero su rango no lo habilita en la máquina.
+    """Hay quien sabe hacer el proceso, pero su rango no lo habilita en la máquina.
 
-    Es el caso de los tornos CNC. El proceso lo pueden hacer Iván y Pablo —tienen la
-    habilidad cargada a mano—, pero las máquinas TORNO CNC piden OFICIAL ESPECIALIZADO
-    o TÉCNICO y ellos son OFICIAL y OFICIAL CNC. Como no hay par operario-máquina
-    compatible, el proceso se planifica SIN máquina, y una máquina sin asignar no se
-    reserva: dos OTs pueden terminar en el mismo torno a la misma hora.
-
-    Se ve distinto de "no lo puede hacer nadie" y se arregla distinto, por eso va aparte.
+    Se agrupa por (máquinas, personas): «torno cnc» y «programacion torno cnc»
+    comparten los tres tornos y la misma gente, y salían como dos tarjetas casi
+    idénticas — Lucas lo marcó: "estaría ver bien en conjunto eso". El problema es
+    UNO (el rango de esas máquinas no coincide con el de quienes las manejan); los
+    procesos afectados son el detalle, no un aviso cada uno.
     """
     por_proceso = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, usa_maq, familia, _sk) in procesos:
@@ -274,7 +237,7 @@ def _gente_sin_habilitacion_en_la_maquina(
         d["minutos"] += dur
         d["procesos"] += 1
 
-    salida = []
+    grupos = {}
     for proc_id, d in por_proceso.items():
         elegibles = set()
         for r in d["rangos"]:
@@ -292,84 +255,70 @@ def _gente_sin_habilitacion_en_la_maquina(
         if not dominio:
             continue
 
-        compatible_por_rango = any(
-            rangos_por_op.get(op, set()) & maq_rangos.get(m, set())
-            for op in personas for m in dominio
-        )
-        if compatible_por_rango:
+        if any(rangos_por_op.get(op, set()) & maq_rangos.get(m, set())
+               for op in personas for m in dominio):
+            continue  # hay al menos un par operario-máquina válido: no hay aviso
+
+        # Con habilidad manual el plan sale bien y CON máquina: las skills están
+        # justamente para habilitar cosas puntuales por persona, además del rango.
+        # Acá hubo un aviso ("funciona por habilidad manual, no por rango") y se
+        # SACÓ a pedido de Julián: si el mecanismo pensado para eso está funcionando,
+        # no es un problema para reportar — era ruido.
+        if any(op in set(skills_manuales.get(proc_id, ())) for op in personas):
             continue
 
-        # Si llega hasta acá pero alguien tiene la habilidad cargada a mano, el plan
-        # SÍ sale con máquina: la manual habilita también la máquina. No es un
-        # bloqueo, pero tampoco está bien: el rango de la máquina sigue sin coincidir
-        # con el de quienes la manejan, así que todo depende de que esa habilidad
-        # manual siga cargada. Vale avisarlo, no callarlo.
-        con_manual = {op for op in personas if op in set(skills_manuales.get(proc_id, ()))}
+        clave = (frozenset(dominio), frozenset(personas))
+        g = grupos.setdefault(clave, {
+            "procesos_nombres": [], "ots": set(), "minutos": 0, "cuantos": 0,
+            "personas": personas, "dominio": sorted(dominio),
+        })
+        g["procesos_nombres"].append(d["nombre"])
+        g["ots"] |= d["ots"]
+        g["minutos"] += d["minutos"]
+        g["cuantos"] += d["procesos"]
 
-        quienes = sorted(nombre_operario.get(op, f"#{op}") for op in personas)
+    salida = []
+    for (_dom, _pers), g in grupos.items():
+        personas, dominio = g["personas"], g["dominio"]
+        nombres_maq = [maq_nombre[m] for m in dominio]
+        quienes = sorted(_primer_nombre(nombre_operario.get(op, f"#{op}")) for op in personas)
+
         rangos_gente_ids = {r for op in personas for r in rangos_por_op.get(op, set())}
-        rangos_gente = sorted(nombre_rango.get(r, f"#{r}") for r in rangos_gente_ids)
-
-        # Para sugerir, el rango MÁS ESPECÍFICO de los que tienen: el que menos gente
-        # tiene. Proponer OFICIAL para un torno CNC habilitaría a los 9 oficiales;
-        # OFICIAL CNC habilita exactamente a los 4 que lo manejan.
+        rangos_maquina = sorted({
+            nombre_rango.get(r, f"#{r}") for m in dominio for r in maq_rangos.get(m, set())
+        })
+        # El rango MÁS ACOTADO de los que tiene la gente: proponer OFICIAL para un
+        # torno CNC habilitaría a los 9 oficiales; OFICIAL CNC, solo a quienes lo manejan.
         rango_sugerido = min(
             rangos_gente_ids,
             key=lambda r: (len([o for o in ops_por_rango.get(r, set())
                                 if not _es_vacante(nombre_operario.get(o))]), r),
         )
         nombre_sugerido = nombre_rango.get(rango_sugerido, f"#{rango_sugerido}")
-        cuantos_sugerido = len([o for o in ops_por_rango.get(rango_sugerido, set())
-                                if not _es_vacante(nombre_operario.get(o))])
-        rangos_maquina = sorted({
-            nombre_rango.get(r, f"#{r}") for m in dominio for r in maq_rangos.get(m, set())
-        })
-        nombres_maq = [maq_nombre[m] for m in sorted(dominio)]
 
-        if con_manual:
-            quienes_manual = sorted(nombre_operario.get(op, f"#{op}") for op in con_manual)
-            titulo = f"«{d['nombre']}» funciona por habilidad manual, no por rango"
-            detalle = (
-                f"{_listar(quienes_manual)} tiene(n) este proceso cargado a mano, así que el plan "
-                f"sale bien y con máquina. Pero {_listar(nombres_maq)} pide(n) {_listar(rangos_maquina)} "
-                f"y ellos son {_listar(rangos_gente)}: si esa habilidad manual se borra, o si mañana "
-                f"lo tiene que hacer otro, el trabajo vuelve a salir sin máquina. Conviene que el "
-                f"rango diga lo que realmente pasa en el taller."
-            )
-        else:
-            titulo = f"«{d['nombre']}» se planifica sin máquina"
-            detalle = (
-                f"{_listar(quienes)} puede(n) hacerlo, pero {_listar(nombres_maq)} pide(n) "
-                f"{_listar(rangos_maquina)} y ellos son {_listar(rangos_gente)}. "
-                f"Sin un par operario-máquina compatible el proceso sale sin máquina asignada, "
-                f"y una máquina que no se asigna tampoco se reserva: dos OTs pueden quedar "
-                f"en la misma a la misma hora."
-            )
+        procesos_txt = _listar([f"«{p}»" for p in sorted(g["procesos_nombres"])], 2)
+        maqs_txt = _listar(nombres_maq, 3)
 
         salida.append({
-            "id": f"sin-maquina-compatible-{proc_id}",
+            "id": "maquina-rango-" + "-".join(str(m) for m in dominio),
             "tipo": "sin_maquina_compatible",
-            "severidad": ADVERTENCIA if con_manual else BLOQUEANTE,
-            "titulo": titulo,
-            "detalle": detalle,
+            "severidad": BLOQUEANTE,
+            "titulo": f"{procesos_txt} sale sin máquina",
+            "detalle": (
+                f"{_listar(quienes, 2)} pueden hacerlo, pero {maqs_txt} pide(n) "
+                f"{_listar(rangos_maquina, 2)}. Sin máquina asignada, la máquina no se reserva."
+            ),
             "impacto": {
-                "procesos": d["procesos"],
-                "ots": sorted(d["ots"]),
-                "minutos": d["minutos"],
-                "resumen": f"{d['procesos']} proceso(s) en {len(d['ots'])} OT(s) — {_jornadas(d['minutos'])}",
+                "procesos": g["cuantos"],
+                "ots": sorted(g["ots"]),
+                "minutos": g["minutos"],
+                "resumen": _resumen(g["cuantos"], g["ots"], g["minutos"]),
             },
             "soluciones": [{
-                "texto": (
-                    f"Agregá {nombre_sugerido} a {_listar(nombres_maq)}: es el rango de los "
-                    f"{cuantos_sugerido} que efectivamente la(s) manejan, y es el arreglo de un solo paso. "
-                    f"Es el más acotado de los que tienen, así que no le abre la máquina a todo el taller."
-                ),
-                "donde": "Recursos › Rangos",
+                "texto": f"Sumá {nombre_sugerido} a {maqs_txt}: es el rango de quienes las manejan.",
+                "donde": "Recursos › Maquinarias",
             }, {
-                "texto": (
-                    f"O asignale {_listar(rangos_maquina)} a {_listar(quienes)}, si ese rango "
-                    f"describe bien lo que hacen."
-                ),
+                "texto": f"O dales {_listar(rangos_maquina, 2)} a {_listar(quienes, 2)}.",
                 "donde": "Recursos › Operarios",
             }],
         })
@@ -377,17 +326,13 @@ def _gente_sin_habilitacion_en_la_maquina(
 
 
 def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados):
-    """El caso de la fresadora CNC: hay una sola máquina para mucho más trabajo.
+    """Más trabajo del que entra en las máquinas habilitadas dentro del período.
 
-    Antes esto no se notaba porque NINGÚN proceso recibía máquina y por lo tanto no
-    había competencia por ninguna. Ahora que se reserva de verdad, el trabajo que no
-    entra sale sin asignar y conviene decir por qué.
+    Se agrupa por el CONJUNTO de máquinas que el proceso puede usar, no por familia:
+    "fresadora cnc" (OFICIAL CNC) solo puede ir a la FRESADORA CNC; "fresadora f6"
+    (OFICIAL) puede ir a otras tres. Por familia parecían cuatro máquinas para todo,
+    cuando el cuello real es que hay UNA para la parte CNC.
     """
-    # Se agrupa por el CONJUNTO de máquinas que el proceso puede usar, no por familia.
-    # Agrupar por familia mezclaba peras con manzanas: "fresadora cnc" (rango OFICIAL
-    # CNC) solo puede ir a la FRESADORA CNC, mientras que "fresadora f6" (rango OFICIAL)
-    # puede ir a otras tres. Sumadas parecían cuatro máquinas para todo el trabajo, y en
-    # realidad el cuello es que hay UNA sola para la parte CNC.
     grupos = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, usa_maq, familia, _sk) in procesos:
         if not usa_maq or not familia:
@@ -398,7 +343,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
         rangos = set(rangos or ())
         habilitadas = [m for m in de_la_familia if not rangos or (rangos & maq_rangos.get(m, set()))]
         if not habilitadas:
-            continue  # ese caso lo cubre el diagnóstico de máquinas sin rango
+            continue  # lo cubre el diagnóstico de máquinas sin rango
 
         clave = frozenset(habilitadas)
         g = grupos.setdefault(clave, {
@@ -417,43 +362,30 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
     for clave, d in grupos.items():
         habilitadas = sorted(clave)
         sin_habilitar = [m for m in sorted(d["de_la_familia"]) if m not in clave]
-        familia = d["familia"]
 
         jornadas_por_maquina = d["minutos"] / max(1, len(habilitadas)) / MIN_LABORAL_DIA
         if jornadas_por_maquina < 3:
-            continue  # entra sin drama, no hace falta avisar nada
+            continue  # entra sin drama
 
+        nombres_hab = [maq_nombre[m] for m in habilitadas]
         soluciones = []
         if sin_habilitar:
-            faltantes = _listar([maq_nombre[m] for m in sin_habilitar])
-            rangos_txt = _listar([nombre_rango.get(r, f"#{r}") for r in sorted(d["rangos"])])
+            rangos_txt = _listar([nombre_rango.get(r, f"#{r}") for r in sorted(d["rangos"])], 2)
             soluciones.append({
-                "texto": (
-                    f"Hay {len(sin_habilitar)} máquina(s) más de la misma familia sin habilitar para este "
-                    f"trabajo: {faltantes}. Si alguna puede hacerlo, cargale {rangos_txt} y el trabajo se reparte."
-                ),
-                "donde": "Recursos › Rangos",
+                "texto": f"Habilitá {_listar([maq_nombre[m] for m in sin_habilitar], 2)} (cargale {rangos_txt}) y el trabajo se reparte.",
+                "donde": "Recursos › Maquinarias",
             })
         soluciones.append({
-            "texto": (
-                "Planificá menos OTs juntas o ampliá el rango de fechas: el trabajo existe igual, "
-                "lo que no alcanza es la máquina dentro del período elegido."
-            ),
-            "donde": "En esta misma pantalla, al elegir las OTs",
-        })
-        soluciones.append({
-            "texto": "O sacá del lote las OTs que puedan esperar, y planificalas en la próxima tanda.",
-            "donde": "En esta misma pantalla",
+            "texto": "O planificá menos OTs juntas, o ampliá el rango de fechas.",
+            "donde": "Al elegir las OTs",
         })
 
-        # Si además quedaron OTs de esta familia sin máquina en el resultado, el cuello
-        # no es teórico: ya está mordiendo.
+        # Si además quedaron OTs de este grupo sin máquina, el cuello ya está mordiendo.
         afecta_ots = sorted(sin_maquina_por_ot & d["ots"])
-        nombres_hab = [maq_nombre[m] for m in habilitadas]
         titulo = (
-            f"Una sola máquina ({nombres_hab[0]}) para {_jornadas(d['minutos'])} de trabajo"
+            f"{nombres_hab[0]}: {_corto(d['minutos'])} de trabajo para 1 sola máquina"
             if len(habilitadas) == 1
-            else f"{len(habilitadas)} máquinas para {_jornadas(d['minutos'])} de trabajo"
+            else f"{_corto(d['minutos'])} de trabajo para {len(habilitadas)} máquinas"
         )
         salida.append({
             "id": "cuello-" + "-".join(str(m) for m in habilitadas),
@@ -461,17 +393,14 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
             "severidad": BLOQUEANTE if afecta_ots else ADVERTENCIA,
             "titulo": titulo,
             "detalle": (
-                f"{_listar(sorted(d['procesos']))} solo puede(n) ir a {_listar(nombres_hab)}. "
-                f"A una jornada por día son unas {jornadas_por_maquina:.0f} jornadas por máquina, "
-                f"así que no entra todo junto y lo que sobra queda sin máquina asignada."
+                f"{_listar(sorted(d['procesos']), 3)} solo puede(n) ir a {_listar(nombres_hab, 3)}. "
+                f"Lo que no entra en el período queda sin máquina."
             ),
             "impacto": {
                 "procesos": len(d["procesos"]),
                 "ots": sorted(d["ots"]),
                 "minutos": d["minutos"],
-                "resumen": (
-                    f"{_listar(sorted(d['procesos']))} — {len(d['ots'])} OT(s), {_jornadas(d['minutos'])}"
-                ),
+                "resumen": _resumen(len(d["procesos"]), d["ots"], d["minutos"]),
             },
             "soluciones": soluciones,
         })
@@ -494,32 +423,24 @@ def _procesos_sin_rango(procesos):
         "id": f"sin-rango-{proc_id}",
         "tipo": "proceso_sin_rango",
         "severidad": ADVERTENCIA,
-        "titulo": f"«{d['nombre']}» no tiene rango cargado, así que se lo puede llevar cualquiera",
-        "detalle": (
-            "Sin rango, el planificador no lo restringe a nadie: puede caer en alguien que no sabe hacerlo. "
-            "No se nota en el resultado, porque el plan sale igual."
-        ),
+        "titulo": f"«{d['nombre']}» no tiene rango",
+        "detalle": "Se lo puede llevar cualquiera, sepa hacerlo o no. El plan sale igual.",
         "impacto": {
             "procesos": d["procesos"],
             "ots": sorted(d["ots"]),
             "minutos": d["minutos"],
-            "resumen": f"{d['procesos']} proceso(s) en {len(d['ots'])} OT(s) — {_jornadas(d['minutos'])}",
+            "resumen": _resumen(d["procesos"], d["ots"], d["minutos"]),
         },
         "soluciones": [{
-            "texto": f"Cargale a «{d['nombre']}» los rangos que lo habilitan.",
+            "texto": "Cargale sus rangos.",
             "donde": "Recursos › Procesos",
         }],
     } for proc_id, d in sin_rango.items()]
 
 
 def _trabajo_tercerizado(procesos):
-    """Trabajo que hace un tercero, no el taller.
-
-    Se planifica igual: ocupa lugar en la secuencia de la OT y hay que esperarlo para
-    seguir. Pero no lo hace nadie de adentro, así que sale "sin asignar" y sin máquina.
-    Eso no es un hueco a tapar —es lo que corresponde— y conviene decirlo para que no
-    se lo confunda con un problema de rangos.
-    """
+    """Trabajo de un tercero: va sin operario ni máquina A PROPÓSITO. Se avisa para
+    que no se confunda con un hueco de rangos."""
     tercerizados = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, _rangos, nombre, _um, _fam, _sk) in procesos:
         if _get_tipo_proceso(nombre or "") != "ADMIN":
@@ -541,37 +462,27 @@ def _trabajo_tercerizado(procesos):
         "id": "trabajo-tercerizado",
         "tipo": "trabajo_tercerizado",
         "severidad": ADVERTENCIA,
-        "titulo": f"{cuantos} proceso(s) del plan son trabajo tercerizado",
+        "titulo": f"{cuantos} proceso{'s' if cuantos != 1 else ''} del plan son tercerizados",
         "detalle": (
-            f"{_listar(sorted(d['nombre'] for d in tercerizados.values()))}. "
-            "Quedan en el plan porque ocupan lugar en la secuencia de la OT y hay que "
-            "esperarlos para seguir, pero no los hace nadie del taller: por eso salen sin "
-            "operario y sin máquina. No es un rango que falte cargar."
+            f"{_listar(sorted(d['nombre'] for d in tercerizados.values()), 3)}. "
+            "Van sin operario ni máquina a propósito: los hace un tercero. Nada que corregir."
         ),
         "impacto": {
             "procesos": cuantos,
             "ots": ots,
             "minutos": total,
-            "resumen": f"{cuantos} proceso(s) en {len(ots)} OT(s) — {_jornadas(total)}",
+            "resumen": _resumen(cuantos, ots, total),
         },
         "soluciones": [{
-            "texto": (
-                "Si querés que además figure a nombre de alguien —el que lo gestiona o el "
-                "proveedor— asignale el rango TERCERIZADO a esa persona."
-            ),
+            "texto": "Si querés que figuren a nombre de quien los gestiona, dale el rango TERCERIZADO.",
             "donde": "Recursos › Operarios",
         }],
     }]
 
 
 def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
-    """Trabajo que el plan le carga a un puesto que no tiene a nadie.
-
-    Los "VACANTE ... A CUBRIR" son 12 registros de prueba (sector PRUEBAS, uno por
-    rango, sin ninguna habilidad cargada). Figuran como disponibles, así que el
-    planificador los toma como personas y les asigna trabajo que después nadie hace.
-    Se detectan por el nombre porque es la única marca que tienen.
-    """
+    """Trabajo que el plan le carga a un puesto sin persona. Los "VACANTE" figuran
+    como disponibles y el planificador los toma como gente."""
     por_op = {}
     for r in resultados:
         op = r.get("id_operario")
@@ -591,7 +502,7 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
 
     total = sum(d["minutos"] for d in por_op.values())
     ots = sorted({o for d in por_op.values() for o in d["ots"]})
-    detalle = "; ".join(f"{d['nombre']}: {_jornadas(d['minutos'])}" for d in por_op.values())
+    cuantos = sum(d["procesos"] for d in por_op.values())
 
     return [{
         "id": "trabajo-en-vacantes",
@@ -599,27 +510,17 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
         "severidad": ADVERTENCIA,
         "titulo": "Hay trabajo asignado a puestos vacantes",
         "detalle": (
-            f"El plan le carga trabajo a puestos que no tienen a nadie ({detalle}). "
-            "Son registros de prueba, uno por rango y sin habilidades cargadas, pero figuran como "
-            "disponibles y por eso el planificador los toma como si fueran personas."
+            f"{_listar(sorted(d['nombre'] for d in por_op.values()), 2)} no son personas: "
+            "ese trabajo no lo va a hacer nadie."
         ),
         "impacto": {
-            "procesos": sum(d["procesos"] for d in por_op.values()),
+            "procesos": cuantos,
             "ots": ots,
             "minutos": total,
-            "resumen": f"{sum(d['procesos'] for d in por_op.values())} proceso(s) — {_jornadas(total)}",
+            "resumen": _resumen(cuantos, ots, total),
         },
         "soluciones": [{
-            "texto": (
-                "Marcalos como NO disponibles y salen del plan. No conviene borrarlos: "
-                "hay planificaciones viejas que los referencian."
-            ),
-            "donde": "Recursos › Operarios",
-        }, {
-            "texto": (
-                "Si el puesto hace falta de verdad, el aviso te está diciendo qué rango "
-                "necesitás cubrir para que ese trabajo tenga quién lo haga."
-            ),
+            "texto": "Marcalos como no disponibles y salen del plan.",
             "donde": "Recursos › Operarios",
         }],
     }]

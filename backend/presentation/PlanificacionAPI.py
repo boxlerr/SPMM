@@ -38,6 +38,15 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     forzar_ordenes_ids = body.forzar_ordenes_ids if body else None
     procesos_por_orden = body.procesos_por_orden if body else None
 
+    # Cada intento queda auditado, salga bien o mal. Antes un intento fallado no
+    # dejaba rastro en la app: el 15/08 uno murió por memoria y la única evidencia
+    # estaba en los logs de Cloud Run.
+    from backend.infrastructure.AuditoriaRepository import AuditoriaRepository
+    import time as _time
+    auditoria = AuditoriaRepository(db)
+    tipo = "preview" if preview_mode else ("plan_manual" if manual_plan else "confirmar")
+    t0 = _time.monotonic()
+
     try:
         resultados = await planificar(
             repo_orden,
@@ -53,13 +62,39 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             forzar_ordenes_ids=forzar_ordenes_ids,
             procesos_por_orden=procesos_por_orden,
         )
+        await auditoria.registrar_intento(
+            tipo, ordenes_ids, "ok",
+            int((_time.monotonic() - t0) * 1000), salida=resultados,
+        )
         return resultados
     except PlanificacionException as e:
         logger.error(f"Error de Planificación: {str(e)}")
+        await auditoria.registrar_intento(
+            tipo, ordenes_ids, "sin_solucion",
+            int((_time.monotonic() - t0) * 1000), error=str(e),
+        )
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error inesperado en planificar_endpoint: {str(e)}")
+        await auditoria.registrar_intento(
+            tipo, ordenes_ids, "error",
+            int((_time.monotonic() - t0) * 1000), error=f"{type(e).__name__}: {e}",
+        )
         raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al procesar la planificación. Por favor, intente con menos órdenes.")
+
+
+@router.get("/auditoria/planificacion")
+async def auditoria_planificacion(db = Depends(get_db)):
+    """Historial de intentos de planificación y de borrados, para la pantalla de
+    Auditoría. Lo que un intento muerto por memoria no puede registrar por sí mismo
+    (el proceso muere antes) queda igualmente visible: el intento aparece por el
+    lado del que sí se guardó, y el hueco entre horas cuenta la historia."""
+    from backend.infrastructure.AuditoriaRepository import AuditoriaRepository
+    repo = AuditoriaRepository(db)
+    return {
+        "intentos": await repo.listar_intentos(),
+        "borrados": await repo.listar_borrados(),
+    }
     
     
 @router.post("/planificar/pendientes") 
@@ -76,8 +111,13 @@ async def planificar_pendientes_endpoint(
     fecha_desde = body.fecha_desde if body else None
     fecha_hasta = body.fecha_hasta if body else None
 
+    from backend.infrastructure.AuditoriaRepository import AuditoriaRepository
+    import time as _time
+    auditoria = AuditoriaRepository(db)
+    t0 = _time.monotonic()
+
     try:
-        return await planificar_pendientes(
+        resultados = await planificar_pendientes(
             repo_orden,
             repo_operario,
             repo_maquinaria,
@@ -87,11 +127,25 @@ async def planificar_pendientes_endpoint(
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,
         )
+        await auditoria.registrar_intento(
+            "re_planificar", ordenes_ids, "ok",
+            int((_time.monotonic() - t0) * 1000),
+            salida=resultados if isinstance(resultados, dict) else None,
+        )
+        return resultados
     except PlanificacionException as e:
         logger.error(f"Error de Planificación (pendientes): {str(e)}")
+        await auditoria.registrar_intento(
+            "re_planificar", ordenes_ids, "sin_solucion",
+            int((_time.monotonic() - t0) * 1000), error=str(e),
+        )
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error inesperado en planificar_pendientes_endpoint: {str(e)}")
+        await auditoria.registrar_intento(
+            "re_planificar", ordenes_ids, "error",
+            int((_time.monotonic() - t0) * 1000), error=f"{type(e).__name__}: {e}",
+        )
         raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al procesar la planificación. Por favor, intente con menos órdenes.")
 
 @router.get("/planificacion")

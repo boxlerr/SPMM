@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "auditoria",
+        fecha: "2026-08-15",
+        tipo: "nuevo",
+        seccion: "Auditoría",
+        titulo: "Nueva sección Auditoría: queda registro de cada planificación",
+        detalle:
+            "En el menú de la izquierda hay una sección nueva. Cada vez que alguien calcula una vista previa o confirma un plan queda registrado: qué OTs, cuánto tardó, cuántos procesos salieron y — si falló — el error exacto. También se ven los borrados. Antes un intento que fallaba no dejaba rastro y no había forma de saber qué pasó.",
+        href: "/auditoria",
+    },
+    {
+        id: "planificador-mas-rapido-y-avisos-cortos",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El cálculo ya no se muere y los avisos son cortos",
+        detalle:
+            "Hoy un cálculo se murió a mitad de camino porque el servidor se quedó sin memoria, y otro tardó un minuto entero. Se le dio más memoria y se ajustó el cálculo a la máquina real. Además: los avisos de la vista previa ahora son una línea por problema (tocás para ver el detalle y cómo se arregla), los avisos repetidos se unieron en uno, y si un cálculo falla te lo dice con el motivo en vez de quedarse en «Calculando planificación...» para siempre. Los toasts de «sin stock» y «sin procesos» ahora nombran la OT por el número que ves en la lista.",
+        href: "/operaciones",
+    },
+    {
         id: "rangos-desde-maquina-y-proceso",
         fecha: "2026-08-15",
         tipo: "nuevo",
