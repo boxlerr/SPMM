@@ -2211,6 +2211,15 @@ async def planificar(
             skills_manuales=skills_manuales,
             nativas_off=nativas_off,
         )
+
+        # Las OTs de los diagnósticos salen con su número VISIBLE (id_otvieja), que
+        # es el único que muestra la app en las listas. Adentro del solver viven los
+        # ids internos, y dejarlos pasar a pantalla ya confundió una vez: el aviso
+        # decía "OTs afectadas: 842, 7492" y buscar esos números en la lista no
+        # encontraba nada.
+        nro_visible = {o.id: (o.id_otvieja or o.id) for o in ordenes}
+        for d in diagnosticos:
+            d["impacto"]["ots"] = [nro_visible.get(i, i) for i in d["impacto"]["ots"]]
     except Exception as e:
         # Un diagnóstico que falla no puede tumbar una planificación que salió bien.
         logger.error(f"Service - No se pudieron construir los diagnósticos: {e}")
