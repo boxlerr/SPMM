@@ -20,6 +20,7 @@ import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
 import { toast } from "sonner";
 import { API_URL } from "@/config";
+import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -86,6 +87,8 @@ interface PlanningPreviewModalProps {
     onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[], procesosPorOrden?: Record<number, number[]>) => void;
     /** True mientras se está recalculando (para mostrar spinner). */
     isCalculating?: boolean;
+    /** Qué traba este plan y cómo se destraba (lo calcula el backend). */
+    diagnosticos?: Diagnostico[];
 }
 
 export function PlanningPreviewModal({
@@ -104,6 +107,7 @@ export function PlanningPreviewModal({
     planningRange = {},
     onRecalculate,
     isCalculating = false,
+    diagnosticos = [],
 }: PlanningPreviewModalProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -966,6 +970,19 @@ export function PlanningPreviewModal({
                             por el sidebar de Carga de Operarios. Con overflow-auto el navegador
                             maneja ambos ejes y muestra scrollbar cuando hace falta. */}
                         <div className="flex-1 overflow-auto">
+                            {/* Qué traba el plan y cómo se destraba. Va primero de todo: es lo que
+                                puede cambiar la decisión de guardar o de ir a arreglar un dato antes
+                                de planificar.
+
+                                Queda AFUERA del contenedor de la tabla a propósito: ese fuerza
+                                min-w 1000px para las columnas, y adentro los párrafos se estiraban
+                                hasta ahí y quedaban cortados por el panel de Carga de Operarios.
+                                `sticky left-0` lo mantiene a la vista cuando la tabla se scrollea
+                                en horizontal. */}
+                            <div className="sticky left-0 w-full">
+                                <DiagnosticosPlan diagnosticos={diagnosticos} />
+                            </div>
+
                             <div className="min-w-[1000px] p-0 pr-2" style={{ zoom: zoom / 100 }}>
                                 {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
                                     Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}

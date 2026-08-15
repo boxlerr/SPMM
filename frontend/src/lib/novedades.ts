@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "por-que-no-entra",
+        fecha: "2026-08-15",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "La vista previa te dice qué traba el plan y cómo se arregla",
+        detalle:
+            "Arriba de la vista previa aparece un panel con lo que está frenando la planificación: un proceso que no puede hacer nadie porque nadie tiene el rango, una máquina sola para más trabajo del que entra, o trabajo asignado a un puesto vacante. Cada aviso dice a cuántas OTs y cuántas horas afecta, y abajo las formas de resolverlo con la pantalla donde se hace. Antes esto salía como “sin asignar” o “sin máquina” y no había forma de saber por qué.",
+        href: "/operaciones",
+    },
+    {
         id: "planificacion-vuelve-a-guardar",
         fecha: "2026-08-15",
         tipo: "arreglo",

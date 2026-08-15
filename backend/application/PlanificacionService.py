@@ -11,6 +11,7 @@ from backend.infrastructure.PlanificacionRepository import PlanificacionReposito
 from backend.infrastructure.ConfigRepository import ConfigRepository
 from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProcesoSkillRepository
 from backend.infrastructure.PlanoRepository import PlanoRepository
+from backend.infrastructure.RangoRepository import RangoRepository
 from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -1976,15 +1977,37 @@ async def planificar(
 
     planificados, excedentes = _split_resultados(resultados)
 
+    # Diagnóstico de lo que traba el plan. El import va acá adentro porque el módulo
+    # de diagnóstico usa helpers de este archivo y a nivel de módulo sería circular.
+    from backend.application.DiagnosticoPlanificacion import construir_diagnosticos
+
+    try:
+        rangos_all = await RangoRepository(db).find_all()
+        operarios_all = await repo_operario.find_all()
+        diagnosticos = construir_diagnosticos(
+            procesos_para_solver,
+            operarios,
+            maquinarias,
+            resultados,
+            nombre_rango={r.id: r.nombre for r in rangos_all},
+            nombre_operario={o.id: f"{o.nombre} {o.apellido}".strip() for o in operarios_all},
+            skills_manuales=skills_manuales,
+            nativas_off=nativas_off,
+        )
+    except Exception as e:
+        # Un diagnóstico que falla no puede tumbar una planificación que salió bien.
+        logger.error(f"Service - No se pudieron construir los diagnósticos: {e}")
+        diagnosticos = []
+
     if preview:
-        return {"planificados": planificados, "excedentes": excedentes}
+        return {"planificados": planificados, "excedentes": excedentes, "diagnosticos": diagnosticos}
 
     # Marcar como forzado_fuera_rango los procesos cuyas órdenes el usuario decidió forzar
     for r in planificados:
         r["forzado_fuera_rango"] = (r["orden_id"] in forzar_set)
 
     saved = await repo_planificacion.insertar_planificacion_lote(planificados)
-    return {"planificados": saved, "excedentes": excedentes}
+    return {"planificados": saved, "excedentes": excedentes, "diagnosticos": diagnosticos}
 
 async def planificar_pendientes(
         repo_orden,
