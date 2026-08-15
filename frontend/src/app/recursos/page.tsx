@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { PlanificacionItem } from "@/lib/types";
 import { API_URL } from "@/config"
 import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList";
+import { useCoberturaRangos } from "@/hooks/useCoberturaRangos";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -33,6 +34,11 @@ const getAuthHeaders = (): HeadersInit => {
 export default function RecursosPage() {
   const { addNotification } = useNotifications();
   const { showToast } = useToast();
+
+  // Qué rangos tiene cada máquina y qué máquinas habilita cada rango. Los huecos
+  // (máquina sin rango, rango sin máquinas o sin gente) no se veían en ninguna
+  // pantalla y salían a la luz recién cuando el plan quedaba raro.
+  const { listo: coberturaListo, rangosPorMaquina, porRango } = useCoberturaRangos();
 
   const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos" | "rangos" | "sectores">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
@@ -336,6 +342,26 @@ export default function RecursosPage() {
               <h2 className="text-lg font-semibold">Máquinas y Equipos</h2>
             </div>
             <p className="text-sm text-muted-foreground mt-1">Gestión de maquinaria industrial</p>
+
+            {/* Aviso de las que no puede usar nadie. Va acá arriba porque es el tipo de
+                hueco que no se nota mirando la lista: la máquina existe, está bien
+                cargada, y aun así el planificador nunca se la asigna a nadie. */}
+            {(() => {
+              if (!coberturaListo) return null;
+              const sinRango = maquinas.filter((m) => (rangosPorMaquina.get(m.id)?.length ?? 0) === 0);
+              if (sinRango.length === 0) return null;
+              return (
+                <Alert className="mt-3 border-amber-200 bg-amber-50">
+                  <AlertDescription className="text-amber-900 text-sm">
+                    <span>
+                      Hay <strong>{sinRango.length} de {maquinas.length} máquinas sin rango cargado</strong>: el
+                      planificador no se las asigna a nadie y el trabajo sale “sin máquina”. Son{" "}
+                      {sinRango.map((m) => m.nombre).join(", ")}. El rango se carga desde la pestaña Rangos.
+                    </span>
+                  </AlertDescription>
+                </Alert>
+              );
+            })()}
           </div>
 
           {api.loading && (
@@ -360,6 +386,12 @@ export default function RecursosPage() {
                     <tr>
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Nombre</th>
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Código</th>
+                      <th
+                        className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground"
+                        title="Quién puede usar la máquina. Sin rango, el planificador no se la asigna a nadie."
+                      >
+                        Rangos
+                      </th>
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Limitación</th>
                       <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">Acciones</th>
                     </tr>
@@ -369,6 +401,30 @@ export default function RecursosPage() {
                       <tr key={maquina.id} className="hover:bg-muted/50 transition-colors">
                         <td className="px-4 py-2 text-sm font-medium">{maquina.nombre}</td>
                         <td className="px-4 py-2 text-sm">{maquina.cod_maquina || "-"}</td>
+                        {/* Rangos que habilitan la máquina. Sin ninguno, el planificador
+                            no puede asignarla: queda fuera del dominio de todo proceso
+                            que exija rangos y el trabajo sale "sin máquina". */}
+                        <td className="px-4 py-2 text-sm">
+                          {!coberturaListo ? (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          ) : (rangosPorMaquina.get(maquina.id)?.length ?? 0) > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {rangosPorMaquina.get(maquina.id)!.map((r) => (
+                                <Badge key={r.id} variant="outline" className="text-xs font-normal">
+                                  {r.nombre}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold"
+                              title="Sin rango cargado: el planificador no se la asigna a nadie. Cargale el rango desde la pestaña Rangos."
+                            >
+                              Sin rango
+                            </Badge>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-sm">
                           {maquina.limitacion ? (
                             maquina.limitacion
@@ -411,6 +467,24 @@ export default function RecursosPage() {
                           <span className="text-muted-foreground">Código:</span>
                           <span className="ml-2 font-medium">{maquina.cod_maquina || "-"}</span>
                         </div>
+                      </div>
+                      <div className="mt-2 text-sm">
+                        <span className="text-muted-foreground">Rangos:</span>
+                        {!coberturaListo ? (
+                          <span className="ml-2 text-muted-foreground text-xs">—</span>
+                        ) : (rangosPorMaquina.get(maquina.id)?.length ?? 0) > 0 ? (
+                          <span className="ml-2 inline-flex flex-wrap gap-1 align-middle">
+                            {rangosPorMaquina.get(maquina.id)!.map((r) => (
+                              <Badge key={r.id} variant="outline" className="text-xs font-normal">
+                                {r.nombre}
+                              </Badge>
+                            ))}
+                          </span>
+                        ) : (
+                          <Badge variant="outline" className="ml-2 bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold">
+                            Sin rango
+                          </Badge>
+                        )}
                       </div>
                       <div className="mt-2 text-sm">
                         <span className="text-muted-foreground">Limitación:</span>
@@ -605,6 +679,40 @@ export default function RecursosPage() {
           titulo="Rangos"
           descripcion="Clic en un rango para ver y editar qué procesos y máquinas habilita."
           icon={<Target className="h-5 w-5 text-muted-foreground" />}
+          renderBadge={(rango) => {
+            const cob = porRango.get(rango.id);
+            if (!cob) return null;
+            return (
+              <span className="flex items-center gap-1.5">
+                {cob.maquinas.length > 0 ? (
+                  <Badge
+                    variant="outline"
+                    className="text-xs font-normal"
+                    title={cob.maquinas.map((m) => m.nombre).join(", ")}
+                  >
+                    {cob.maquinas.length} {cob.maquinas.length === 1 ? "máquina" : "máquinas"}
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold"
+                    title="Este rango no habilita ninguna máquina. Quien lo tenga solo puede tomar procesos manuales."
+                  >
+                    Sin máquinas
+                  </Badge>
+                )}
+                {cob.operarios === 0 && (
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold"
+                    title="Nadie tiene este rango: los procesos y máquinas que solo él habilita quedan sin candidatos."
+                  >
+                    Sin operarios
+                  </Badge>
+                )}
+              </span>
+            );
+          }}
           renderExpanded={(rango) => (
             <RangoComposicion idRango={rango.id} nombreRango={rango.nombre} />
           )}

@@ -27,6 +27,7 @@ import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 import { AddProcessRow } from "./planning/AddProcessRow";
+import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -41,6 +42,9 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
+
+    // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
+    const ordenesConPlano = useOrdenesConPlano();
 
     // Mismo patrón que PlanningListTable: el degradado del borde derecho se oculta
     // dinámicamente cuando el usuario llegó al final del scroll horizontal.
@@ -157,7 +161,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                     return sortConfig.direction === 'asc' ? diff : -diff;
                 }
                 case 'plano': {
-                    const has = (o: WorkOrder) => (Number(o.tiene_plano) === 1 ? 1 : 0);
+                    const has = (o: WorkOrder) => rankPlano(estadoPlano(o.id, o.tiene_plano, ordenesConPlano));
                     const diff = has(a) - has(b);
                     return sortConfig.direction === 'asc' ? diff : -diff;
                 }
@@ -459,13 +463,27 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                         )}
                                                     </td>
-                                                    {/* Plano: Sí (verde) si tiene_plano==1, No (gris) si no. */}
+                                                    {/* Plano: verde si el archivo está cargado, ámbar si la OT
+                                                        está marcada con plano pero no hay archivo, gris si no
+                                                        lleva. Solo el archivo real restringe la asignación a
+                                                        operarios que saben leer planos. */}
                                                     <td className="px-3 py-3 text-center">
-                                                        {Number(order.tiene_plano) === 1 ? (
-                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                        ) : (
-                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
-                                                        )}
+                                                        {(() => {
+                                                            const est = estadoPlano(order.id, order.tiene_plano, ordenesConPlano);
+                                                            if (est === 'adjunto') return (
+                                                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                            );
+                                                            if (est === 'marcado_sin_archivo') return (
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className="bg-amber-50 text-amber-700 border-amber-200 font-semibold"
+                                                                    title="La OT figura con plano pero no tiene el archivo cargado. Para el planificador es una OT sin plano."
+                                                                >
+                                                                    Sin archivo
+                                                                </Badge>
+                                                            );
+                                                            return <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>;
+                                                        })()}
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
                                                         <span className={cn(

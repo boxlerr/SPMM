@@ -56,6 +56,24 @@ async def listar_maquinarias_por_rango(db=Depends(get_db)):
     return await service.listarMaquinariasPorRango()
 
 
+@router.get("/rangos/cobertura")
+async def obtener_cobertura_rangos(db=Depends(get_db)):
+    """
+    Qué máquinas habilita cada rango y qué rangos tiene cada máquina.
+
+    Sirve para ver los huecos desde Recursos: una máquina sin rango queda fuera de
+    todo proceso que exija rangos, y un rango sin operarios deja sin candidatos a lo
+    que solo él habilita. Los dos casos hoy se descubren recién cuando el plan sale
+    raro.
+
+    Igual que /rangos/procesos, va ANTES de /rangos/{id} para que FastAPI no intente
+    parsear "cobertura" como int.
+    """
+    logger.info("API - Inicio GET /rangos/cobertura")
+    service = RangoService(db)
+    return await service.obtenerCobertura()
+
+
 @router.get("/rangos/{id}/detalle")
 async def obtener_detalle_rango(id: int, db=Depends(get_db)):
     """El rango con sus procesos y maquinarias resueltos, y a cuántos operarios alcanza."""

@@ -72,6 +72,75 @@ class RangoRepository:
             logger.error(f"Repository - Error en find_maquinarias_por_rango: {e}")
             raise InfrastructureException("Error al listar las maquinarias por rango.") from e
 
+    async def find_cobertura(self):
+        """Cobertura cruzada rango ↔ maquinaria (y cuánta gente tiene cada rango).
+
+        Es información de diagnóstico: los huecos acá se pagan callados en el
+        planificador. Una máquina sin rango queda fuera del dominio de todo proceso
+        que exija rangos, y un rango que no tiene ningún operario deja sin candidatos
+        a las máquinas y procesos que solo ese rango habilita —así fue como los tornos
+        CNC, marcados con OFICIAL ESPECIALIZADO y TÉCNICO, terminaron sin nadie que
+        pudiera usarlos—.
+        """
+        try:
+            from backend.domain.RangoMaquinaria import RangoMaquinaria
+            from backend.domain.Maquinaria import Maquinaria
+            from backend.domain.OperarioRango import OperarioRango
+
+            rangos = (await self.db.execute(select(Rango).order_by(Rango.nombre))).scalars().all()
+            maquinas = (await self.db.execute(
+                select(Maquinaria).order_by(Maquinaria.nombre))).scalars().all()
+
+            pares = (await self.db.execute(
+                select(RangoMaquinaria.id_rango, RangoMaquinaria.id_maquinaria))).all()
+
+            operarios = (await self.db.execute(
+                select(OperarioRango.id_rango, OperarioRango.id_operario))).all()
+
+            por_maquina, por_rango = {}, {}
+            for id_rango, id_maquinaria in pares:
+                por_maquina.setdefault(id_maquinaria, []).append(id_rango)
+                por_rango.setdefault(id_rango, []).append(id_maquinaria)
+
+            ops_por_rango = {}
+            for id_rango, id_operario in operarios:
+                ops_por_rango.setdefault(id_rango, set()).add(id_operario)
+
+            nombre_rango = {r.id: r.nombre for r in rangos}
+            nombre_maquina = {m.id: m.nombre for m in maquinas}
+
+            return {
+                "maquinas": [
+                    {
+                        "id": m.id,
+                        "nombre": m.nombre,
+                        "cod_maquina": m.cod_maquina,
+                        "rangos": [
+                            {"id": rid, "nombre": nombre_rango.get(rid, f"#{rid}")}
+                            for rid in sorted(por_maquina.get(m.id, []),
+                                              key=lambda x: nombre_rango.get(x, ""))
+                        ],
+                    }
+                    for m in maquinas
+                ],
+                "rangos": [
+                    {
+                        "id": r.id,
+                        "nombre": r.nombre,
+                        "maquinas": [
+                            {"id": mid, "nombre": nombre_maquina.get(mid, f"#{mid}")}
+                            for mid in sorted(por_rango.get(r.id, []),
+                                              key=lambda x: nombre_maquina.get(x, ""))
+                        ],
+                        "operarios": len(ops_por_rango.get(r.id, ())),
+                    }
+                    for r in rangos
+                ],
+            }
+        except Exception as e:
+            logger.error(f"Repository - Error en find_cobertura: {e}")
+            raise InfrastructureException("Error al calcular la cobertura de rangos.") from e
+
     async def find_detalle(self, id: int):
         """
         Rango con sus procesos y maquinarias resueltos a nombre, y QUIÉNES lo tienen.

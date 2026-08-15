@@ -56,6 +56,13 @@ interface CatalogoSimpleProps {
    * mira de a un rango por vez.
    */
   renderExpanded?: (item: Item) => React.ReactNode;
+  /**
+   * Contenido corto al lado del nombre, en la fila cerrada.
+   *
+   * Lo usa Rangos para mostrar cuántas máquinas habilita y cuánta gente lo tiene,
+   * sin obligar a abrir uno por uno para descubrir que alguno está vacío.
+   */
+  renderBadge?: (item: Item) => React.ReactNode;
 }
 
 const getAuthHeaders = (): HeadersInit => {
@@ -73,6 +80,7 @@ export default function CatalogoSimple({
   titulo,
   descripcion,
   renderExpanded,
+  renderBadge,
 }: CatalogoSimpleProps) {
   const cleanUrl = API_URL.replace(/\/$/, "");
   const { showToast } = useToast();
@@ -281,6 +289,7 @@ export default function CatalogoSimple({
                             />
                           )}
                           {item.nombre}
+                          {renderBadge?.(item)}
                         </div>
                       </td>
                       <td className="px-4 py-2">

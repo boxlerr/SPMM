@@ -7,6 +7,7 @@ import { RegistrarIncidenciaModal } from "@/components/planning/RegistrarInciden
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
+import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 import { Input } from "@/components/ui/input";
 import {
     Search, ChevronDown, ChevronRight, CalendarClock,
@@ -160,6 +161,8 @@ function _PlanningListTable({
     tableZoom = 100
 }: PlanningListTableProps) {
 
+    // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
+    const ordenesConPlano = useOrdenesConPlano();
 
     const [sortConfig, setSortConfig] = React.useState<{
         key: SortColumn | null;
@@ -389,7 +392,7 @@ function _PlanningListTable({
                 case 'prioridad': return item.id_prioridad || 0;
                 case 'material': return materialRank(item.estado_material);
                 case 'proceso': return procesoRank(item);
-                case 'plano': return Number(item.tiene_plano) === 1 ? 1 : 0;
+                case 'plano': return rankPlano(estadoPlano(item.id, item.tiene_plano, ordenesConPlano));
                 case 'estado': return getOrderStatus(item);
                 case 'entrega': return entregaRank(item);
                 case 'aprobado_por': return item.aprobado_por || "";
@@ -1340,13 +1343,27 @@ function _PlanningListTable({
                                                     <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                 )}
                                             </td>
-                                            {/* Plano: Sí (verde) si tiene_plano==1. */}
+                                            {/* Plano: verde si el archivo está cargado, ámbar si la OT está
+                                                marcada con plano pero no hay archivo, gris si no lleva plano.
+                                                La diferencia importa: el planificador solo restringe a los
+                                                operarios que leen planos cuando el archivo existe de verdad. */}
                                             <td className="px-3 py-3 text-center">
-                                                {Number(item.tiene_plano) === 1 ? (
-                                                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                ) : (
-                                                    <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
-                                                )}
+                                                {(() => {
+                                                    const est = estadoPlano(item.id, item.tiene_plano, ordenesConPlano);
+                                                    if (est === 'adjunto') return (
+                                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                                                    );
+                                                    if (est === 'marcado_sin_archivo') return (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="bg-amber-50 text-amber-700 border-amber-200 font-semibold"
+                                                            title="La OT figura con plano pero no tiene el archivo cargado. Para el planificador es una OT sin plano."
+                                                        >
+                                                            Sin archivo
+                                                        </Badge>
+                                                    );
+                                                    return <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>;
+                                                })()}
                                             </td>
                                             {!hideStatus && (
                                                 <td className="px-3 py-3 text-center">

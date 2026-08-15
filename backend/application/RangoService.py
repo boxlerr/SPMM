@@ -50,6 +50,16 @@ class RangoService:
         mapa = await self.repository.find_maquinarias_por_rango()
         return ResponseDTO(status=True, data=mapa)
 
+    async def obtenerCobertura(self):
+        """Cobertura rango ↔ maquinaria, para mostrar los huecos en Recursos."""
+        try:
+            logger.info("Service - Cobertura de rangos.")
+            data = await self.repository.find_cobertura()
+            return ResponseDTO(status=True, data=jsonable_encoder(data))
+        except InfrastructureException as e:
+            logger.error(f"Service - Error de infraestructura en cobertura: {e}")
+            raise ApplicationException("No se pudo calcular la cobertura de rangos.") from e
+
     async def obtenerDetalleRango(self, id: int):
         """Rango + sus procesos y maquinarias + cuántos operarios lo tienen."""
         logger.info(f"Service - Detalle del rango ID: {id}")
