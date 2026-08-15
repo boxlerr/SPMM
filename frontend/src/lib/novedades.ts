@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "rangos-desde-maquina-y-proceso",
+        fecha: "2026-08-15",
+        tipo: "nuevo",
+        seccion: "Recursos",
+        titulo: "Ahora ves y arreglás los rangos desde la máquina y desde el proceso",
+        detalle:
+            "En Maquinarias, la columna Rangos te dice quién puede usar cada una y las que no tienen ninguna salen marcadas: tocás el aviso y las cargás ahí mismo, sin ir a Rangos. En Procesos hay una columna “Quién puede hacerlo” con la misma idea, y avisa los dos casos que después frenan un plan: el que no tiene rango (se lo lleva cualquiera) y el que tiene rangos que no tiene ningún operario (no lo hace nadie). El botón “Ver los que frenan un plan” filtra solo los que están en OTs abiertas, para no perderte entre los cientos del catálogo viejo.",
+        href: "/recursos",
+    },
+    {
         id: "fechas-dentro-del-turno",
         fecha: "2026-08-15",
         tipo: "arreglo",

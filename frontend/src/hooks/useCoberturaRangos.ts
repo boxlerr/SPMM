@@ -28,9 +28,28 @@ export interface RangoCobertura {
     operarios: number;
 }
 
+export interface ProcesoCobertura {
+    id: number;
+    nombre: string;
+    rangos: RangoRef[];
+    /** Cuántos operarios DISPONIBLES pueden hacerlo (por rango o habilidad manual). */
+    habilitados: number;
+    por_habilidad_manual: number;
+    /** En cuántas líneas de OTs abiertas se usa. 0 = está en el catálogo pero no se usa. */
+    lineas_abiertas: number;
+}
+
+/** Un proceso "trae problema" si no lo puede hacer nadie o si no tiene rango. */
+export function problemaDelProceso(p: ProcesoCobertura): "nadie" | "sin_rango" | null {
+    if (p.rangos.length > 0 && p.habilitados === 0) return "nadie";
+    if (p.rangos.length === 0) return "sin_rango";
+    return null;
+}
+
 export interface Cobertura {
     maquinas: MaquinaCobertura[];
     rangos: RangoCobertura[];
+    procesos: ProcesoCobertura[];
 }
 
 // `null` = todavía no se sabe. Distinguirlo de "no hay nada" es lo que evita que,
@@ -58,6 +77,13 @@ export function invalidarCobertura() {
 
 export function useCoberturaRangos() {
     const [cobertura, setCobertura] = useState<Cobertura | null>(null);
+    const [version, setVersion] = useState(0);
+
+    /** Vuelve a pedir la cobertura (después de editar los rangos de algo). */
+    const recargar = () => {
+        invalidarCobertura();
+        setVersion((v) => v + 1);
+    };
 
     useEffect(() => {
         let vivo = true;
@@ -67,7 +93,7 @@ export function useCoberturaRangos() {
         return () => {
             vivo = false;
         };
-    }, []);
+    }, [version]);
 
     // Mientras no haya dato, los mapas quedan vacíos y `listo` en false: la pantalla
     // no muestra ningún aviso en vez de acusar de "sin rango" a todo el taller.
@@ -78,6 +104,17 @@ export function useCoberturaRangos() {
     const porRango = new Map<number, RangoCobertura>(
         (cobertura?.rangos ?? []).map((r) => [r.id, r])
     );
+    const porProceso = new Map<number, ProcesoCobertura>(
+        (cobertura?.procesos ?? []).map((p) => [p.id, p])
+    );
 
-    return { cobertura, listo, rangosPorMaquina, porRango };
+    // Catálogo para los selectores: cada rango con cuánta gente lo tiene. Ese número
+    // es el que decide si agregarlo sirve de algo.
+    const catalogoRangos = (cobertura?.rangos ?? []).map((r) => ({
+        id: r.id,
+        nombre: r.nombre,
+        operarios: r.operarios,
+    }));
+
+    return { cobertura, listo, rangosPorMaquina, porRango, porProceso, catalogoRangos, recargar };
 }

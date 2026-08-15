@@ -1,4 +1,4 @@
-from sqlalchemy import select, delete as sa_delete
+from sqlalchemy import select, text, delete as sa_delete
 from backend.domain.Rango import Rango
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -94,8 +94,16 @@ class RangoRepository:
             pares = (await self.db.execute(
                 select(RangoMaquinaria.id_rango, RangoMaquinaria.id_maquinaria))).all()
 
-            operarios = (await self.db.execute(
-                select(OperarioRango.id_rango, OperarioRango.id_operario))).all()
+            # Solo operarios DISPONIBLES: un rango que solo tienen puestos vacantes o
+            # gente de licencia no habilita a nadie, y mostrarlo como "1 operario" hace
+            # creer que está cubierto. Es justo el número que decide si agregar ese
+            # rango a una máquina o a un proceso sirve de algo.
+            operarios = (await self.db.execute(text("""
+                SELECT orr.id_rango, orr.id_operario
+                FROM operario_rango orr
+                JOIN operario o ON o.id = orr.id_operario
+                WHERE o.disponible
+            """))).all()
 
             por_maquina, por_rango = {}, {}
             for id_rango, id_maquinaria in pares:
@@ -109,7 +117,83 @@ class RangoRepository:
             nombre_rango = {r.id: r.nombre for r in rangos}
             nombre_maquina = {m.id: m.nombre for m in maquinas}
 
+            # Procesos: qué rangos los habilitan y, sobre todo, cuánta GENTE puede
+            # hacerlos. Un proceso puede tener rangos cargados y aun así no poder
+            # hacerlo nadie, si esos rangos no los tiene ninguna persona disponible.
+            # Se cuenta igual que el planificador: rango o habilidad manual, menos las
+            # nativas apagadas, y solo operarios disponibles.
+            procesos = (await self.db.execute(text("""
+                WITH disponibles AS (
+                    SELECT id FROM operario WHERE disponible
+                ),
+                por_rango AS (
+                    SELECT rp.id_proceso, orr.id_operario
+                    FROM rango_proceso rp
+                    JOIN operario_rango orr ON orr.id_rango = rp.id_rango
+                    JOIN disponibles d ON d.id = orr.id_operario
+                ),
+                manual AS (
+                    SELECT s.id_proceso, s.id_operario
+                    FROM operario_proceso_skill s
+                    JOIN disponibles d ON d.id = s.id_operario
+                    WHERE s.manual AND s.habilitado
+                ),
+                habilitados AS (
+                    SELECT u.id_proceso, u.id_operario
+                    FROM (SELECT * FROM por_rango UNION SELECT * FROM manual) u
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM operario_proceso_skill a
+                        WHERE a.id_proceso = u.id_proceso
+                          AND a.id_operario = u.id_operario
+                          AND NOT a.habilitado
+                    )
+                ),
+                -- En cuántas líneas de OTs abiertas se usa. El catálogo arrastra
+                -- cientos de procesos del legacy que no usa nadie: sin este dato, la
+                -- pantalla marca 272 "problemas" y el que importa se pierde entre
+                -- ellos. Un proceso sin rango que nadie usa no le hace daño a nadie.
+                en_uso AS (
+                    SELECT otp.id_proceso, COUNT(*) AS lineas
+                    FROM orden_trabajo_proceso otp
+                    JOIN orden_trabajo ot ON ot.id = otp.id_orden_trabajo
+                    WHERE COALESCE(ot.finalizadototal, 0) = 0
+                      AND ot.fecha_entrega IS NULL
+                      AND otp.id_estado <> 3
+                    GROUP BY otp.id_proceso
+                )
+                SELECT p.id, p.nombre,
+                       COUNT(DISTINCT h.id_operario) AS habilitados,
+                       COUNT(DISTINCT m.id_operario) AS por_habilidad_manual,
+                       COALESCE(MAX(u.lineas), 0) AS lineas_abiertas
+                FROM proceso p
+                LEFT JOIN habilitados h ON h.id_proceso = p.id
+                LEFT JOIN manual m ON m.id_proceso = p.id
+                LEFT JOIN en_uso u ON u.id_proceso = p.id
+                GROUP BY p.id, p.nombre
+                ORDER BY p.nombre
+            """))).fetchall()
+
+            rangos_de_proceso = {}
+            for id_proceso, id_rango in (await self.db.execute(
+                    text("SELECT id_proceso, id_rango FROM rango_proceso"))).all():
+                rangos_de_proceso.setdefault(id_proceso, []).append(id_rango)
+
             return {
+                "procesos": [
+                    {
+                        "id": p.id,
+                        "nombre": p.nombre,
+                        "rangos": [
+                            {"id": rid, "nombre": nombre_rango.get(rid, f"#{rid}")}
+                            for rid in sorted(rangos_de_proceso.get(p.id, []),
+                                              key=lambda x: nombre_rango.get(x, ""))
+                        ],
+                        "habilitados": p.habilitados,
+                        "por_habilidad_manual": p.por_habilidad_manual,
+                        "lineas_abiertas": p.lineas_abiertas,
+                    }
+                    for p in procesos
+                ],
                 "maquinas": [
                     {
                         "id": m.id,
@@ -257,6 +341,52 @@ class RangoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error en set_maquinarias: {e}")
             raise InfrastructureException("Error al actualizar las maquinarias del Rango.") from e
+
+    async def set_rangos_de_maquinaria(self, id_maquinaria: int, ids_rango: list[int]):
+        """Reemplaza los rangos que habilitan una máquina.
+
+        Es el mismo vínculo que set_maquinarias pero visto desde el otro lado. Hace
+        falta porque el hueco se descubre mirando la máquina ("esta no la puede usar
+        nadie") y obligaba a irse a la pestaña Rangos, abrir el rango correcto y
+        agregarla desde ahí: tres pantallas para un dato que ya tenías delante.
+        """
+        try:
+            from backend.domain.RangoMaquinaria import RangoMaquinaria
+
+            logger.info(
+                f"Repository - Set rangos de la maquinaria {id_maquinaria}: {len(ids_rango)} rangos."
+            )
+            await self.db.execute(
+                sa_delete(RangoMaquinaria).where(RangoMaquinaria.id_maquinaria == id_maquinaria)
+            )
+            for id_rango in dict.fromkeys(ids_rango):
+                self.db.add(RangoMaquinaria(id_rango=id_rango, id_maquinaria=id_maquinaria))
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en set_rangos_de_maquinaria: {e}")
+            raise InfrastructureException("Error al actualizar los rangos de la maquinaria.") from e
+
+    async def set_rangos_de_proceso(self, id_proceso: int, ids_rango: list[int]):
+        """Reemplaza los rangos que habilitan un proceso (el inverso de set_procesos)."""
+        try:
+            from backend.domain.RangoProceso import RangoProceso
+
+            logger.info(
+                f"Repository - Set rangos del proceso {id_proceso}: {len(ids_rango)} rangos."
+            )
+            await self.db.execute(
+                sa_delete(RangoProceso).where(RangoProceso.id_proceso == id_proceso)
+            )
+            for id_rango in dict.fromkeys(ids_rango):
+                self.db.add(RangoProceso(id_rango=id_rango, id_proceso=id_proceso))
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en set_rangos_de_proceso: {e}")
+            raise InfrastructureException("Error al actualizar los rangos del proceso.") from e
 
     async def find_by_id(self, id: int):
         try:
