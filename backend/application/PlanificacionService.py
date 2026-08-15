@@ -907,10 +907,22 @@ def _agregar_compatibilidad_op_maq(
     DUMMY_OP_ID,
     DUMMY_MAQ_ID,
     op_to_rangos=None,
+    skills_manuales=None,
 ):
     """
     Añade restricciones de compatibilidad Operario–Maquinaria
     mediante AddAllowedAssignments.
+
+    `skills_manuales` ({proceso: {operarios}}) también habilita máquina, no solo
+    proceso. Antes acá se miraba únicamente el rango, así que cargarle a alguien la
+    habilidad a mano lo dejaba a mitad de camino: podía tomar el proceso pero ninguna
+    máquina le resultaba compatible, y el trabajo salía "sin máquina" —que es peor que
+    sin asignar, porque una máquina que no se asigna tampoco se reserva—. Era el caso
+    de los tornos CNC: Iván y Pablo tienen el proceso cargado a mano, pero su rango no
+    está en la máquina. Decir "esta persona hace este proceso" y a la vez "no puede
+    tocar la máquina en la que ese proceso se hace" no es una regla, es una grieta.
+    Las máquinas candidatas ya vienen filtradas por los rangos del proceso, así que
+    esto no abre nada que el proceso no habilitara.
 
     `op_to_rangos` es {id_operario: {rangos}}. Hace falta aparte de `op_to_rango`
     porque ese es un dict armado sobre una lista de pares (operario, rango): a un
@@ -920,6 +932,7 @@ def _agregar_compatibilidad_op_maq(
     a la máquina dummy. Para la compatibilidad hay que mirar TODOS sus rangos.
     """
     op_to_rangos = op_to_rangos or {}
+    skills_manuales = skills_manuales or {}
     for (orden_id, proc_id, secuencia, _fp,
         _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
 
@@ -938,6 +951,7 @@ def _agregar_compatibilidad_op_maq(
             continue
 
         needs = set(rangos_proc)
+        con_manual = set(skills_manuales.get(proc_id, ()))
         allowed_pairs = []
 
         for op_id in ops_dom:
@@ -960,7 +974,10 @@ def _agregar_compatibilidad_op_maq(
                         continue
 
                 mrangos = maq_to_rangos.get(m_id, set())
-                if (rangos_op & mrangos) and (not needs or (needs & mrangos)):
+                # La habilidad cargada a mano vale como habilitación en la máquina:
+                # es una afirmación explícita de que esa persona hace ese proceso.
+                habilitado = bool(rangos_op & mrangos) or (op_id in con_manual)
+                if habilitado and (not needs or (needs & mrangos)):
                     allowed_pairs.append([op_id, m_id])
 
         # Evitar conjunto vacío
@@ -1569,7 +1586,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     for _op_id, _r_id in operarios:
         op_to_rangos.setdefault(_op_id, set()).add(_r_id)
 
-    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos)
+    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales)
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
     _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----

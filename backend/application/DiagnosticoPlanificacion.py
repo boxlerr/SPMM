@@ -286,12 +286,19 @@ def _gente_sin_habilitacion_en_la_maquina(
         if not dominio:
             continue
 
-        compatible = any(
+        compatible_por_rango = any(
             rangos_por_op.get(op, set()) & maq_rangos.get(m, set())
             for op in personas for m in dominio
         )
-        if compatible:
+        if compatible_por_rango:
             continue
+
+        # Si llega hasta acá pero alguien tiene la habilidad cargada a mano, el plan
+        # SÍ sale con máquina: la manual habilita también la máquina. No es un
+        # bloqueo, pero tampoco está bien: el rango de la máquina sigue sin coincidir
+        # con el de quienes la manejan, así que todo depende de que esa habilidad
+        # manual siga cargada. Vale avisarlo, no callarlo.
+        con_manual = {op for op in personas if op in set(skills_manuales.get(proc_id, ()))}
 
         quienes = sorted(nombre_operario.get(op, f"#{op}") for op in personas)
         rangos_gente_ids = {r for op in personas for r in rangos_por_op.get(op, set())}
@@ -313,18 +320,32 @@ def _gente_sin_habilitacion_en_la_maquina(
         })
         nombres_maq = [maq_nombre[m] for m in sorted(dominio)]
 
-        salida.append({
-            "id": f"sin-maquina-compatible-{proc_id}",
-            "tipo": "sin_maquina_compatible",
-            "severidad": BLOQUEANTE,
-            "titulo": f"«{d['nombre']}» se planifica sin máquina",
-            "detalle": (
+        if con_manual:
+            quienes_manual = sorted(nombre_operario.get(op, f"#{op}") for op in con_manual)
+            titulo = f"«{d['nombre']}» funciona por habilidad manual, no por rango"
+            detalle = (
+                f"{_listar(quienes_manual)} tiene(n) este proceso cargado a mano, así que el plan "
+                f"sale bien y con máquina. Pero {_listar(nombres_maq)} pide(n) {_listar(rangos_maquina)} "
+                f"y ellos son {_listar(rangos_gente)}: si esa habilidad manual se borra, o si mañana "
+                f"lo tiene que hacer otro, el trabajo vuelve a salir sin máquina. Conviene que el "
+                f"rango diga lo que realmente pasa en el taller."
+            )
+        else:
+            titulo = f"«{d['nombre']}» se planifica sin máquina"
+            detalle = (
                 f"{_listar(quienes)} puede(n) hacerlo, pero {_listar(nombres_maq)} pide(n) "
                 f"{_listar(rangos_maquina)} y ellos son {_listar(rangos_gente)}. "
                 f"Sin un par operario-máquina compatible el proceso sale sin máquina asignada, "
                 f"y una máquina que no se asigna tampoco se reserva: dos OTs pueden quedar "
                 f"en la misma a la misma hora."
-            ),
+            )
+
+        salida.append({
+            "id": f"sin-maquina-compatible-{proc_id}",
+            "tipo": "sin_maquina_compatible",
+            "severidad": ADVERTENCIA if con_manual else BLOQUEANTE,
+            "titulo": titulo,
+            "detalle": detalle,
             "impacto": {
                 "procesos": d["procesos"],
                 "ots": sorted(d["ots"]),
