@@ -119,67 +119,20 @@ async def obtener_planificacion(db = Depends(get_db)):
     result = await db.execute(query)
     rows = result.fetchall()
 
-    # Helper for date conversion (duplicated from Service to avoid circular imports or complex refactoring)
-    from datetime import datetime, timedelta
-    from backend.infrastructure.ConfigRepository import ConfigRepository
+    # La conversión de minutos a fecha vive en el servicio. Acá había una copia con la
+    # jornada escrita a mano (555 minutos, 105 muertos), así que cualquier corrección
+    # al calendario había que acordarse de hacerla en dos lugares —y la copia ya se
+    # había quedado atrás—. Es la MISMA función que usa el planificador al armar el
+    # plan, con lo cual el Gantt y la vista previa no se pueden contradecir.
+    from backend.application.PlanificacionService import _convertir_minutos_a_fecha
+    from backend.infrastructure.DiaBloqueadoRepository import DiaBloqueadoRepository
 
-    # Leer blocked_dates UNA sola vez por request (antes se leía desde disco
-    # 2 veces por cada fila del resultado, lo cual escalaba a O(N) lecturas de I/O).
-    config_repo = ConfigRepository()
-    blocked_dates = set(config_repo.get_blocked_dates())
+    # Una sola lectura por request: antes se abría el archivo de feriados dos veces
+    # por cada fila del resultado.
+    blocked_dates = await DiaBloqueadoRepository(db).listar()
 
     def convertir_minutos_a_fecha(minutos_acumulados: int):
-        ahora = datetime.now()
-        inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
-        
-        def avanzar_a_dia_valido(fecha):
-            while True:
-                wd = fecha.weekday()
-                is_blocked = fecha.strftime("%Y-%m-%d") in blocked_dates
-                if wd == 6 or is_blocked: 
-                    fecha += timedelta(days=1)
-                else:
-                    break
-            return fecha
-
-        tiempo_actual = avanzar_a_dia_valido(inicio_base)
-        minutos_restantes = minutos_acumulados
-
-        while minutos_restantes > 0:
-            wd = tiempo_actual.weekday()
-            
-            if wd < 5:
-                capacidad_hoy = 555
-            elif wd == 5:
-                capacidad_hoy = 300
-            else:
-                capacidad_hoy = 0
-
-            if capacidad_hoy == 0:
-                tiempo_actual += timedelta(days=1)
-                tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
-                continue
-                
-            if minutos_restantes >= capacidad_hoy:
-                minutos_restantes -= capacidad_hoy
-                tiempo_actual += timedelta(days=1)
-                tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
-            else:
-                if wd < 5:
-                    if minutos_restantes <= 120:
-                        tiempo_actual += timedelta(minutes=minutos_restantes)
-                    elif minutos_restantes <= 285:
-                        tiempo_actual += timedelta(minutes=minutos_restantes + 15)
-                    else:
-                        tiempo_actual += timedelta(minutes=minutos_restantes + 105)
-                elif wd == 5:
-                    tiempo_actual += timedelta(minutes=minutos_restantes)
-                
-                minutos_restantes = 0
-        
-        return tiempo_actual.isoformat()
-        
-        return tiempo_actual.isoformat()
+        return _convertir_minutos_a_fecha(minutos_acumulados, None, blocked_dates)
 
     results = []
     for row in rows:

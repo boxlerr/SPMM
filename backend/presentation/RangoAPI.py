@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from backend.application.RangoService import RangoService
 from backend.dto.RangoRequestDTO import RangoRequestDTO
-from backend.dto.RangoAsignacionDTO import RangoProcesosDTO, RangoMaquinariasDTO
+from backend.dto.RangoAsignacionDTO import RangoProcesosDTO, RangoMaquinariasDTO, RangoIdsDTO
 from backend.infrastructure.db import SessionLocal
 from backend.commons.loggers.logger import logger
 
@@ -54,6 +54,41 @@ async def listar_maquinarias_por_rango(db=Depends(get_db)):
     logger.info("API - Inicio GET /rangos/maquinarias")
     service = RangoService(db)
     return await service.listarMaquinariasPorRango()
+
+
+@router.get("/rangos/cobertura")
+async def obtener_cobertura_rangos(db=Depends(get_db)):
+    """
+    Qué máquinas habilita cada rango y qué rangos tiene cada máquina.
+
+    Sirve para ver los huecos desde Recursos: una máquina sin rango queda fuera de
+    todo proceso que exija rangos, y un rango sin operarios deja sin candidatos a lo
+    que solo él habilita. Los dos casos hoy se descubren recién cuando el plan sale
+    raro.
+
+    Igual que /rangos/procesos, va ANTES de /rangos/{id} para que FastAPI no intente
+    parsear "cobertura" como int.
+    """
+    logger.info("API - Inicio GET /rangos/cobertura")
+    service = RangoService(db)
+    return await service.obtenerCobertura()
+
+
+# El vínculo rango ↔ máquina y rango ↔ proceso se puede editar desde los dos lados.
+# El hueco se descubre mirando la máquina ("esta no la puede usar nadie") o el proceso
+# ("esto no lo puede hacer nadie"), y hasta ahora había que irse a Rangos, buscar el
+# rango correcto y agregarlo desde ahí: tres pantallas para un dato que ya tenías
+# delante de los ojos.
+@router.put("/maquinarias/{id}/rangos")
+async def modificar_rangos_de_maquinaria(id: int, dto: RangoIdsDTO, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /maquinarias/{id}/rangos")
+    return await RangoService(db).modificarRangosDeMaquinaria(id, dto.rangos)
+
+
+@router.put("/procesos/{id}/rangos")
+async def modificar_rangos_de_proceso(id: int, dto: RangoIdsDTO, db=Depends(get_db)):
+    logger.info(f"API - Inicio PUT /procesos/{id}/rangos")
+    return await RangoService(db).modificarRangosDeProceso(id, dto.rangos)
 
 
 @router.get("/rangos/{id}/detalle")

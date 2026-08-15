@@ -47,6 +47,146 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "rangos-desde-maquina-y-proceso",
+        fecha: "2026-08-15",
+        tipo: "nuevo",
+        seccion: "Recursos",
+        titulo: "Ahora ves y arreglás los rangos desde la máquina y desde el proceso",
+        detalle:
+            "En Maquinarias, la columna Rangos te dice quién puede usar cada una y las que no tienen ninguna salen marcadas: tocás el aviso y las cargás ahí mismo, sin ir a Rangos. En Procesos hay una columna “Quién puede hacerlo” con la misma idea, y avisa los dos casos que después frenan un plan: el que no tiene rango (se lo lleva cualquiera) y el que tiene rangos que no tiene ningún operario (no lo hace nadie). El botón “Ver los que frenan un plan” filtra solo los que están en OTs abiertas, para no perderte entre los cientos del catálogo viejo.",
+        href: "/recursos",
+    },
+    {
+        id: "fechas-dentro-del-turno",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Las fechas del plan ya no se pasan del horario del taller",
+        detalle:
+            "El plan calculaba días de 555 minutos y mostraba trabajos terminando 17:30 o 18:00, cuando el turno cierra 16:00. Ahora usa la jornada real (07:00 a 16:00 con desayuno y almuerzo), así que las fechas que ves —y las que le prometés al cliente— son las que se pueden cumplir. Como consecuencia el mismo trabajo ocupa más días que antes: no es que haya más trabajo, es que antes la cuenta estaba mal.",
+        href: "/operaciones",
+    },
+    {
+        id: "horarios-por-operario",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El plan respeta el horario de cada uno y no planifica sábados",
+        detalle:
+            "El horario que cargás en la ficha del operario ahora se usa: a quien entra 09:00 no se le pone trabajo a las 07:00. Y como hoy nadie tiene el sábado marcado como día de trabajo, el plan dejó de usarlo — antes contaba 5 horas por persona por semana que en realidad no existen.",
+        href: "/operaciones",
+    },
+    {
+        id: "tercerizados-marcados",
+        fecha: "2026-08-15",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los trabajos tercerizados se ven como tercerizados",
+        detalle:
+            "Aparecían en rojo como “sin operario asignado”, igual que un proceso al que le falta cargar un rango. Ahora llevan la etiqueta Tercerizado: siguen en el plan porque ocupan lugar en la secuencia de la OT y hay que esperarlos, pero no los hace nadie del taller y no hay nada que corregir.",
+        href: "/operaciones",
+    },
+    {
+        id: "vacantes-fuera-del-plan",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los puestos “VACANTE — A CUBRIR” dejaron de recibir trabajo",
+        detalle:
+            "El plan les cargaba horas como si fueran personas, así que ese trabajo figuraba hecho y en realidad no lo hacía nadie. Ahora quedan fuera del plan y, cuando un proceso solo lo podía hacer un puesto vacante, el aviso te dice qué rango hace falta cubrir. Los puestos siguen en Recursos, marcados como no disponibles.",
+        href: "/recursos",
+    },
+    {
+        id: "feriados-no-se-pierden",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Disponibilidad",
+        titulo: "Los feriados que cargás ya no se borran solos",
+        detalle:
+            "Los días no laborables se guardaban en un archivo del servidor y se perdían cada vez que se actualizaba el sistema: cargabas un feriado, andaba un rato, y después el día volvía a aparecer como laborable. Ahora se guardan como el resto de los datos. Los que ya tenías cargados se pasaron solos.",
+        href: "/operaciones",
+    },
+    {
+        id: "por-que-no-entra",
+        fecha: "2026-08-15",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "La vista previa te dice qué traba el plan y cómo se arregla",
+        detalle:
+            "Arriba de la vista previa aparece un panel con lo que está frenando la planificación: un proceso que no puede hacer nadie porque nadie tiene el rango, una máquina sola para más trabajo del que entra, o trabajo asignado a un puesto vacante. Cada aviso dice a cuántas OTs y cuántas horas afecta, y abajo las formas de resolverlo con la pantalla donde se hace. Antes esto salía como “sin asignar” o “sin máquina” y no había forma de saber por qué.",
+        href: "/operaciones",
+    },
+    {
+        id: "planificacion-vuelve-a-guardar",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Confirmar una planificación vuelve a guardarla",
+        detalle:
+            "Al confirmar, la planificación fallaba con un error que hablaba de intentar con menos órdenes, y no era el volumen: no se guardaba ninguna, ni siquiera con una sola OT. Ya se guarda normal. Y cuando borrás una planificación queda registrado qué se borró y cuándo.",
+        href: "/operaciones",
+    },
+    {
+        id: "procesos-largos-entran",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los procesos de muchas horas ya entran en el plan",
+        detalle:
+            "Un proceso que duraba más que un tramo de trabajo no entraba en ninguna parte y se llevaba puesto todo lo que venía después en esa OT: la OT aparecía casi entera como 'sin lugar' aunque hubiera gente libre. Ahora se reparte en varios tramos, siempre con la misma persona y la misma máquina, y la OT entra completa.",
+        href: "/operaciones",
+    },
+    {
+        id: "plan-con-maquina",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El plan ahora dice en qué máquina va cada trabajo",
+        detalle:
+            "Los procesos de producción salían siempre 'sin máquina', y como nadie tenía máquina asignada, dos OTs podían quedar agendadas en el mismo torno a la misma hora. Ahora cada trabajo sale con su máquina y no se pisan entre sí.",
+        href: "/operaciones",
+    },
+    {
+        id: "plano-sin-archivo",
+        fecha: "2026-08-15",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "La columna Plano distingue la OT que no tiene el archivo cargado",
+        detalle:
+            "Antes decía Sí en casi todas porque venía marcado del sistema viejo. Ahora dice Sí solo si el plano está cargado de verdad, y 'Sin archivo' cuando figura con plano pero no hay nada adjunto. Importa porque solo el plano real limita el trabajo a quienes saben leer planos: con la marca vieja quedaban afuera del plan los pasantes y los ayudantes.",
+        href: "/operaciones",
+    },
+    {
+        id: "reparto-por-rango",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Embalado y pintura dejan de caer en los oficiales",
+        detalle:
+            "Las tareas que admiten ayudante o ingresante se le podían asignar a cualquiera, así que terminaban en oficiales. Ahora cada tarea va solo a quien tiene el rango que la habilita. También se arregló que la preparación de una máquina quedara pegada al proceso siguiente aunque no tuvieran nada que ver: la preparación de la soldadora se la llevaba el tornero.",
+        href: "/operaciones",
+    },
+    {
+        id: "recursos-maquinas-sin-rango",
+        fecha: "2026-08-15",
+        tipo: "nuevo",
+        seccion: "Recursos",
+        titulo: "Se ve qué máquinas no tienen rango y qué rangos no tienen máquina",
+        detalle:
+            "En Maquinarias hay una columna Rangos y un aviso arriba con las máquinas que no tienen ninguno: esas el planificador no se las asigna a nadie. En Rangos, al lado de cada nombre dice cuántas máquinas habilita, y avisa si no habilita ninguna o si no lo tiene ningún operario.",
+        href: "/recursos",
+    },
+    {
+        id: "operario-no-disponible",
+        fecha: "2026-08-15",
+        tipo: "arreglo",
+        seccion: "Recursos",
+        titulo: "Marcar a alguien como no disponible ahora saca su trabajo del plan",
+        detalle:
+            "El estado estaba en el perfil pero el planificador lo ignoraba y le seguía cargando tareas. Sirve para vacaciones y licencias, y también para los puestos 'VACANTE — A CUBRIR', que no son personas y hasta ahora recibían trabajo.",
+        href: "/recursos",
+    },
+    {
         id: "ot-planificadas-filtros",
         fecha: "2026-08-14",
         tipo: "nuevo",

@@ -10,6 +10,9 @@ from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 from backend.infrastructure.ConfigRepository import ConfigRepository
 from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProcesoSkillRepository
+from backend.infrastructure.PlanoRepository import PlanoRepository
+from backend.infrastructure.RangoRepository import RangoRepository
+from backend.infrastructure.DiaBloqueadoRepository import DiaBloqueadoRepository
 from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -24,23 +27,122 @@ import math
 
 import re
 import unicodedata
+from collections import namedtuple
 
 ##Variables:
-MIN_LABORAL_DIA = 555
-MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + 300  # Lun–Vie + Sáb medio día = 3075
+# Jornada real del taller: 07:00 a 16:00 con 15' de desayuno y 30' de almuerzo, o sea
+# 495 minutos de trabajo efectivo. Antes acá decía 555, que no es ni la jornada neta ni
+# la bruta (07:00–16:00 son 540 de reloj): el modelo se creía casi una hora más de
+# trabajo por día del que hay. Como _convertir_minutos_a_fecha le suma encima los
+# minutos muertos, un día completo terminaba dando las 18:00 y las fechas prometidas
+# salían sistemáticamente optimistas.
+MIN_DESAYUNO = 15
+MIN_ALMUERZO = 30
 
+# (inicio, fin) en minutos trabajados del día. Los cortes son las pausas:
+#   07:00–09:00 (120) · desayuno · 09:15–12:00 (165) · almuerzo · 12:30–16:00 (210)
 TRAMOS_LV_LAB = [
     (0, 120),
     (120, 285),
-    (285, 555),
+    (285, 495),
 ]
 
+# Sábado: 07:00 a 12:00 de corrido.
 TRAMOS_SAB_LAB = [
     (0, 300),
 ]
+
+MIN_LABORAL_DIA = TRAMOS_LV_LAB[-1][1]          # 495
+MIN_LABORAL_SABADO = TRAMOS_SAB_LAB[-1][1]      # 300
+MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + MIN_LABORAL_SABADO
+
+
+HORA_APERTURA = time(7, 0)
+
+# Una ventana del horizonte. `ini`/`fin` son minutos del timeline comprimido; el resto
+# ubica la ventana en el calendario para poder cruzarla con el horario de cada persona.
+Ventana = namedtuple("Ventana", "ini fin weekday ini_dia fin_dia")
+
+# Nombres de día como los guarda operario.dias_trabajo ("MON,TUE,...").
+_DIAS = {"MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6}
+
+
+def minutos_modelo_desde_hora(hora, es_sabado: bool = False) -> int:
+    """Pasa una hora de reloj al minuto de TRABAJO del día que le corresponde.
+
+    El solver cuenta minutos trabajados, no minutos de reloj: las 09:00 de un día de
+    semana son el minuto 120, y las 12:30 el 285 (porque entre medio hubo pausas).
+    Hace falta para poder comparar el horario de un operario contra los tramos.
+    """
+    tramos = TRAMOS_SAB_LAB if es_sabado else TRAMOS_LV_LAB
+    reloj = (hora.hour * 60 + hora.minute) - (HORA_APERTURA.hour * 60 + HORA_APERTURA.minute)
+    if reloj <= 0:
+        return 0
+    for ini, fin in tramos:
+        ancho = fin - ini
+        muertos = minutos_muertos_del_dia(ini + 1, es_sabado)
+        # Minutos de reloj consumidos hasta el final de este tramo (trabajo + pausas).
+        if reloj <= fin + muertos:
+            return min(fin, max(ini, reloj - muertos))
+    return tramos[-1][1]
+
+
+def minutos_muertos_del_dia(minutos_trabajados: int, es_sabado: bool = False) -> int:
+    """Pausas acumuladas antes de llegar a ese minuto de trabajo del día.
+
+    Sirve para pasar de "minuto de trabajo" a hora de reloj. Se deriva de los tramos
+    para que no haya dos versiones de la misma jornada dando vueltas: cambiar
+    TRAMOS_LV_LAB alcanza para que la conversión a fecha siga en sincronía.
+    """
+    if es_sabado:
+        return 0
+    muertos = 0
+    if minutos_trabajados > TRAMOS_LV_LAB[0][1]:
+        muertos += MIN_DESAYUNO
+    if minutos_trabajados > TRAMOS_LV_LAB[1][1]:
+        muertos += MIN_ALMUERZO
+    return muertos
+
+# Tramo laboral más largo de un día de semana. Es el techo real de lo que puede durar
+# un proceso: _agregar_ventanas_horarias solo le ofrece a un proceso las ventanas
+# donde entra entero, así que uno más largo que esto no entra en NINGUNA y queda
+# forzado a excedente —arrastrando, por la cadena de presencia, a todo lo que sigue
+# en su OT—. Los procesos que lo superan se parten en tramos (ver _partir_procesos_largos).
+MAX_MIN_TRAMO = max(fin - ini for ini, fin in TRAMOS_LV_LAB)
+
+# Separación de claves al partir: la secuencia pasa a ser `orden * ESCALA_SECUENCIA + parte`,
+# que mantiene el orden relativo entre procesos y entre partes de un mismo proceso.
+ESCALA_SECUENCIA = 1000
 # ------------------------------------------------------------------
 #Funcion para ventanas semanales en tiempo.
-def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None):
+def calendarios_de_operarios(operarios_orm):
+    """Traduce el horario cargado de cada operario a algo que el solver pueda usar.
+
+    Devuelve {id_operario: {"dias": {0..6}, "desde": min_trabajo, "hasta": min_trabajo}}.
+
+    Los horarios existían en la ficha del operario desde siempre, pero el planificador
+    usaba un único calendario para todos: Argañaraz entra 09:00 y el plan le podía
+    poner trabajo a las 07:00, y nadie trabaja los sábados aunque el modelo los
+    planificaba igual —300 minutos por persona por semana de capacidad que no existe—.
+    """
+    calendarios = {}
+    for o in operarios_orm:
+        dias = {
+            _DIAS[d.strip().upper()]
+            for d in (o.dias_trabajo or "").split(",")
+            if d.strip().upper() in _DIAS
+        }
+        calendarios[o.id] = {
+            "dias": dias or {0, 1, 2, 3, 4},
+            "desde": minutos_modelo_desde_hora(o.hora_inicio) if o.hora_inicio else 0,
+            "hasta": minutos_modelo_desde_hora(o.hora_fin) if o.hora_fin else MIN_LABORAL_DIA,
+            "desde_sab": minutos_modelo_desde_hora(o.hora_inicio, True) if o.hora_inicio else 0,
+            "hasta_sab": minutos_modelo_desde_hora(o.hora_fin, True) if o.hora_fin else MIN_LABORAL_SABADO,
+        }
+    return calendarios
+
+
+def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dates: list[str], fecha_hasta: date | None = None, incluir_sabado: bool = True):
     """
     Construye las ventanas horarias del horizonte.
     Si `fecha_hasta` viene, limita el horizonte a (fecha_hasta - start_date) días INCLUSIVE.
@@ -110,7 +212,7 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
             day_capacity = MIN_LABORAL_DIA
         elif weekday == 5: # Sat
             tramos = TRAMOS_SAB_LAB
-            day_capacity = 300 # Approx
+            day_capacity = MIN_LABORAL_SABADO
         else:
             tramos = [] # Sun
             day_capacity = 0
@@ -195,13 +297,26 @@ def construir_ventanas_semanales(num_semanas: int, start_date: date, blocked_dat
             
             pass 
             
+        elif weekday == 5 and not incluir_sabado:
+            # Nadie trabaja los sábados: el día no aporta capacidad. Antes se generaba
+            # igual y el modelo se creía 300 minutos por persona por semana que no
+            # existen, con lo cual toda fecha prometida salía optimista.
+            logger.info(f"SABADO SIN GENTE: {day_str} (sin ventanas)")
         else:
-             # Add segments for this day
+             # Add segments for this day. Se guarda además el día de la semana y el
+             # tramo dentro del día: hace falta para poder decir "este operario no
+             # trabaja los sábados" o "no entra antes de las 9".
              for ini, fin in tramos:
-                 ventanas.append((current_base_minutes + ini, current_base_minutes + fin))
-             
+                 ventanas.append(Ventana(
+                     ini=current_base_minutes + ini,
+                     fin=current_base_minutes + fin,
+                     weekday=weekday,
+                     ini_dia=ini,
+                     fin_dia=fin,
+                 ))
+
              # Advance base minutes
-             day_duration = MIN_LABORAL_DIA if weekday < 5 else 300
+             day_duration = MIN_LABORAL_DIA if weekday < 5 else MIN_LABORAL_SABADO
              current_base_minutes += day_duration
         
         # Advance calendar
@@ -247,9 +362,92 @@ def _normalizar_procesos(procesos, prioridad_pesos):
     # Horizonte en minutos laborales:
     # suma total de trabajo + margen (1 día laboral)
     total_trabajo = sum(p[5] for p in procesos_norm)
-    H = total_trabajo + 495
+    H = total_trabajo + MIN_LABORAL_DIA
 
     return procesos_norm, H
+
+
+def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=None):
+    """Parte los procesos que no entran en ningún tramo laboral.
+
+    Un proceso de 12 horas no cabe en ninguna ventana, así que el modelo lo dejaba
+    afuera y —por la cadena de presencia— se llevaba puesto todo el resto de la OT.
+    En la corrida de prueba eso dejaba fuera 103 de 241 procesos con la fábrica a
+    menos de la mitad de su capacidad.
+
+    Acá el proceso se corta en partes que sí entran en el horario disponible. Las
+    partes quedan encadenadas (una detrás de la otra) y, en el modelo, atadas al
+    MISMO operario y la MISMA máquina, así que sigue siendo un solo trabajo hecho
+    por una sola persona: lo único que cambia es que ocupa varios tramos.
+
+    El corte es parejo (750 min -> 3 partes de 250, no 270+270+210) para que no
+    quede una última parte mínima colgando y para repartir mejor entre días.
+
+    Devuelve (procesos_norm, cant_op_map, preseleccion_maq, partes), donde `partes`
+    mapea la clave original a las claves nuevas:
+        {(orden_id, secuencia_orig): {"orig": tupla, "claves": [(orden_id, sec_new), ...]}}
+    """
+    cant_op_map = cant_op_map or {}
+    preseleccion_maq = preseleccion_maq or {}
+
+    nuevos, partes = [], {}
+    nuevo_cant_op, nueva_presel = {}, {}
+
+    for proc in procesos_norm:
+        (orden_id, proc_id, secuencia, fecha_prometida, peso, dur,
+         rangos, nombre, usa_maquina, familia, skills) = proc
+
+        n_partes = max(1, math.ceil(dur / MAX_MIN_TRAMO))
+        base = dur // n_partes
+        resto = dur % n_partes
+        duraciones = [base + (1 if i < resto else 0) for i in range(n_partes)]
+        # Con duraciones enteras y reparto parejo ninguna parte puede quedar en 0.
+        duraciones = [d for d in duraciones if d > 0] or [dur]
+
+        clave_orig = (orden_id, secuencia)
+        claves = []
+        for i, d in enumerate(duraciones):
+            sec_nueva = secuencia * ESCALA_SECUENCIA + i
+            nuevos.append((orden_id, proc_id, sec_nueva, fecha_prometida, peso, d,
+                           rangos, nombre, usa_maquina, familia, skills))
+            claves.append((orden_id, sec_nueva))
+
+            if clave_orig in cant_op_map:
+                nuevo_cant_op[(orden_id, sec_nueva)] = cant_op_map[clave_orig]
+            if clave_orig in preseleccion_maq:
+                nueva_presel[(orden_id, sec_nueva)] = preseleccion_maq[clave_orig]
+
+        partes[clave_orig] = {"orig": proc, "claves": claves}
+
+        if len(duraciones) > 1:
+            logger.info(
+                f"PLANIFICADOR: '{nombre}' de la OT {orden_id} dura {dur} min y no entra "
+                f"en un tramo (máx {MAX_MIN_TRAMO}); se parte en {len(duraciones)} tramos "
+                f"de {duraciones} min, mismo operario y misma máquina."
+            )
+
+    return nuevos, nuevo_cant_op, nueva_presel, partes
+
+
+def _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars=None):
+    """Las partes de un proceso partido van al mismo operario y a la misma máquina.
+
+    El encadenamiento temporal y la cadena de presencia ya salen de las restricciones
+    de secuencia, porque las partes son consecutivas en el orden. Lo que falta es que
+    no se repartan entre personas o máquinas distintas: media pieza torneada por uno
+    y media por otro, en dos tornos distintos, no es un plan.
+    """
+    for datos in partes.values():
+        claves = datos["claves"]
+        if len(claves) < 2:
+            continue
+        primera = claves[0]
+        for clave in claves[1:]:
+            model.Add(operario_vars[clave] == operario_vars[primera])
+            model.Add(maq_vars[clave] == maq_vars[primera])
+            for ev_a, ev_b in zip((op_extra_vars or {}).get(primera, []),
+                                  (op_extra_vars or {}).get(clave, [])):
+                model.Add(ev_b == ev_a)
 
 
 def _crear_variables_y_dominios(
@@ -307,8 +505,9 @@ def _crear_variables_y_dominios(
 
     maq_to_rangos = {m_id: set(rs) for (m_id, rs, _n, _cod) in maquinarias}
 
-    # NUEVO: familia/tipo de cada máquina según cod_maquina
-    maq_to_familia = {m_id: familia_from_cod_maquina(_cod) for (m_id, _rs, _n, _cod) in maquinarias}
+    # Familia/tipo de cada máquina. Sale del nombre (el código es una abreviatura
+    # que no matchea ninguna familia) — ver familia_from_maquina.
+    maq_to_familia = {m_id: familia_from_maquina(_n, _cod) for (m_id, _rs, _n, _cod) in maquinarias}
 
     op_domain_vals = {}
     maq_domain_vals = {}
@@ -341,19 +540,26 @@ def _crear_variables_y_dominios(
         # nativa en su perfil (nativas_off).
         es_proceso_maquina = usa_maquina and _get_tipo_proceso(nombre_proc) == "PRODUCCION_MAQUINA"
 
+        # La elegibilidad es la INTERSECCIÓN: rango del operario ∈ rangos del proceso.
+        #
+        # Antes había dos atajos sobre esa regla y los dos mentían:
+        #   - Si el proceso admitía un rango "básico", `operarios_validos` pasaba a ser
+        #     REAL_OP_IDS —o sea, TODOS—. Con 25 procesos que admiten AYUDANTE y 25 que
+        #     admiten INGRESANTE, eso hacía que EMBALADO, PINTURA o REBARBADO se los
+        #     pudiera llevar cualquiera, y en la práctica caían en oficiales.
+        #   - Si admitía un rango "especializado", se quedaba SOLO con ese y descartaba
+        #     los demás rangos que el proceso sí habilita.
+        # Además las constantes estaban desfasadas del catálogo (PEON_ID = 1 es hoy
+        # AYUDANTE, y AYUDANTE_ID = 11 es INGRESANTE), así que el atajo se disparaba
+        # para rangos distintos de los que decía el nombre.
+        #
+        # Para que un rango alto no termine haciendo tareas básicas está la penalización
+        # por sobre-cualificación en la función objetivo: eso ordena preferencias sin
+        # inventar permisos.
         if not rangos_proc:
             operarios_validos = REAL_OP_IDS[:]
         else:
-            requiere_basicos   = any(r in RANGOS_BÁSICOS for r in rangos_proc)
-            requiere_especial  = any(r in RANGOS_ESPECIALIZADOS for r in rangos_proc)
-
-            if requiere_especial:
-                objetivo = set(rangos_proc) & RANGOS_ESPECIALIZADOS
-                operarios_validos = [op_id for (op_id, rango) in operarios if rango in objetivo]
-            elif requiere_basicos:
-                operarios_validos = REAL_OP_IDS[:]
-            else:
-                operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
+            operarios_validos = [op_id for (op_id, rango) in operarios if rango in rangos_proc]
 
         # Sumar a quienes tienen el proceso cargado a mano. Se filtra contra REAL_OP_IDS
         # porque `operarios` sale de operario_rango: un operario sin ningún rango no
@@ -721,11 +927,39 @@ def _agregar_no_solape_maquinas(
         model.AddNoOverlap(pres_intervals)
 
 
+def _setup_de_esta_produccion(proc_setup, proc_prod) -> bool:
+    """True si `proc_setup` es la preparación de `proc_prod`.
+
+    No alcanza con que uno sea SETUP y el que le sigue PRODUCCION_MAQUINA: en la
+    secuencia de una OT puede haber una preparación seguida de un proceso que no
+    tiene nada que ver. Se exige además que compartan familia de máquina, que es
+    lo que hace que "preparar la fresadora" y "fresar" sean efectivamente la misma
+    máquina y la misma persona.
+
+    La familia se deriva del NOMBRE de cada proceso y no del campo ya calculado de
+    la tupla: el paso de herencia le pisa la familia al setup con la de la
+    producción, así que mirar el campo haría que después todo par pareciera
+    relacionado. Con el nombre, los dos lugares deciden igual.
+
+    Tupla: (orden_id, proc_id, secuencia, fecha_prometida, peso, dur, rangos,
+            nombre, usa_maquina, familia_req, skills)
+    """
+    if _get_tipo_proceso(proc_setup[7]) != "SETUP":
+        return False
+    if _get_tipo_proceso(proc_prod[7]) != "PRODUCCION_MAQUINA":
+        return False
+    fam_setup = familia_requerida_from_proceso(proc_setup[7] or "")
+    fam_prod = familia_requerida_from_proceso(proc_prod[7] or "")
+    return bool(fam_setup) and fam_setup == fam_prod
+
+
 def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None):
     """
     Fuerza a que procesos coordinados (ej: Programacion + Produccion)
     usen la misma máquina y, si se pasa `operario_vars`, el MISMO operario
     (el que prepara la máquina es el que la usa). Ver A2 (feedback 06/07).
+
+    Solo para pares realmente relacionados: ver _setup_de_esta_produccion.
     """
     # Agrupar por OT
     ord_ids = set(p[0] for p in procesos_norm)
@@ -746,12 +980,9 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_var
             name_s = sig[7]
             usa_m_s= sig[8]
             
-            # Si el actual es SETUP y el siguiente es PRODUCCIÓN
+            # Si el actual es la preparación del siguiente (misma familia de máquina)
             # Y ambos están marcados para usar máquina
-            tipo_act = _get_tipo_proceso(name_a)
-            tipo_sig = _get_tipo_proceso(name_s)
-            
-            if tipo_act == "SETUP" and tipo_sig == "PRODUCCION_MAQUINA" and usa_m_a and usa_m_s:
+            if _setup_de_esta_produccion(act, sig) and usa_m_a and usa_m_s:
                 # Forzamos igualdad de la variable de máquina
                 model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
                 logger.info(f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y Seq {seq_s} ({name_s}) en OT {oid}")
@@ -777,11 +1008,33 @@ def _agregar_compatibilidad_op_maq(
     maq_to_familia,
     DUMMY_OP_ID,
     DUMMY_MAQ_ID,
+    op_to_rangos=None,
+    skills_manuales=None,
 ):
     """
     Añade restricciones de compatibilidad Operario–Maquinaria
     mediante AddAllowedAssignments.
+
+    `skills_manuales` ({proceso: {operarios}}) también habilita máquina, no solo
+    proceso. Antes acá se miraba únicamente el rango, así que cargarle a alguien la
+    habilidad a mano lo dejaba a mitad de camino: podía tomar el proceso pero ninguna
+    máquina le resultaba compatible, y el trabajo salía "sin máquina" —que es peor que
+    sin asignar, porque una máquina que no se asigna tampoco se reserva—. Era el caso
+    de los tornos CNC: Iván y Pablo tienen el proceso cargado a mano, pero su rango no
+    está en la máquina. Decir "esta persona hace este proceso" y a la vez "no puede
+    tocar la máquina en la que ese proceso se hace" no es una regla, es una grieta.
+    Las máquinas candidatas ya vienen filtradas por los rangos del proceso, así que
+    esto no abre nada que el proceso no habilitara.
+
+    `op_to_rangos` es {id_operario: {rangos}}. Hace falta aparte de `op_to_rango`
+    porque ese es un dict armado sobre una lista de pares (operario, rango): a un
+    operario con varios rangos le sobrevive UNO SOLO, el último que aparece. Con
+    eso, Iván —OFICIAL y OFICIAL CNC— podía quedar registrado solo como OFICIAL y
+    entonces ninguna máquina CNC le resultaba compatible, así que el proceso se iba
+    a la máquina dummy. Para la compatibilidad hay que mirar TODOS sus rangos.
     """
+    op_to_rangos = op_to_rangos or {}
+    skills_manuales = skills_manuales or {}
     for (orden_id, proc_id, secuencia, _fp,
         _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
 
@@ -800,6 +1053,7 @@ def _agregar_compatibilidad_op_maq(
             continue
 
         needs = set(rangos_proc)
+        con_manual = set(skills_manuales.get(proc_id, ()))
         allowed_pairs = []
 
         for op_id in ops_dom:
@@ -809,7 +1063,7 @@ def _agregar_compatibilidad_op_maq(
                     allowed_pairs.append([DUMMY_OP_ID, DUMMY_MAQ_ID])
                 continue
 
-            rango_op = op_to_rango.get(op_id)
+            rangos_op = op_to_rangos.get(op_id) or {op_to_rango.get(op_id)}
 
             for m_id in maqs_dom:
                 # dummy-maq → permitido para cualquier operario
@@ -820,9 +1074,12 @@ def _agregar_compatibilidad_op_maq(
                 if familia_req:
                     if maq_to_familia.get(m_id) != familia_req:
                         continue
-                    
+
                 mrangos = maq_to_rangos.get(m_id, set())
-                if rango_op in mrangos and (not needs or (needs & mrangos)):
+                # La habilidad cargada a mano vale como habilitación en la máquina:
+                # es una afirmación explícita de que esa persona hace ese proceso.
+                habilitado = bool(rangos_op & mrangos) or (op_id in con_manual)
+                if habilitado and (not needs or (needs & mrangos)):
                     allowed_pairs.append([op_id, m_id])
 
         # Evitar conjunto vacío
@@ -849,14 +1106,15 @@ def _agregar_funcion_objetivo(
     maq_to_rangos,
     atraso_mult_por_prioridad,
     RANGOS_BÁSICOS,
-    PEON_ID,
-    AYUDANTE_ID,
+    _AYUDANTE_ID,      # se conservan por compatibilidad de firma; la penalización
+    _INGRESANTE_ID,    # de sobre-cualificación ahora mira el rango del operario
     PENAL_OVERQUAL,
     PENAL_DUMMY,
     PENAL_DUMMY_MAQ,
     H,
     presente_vars=None,
     op_extra_vars=None,
+    op_to_rangos=None,
 ):
     # Pesos de prioridad para excedentes (más agresivo: prio 1 vale 100x prio 5)
     PESO_EXCED_POR_PRIO = {1: 10000, 2: 5000, 3: 1000, 4: 300, 5: 100}
@@ -921,6 +1179,9 @@ def _agregar_funcion_objetivo(
         # (bool_pick, penalización) — se gatean por `presente` más abajo, una vez que
         # existe el helper. Sin gatear, un proceso excedente pagaba prioridad igual.
         penal_prioridad = []
+        # Tarea que admite rangos básicos: preferimos que la haga alguien de rango
+        # básico y no un oficial (ver PENAL_OVERQUAL más abajo).
+        tarea_basica = bool(rangos_proc) and any(rid in RANGOS_BÁSICOS for rid in rangos_proc)
         for op_id in op_to_rango.keys():
             if op_id == 999999:  # dummy, lo tratamos aparte
                 continue
@@ -935,6 +1196,16 @@ def _agregar_funcion_objetivo(
             penal = _penal_prioridad((op_skill_levels or {}).get(op_id))
             if penal:
                 penal_prioridad.append((pres, penal))
+
+            # Sobre-cualificación: la tarea admite rango básico y esta persona no tiene
+            # ninguno. Se mira el RANGO del operario; antes se comparaba `op_var` (que
+            # lleva ids de operario) contra PEON_ID/AYUDANTE_ID (que son ids de RANGO),
+            # así que la condición no significaba nada y la penalización caía siempre
+            # igual sobre todos los candidatos.
+            if tarea_basica:
+                rangos_op = (op_to_rangos or {}).get(op_id) or {op_to_rango.get(op_id)}
+                if not (rangos_op & RANGOS_BÁSICOS):
+                    penal_prioridad.append((pres, PENAL_OVERQUAL))
 
         pick_dummy = model.NewBoolVar(f"pick_op_{orden_id}_{secuencia}_dummy")
         model.Add(op_var == 999999).OnlyEnforceIf(pick_dummy)
@@ -1041,22 +1312,8 @@ def _agregar_funcion_objetivo(
             total_obj.append((ev_eff, PENAL_DUMMY))
 
 
-        # Penalización por sobre-cualificación en tareas básicas
-        if rangos_proc and any(rid in RANGOS_BÁSICOS for rid in rangos_proc):
-            is_over = model.NewBoolVar(f"overq_{orden_id}_{secuencia}")
-            not_b1 = model.NewBoolVar(f"not_peon_{orden_id}_{secuencia}")
-            not_b2 = model.NewBoolVar(f"not_ayud_{orden_id}_{secuencia}")
-            model.Add(op_var != PEON_ID).OnlyEnforceIf(not_b1)
-            model.Add(op_var == PEON_ID).OnlyEnforceIf(not_b1.Not())
-            model.Add(op_var != AYUDANTE_ID).OnlyEnforceIf(not_b2)
-            model.Add(op_var == AYUDANTE_ID).OnlyEnforceIf(not_b2.Not())
-            model.Add(is_over <= not_b1)
-            model.Add(is_over <= not_b2)
-            tmp = model.NewIntVar(0, 2, f"tmp_over_{orden_id}_{secuencia}")
-            model.Add(tmp == not_b1 + not_b2)
-            model.Add(is_over >= tmp - 1)
-            over_eff = _gate_bool(is_over, f"over_eff_{orden_id}_{secuencia}")
-            total_obj.append((over_eff, PENAL_OVERQUAL))
+        # (la penalización por sobre-cualificación se arma arriba, junto a los picks
+        #  de operario, porque necesita el rango de cada candidato)
 
         # --- Término dominante: excedente ---
         if presente is not None:
@@ -1068,16 +1325,22 @@ def _agregar_funcion_objetivo(
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
 
-def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
+def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_dates=None):
     """
     Convierte minutos de trabajo lógicos a una fecha real del calendario físico.
-    Alineado a jornada física de 07:00 a 18:00 con 105 minutos muertos.
+
+    La jornada sale de TRAMOS_LV_LAB / TRAMOS_SAB_LAB, no de números sueltos: es la
+    misma que usa el solver para armar las ventanas. Antes acá había una copia con
+    555 y 105 escritos a mano, así que un día entero de trabajo caía a las 18:00
+    —dos horas después de que el taller cierra— y la fecha prometida al cliente
+    heredaba ese error.
     """
     from datetime import timedelta
-    
-    # Load blocked dates first
-    config_repo = ConfigRepository()
-    blocked_dates = set(config_repo.get_blocked_dates())
+
+    # Los días bloqueados llegan de afuera (los lee el servicio, que sí tiene sesión de
+    # base). Antes esta función abría el archivo de configuración cada vez que la
+    # llamaban: dos lecturas de disco POR FILA del resultado.
+    blocked_dates = set(blocked_dates or ())
 
     ahora = ahora_ref if ahora_ref else datetime.now()
     inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
@@ -1099,38 +1362,31 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None):
         wd = tiempo_actual.weekday()
         
         if wd < 5:
-            capacidad_hoy = 555
+            capacidad_hoy = MIN_LABORAL_DIA
         elif wd == 5:
-            capacidad_hoy = 300
+            capacidad_hoy = MIN_LABORAL_SABADO
         else:
             capacidad_hoy = 0
-            
+
         if capacidad_hoy == 0:
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             continue
-            
+
         if minutos_restantes >= capacidad_hoy:
             minutos_restantes -= capacidad_hoy
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
         else:
-            if wd < 5:
-                if minutos_restantes <= 120:
-                    tiempo_actual += timedelta(minutes=minutos_restantes)
-                elif minutos_restantes <= 285:
-                    tiempo_actual += timedelta(minutes=minutos_restantes + 15)
-                else:
-                    tiempo_actual += timedelta(minutes=minutos_restantes + 105)
-            elif wd == 5:
-                tiempo_actual += timedelta(minutes=minutos_restantes)
-                
+            tiempo_actual += timedelta(
+                minutes=minutos_restantes + minutos_muertos_del_dia(minutos_restantes, es_sabado=(wd == 5))
+            )
             minutos_restantes = 0
-            
+
     return tiempo_actual.isoformat()
 
 
-def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None):
+def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operario_vars,maq_vars,op_to_rango, DUMMY_OP_ID,DUMMY_MAQ_ID, start_time_ref, presente_vars=None, op_extra_vars=None, partes=None, blocked_dates=None):
     """
     Transforma la solución CP-SAT en la lista de dicts que tu servicio guarda en BD.
     Cada resultado incluye `excedente`: True si el proceso no entra en el horizonte (presente=0).
@@ -1138,20 +1394,38 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
     Procesos que requieren N operarios: emiten una fila por operario asignado. La fila
     principal conserva la máquina; las filas de los operarios adicionales van sin máquina
     (comparten la del proceso) para no marcar la misma máquina como ocupada N veces.
+
+    `partes` mapea cada proceso original a las claves de sus tramos (ver
+    _partir_procesos_largos). Un proceso partido vuelve a salir como UNA fila: arranca
+    cuando arranca el primer tramo y termina cuando termina el último. Que por dentro
+    hayan sido tres tirones de 250 minutos es cosa del modelo, no del plan que se lee.
     """
     resultados = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        for (orden_id, proc_id, secuencia, fecha_prometida,
-            peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria,_familia_req, _skills) in procesos_norm:
+        if partes is None:
+            partes = {
+                (p[0], p[2]): {"orig": p, "claves": [(p[0], p[2])]}
+                for p in procesos_norm
+            }
 
-            op_id  = solver.Value(operario_vars[(orden_id, secuencia)])
-            maq_id = solver.Value(maq_vars[(orden_id, secuencia)])
+        for clave_orig, datos in partes.items():
+            (orden_id, proc_id, _sec_modelo, fecha_prometida,
+             peso_prioridad, dur, rangos_proc, nombre_proceso, usa_maquinaria,
+             _familia_req, _skills) = datos["orig"]
+            secuencia = clave_orig[1]
+            claves = datos["claves"]
+            primera = claves[0]
 
-            inicio_m = solver.Value(inicio_vars[(orden_id, secuencia)])
-            fin_m = solver.Value(fin_vars[(orden_id, secuencia)])
+            op_id  = solver.Value(operario_vars[primera])
+            maq_id = solver.Value(maq_vars[primera])
+
+            inicio_m = min(solver.Value(inicio_vars[k]) for k in claves)
+            fin_m = max(solver.Value(fin_vars[k]) for k in claves)
 
             if presente_vars is not None:
-                excedente = (solver.Value(presente_vars[(orden_id, secuencia)]) == 0)
+                # Si algún tramo no entra, el proceso no se puede completar: va entero
+                # a excedentes. Dejarlo como planificado a medias sería mentir.
+                excedente = any(solver.Value(presente_vars[k]) == 0 for k in claves)
             else:
                 excedente = False
 
@@ -1160,8 +1434,8 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 if isinstance(fecha_prometida, (date, datetime))
                 else (fecha_prometida if isinstance(fecha_prometida, str) else None)
             )
-            fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref)
-            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref)
+            fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref, blocked_dates)
+            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref, blocked_dates)
 
             resultados.append({
                 "orden_id": orden_id,
@@ -1182,11 +1456,18 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "excedente": excedente,
                 "fecha_inicio_estimada": fecha_ini_est,
                 "fecha_fin_estimada": fecha_fin_est,
+                # En cuántos tramos se tuvo que repartir (1 = entró de una).
+                "cantidad_tramos": len(claves),
+                # Trabajo que hace un tercero. Se planifica igual —ocupa lugar en la
+                # secuencia de la OT y hay que esperarlo— pero no lo hace nadie del
+                # taller, así que salir "sin asignar" no es un problema a resolver:
+                # es lo que corresponde. Sin esta marca se confunde con un hueco.
+                "tercerizado": _get_tipo_proceso(nombre_proceso) == "ADMIN",
             })
 
             # Operarios adicionales del proceso (slots extra). Una fila por cada operario
             # real asignado; los slots que quedaron en DUMMY (sin gente) se omiten.
-            for ev in (op_extra_vars or {}).get((orden_id, secuencia), []):
+            for ev in (op_extra_vars or {}).get(primera, []):
                 ev_id = solver.Value(ev)
                 if ev_id == DUMMY_OP_ID:
                     continue
@@ -1232,24 +1513,46 @@ def _split_resultados(resultados: list[dict]) -> tuple[list[dict], list[dict]]:
     return planificados, excedentes
 
 
-def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None):
+def _ventana_prohibida_para(cal, v: "Ventana") -> bool:
+    """True si el calendario de ese operario no le permite trabajar en esa ventana."""
+    if v.weekday not in cal["dias"]:
+        return True
+    if v.weekday == 5:
+        desde, hasta = cal["desde_sab"], cal["hasta_sab"]
+    else:
+        desde, hasta = cal["desde"], cal["hasta"]
+    # La ventana tiene que caer entera dentro del horario de la persona.
+    return v.ini_dia < desde or v.fin_dia > hasta
+
+
+def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas, presente_vars=None,
+                               operario_vars=None, calendarios=None):
     """
     Obliga a que cada proceso:
     - empiece dentro de una ventana laboral
     - termine antes de que esa ventana cierre
     Si presente_vars está, solo aplica cuando el proceso está presente.
     Si un proceso NO entra en ninguna ventana del horizonte → presente = 0.
+
+    Con `calendarios` ({id_operario: horario}) se agrega además el horario de cada
+    persona: si una ventana cae fuera de su turno o en un día que no trabaja, ese
+    operario no puede quedar asignado a un proceso que caiga ahí. Solo se generan
+    restricciones para quienes tienen un horario distinto del general —hoy es uno
+    solo— así que el modelo casi no crece.
     """
+    calendarios = calendarios or {}
 
     for (orden_id, proc_id, secuencia, *_resto) in procesos_norm:
         key = (orden_id, secuencia)
         start = inicio_vars[key]
         dur = dur_map[key]
+        op_var = (operario_vars or {}).get(key)
 
         # Un booleano por ventana donde el proceso podría caber
         en_ventana = []
 
-        for idx, (v_ini, v_fin) in enumerate(ventanas):
+        for idx, v in enumerate(ventanas):
+            v_ini, v_fin = v.ini, v.fin
             if dur > (v_fin - v_ini):
                 continue  # No cabe en esta ventana → no la considero
 
@@ -1258,6 +1561,12 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
             model.Add(start >= v_ini).OnlyEnforceIf(b)
             model.Add(start < v_fin).OnlyEnforceIf(b)
             en_ventana.append(b)
+
+            # Nadie que no trabaje en ese horario puede quedarse con este proceso.
+            if op_var is not None:
+                for op_id, cal in calendarios.items():
+                    if _ventana_prohibida_para(cal, v):
+                        model.Add(op_var != op_id).OnlyEnforceIf(b)
 
         if presente_vars is not None:
             presente = presente_vars[key]
@@ -1278,12 +1587,11 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None):
     model = cp_model.CpModel()
 
-    # Init Config
-    config_repo = ConfigRepository()
-    blocked_dates = config_repo.get_blocked_dates()
+    # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
+    blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
 
     # Determine start date
@@ -1315,12 +1623,17 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     atraso_mult_por_prioridad = {1: 1000, 2: 800, 3: 500, 4: 300, 5: 200}
 
     # IDs de rangos (los que ya usabas)
-    PEON_ID = 1
-    AYUDANTE_ID = 11
+    # IDs de rangos según el catálogo actual (tabla `rango`). Los nombres viejos
+    # (PEON_ID = 1, AYUDANTE_ID = 11) quedaron de un catálogo anterior y no
+    # coincidían con lo que hay: 1 es AYUDANTE y 11 es INGRESANTE.
+    AYUDANTE_ID = 1
+    INGRESANTE_ID = 11
     OFICIAL_ESP_ID = 8
     TECNICO_ID = 14
 
-    RANGOS_BÁSICOS = {PEON_ID, AYUDANTE_ID}
+    # Solo se usan para la penalización por sobre-cualificación: la elegibilidad es
+    # siempre la intersección rango operario × rangos del proceso.
+    RANGOS_BÁSICOS = {AYUDANTE_ID, INGRESANTE_ID}
     RANGOS_ESPECIALIZADOS = {OFICIAL_ESP_ID, TECNICO_ID}
 
     PENAL_OVERQUAL = 50
@@ -1330,16 +1643,28 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # ---- Normalizar procesos ----
     procesos_norm, H_local = _normalizar_procesos(procesos, prioridad_pesos)
 
+    # ---- Partir los que no entran en un tramo laboral ----
+    # H no cambia: la suma total de trabajo es la misma, solo se reparte en más piezas.
+    procesos_norm, cant_op_map, preseleccion_maq, partes = _partir_procesos_largos(
+        procesos_norm, cant_op_map, preseleccion_maq
+    )
+
     # ---- Coordinación de dominios: SETUP hereda de PRODUCCIÓN ----
-    # Si un SETUP precede a una PRODUCCIÓN, debe usar el mismo dominio de máquinas
+    # Si un SETUP precede a una PRODUCCIÓN de la MISMA familia de máquina, comparten
+    # dominio: preparar la fresadora y fresar son la misma máquina y la misma persona.
+    #
+    # La condición de familia no estaba y alcanzaba con que fueran consecutivos en la
+    # secuencia. Eso emparejaba cosas que no tienen nada que ver: en la OT 7541,
+    # "PREPARACION DE SOLDADORA MIG" (rangos MEDIO OFICIAL / OPERARIO CALIFICADO) estaba
+    # seguida de "TORNO T2", así que heredaba el rango OFICIAL del torno y la preparación
+    # de la soldadora se la terminaba llevando el tornero.
     procesos_norm_list = [list(p) for p in procesos_norm]
     for oid in set(p[0] for p in procesos_norm):
         idxs = sorted([i for i, p in enumerate(procesos_norm) if p[0] == oid], key=lambda i: procesos_norm[i][2])
         for j in range(len(idxs)-1):
             idx_a = idxs[j]
             idx_s = idxs[j+1]
-            if (_get_tipo_proceso(procesos_norm[idx_a][7]) == "SETUP" and 
-                _get_tipo_proceso(procesos_norm[idx_s][7]) == "PRODUCCION_MAQUINA"):
+            if _setup_de_esta_produccion(procesos_norm[idx_a], procesos_norm[idx_s]):
                 # Heredar familia (idx 9) y rangos (idx 6)
                 procesos_norm_list[idx_a][9] = procesos_norm[idx_s][9]
                 procesos_norm_list[idx_a][6] = procesos_norm[idx_s][6]
@@ -1389,12 +1714,38 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     _agregar_distintos_operarios(model, operario_vars, op_extra_vars, DUMMY_OP_ID)
     _agregar_no_solape_operarios(model, REAL_OP_IDS, inicio_vars, fin_vars, dur_map, operario_vars, presente_vars=presente_vars, op_extra_vars=op_extra_vars)
     _agregar_no_solape_maquinas(model,REAL_MAQ_IDS,procesos_norm, inicio_vars,fin_vars,dur_map,maq_vars, presente_vars=presente_vars)
-    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID)
+    # Todos los rangos de cada operario (op_to_rango se queda con uno solo).
+    op_to_rangos = {}
+    for _op_id, _r_id in operarios:
+        op_to_rangos.setdefault(_op_id, set()).add(_r_id)
+
+    _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales)
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
+    _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----
-    num_semanas = math.ceil(H / MIN_LABORAL_SEMANA) + 1
-    ventanas = construir_ventanas_semanales(num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta)
-    logger.info(f"PLANIFICADOR: ventanas generadas = {len(ventanas)} (fecha_hasta={fecha_hasta})")
+    # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar
+    # más semanas para el mismo trabajo; si lo dejáramos como antes, el horizonte se
+    # quedaría corto y sobrarían procesos por una razón inventada.
+    # Solo los que entran al plan: `calendarios` viene de todos los operarios, y los
+    # que no están disponibles no tienen ni dominio ni no-solape, así que restringirles
+    # ventanas sería agregar restricciones sobre alguien que no existe para el modelo.
+    calendarios = {op: c for op, c in (calendarios or {}).items() if op in set(REAL_OP_IDS)}
+    hay_sabado = any(5 in c["dias"] for c in calendarios.values()) if calendarios else True
+    min_semana = 5 * MIN_LABORAL_DIA + (MIN_LABORAL_SABADO if hay_sabado else 0)
+
+    num_semanas = math.ceil(H / min_semana) + 1
+    ventanas = construir_ventanas_semanales(
+        num_semanas, start_date, blocked_dates, fecha_hasta=fecha_hasta, incluir_sabado=hay_sabado
+    )
+    con_horario_propio = sum(
+        1 for c in calendarios.values()
+        if c["desde"] > 0 or c["hasta"] < MIN_LABORAL_DIA or c["dias"] != {0, 1, 2, 3, 4}
+    )
+    logger.info(
+        f"PLANIFICADOR: ventanas generadas = {len(ventanas)} (fecha_hasta={fecha_hasta}, "
+        f"sábados={'sí' if hay_sabado else 'no, nadie trabaja'}, "
+        f"operarios con horario propio={con_horario_propio})"
+    )
 
     # ---- Restricciones de ventanas horarias ----
     _agregar_ventanas_horarias(
@@ -1404,6 +1755,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         dur_map,
         ventanas,
         presente_vars=presente_vars,
+        operario_vars=operario_vars,
+        calendarios=calendarios,
     )
 
     # ---- Función objetivo ----
@@ -1418,14 +1771,15 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         maq_to_rangos,
         atraso_mult_por_prioridad,
         RANGOS_BÁSICOS,
-        PEON_ID,
         AYUDANTE_ID,
+        INGRESANTE_ID,
         PENAL_OVERQUAL,
         PENAL_DUMMY,
         PENAL_DUMMY_MAQ,
         H,
         presente_vars=presente_vars,
         op_extra_vars=op_extra_vars,
+        op_to_rangos=op_to_rangos,
     )
 
 
@@ -1454,6 +1808,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         ahora_ref,
         presente_vars=presente_vars,
         op_extra_vars=op_extra_vars,
+        partes=partes,
+        blocked_dates=blocked_dates,
     )
 
     return resultados
@@ -1480,6 +1836,25 @@ def familia_from_cod_maquina(cod: str) -> str:
     if c.startswith("RECTIFICADORA"): return "RECTIFICADORA"
     if c.startswith("OXICORTE") or c.startswith("SOPLETE"): return "OXICORTE"
     return ""
+
+def familia_from_maquina(nombre: str, cod: str) -> str:
+    """Familia de la máquina, sacada del NOMBRE y no del código.
+
+    `cod_maquina` son abreviaturas ("TORY-1", "FCNCY-1", "PLE-1", "GUI-1") y
+    familia_from_cod_maquina compara contra palabras enteras ("TORNO",
+    "FRESADORA"), así que devolvía "" para las 31 máquinas. Con la familia vacía,
+    el filtro por familia de _crear_variables_y_dominios dejaba CERO candidatos y
+    todo proceso de producción terminaba en la máquina dummy: el plan salía sin
+    máquina y, como el no-solape solo corre sobre máquinas reales, dos OTs podían
+    quedar agendadas en el mismo torno a la misma hora.
+
+    El nombre sí es descriptivo ("TORNO 1", "FRESADORA CNC"), y clasificarlo es
+    exactamente lo que ya hace familia_requerida_from_proceso. Se reusa esa para
+    que máquina y proceso hablen el mismo idioma —si mañana se agrega una familia,
+    entra por los dos lados a la vez—. El código queda como fallback por si alguna
+    máquina tiene un nombre poco claro pero un código explícito.
+    """
+    return familia_requerida_from_proceso(nombre or "") or familia_from_cod_maquina(cod or "")
 
 def familia_requerida_from_proceso(nombre_proc: str) -> str:
     n = _norm(nombre_proc)
@@ -1620,6 +1995,10 @@ async def planificar(
     skills_manuales = await repo_skill.get_manuales_por_proceso()
     # 🔹 Quién sabe interpretar planos (id_operario -> bool)
     op_planos = await repo_operario.find_interpreta_planos()
+    # 🔹 Horario de cada uno: turno y días que trabaja.
+    calendarios = calendarios_de_operarios(await repo_operario.find_all())
+    # 🔹 Feriados / días de mantenimiento, ahora desde la base.
+    blocked_dates = await DiaBloqueadoRepository(db).listar()
 
     # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
     if not preview and plan:
@@ -1634,8 +2013,10 @@ async def planificar(
 
     operarios = await repo_operario.find_with_rangos()
 
-    # OTs con plano adjunto: sus procesos exigen saber interpretar planos.
-    ots_con_plano = {o.id for o in ordenes if getattr(o, "tiene_plano", 0)}
+    # OTs con plano REALMENTE adjunto: sus procesos exigen saber interpretar planos.
+    # Se mira la tabla `plano`, no la bandera `tiene_plano` del legacy — ver
+    # PlanoRepository.find_ordenes_con_plano.
+    ots_con_plano = await PlanoRepository(db).find_ordenes_con_plano()
 
     # Cargar maquinarias (con rangos)
     maquinarias_orm = await repo_maquinaria.find_with_rangos()
@@ -1769,19 +2150,43 @@ async def planificar(
         op_planos,
         ots_con_plano,
         skills_manuales,
+        calendarios,
+        blocked_dates,
     )
 
     planificados, excedentes = _split_resultados(resultados)
 
+    # Diagnóstico de lo que traba el plan. El import va acá adentro porque el módulo
+    # de diagnóstico usa helpers de este archivo y a nivel de módulo sería circular.
+    from backend.application.DiagnosticoPlanificacion import construir_diagnosticos
+
+    try:
+        rangos_all = await RangoRepository(db).find_all()
+        operarios_all = await repo_operario.find_all()
+        diagnosticos = construir_diagnosticos(
+            procesos_para_solver,
+            operarios,
+            maquinarias,
+            resultados,
+            nombre_rango={r.id: r.nombre for r in rangos_all},
+            nombre_operario={o.id: f"{o.nombre} {o.apellido}".strip() for o in operarios_all},
+            skills_manuales=skills_manuales,
+            nativas_off=nativas_off,
+        )
+    except Exception as e:
+        # Un diagnóstico que falla no puede tumbar una planificación que salió bien.
+        logger.error(f"Service - No se pudieron construir los diagnósticos: {e}")
+        diagnosticos = []
+
     if preview:
-        return {"planificados": planificados, "excedentes": excedentes}
+        return {"planificados": planificados, "excedentes": excedentes, "diagnosticos": diagnosticos}
 
     # Marcar como forzado_fuera_rango los procesos cuyas órdenes el usuario decidió forzar
     for r in planificados:
         r["forzado_fuera_rango"] = (r["orden_id"] in forzar_set)
 
     saved = await repo_planificacion.insertar_planificacion_lote(planificados)
-    return {"planificados": saved, "excedentes": excedentes}
+    return {"planificados": saved, "excedentes": excedentes, "diagnosticos": diagnosticos}
 
 async def planificar_pendientes(
         repo_orden,
@@ -1812,9 +2217,11 @@ async def planificar_pendientes(
 
         operarios = await repo_operario.find_with_rangos()
         op_planos = await repo_operario.find_interpreta_planos()
+        calendarios = calendarios_de_operarios(await repo_operario.find_all())
+        blocked_dates = await DiaBloqueadoRepository(db).listar()
 
-        # OTs con plano adjunto: sus procesos exigen saber interpretar planos.
-        ots_con_plano = {o.id for o in ordenes if getattr(o, "tiene_plano", 0)}
+        # OTs con plano REALMENTE adjunto (tabla `plano`, no la bandera del legacy).
+        ots_con_plano = await PlanoRepository(db).find_ordenes_con_plano()
 
         maquinarias_orm = await repo_maquinaria.find_with_rangos()
         #maquinarias = [
@@ -1885,6 +2292,8 @@ async def planificar_pendientes(
             op_planos,
             ots_con_plano,
             skills_manuales,
+            calendarios,
+            blocked_dates,
         )
 
         planificados, excedentes = _split_resultados(resultados)

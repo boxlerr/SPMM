@@ -93,6 +93,8 @@ export default function OperacionesPage() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [previewResults, setPreviewResults] = useState<any[]>([])
   const [excedentesResults, setExcedentesResults] = useState<any[]>([])
+  // Qué traba el plan y cómo se destraba: lo calcula el backend en cada vista previa.
+  const [diagnosticosPlan, setDiagnosticosPlan] = useState<any[]>([])
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
@@ -914,6 +916,7 @@ export default function OperacionesPage() {
 
       setPreviewResults(enrichedResults);
       setExcedentesResults(enrichedExcedentes);
+      setDiagnosticosPlan(Array.isArray(responseData?.diagnosticos) ? responseData.diagnosticos : []);
 
       // Calculate current operator loads for the WEEK of the FIRST PLANNED ITEM
       const loads: Record<number, { current: number, new: number }> = {};
@@ -1041,6 +1044,7 @@ export default function OperacionesPage() {
 
       setPreviewResults(planificadosRaw.map(enrich));
       setExcedentesResults(excedentesRaw.map(enrich));
+      setDiagnosticosPlan(Array.isArray(responseData?.diagnosticos) ? responseData.diagnosticos : []);
 
       // Distinguimos:
       //   - "sin lugar" reales: OTs excedentes que el usuario NO forzó (decisión pendiente).
@@ -2044,6 +2048,7 @@ export default function OperacionesPage() {
         planningRange={planningRange}
         onRecalculate={handleRecalculatePreview}
         isCalculating={isPreviewCalculating}
+        diagnosticos={diagnosticosPlan}
       />
       {activeTab === "lista_planificacion" && (
         <ConfirmationDialog

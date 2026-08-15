@@ -132,11 +132,20 @@ class OperarioRepository:
 
     async def find_with_rangos(self):
         """
-        Devuelve una lista de tuplas (id_operario, id_rango)
+        Devuelve una lista de tuplas (id_operario, id_rango).
+
+        Solo operarios DISPONIBLES: es la lista que arma el universo del
+        planificador. El filtro no estaba, así que marcar a alguien como no
+        disponible (vacaciones, licencia, o los "VACANTE ... A CUBRIR" que son
+        puestos y no personas) no tenía ningún efecto y el plan le seguía cargando
+        trabajo.
         """
         try:
             result = await self.db.execute(
-                select(OperarioRango).options(joinedload(OperarioRango.operario))
+                select(OperarioRango)
+                .join(OperarioRango.operario)
+                .where(Operario.disponible.is_(True))
+                .options(joinedload(OperarioRango.operario))
             )
             relaciones = result.scalars().all()
             return [(r.id_operario, r.id_rango) for r in relaciones]

@@ -20,6 +20,7 @@ import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
 import { toast } from "sonner";
 import { API_URL } from "@/config";
+import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -42,6 +43,8 @@ interface PlanificacionResult {
     fecha_prometida?: string | null;
     sin_asignar: boolean;
     sin_maquinaria: boolean;
+    /** Lo hace un tercero: va sin operario y sin máquina a propósito. */
+    tercerizado?: boolean;
     secuencia?: number;
     fecha_inicio_estimada?: string;
     fecha_fin_estimada?: string;
@@ -86,6 +89,8 @@ interface PlanningPreviewModalProps {
     onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[], procesosPorOrden?: Record<number, number[]>) => void;
     /** True mientras se está recalculando (para mostrar spinner). */
     isCalculating?: boolean;
+    /** Qué traba este plan y cómo se destraba (lo calcula el backend). */
+    diagnosticos?: Diagnostico[];
 }
 
 export function PlanningPreviewModal({
@@ -104,6 +109,7 @@ export function PlanningPreviewModal({
     planningRange = {},
     onRecalculate,
     isCalculating = false,
+    diagnosticos = [],
 }: PlanningPreviewModalProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -966,6 +972,19 @@ export function PlanningPreviewModal({
                             por el sidebar de Carga de Operarios. Con overflow-auto el navegador
                             maneja ambos ejes y muestra scrollbar cuando hace falta. */}
                         <div className="flex-1 overflow-auto">
+                            {/* Qué traba el plan y cómo se destraba. Va primero de todo: es lo que
+                                puede cambiar la decisión de guardar o de ir a arreglar un dato antes
+                                de planificar.
+
+                                Queda AFUERA del contenedor de la tabla a propósito: ese fuerza
+                                min-w 1000px para las columnas, y adentro los párrafos se estiraban
+                                hasta ahí y quedaban cortados por el panel de Carga de Operarios.
+                                `sticky left-0` lo mantiene a la vista cuando la tabla se scrollea
+                                en horizontal. */}
+                            <div className="sticky left-0 w-full">
+                                <DiagnosticosPlan diagnosticos={diagnosticos} />
+                            </div>
+
                             <div className="min-w-[1000px] p-0 pr-2" style={{ zoom: zoom / 100 }}>
                                 {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
                                     Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}
@@ -1354,10 +1373,25 @@ export function PlanningPreviewModal({
                                                                                             <span className="font-medium text-gray-800">{capitalize(effectiveItem.nombre_proceso)}</span>
                                                                                             <div className="flex items-center gap-2 mt-0.5">
                                                                                                 <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
+                                                                                                {/* Tercerizado: sale sin operario y sin máquina a propósito, porque
+                                                                                                    lo hace un tercero. Sin esta marca se lee como un hueco por
+                                                                                                    falta de rango, que es un problema distinto. */}
+                                                                                                {effectiveItem.tercerizado && (
+                                                                                                    <span
+                                                                                                        className="text-xs text-violet-700 bg-violet-50 border border-violet-200 px-1.5 rounded font-medium"
+                                                                                                        title="Lo hace un tercero. Ocupa lugar en la secuencia de la OT, pero no lo hace nadie del taller: por eso va sin operario y sin máquina."
+                                                                                                    >
+                                                                                                        Tercerizado
+                                                                                                    </span>
+                                                                                                )}
                                                                                             </div>
                                                                                             {/* A1 (feedback 06/07): motivo SIEMPRE visible en procesos sin operario asignado,
-                                                                                                aunque la orden se haya planificado (antes solo quedaba el selector vacío, sin explicación). */}
-                                                                                            {!effectiveItem.id_operario && (() => {
+                                                                                                aunque la orden se haya planificado (antes solo quedaba el selector vacío, sin explicación).
+
+                                                                                                En los tercerizados no va: ahí no falta nadie ni falta un rango, lo
+                                                                                                hace un tercero. Marcarlo en rojo como si fuera un problema manda a
+                                                                                                buscar un rango que no hay que cargar. */}
+                                                                                            {!effectiveItem.id_operario && !effectiveItem.tercerizado && (() => {
                                                                                                 const diag = diagnoseUnfitProcess(item);
                                                                                                 return (
                                                                                                     <div className="mt-1 flex items-start gap-1 text-[11px] text-red-600 leading-tight" title={diag.hint}>

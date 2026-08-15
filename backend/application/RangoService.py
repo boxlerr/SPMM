@@ -50,6 +50,42 @@ class RangoService:
         mapa = await self.repository.find_maquinarias_por_rango()
         return ResponseDTO(status=True, data=mapa)
 
+    async def obtenerCobertura(self):
+        """Cobertura rango ↔ maquinaria, para mostrar los huecos en Recursos."""
+        try:
+            logger.info("Service - Cobertura de rangos.")
+            data = await self.repository.find_cobertura()
+            return ResponseDTO(status=True, data=jsonable_encoder(data))
+        except InfrastructureException as e:
+            logger.error(f"Service - Error de infraestructura en cobertura: {e}")
+            raise ApplicationException("No se pudo calcular la cobertura de rangos.") from e
+
+    async def modificarRangosDeMaquinaria(self, id_maquinaria: int, ids_rango: list[int]):
+        """Qué rangos habilitan una máquina, editado desde la máquina."""
+        try:
+            from backend.domain.Rango import Rango as _R
+            await self._validar_ids(_R, ids_rango, "rango")
+            await self.repository.set_rangos_de_maquinaria(id_maquinaria, ids_rango)
+            return ResponseDTO(status=True, data={"id_maquinaria": id_maquinaria, "rangos": ids_rango})
+        except (BusinessException, NotFoundException):
+            raise
+        except InfrastructureException as e:
+            logger.error(f"Service - Error al actualizar rangos de la maquinaria: {e}")
+            raise ApplicationException("No se pudieron actualizar los rangos de la maquinaria.") from e
+
+    async def modificarRangosDeProceso(self, id_proceso: int, ids_rango: list[int]):
+        """Qué rangos habilitan un proceso, editado desde el proceso."""
+        try:
+            from backend.domain.Rango import Rango as _R
+            await self._validar_ids(_R, ids_rango, "rango")
+            await self.repository.set_rangos_de_proceso(id_proceso, ids_rango)
+            return ResponseDTO(status=True, data={"id_proceso": id_proceso, "rangos": ids_rango})
+        except (BusinessException, NotFoundException):
+            raise
+        except InfrastructureException as e:
+            logger.error(f"Service - Error al actualizar rangos del proceso: {e}")
+            raise ApplicationException("No se pudieron actualizar los rangos del proceso.") from e
+
     async def obtenerDetalleRango(self, id: int):
         """Rango + sus procesos y maquinarias + cuántos operarios lo tienen."""
         logger.info(f"Service - Detalle del rango ID: {id}")
