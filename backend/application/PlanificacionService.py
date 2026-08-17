@@ -1454,6 +1454,10 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 "fecha_prometida": fecha_prom_str,
                 "sin_asignar": (op_id == DUMMY_OP_ID),
                 "sin_maquinaria": (maq_id == DUMMY_MAQ_ID),
+                # Manual/tercerizado (False) vs. proceso que sí pide máquina (True).
+                # El front lo usa para mostrar "No necesita" en vez de "Sin asignar":
+                # sin esto, embalado o pintura parecían un hueco a resolver.
+                "usa_maquina": bool(usa_maquinaria),
                 "excedente": excedente,
                 "fecha_inicio_estimada": fecha_ini_est,
                 "fecha_fin_estimada": fecha_fin_est,
@@ -1488,6 +1492,7 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                     "fecha_prometida": fecha_prom_str,
                     "sin_asignar": False,
                     "sin_maquinaria": True,
+                    "usa_maquina": bool(usa_maquinaria),
                     "excedente": excedente,
                     "fecha_inicio_estimada": fecha_ini_est,
                     "fecha_fin_estimada": fecha_fin_est,

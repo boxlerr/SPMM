@@ -45,6 +45,10 @@ interface PlanificacionResult {
     sin_maquinaria: boolean;
     /** Lo hace un tercero: va sin operario y sin máquina a propósito. */
     tercerizado?: boolean;
+    /** false = proceso manual (embalado, pintura, soldadura...): no usa máquina
+     *  y el "sin máquina" NO es un hueco. Se muestra "No necesita" en vez de
+     *  "Sin asignar", con el desplegable disponible por si igual quieren una. */
+    usa_maquina?: boolean;
     secuencia?: number;
     fecha_inicio_estimada?: string;
     fecha_fin_estimada?: string;
@@ -1439,11 +1443,20 @@ export function PlanningPreviewModal({
                                                                                                 value={effectiveItem.id_maquinaria?.toString() || "0"}
                                                                                                 onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
                                                                                             >
-                                                                                                <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100">
+                                                                                                <SelectTrigger
+                                                                                                    className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100"
+                                                                                                    title={effectiveItem.usa_maquina === false
+                                                                                                        ? "Proceso manual: no usa máquina. Podés asignarle una igual si querés."
+                                                                                                        : undefined}
+                                                                                                >
                                                                                                     <SelectValue placeholder="Sin asignar" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
-                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                    {/* "No necesita" ≠ "Sin asignar": embalado o pintura sin máquina
+                                                                                                        no es un hueco a resolver, es lo normal (pedido de Julián 16/08). */}
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">
+                                                                                                        {effectiveItem.usa_maquina === false ? "No necesita" : "Sin asignar"}
+                                                                                                    </SelectItem>
                                                                                                     {availableMachines.map(m => (
                                                                                                         <SelectItem key={m.id} value={m.id.toString()}>
                                                                                                             {m.nombre}
@@ -1572,12 +1585,17 @@ export function PlanningPreviewModal({
                                                                                             >
                                                                                                 <SelectTrigger className={cn(
                                                                                                     "h-7 text-[11px] px-2",
-                                                                                                    !effU.id_maquinaria ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
+                                                                                                    // Un manual sin máquina no es un pendiente: no va en rojo.
+                                                                                                    effU.usa_maquina === false && !effU.id_maquinaria
+                                                                                                        ? "border-gray-200 bg-gray-50/50"
+                                                                                                        : !effU.id_maquinaria ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
                                                                                                 )}>
                                                                                                     <SelectValue placeholder="Máquina" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
-                                                                                                    <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>
+                                                                                                    <SelectItem value="0" className="text-gray-400 italic">
+                                                                                                        {effU.usa_maquina === false ? "No necesita" : "Sin asignar"}
+                                                                                                    </SelectItem>
                                                                                                     {availableMachines.map(m => (
                                                                                                         <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
                                                                                                     ))}
