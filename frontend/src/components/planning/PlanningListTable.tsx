@@ -71,6 +71,10 @@ interface PlanningListTableProps {
     onFieldUpdate?: (ordenId: number, field: string, value: any) => Promise<void>;
     /** Zoom (%) aplicado SOLO a la tabla (no al search ni a las tarjetas mobile). */
     tableZoom?: number;
+    /** Las OTs tildadas van arriba de la lista. El agrupamiento se recalcula al
+     *  cambiar la búsqueda (no con cada tilde): reordenar en vivo movía la fila
+     *  bajo el cursor y el siguiente click caía en la OT equivocada. */
+    pinSelectedOnTop?: boolean;
 }
 
 /** Columnas ordenables de la tabla. TODAS las columnas con dato ordenan; las que
@@ -158,7 +162,8 @@ function _PlanningListTable({
     onDataChange, // Added
     hideStatus = false,
     highlightedIds = [],
-    tableZoom = 100
+    tableZoom = 100,
+    pinSelectedOnTop = false
 }: PlanningListTableProps) {
 
     // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
@@ -337,30 +342,61 @@ function _PlanningListTable({
         setSortConfig({ key: direction ? key : null, direction });
     };
 
+    // Términos efectivos de búsqueda. Se puede pegar una lista de OTs — "13345
+    // 13343" o "#13345, #13343" — y cada número filtra por su cuenta (el # y los
+    // separadores se ignoran). Un texto normal ("ceramica cañuelas") se busca
+    // entero, como frase; con comas, cada parte por separado. trim(): un espacio
+    // al final ("13345 ") hacía que la búsqueda no encontrara NADA.
+    const searchTerms = React.useMemo(() => {
+        const raw = searchTerm.trim();
+        if (!raw) return [] as string[];
+        const tokens = raw.split(/[\s,;]+/).map(t => t.replace(/^#/, "")).filter(Boolean);
+        const esListaDeNumeros = tokens.length > 0 && tokens.every(t => /^\d+$/.test(t));
+        const terms = (esListaDeNumeros || raw.includes(","))
+            ? tokens.map(t => t.toLowerCase())
+            : [raw.replace(/^#/, "").toLowerCase()];
+        // "#" o "," solos no son una búsqueda: sin términos se muestra todo.
+        return terms.filter(Boolean);
+    }, [searchTerm]);
+
     const filteredData = React.useMemo(() => {
-        if (!searchTerm) return data;
-        const lowerTerm = searchTerm.toLowerCase();
-        return data.filter(item =>
-            item.id.toString().includes(lowerTerm) ||
-            (item.id_otvieja && item.id_otvieja.toString().includes(lowerTerm)) ||
-            String(item.observaciones || "").toLowerCase().includes(lowerTerm) ||
-            String(item.cliente?.nombre || "").toLowerCase().includes(lowerTerm) ||
-            String(item.articulo?.cod_articulo || "").toLowerCase().includes(lowerTerm) ||
-            String(item.articulo?.descripcion || "").toLowerCase().includes(lowerTerm) ||
-            item.procesos.some(p => String(p.proceso?.nombre || "").toLowerCase().includes(lowerTerm))
-        );
-    }, [data, searchTerm]);
+        if (searchTerms.length === 0) return data;
+
+        const matchesTerm = (item: WorkOrder, term: string) =>
+            item.id.toString().includes(term) ||
+            (item.id_otvieja && item.id_otvieja.toString().includes(term)) ||
+            String(item.n_pedido || item.n_ped_l || "").toLowerCase().includes(term) ||
+            String(item.observaciones || "").toLowerCase().includes(term) ||
+            String(item.cliente?.nombre || "").toLowerCase().includes(term) ||
+            String(item.articulo?.cod_articulo || "").toLowerCase().includes(term) ||
+            String(item.articulo?.descripcion || "").toLowerCase().includes(term) ||
+            item.procesos.some(p => String(p.proceso?.nombre || "").toLowerCase().includes(term));
+
+        return data.filter(item => searchTerms.some(t => matchesTerm(item, t)));
+    }, [data, searchTerms]);
 
     // Al buscar por nombre de proceso, auto-expandir las OT que matchean para que
-    // el proceso (con su orden) quede visible sin abrir la fila a mano.
+    // el proceso (con su orden) quede visible sin abrir la fila a mano. Usa los
+    // MISMOS términos que el filtro: con "amolado, plegado" cada parte expande lo
+    // suyo (antes se testeaba la frase entera y con comas no expandía nada).
     const procesoMatchIds = React.useMemo(() => {
-        const s = searchTerm.trim().toLowerCase();
-        if (!s) return new Set<number>();
+        if (searchTerms.length === 0) return new Set<number>();
         return new Set(
-            data.filter(item => item.procesos.some(p => String(p.proceso?.nombre || "").toLowerCase().includes(s)))
-                .map(item => item.id)
+            data.filter(item => item.procesos.some(p => {
+                const nombre = String(p.proceso?.nombre || "").toLowerCase();
+                return searchTerms.some(t => nombre.includes(t));
+            })).map(item => item.id)
         );
-    }, [data, searchTerm]);
+    }, [data, searchTerms]);
+
+    // Anclado de tildadas arriba (pinSelectedOnTop): la foto de qué va arriba se
+    // toma al montar y en cada cambio de búsqueda — NO con cada tilde, para que
+    // la lista no se reordene abajo del cursor mientras tildás.
+    const [pinnedIds, setPinnedIds] = React.useState<Set<number>>(() => new Set(selectedIds));
+    React.useEffect(() => {
+        if (pinSelectedOnTop) setPinnedIds(new Set(selectedIds));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchTerm, pinSelectedOnTop]);
     const isRowExpanded = (id: number) => expandedOrderIds.includes(id) || procesoMatchIds.has(id);
 
     const sortedData = React.useMemo(() => {
@@ -371,7 +407,17 @@ function _PlanningListTable({
             procesos: [...item.procesos].sort((a, b) => a.orden - b.orden)
         }));
 
-        if (!sortConfig.key || !sortConfig.direction) return dataWithSortedProcesses;
+        if (!sortConfig.key || !sortConfig.direction) {
+            // Tildadas arriba (solo sin orden de columna explícito: si el usuario
+            // ordenó por una columna, ese orden manda).
+            if (pinSelectedOnTop && pinnedIds.size > 0) {
+                return [
+                    ...dataWithSortedProcesses.filter(i => pinnedIds.has(i.id)),
+                    ...dataWithSortedProcesses.filter(i => !pinnedIds.has(i.id)),
+                ];
+            }
+            return dataWithSortedProcesses;
+        }
 
         const key = sortConfig.key;
         const dir = sortConfig.direction === 'asc' ? 1 : -1;
@@ -426,7 +472,7 @@ function _PlanningListTable({
             }
             return dir * (va - vb);
         });
-    }, [filteredData, sortConfig]);
+    }, [filteredData, sortConfig, pinSelectedOnTop, pinnedIds]);
 
     // Observa el scroll horizontal del contenedor de la tabla y actualiza `showRightFade`:
     //   true  → hay más columnas a la derecha → mostrar el gradient fade

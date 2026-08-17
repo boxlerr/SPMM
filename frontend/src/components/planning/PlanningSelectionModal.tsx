@@ -107,10 +107,11 @@ export function PlanningSelectionModal({
         c.toLowerCase().includes(clientSearchTerm.toLowerCase())
     );
 
-    // Apply filters and sort
+    // Apply filters and sort. Lo tildado A MANO también sube arriba, pero eso lo
+    // maneja la tabla (pinSelectedOnTop) para no reordenar en vivo con cada tilde;
+    // acá solo se garantiza que las pre-seleccionadas arranquen arriba.
     const filteredOrders = applyWorkOrderFilters(unplannedOrders, filters)
         .sort((a, b) => {
-            // Priority Sort: Initial Selected Orders First
             const isASelected = initialSelectedIds.includes(a.id);
             const isBSelected = initialSelectedIds.includes(b.id);
             if (isASelected && !isBSelected) return -1;
@@ -392,6 +393,7 @@ export function PlanningSelectionModal({
                                     onDataChange={onDataRefresh}
                                     hideStatus={true}
                                     highlightedIds={initialSelectedIds}
+                                    pinSelectedOnTop
                                 />
                             </div>
                         </div>

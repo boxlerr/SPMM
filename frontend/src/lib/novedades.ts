@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "buscador-varias-ots-y-avisos-claros",
+        fecha: "2026-08-16",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Podés buscar varias OTs juntas y los avisos se leen mejor",
+        detalle:
+            "En el buscador de Planificar Órdenes ahora podés pegar varias OTs juntas — «13345 13343» o «#13345, #13343» — y aparecen todas; el # y los espacios ya no molestan, y también busca por N° de pedido. Las OTs que tildás suben primeras en la lista. Y los avisos de la vista previa se rediseñaron: letra más grande, cada uno dice si es traba o aviso, podés abrir varios a la vez, y solo aparece en rojo lo que de verdad quedó sin resolver. Si un proceso sale sin máquina porque el rango de la máquina no coincide con el del proceso, ahora hay un aviso que te dice exactamente qué cargar y dónde.",
+        href: "/operaciones",
+    },
+    {
         id: "auditoria",
         fecha: "2026-08-15",
         tipo: "nuevo",

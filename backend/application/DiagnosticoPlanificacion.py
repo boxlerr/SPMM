@@ -92,6 +92,9 @@ def construir_diagnosticos(
     diagnosticos += _cuellos_de_maquina(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
     )
+    diagnosticos += _procesos_sin_maquina_compatible(
+        procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
+    )
     diagnosticos += _procesos_sin_rango(procesos)
     diagnosticos += _trabajo_tercerizado(procesos)
     diagnosticos += _trabajo_en_puestos_vacantes(resultados, nombre_operario)
@@ -300,7 +303,10 @@ def _gente_sin_habilitacion_en_la_maquina(
         maqs_txt = _listar(nombres_maq, 3)
 
         salida.append({
-            "id": "maquina-rango-" + "-".join(str(m) for m in dominio),
+            # Las personas van en el id: dos grupos pueden compartir máquinas con
+            # gente distinta, y un id repetido rompe el desplegado en el front.
+            "id": ("maquina-rango-" + "-".join(str(m) for m in dominio)
+                   + "-p" + "-".join(str(p) for p in sorted(personas)[:4])),
             "tipo": "sin_maquina_compatible",
             "severidad": BLOQUEANTE,
             "titulo": f"{procesos_txt} sale sin máquina",
@@ -349,14 +355,31 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
         g = grupos.setdefault(clave, {
             "minutos": 0, "ots": set(), "rangos": set(), "procesos": set(),
             "familia": familia, "de_la_familia": set(de_la_familia),
+            "pares": set(),
         })
         g["minutos"] += dur
         g["ots"].add(orden_id)
         g["rangos"] |= rangos
         g["procesos"].add((nombre or "").strip())
         g["de_la_familia"] |= set(de_la_familia)
+        # (orden, secuencia) y no (orden, proceso): una OT puede traer el mismo
+        # proceso dos veces y son instancias distintas — con la clave por proceso,
+        # que una consiga máquina taparía a la otra.
+        g["pares"].add((orden_id, _sec))
 
-    sin_maquina_por_ot = {r["orden_id"] for r in resultados if r.get("sin_maquinaria") and not r.get("excedente")}
+    # Qué instancia salió DE VERDAD sin máquina. El flag `sin_maquinaria` a
+    # secas no sirve para esto: los procesos manuales (soldadura, embalado,
+    # pintura...) salen sin máquina a propósito, así que mirar el flag por OT
+    # pintaba TODO cuello como traba roja aunque el plan hubiera entrado completo
+    # — Julián lo vio el 15/08: "2 trabas" con 73/73 procesos planificados.
+    # Un proceso de estos grupos sí pide máquina; si ninguna fila suya la tiene,
+    # el cuello mordió en serio.
+    pares_con_maquina = {
+        (r["orden_id"], r["secuencia"]) for r in resultados if r.get("id_maquinaria")
+    }
+    pares_excedentes = {
+        (r["orden_id"], r["secuencia"]) for r in resultados if r.get("excedente")
+    }
 
     salida = []
     for clave, d in grupos.items():
@@ -380,27 +403,125 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
             "donde": "Al elegir las OTs",
         })
 
-        # Si además quedaron OTs de este grupo sin máquina, el cuello ya está mordiendo.
-        afecta_ots = sorted(sin_maquina_por_ot & d["ots"])
+        # Solo es traba si a este grupo se le quedó trabajo sin máquina o afuera.
+        pares_mordidos = [
+            p for p in d["pares"]
+            if p not in pares_con_maquina and p not in pares_excedentes
+        ]
+        pares_sin_lugar = [p for p in d["pares"] if p in pares_excedentes]
+        afecta_ots = sorted({o for o, _ in pares_mordidos} | {o for o, _ in pares_sin_lugar})
         titulo = (
-            f"{nombres_hab[0]}: {_corto(d['minutos'])} de trabajo para 1 sola máquina"
+            f"{nombres_hab[0]} es la única para {_corto(d['minutos'])} de trabajo"
             if len(habilitadas) == 1
-            else f"{_corto(d['minutos'])} de trabajo para {len(habilitadas)} máquinas"
+            else f"{_corto(d['minutos'])} de trabajo entre {len(habilitadas)} máquinas"
         )
+        base_txt = f"{_listar(sorted(d['procesos']), 3)} solo puede(n) ir a {_listar(nombres_hab, 3)}"
+        if afecta_ots:
+            partes = []
+            if pares_mordidos:
+                n = len(pares_mordidos)
+                partes.append(f"{n} proceso{'s' if n != 1 else ''} sin máquina reservada")
+            if pares_sin_lugar:
+                n = len(pares_sin_lugar)
+                partes.append(f"{n} afuera del período")
+            detalle = f"{base_txt}, y no alcanzó: {' y '.join(partes)}."
+        else:
+            detalle = f"{base_txt}. Entró todo, pero en fila: por eso las fechas se corren hacia adelante."
         salida.append({
             "id": "cuello-" + "-".join(str(m) for m in habilitadas),
             "tipo": "cuello_de_maquina",
             "severidad": BLOQUEANTE if afecta_ots else ADVERTENCIA,
             "titulo": titulo,
-            "detalle": (
-                f"{_listar(sorted(d['procesos']), 3)} solo puede(n) ir a {_listar(nombres_hab, 3)}. "
-                f"Lo que no entra en el período queda sin máquina."
-            ),
+            "detalle": detalle,
             "impacto": {
                 "procesos": len(d["procesos"]),
                 "ots": sorted(d["ots"]),
                 "minutos": d["minutos"],
                 "resumen": _resumen(len(d["procesos"]), d["ots"], d["minutos"]),
+            },
+            "soluciones": soluciones,
+        })
+    return salida
+
+
+def _procesos_sin_maquina_compatible(
+    procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
+):
+    """El proceso pide máquina pero su rango no coincide con NINGUNA de la familia.
+
+    Era el hueco mudo del diagnóstico: «PLEGADO» trae MEDIO OFICIAL y OPERARIO
+    CALIFICADO, la PLEGADORA pide OFICIAL PLEGADOR → el solver se queda sin
+    máquina válida, asigna la dummy y el proceso aparece "Sin asignar" en la
+    columna de maquinaria sin que nadie diga por qué. (El diagnóstico de
+    operarios lo salteaba porque su dominio de máquinas quedaba vacío, y el de
+    cuellos también — Julián lo preguntó el 15/08 mirando la vista previa.)
+
+    Solo se reporta si el proceso efectivamente salió sin máquina en el
+    resultado: los SETUP tienen un fallback por nombre que a veces la consigue
+    igual, y avisar por algo que salió bien es ruido.
+    """
+    pares_con_maquina = {
+        (r["orden_id"], r["secuencia"]) for r in resultados if r.get("id_maquinaria")
+    }
+
+    por_proceso = {}
+    for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, usa_maq, familia, _sk) in procesos:
+        if not usa_maq or not familia:
+            continue
+        rangos = set(rangos or ())
+        de_la_familia = [m for m, f in maq_familia.items() if f == familia]
+        if de_la_familia and (not rangos or any(rangos & maq_rangos.get(m, set()) for m in de_la_familia)):
+            continue  # hay al menos una máquina válida: esto lo cubren los otros diagnósticos
+        if (orden_id, _sec) in pares_con_maquina:
+            continue  # la consiguió igual (fallback de SETUP): nada que avisar
+        d = por_proceso.setdefault(proc_id, {
+            "nombre": (nombre or f"#{proc_id}").strip(), "rangos": rangos,
+            "familia": familia, "maquinas": de_la_familia,
+            "ots": set(), "minutos": 0, "procesos": 0,
+        })
+        d["ots"].add(orden_id)
+        d["minutos"] += dur
+        d["procesos"] += 1
+
+    salida = []
+    for proc_id, d in por_proceso.items():
+        rangos_proc = [nombre_rango.get(r, f"#{r}") for r in sorted(d["rangos"])]
+        if not d["maquinas"]:
+            familia_txt = d["familia"].replace("_", " ").title()
+            detalle = f"No hay ninguna máquina de tipo {familia_txt} cargada, así que sale sin máquina."
+            soluciones = [{
+                "texto": "Cargá la máquina con su rango. Si este trabajo va sin máquina, no hay nada que hacer.",
+                "donde": "Recursos › Maquinarias",
+            }]
+        else:
+            maqs = [maq_nombre[m] for m in d["maquinas"]]
+            rangos_maq = sorted({
+                nombre_rango.get(r, f"#{r}") for m in d["maquinas"] for r in maq_rangos.get(m, set())
+            })
+            detalle = (
+                f"{_listar(maqs, 2)} pide(n) {_listar(rangos_maq, 2) or 'ningún rango'} y el proceso "
+                f"trae {_listar(rangos_proc, 2) or 'ninguno'}. No coinciden, así que la máquina no se reserva."
+            )
+            soluciones = [{
+                "texto": f"Sumale {_listar(rangos_proc, 2)} a {_listar(maqs, 2)}.",
+                "donde": "Recursos › Maquinarias",
+            }]
+            if rangos_maq:
+                soluciones.append({
+                    "texto": f"O sumale {_listar(rangos_maq, 2)} al proceso.",
+                    "donde": "Recursos › Procesos",
+                })
+        salida.append({
+            "id": f"maquina-incompatible-{proc_id}",
+            "tipo": "maquina_incompatible",
+            "severidad": BLOQUEANTE,
+            "titulo": f"«{d['nombre']}» sale sin máquina",
+            "detalle": detalle,
+            "impacto": {
+                "procesos": d["procesos"],
+                "ots": sorted(d["ots"]),
+                "minutos": d["minutos"],
+                "resumen": _resumen(d["procesos"], d["ots"], d["minutos"]),
             },
             "soluciones": soluciones,
         })
