@@ -1493,6 +1493,12 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                     "sin_asignar": False,
                     "sin_maquinaria": True,
                     "usa_maquina": bool(usa_maquinaria),
+                    # Fila de un operario ADICIONAL del mismo proceso: comparte
+                    # (orden, secuencia) con la principal y va siempre sin máquina
+                    # (la máquina la reserva la fila principal). Sin esta marca, el
+                    # diagnóstico la leía como "el proceso no consiguió máquina" y
+                    # contradecía a la máquina que el propio plan había reservado.
+                    "slot_extra": True,
                     "excedente": excedente,
                     "fecha_inicio_estimada": fecha_ini_est,
                     "fecha_fin_estimada": fecha_fin_est,
@@ -1867,7 +1873,13 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         blocked_dates=blocked_dates,
     )
 
-    return resultados
+    # Rangos y familia EFECTIVOS por (orden, proceso): los que el solver usó de
+    # verdad, ya con la herencia del SETUP desde su producción. No se devuelve
+    # `procesos_norm` entero a propósito — viene partido en tramos y con otras
+    # secuencias, así que como lista de procesos mentiría (duplica duraciones y
+    # no casa con los resultados). El diagnóstico solo necesita los rangos.
+    rangos_efectivos = {(p[0], p[1]): (p[6], p[9]) for p in procesos_norm}
+    return resultados, rangos_efectivos
 
 import re
 import unicodedata
@@ -2192,7 +2204,7 @@ async def planificar(
     # acomodaba en operarios/horarios).
     effective_fecha_hasta = None if forzar_set else fecha_hasta
 
-    resultados = await asyncio.to_thread(
+    resultados, rangos_efectivos = await asyncio.to_thread(
         _resolver_planificacion,
         procesos_para_solver,
         operarios,
@@ -2227,6 +2239,17 @@ async def planificar(
             nombre_operario={o.id: f"{o.nombre} {o.apellido}".strip() for o in operarios_all},
             skills_manuales=skills_manuales,
             nativas_off=nativas_off,
+            # El plano es filtro DURO en el solver: si la OT tiene plano y nadie
+            # de los habilitados sabe leerlo, el proceso sale sin operario y sin
+            # máquina. Sin estos dos datos el diagnóstico creía que había gente
+            # disponible y se comía el caso sin explicarlo.
+            ots_con_plano=ots_con_plano,
+            op_planos=op_planos,
+            # Rangos que el solver usó de verdad (el SETUP hereda los de su
+            # producción). Explicar con los rangos crudos mandaba a corregir el
+            # dato equivocado: "preparacion de fresadora está cargado con MEDIO
+            # OFICIAL" cuando el solver había filtrado por OFICIAL CNC.
+            rangos_efectivos=rangos_efectivos,
         )
 
         # Las OTs de los diagnósticos salen con su número VISIBLE (id_otvieja), que
@@ -2343,7 +2366,7 @@ async def planificar_pendientes(
                 f"RANGO, así que se los puede asignar a CUALQUIER operario: {detalle}."
             )
 
-        resultados = await asyncio.to_thread(
+        resultados, _rangos_efectivos = await asyncio.to_thread(
             _resolver_planificacion,
             procesos_para_solver,
             operarios,

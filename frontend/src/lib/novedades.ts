@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "resolver-desde-el-aviso",
+        fecha: "2026-08-18",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los avisos ahora se resuelven con un botón, sin salir de la vista previa",
+        detalle:
+            "Cuando un aviso se arregla cargando un rango, al lado de la solución hay un botón «Aplicar y recalcular»: lo tocás, se guarda el cambio y el plan se vuelve a calcular solo, con las fechas actualizadas. El aviso desaparece únicamente si de verdad se resolvió. El botón aparece solo cuando el cambio es uno y claro (un proceso o una máquina); si hay varias máquinas en juego te manda a Recursos para que elijas vos. Y cada opción dice a cuánta gente le abre la máquina antes de que la toques.",
+        href: "/operaciones",
+    },
+    {
         id: "maquinas-en-cola-y-fechas-visibles",
         fecha: "2026-08-18",
         tipo: "arreglo",

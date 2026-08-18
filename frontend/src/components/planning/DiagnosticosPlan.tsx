@@ -16,8 +16,11 @@
  */
 
 import { useState } from "react";
-import { AlertTriangle, ChevronDown, Info, Wrench } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Info, Loader2, Wrench } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { API_URL } from "@/config";
 
 /**
  * Resalta lo que viene entre **dobles asteriscos** desde el backend.
@@ -37,9 +40,25 @@ function conNegritas(texto: string) {
     );
 }
 
+/**
+ * El cambio concreto que hace falta, listo para aplicar desde el aviso.
+ *
+ * `rangos` es el conjunto FINAL (los que ya tenía más los nuevos): los endpoints
+ * de rangos reemplazan, no suman. Viene solo cuando el cambio es inequívoco —
+ * un único proceso o una única máquina—; si son varias, el aviso manda a
+ * Recursos y ahí se decide una por una.
+ */
+export interface DiagnosticoAccion {
+    tipo: "proceso" | "maquinaria";
+    id: number;
+    nombre: string;
+    rangos: number[];
+}
+
 export interface DiagnosticoSolucion {
     texto: string;
     donde: string;
+    accion?: DiagnosticoAccion | null;
 }
 
 export interface Diagnostico {
@@ -57,13 +76,74 @@ export interface Diagnostico {
     soluciones: DiagnosticoSolucion[];
 }
 
-export function DiagnosticosPlan({ diagnosticos }: { diagnosticos?: Diagnostico[] }) {
+export function DiagnosticosPlan({
+    diagnosticos,
+    onResuelto,
+}: {
+    diagnosticos?: Diagnostico[];
+    /** Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo. */
+    onResuelto?: () => void;
+}) {
     const items = diagnosticos ?? [];
     const bloqueantes = items.filter((d) => d.severidad === "bloqueante");
     const avisos = items.filter((d) => d.severidad !== "bloqueante");
 
     const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
     const [colapsado, setColapsado] = useState(false);
+    const [aplicando, setAplicando] = useState<string | null>(null);
+    const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
+    /**
+     * Botón en dos pasos: el primer click pregunta, el segundo aplica.
+     *
+     * Estos cambios tocan quién puede usar una máquina — el 18/08 un cambio así,
+     * hecho sin preguntar, abrió la PLEGADORA de 1 persona a 10 y hubo que
+     * revertirlo. Un click de más es barato al lado de eso, y el paso intermedio
+     * es donde se lee el "ojo, esto la habilita para N personas".
+     */
+    const [confirmando, setConfirmando] = useState<string | null>(null);
+
+    /**
+     * Aplica el cambio de rangos y recalcula el plan sin salir de la vista previa.
+     *
+     * Cambiar rangos toca quién puede usar una máquina o hacer un proceso, así que
+     * el botón no adivina: el texto del aviso dice exactamente qué se va a cambiar
+     * y a cuánta gente alcanza, y recién ahí se aplica.
+     */
+    const aplicar = async (clave: string, accion: DiagnosticoAccion) => {
+        if (confirmando !== clave) {
+            setConfirmando(clave);
+            return;
+        }
+        setConfirmando(null);
+        setAplicando(clave);
+        try {
+            const base = API_URL.replace(/\/$/, "");
+            const url = accion.tipo === "proceso"
+                ? `${base}/procesos/${accion.id}/rangos`
+                : `${base}/maquinarias/${accion.id}/rangos`;
+            const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+            const res = await fetch(url, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ rangos: accion.rangos }),
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            setAplicadas((prev) => new Set(prev).add(clave));
+            toast.success(`Listo: ${accion.nombre} actualizado`, {
+                description: "Recalculando el plan con el cambio…",
+            });
+            onResuelto?.();
+        } catch {
+            toast.error(`No se pudo actualizar ${accion.nombre}`, {
+                description: "Probá desde Recursos.",
+            });
+        } finally {
+            setAplicando(null);
+        }
+    };
 
     if (items.length === 0) return null;
 
@@ -157,17 +237,59 @@ export function DiagnosticosPlan({ diagnosticos }: { diagnosticos?: Diagnostico[
                                         </p>
                                         {d.soluciones.length > 0 && (
                                             <div className="space-y-1.5">
-                                                {d.soluciones.map((s, i) => (
+                                                {d.soluciones.map((s, i) => {
+                                                  const clave = `${d.id}-${i}`;
+                                                  const hecha = aplicadas.has(clave);
+                                                  return (
                                                     <div key={i} className="flex items-start gap-2 text-sm">
                                                         <Wrench className="w-3.5 h-3.5 mt-[3px] shrink-0 text-emerald-600" />
                                                         <span className="text-gray-800 leading-relaxed">
-                                                            {conNegritas(s.texto)}{" "}
-                                                            <span className="inline-block rounded bg-slate-100 text-slate-600 text-xs px-1.5 py-px whitespace-nowrap align-baseline">
-                                                                {s.donde}
-                                                            </span>
+                                                            {conNegritas(s.texto)}
+                                                            {/* Hay soluciones que no mandan a ninguna pantalla
+                                                                ("está bien así"): sin esto quedaba un chip vacío. */}
+                                                            {s.donde && (
+                                                                <>
+                                                                    {" "}
+                                                                    <span className="inline-block rounded bg-slate-100 text-slate-600 text-xs px-1.5 py-px whitespace-nowrap align-baseline">
+                                                                        {s.donde}
+                                                                    </span>
+                                                                </>
+                                                            )}
+                                                            {s.accion && (
+                                                                <>
+                                                                    {" "}
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant={hecha ? "ghost" : "outline"}
+                                                                        disabled={hecha || aplicando !== null}
+                                                                        onClick={() => aplicar(clave, s.accion!)}
+                                                                        onBlur={() => confirmando === clave && setConfirmando(null)}
+                                                                        className={cn(
+                                                                            "h-6 px-2 text-[11px] gap-1 align-baseline",
+                                                                            hecha
+                                                                                ? "text-emerald-700"
+                                                                                : confirmando === clave
+                                                                                    ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                                                                                    : "border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+                                                                        )}
+                                                                    >
+                                                                        {aplicando === clave ? (
+                                                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                                                        ) : hecha ? (
+                                                                            <Check className="w-3 h-3" />
+                                                                        ) : null}
+                                                                        {hecha
+                                                                            ? "Aplicado"
+                                                                            : confirmando === clave
+                                                                                ? "Tocá de nuevo para confirmar"
+                                                                                : "Aplicar y recalcular"}
+                                                                    </Button>
+                                                                </>
+                                                            )}
                                                         </span>
                                                     </div>
-                                                ))}
+                                                  );
+                                                })}
                                             </div>
                                         )}
                                         <p className="text-xs text-gray-500">

@@ -646,10 +646,23 @@ export function PlanningPreviewModal({
     // Devuelve una lista de strings amigables que el usuario puede leer y accionar.
 
     /** Calcula días hábiles entre dos fechas YYYY-MM-DD (excluye sábados/domingos). */
+    /**
+     * "2026-08-17" → Date del 17 a las 00:00 LOCALES.
+     *
+     * `new Date("2026-08-17")` se parsea como medianoche UTC, que en Argentina
+     * (UTC-3) es el día ANTERIOR a las 21:00. Con eso getDay() devolvía el día de
+     * semana corrido: el conteo de hábiles terminaba salteando lunes y contando
+     * domingos. Toda fecha "sólo día" que venga como texto tiene que entrar por acá.
+     */
+    const fechaLocal = (iso: string): Date => {
+        const [a, m, d] = iso.slice(0, 10).split("-").map(Number);
+        return new Date(a, (m || 1) - 1, d || 1);
+    };
+
     const businessDaysBetween = (fromIso?: string, toIso?: string): number => {
         if (!fromIso || !toIso) return 0;
-        const start = new Date(fromIso);
-        const end = new Date(toIso);
+        const start = fechaLocal(fromIso);
+        const end = fechaLocal(toIso);
         if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
         let count = 0;
         const cur = new Date(start);
@@ -766,11 +779,11 @@ export function PlanningPreviewModal({
         const hasta = fines.reduce((a, b) => (a > b ? a : b));
         // Días hábiles entre ambas puntas (sin domingos; el sábado puede o no
         // trabajarse según los horarios de cada uno, así que se cuenta).
-        const d0 = new Date(desde.slice(0, 10));
-        const d1 = new Date(hasta.slice(0, 10));
+        const d0 = fechaLocal(desde);
+        const d1 = fechaLocal(hasta);
         let habiles = 0;
         for (const d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
-            if (d.getDay() !== 0) habiles++;
+            if (d.getDay() !== 0) habiles++;  // el sábado puede trabajarse: cuenta
         }
         return { desde, hasta, habiles };
     }, [results]);
@@ -794,9 +807,10 @@ export function PlanningPreviewModal({
 
     /** Suma días a una fecha "YYYY-MM-DD" y la devuelve en el mismo formato. */
     const sumarDias = (iso: string, dias: number) => {
-        const d = new Date(iso.slice(0, 10));
+        const d = fechaLocal(iso);
         d.setDate(d.getDate() + dias);
-        return d.toISOString().slice(0, 10);
+        // Formateo local: toISOString() vuelve a UTC y restaría un día.
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     };
 
     /** Recalcula el mismo plan con dos semanas más de margen. */
@@ -804,10 +818,16 @@ export function PlanningPreviewModal({
         if (!onRecalculate) return;
         const base = planningRange.fecha_hasta || spanPlan?.hasta?.slice(0, 10);
         if (!base) return;
+        // Las OTs excedentes SON el motivo del botón: mandarlas es el punto.
+        // Con `results` solo (las planificadas) se caían de la lista, el backend
+        // devolvía excedentes: [] y el cartel ámbar desaparecía como si se hubiera
+        // resuelto. Y hay que respetar los "forzar" que el usuario ya marcó, o la
+        // pantalla queda mostrando algo distinto de lo que se va a guardar.
+        const forcedArr = Array.from(forzarOrdenIds);
         onRecalculate(
-            Array.from(new Set(results.map(r => r.orden_id))),
+            buildOrdenIdsForRecalc(forcedArr),
             { fecha_desde: planningRange.fecha_desde, fecha_hasta: sumarDias(base, 14) },
-            [],
+            forcedArr,
         );
     };
 
@@ -856,7 +876,7 @@ export function PlanningPreviewModal({
                                     <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
                                         <Calendar className="w-3 h-3" />
                                         {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
-                                        <span className="text-slate-500">· {spanPlan.habiles} días</span>
+                                        <span className="text-slate-500">· {spanPlan.habiles} días hábiles</span>
                                     </Badge>
                                 )}
                                 {planningRange.fecha_hasta && (
@@ -1069,7 +1089,18 @@ export function PlanningPreviewModal({
                                 `sticky left-0` lo mantiene a la vista cuando la tabla se scrollea
                                 en horizontal. */}
                             <div className="sticky left-0 w-full">
-                                <DiagnosticosPlan diagnosticos={diagnosticos} />
+                                <DiagnosticosPlan
+                                    diagnosticos={diagnosticos}
+                                    /* Aplicado el cambio de rangos, se recalcula el mismo
+                                       plan al toque: el aviso desaparece solo si de verdad
+                                       se resolvió, y las fechas se actualizan con el dato
+                                       nuevo sin salir de la vista previa. */
+                                    onResuelto={() => {
+                                        if (!onRecalculate) return;
+                                        const forcedArr = Array.from(forzarOrdenIds);
+                                        onRecalculate(buildOrdenIdsForRecalc(forcedArr), planningRange, forcedArr);
+                                    }}
+                                />
                             </div>
 
                             <div className="min-w-[1000px] p-0 pr-2" style={{ zoom: zoom / 100 }}>

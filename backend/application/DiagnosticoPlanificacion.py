@@ -60,6 +60,9 @@ def construir_diagnosticos(
     nombre_operario,
     skills_manuales=None,
     nativas_off=None,
+    ots_con_plano=None,
+    op_planos=None,
+    rangos_efectivos=None,
 ):
     """
     procesos      : tuplas que se le pasan al solver
@@ -69,6 +72,20 @@ def construir_diagnosticos(
     """
     skills_manuales = skills_manuales or {}
     nativas_off = nativas_off or {}
+    ots_con_plano = set(ots_con_plano or ())
+    op_planos = op_planos or {}
+
+    # El SETUP hereda del proceso de producción que le sigue los rangos y la
+    # familia con los que el solver realmente filtró máquinas. Se aplican acá,
+    # una vez, para que todos los diagnósticos cuenten la misma verdad.
+    rangos_crudos = {(p[0], p[1]): set(p[6] or ()) for p in procesos}
+    if rangos_efectivos:
+        procesos = [
+            (p[:6] + (rangos_efectivos[(p[0], p[1])][0],) + (p[7], p[8])
+             + (rangos_efectivos[(p[0], p[1])][1],) + p[10:])
+            if (p[0], p[1]) in rangos_efectivos else p
+            for p in procesos
+        ]
 
     ops_por_rango = {}
     for op_id, r_id in operarios:
@@ -95,6 +112,7 @@ def construir_diagnosticos(
     diagnosticos += _procesos_sin_maquina_compatible(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
         ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
+        ots_con_plano, op_planos, rangos_crudos,
     )
     diagnosticos += _procesos_sin_rango(procesos)
     diagnosticos += _trabajo_tercerizado(procesos)
@@ -120,6 +138,36 @@ def _primer_nombre(completo: str) -> str:
 
 
 
+
+
+
+def _accion_proceso(proc_id, nombre_proc, rangos_finales):
+    """Cargarle rangos a un proceso, listo para que el botón lo aplique solo.
+
+    El endpoint es un REEMPLAZO, así que va el conjunto FINAL —los que ya tenía
+    más los nuevos—, calculado sobre los rangos guardados en la base y no sobre
+    los efectivos (un SETUP hereda los de su producción y escribir eso pisaría
+    la carga real con algo que nunca nadie cargó)."""
+    return {
+        "tipo": "proceso",
+        "id": proc_id,
+        "nombre": nombre_proc,
+        "rangos": sorted(rangos_finales),
+    }
+
+
+def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar):
+    """Cargarle rangos a UNA máquina. Con varias candidatas no se ofrece botón:
+    aplicar el cambio a un parque entero de un click es justo lo que no se quiere."""
+    if len(maquinas) != 1:
+        return None
+    m = maquinas[0]
+    return {
+        "tipo": "maquinaria",
+        "id": m,
+        "nombre": maq_nombre[m],
+        "rangos": sorted(set(maq_rangos.get(m, set())) | set(rangos_a_sumar)),
+    }
 
 
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
@@ -341,6 +389,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
                 "texto": f"Si **{_listar([maq_nombre[m] for m in sin_habilitar], 2)}** también puede hacer este "
                          f"trabajo, agregale **{rangos_txt}** y el trabajo se reparte entre más máquinas.",
                 "donde": "Recursos › Maquinarias",
+                "accion": _accion_maquina(sin_habilitar, maq_nombre, maq_rangos, d["rangos"]),
             })
         soluciones.append({
             "texto": "O planificá menos OTs juntas: con menos trabajo en la misma máquina, las fechas se acercan.",
@@ -405,6 +454,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
 def _procesos_sin_maquina_compatible(
     procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
     ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
+    ots_con_plano=None, op_planos=None, rangos_crudos=None,
 ):
     """El proceso pidió máquina y no la consiguió. Acá se explica por qué.
 
@@ -428,10 +478,19 @@ def _procesos_sin_maquina_compatible(
     propósito), y tampoco los que sí tienen máquina compatible y libre — si a esos
     no les alcanzó el lugar es un cuello, y lo cuenta _cuellos_de_maquina.
     """
+    ots_con_plano = set(ots_con_plano or ())
+    op_planos = op_planos or {}
+    rangos_crudos = rangos_crudos or {}
+
+    # Las filas de operarios ADICIONALES comparten (orden, secuencia) con la
+    # principal y van siempre sin máquina —la reserva la principal—, así que
+    # metían en este set procesos que SÍ tenían máquina y el aviso contradecía
+    # al propio plan. Se descartan por la marca que pone _extraer_resultados.
     sin_maquina = {
         (r["orden_id"], r["secuencia"])
         for r in resultados
-        if r.get("usa_maquina") and not r.get("id_maquinaria") and not r.get("excedente")
+        if r.get("usa_maquina") and not r.get("id_maquinaria")
+        and not r.get("excedente") and not r.get("slot_extra")
     }
     if not sin_maquina:
         return []
@@ -443,12 +502,20 @@ def _procesos_sin_maquina_compatible(
         rangos = set(rangos or ())
         nombre = (nombre or f"#{proc_id}").strip()
 
-        # Candidatas con el mismo criterio del solver: por familia si la tiene,
-        # y si no por nombre (el camino de los SETUP).
+        # Candidatas con el MISMO criterio que el solver, que ramifica por tipo:
+        #   SETUP              → por familia, y si no hay, por nombre de máquina.
+        #   PRODUCCION_MAQUINA → por familia si la tiene; si no, TODAS las máquinas
+        #                        (después las filtra por rango).
+        # Aplicar el camino "por nombre" a todo proceso sin familia era un error:
+        # ENGOMADO, DECAPADO y PEGADO DE CHAPA (producción, sin familia, con rangos
+        # AYUDANTE/INGRESANTE que ninguna máquina acepta) daban candidatas=[] y el
+        # aviso culpaba a una máquina faltante cuando el motivo real es el rango.
         if familia:
             candidatas = [m for m, f in maq_familia.items() if f == familia]
-        else:
+        elif _get_tipo_proceso(nombre) == "SETUP":
             candidatas = _maquinas_por_nombre(nombre, maq_nombre)
+        else:
+            candidatas = list(maq_nombre.keys())
 
         # De esas, las que el PROCESO habilita por rango.
         usables = [m for m in candidatas if not rangos or (rangos & maq_rangos.get(m, set()))]
@@ -459,6 +526,11 @@ def _procesos_sin_maquina_compatible(
             elegibles |= ops_por_rango.get(r, set())
         elegibles |= set(skills_manuales.get(proc_id, set()))
         elegibles -= set(nativas_off.get(proc_id, set()))
+        # Plano adjunto ⇒ solo quien sabe interpretarlo. En el solver es filtro
+        # duro; sin replicarlo acá, el diagnóstico creía que había gente y se
+        # comía el caso: el proceso salía "Sin asignar" sin ninguna explicación.
+        if orden_id in ots_con_plano:
+            elegibles = {op for op in elegibles if op_planos.get(op, False)}
         personas = {op for op in elegibles if not _es_vacante(nombre_operario.get(op))}
 
         # ¿Alguno de ellos está habilitado en alguna de esas máquinas?
@@ -470,11 +542,21 @@ def _procesos_sin_maquina_compatible(
         if usables and hay_par:
             continue  # había con qué y con quién: es cuello de capacidad, no de datos
 
-        causa = "sin_maquina" if not candidatas else ("rango_maquina" if not usables else "rango_persona")
+        # Un proceso de producción sin familia tiene TODO el parque como candidato:
+        # nombrar 31 máquinas y sugerir cargarles el rango a todas sería peor que
+        # no decir nada. Ese caso tiene su propia causa y su propio texto.
+        generico = not familia and _get_tipo_proceso(nombre) != "SETUP"
+        if not candidatas:
+            causa = "sin_maquina"
+        elif not usables:
+            causa = "rangos_sin_maquina" if generico else "rango_maquina"
+        else:
+            causa = "rango_persona"
         d = por_proceso.setdefault(proc_id, {
             "nombre": nombre, "rangos": rangos, "candidatas": candidatas,
             "usables": usables, "personas": personas, "causa": causa,
-            "ots": set(), "minutos": 0, "procesos": 0,
+            "total_maquinas": len(maq_nombre), "ots": set(), "minutos": 0, "procesos": 0,
+            "proc_id": proc_id, "crudos": set(rangos_crudos.get((orden_id, proc_id), rangos)),
         })
         d["ots"].add(orden_id)
         d["minutos"] += dur
@@ -495,6 +577,25 @@ def _procesos_sin_maquina_compatible(
                 "texto": "Si este trabajo usa una máquina, cargala con los mismos rangos que el proceso. "
                          "Si va sin máquina, dejalo así: no molesta.",
                 "donde": "Recursos › Maquinarias",
+            }]
+
+        elif d["causa"] == "rangos_sin_maquina":
+            # Típicamente un proceso manual mal clasificado (ENGOMADO, DECAPADO,
+            # PEGADO DE CHAPA: rangos AYUDANTE/INGRESANTE que ninguna máquina tiene).
+            # Aviso, no traba: lo más probable es que efectivamente vaya sin máquina.
+            severidad = ADVERTENCIA
+            detalle = (
+                f"**{nombre_proc}** está cargado con **{_listar(rangos_proc, 2) or 'ningún rango'}**, "
+                f"y ninguna de las {d['total_maquinas']} máquinas del taller tiene ese rango. "
+                "Se planifica igual, sin reservar máquina."
+            )
+            soluciones = [{
+                "texto": f"Si este trabajo usa una máquina en particular, agregale "
+                         f"**{_listar(rangos_proc, 2)}** a esa máquina.",
+                "donde": "Recursos › Maquinarias",
+            }, {
+                "texto": "Si va a mano y sin máquina, está bien así: no hay nada que corregir.",
+                "donde": "",
             }]
 
         elif d["causa"] == "rango_maquina":
@@ -524,12 +625,14 @@ def _procesos_sin_maquina_compatible(
                              f"es el rango de la máquina, así que no cambia quién puede usarla"
                              + (f" — hoy lo tiene {_cuenta_personas(rangos_maq_ids, ops_por_rango, nombre_operario)}." if rangos_maq_ids else "."),
                     "donde": "Recursos › Procesos",
+                    "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids),
                 })
             abre_a = _cuenta_personas(d["rangos"], ops_por_rango, nombre_operario)
             soluciones.append({
                 "texto": f"O al revés: agregale **{_listar(rangos_proc, 2)}** a la máquina "
                          f"**{_listar(maqs, 2)}** — ojo, eso la habilita para {abre_a}.",
                 "donde": "Recursos › Maquinarias",
+                "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"]),
             })
 
         else:  # rango_persona
@@ -558,6 +661,7 @@ def _procesos_sin_maquina_compatible(
                 soluciones.append({
                     "texto": f"O agregale **{_listar(rangos_proc, 2)}** a la máquina **{_listar(maqs, 2)}**.",
                     "donde": "Recursos › Maquinarias",
+                    "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"]),
                 })
 
         salida.append({
