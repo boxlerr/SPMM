@@ -19,6 +19,24 @@ import { useState } from "react";
 import { AlertTriangle, ChevronDown, Info, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Resalta lo que viene entre **dobles asteriscos** desde el backend.
+ *
+ * Los avisos nombran máquinas, rangos, personas y fechas — los datos que hay que
+ * ir a tocar — y en un párrafo plano se pierden. El backend los marca y acá se
+ * dibujan en negrita. No es Markdown: solo negritas, que es lo único que hace
+ * falta y lo único que no puede romper nada.
+ */
+function conNegritas(texto: string) {
+    return texto.split(/(\*\*[^*]+\*\*)/g).map((parte, i) =>
+        parte.startsWith("**") && parte.endsWith("**") && parte.length > 4 ? (
+            <strong key={i} className="font-semibold text-gray-900">{parte.slice(2, -2)}</strong>
+        ) : (
+            parte
+        )
+    );
+}
+
 export interface DiagnosticoSolucion {
     texto: string;
     donde: string;
@@ -135,7 +153,7 @@ export function DiagnosticosPlan({ diagnosticos }: { diagnosticos?: Diagnostico[
                                 {activo && (
                                     <div className="px-4 pb-3.5 pl-[4.25rem] space-y-2.5">
                                         <p className="text-sm text-gray-700 leading-relaxed max-w-[80ch]">
-                                            {d.detalle}
+                                            {conNegritas(d.detalle)}
                                         </p>
                                         {d.soluciones.length > 0 && (
                                             <div className="space-y-1.5">
@@ -143,7 +161,7 @@ export function DiagnosticosPlan({ diagnosticos }: { diagnosticos?: Diagnostico[
                                                     <div key={i} className="flex items-start gap-2 text-sm">
                                                         <Wrench className="w-3.5 h-3.5 mt-[3px] shrink-0 text-emerald-600" />
                                                         <span className="text-gray-800 leading-relaxed">
-                                                            {s.texto}{" "}
+                                                            {conNegritas(s.texto)}{" "}
                                                             <span className="inline-block rounded bg-slate-100 text-slate-600 text-xs px-1.5 py-px whitespace-nowrap align-baseline">
                                                                 {s.donde}
                                                             </span>

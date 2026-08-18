@@ -1644,10 +1644,22 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
 
     PENAL_OVERQUAL = 50
     PENAL_DUMMY = 1_000_000
-    PENAL_DUMMY_MAQ = 1_000_000
 
     # ---- Normalizar procesos ----
     procesos_norm, H_local = _normalizar_procesos(procesos, prioridad_pesos)
+
+    # Dejar un proceso SIN MÁQUINA tiene que ser peor que atrasarlo. Con un valor
+    # fijo (1_000_000) no lo era: el atraso cuesta `minutos * mult` (mult hasta
+    # 1000), así que pasados ~1000..5000 minutos de espera al solver le convenía
+    # soltar la máquina y correr todo en paralelo. Como casi todas las OTs vienen
+    # con la fecha prometida ya vencida, TODO llega tarde y ese umbral se cruza
+    # enseguida: por eso 3 «fresadora cnc» salían "sin máquina" en vez de hacer
+    # cola en la única FRESADORA CNC (Julián, 18/08: "si no hay máquina o tiempo
+    # ¿no tiene que seguir planificando para el día siguiente?" — sí, tiene).
+    # Escalado con el horizonte, ningún atraso posible lo alcanza, así que el
+    # solver serializa y corre la fecha, que es la verdad del taller.
+    # Sigue por debajo de W_FUERA: quedar afuera del período es peor que esperar.
+    PENAL_DUMMY_MAQ = max(1_000_000, H_local * 10 * max(atraso_mult_por_prioridad.values()) + 1)
 
     # ---- Partir los que no entran en un tramo laboral ----
     # H no cambia: la suma total de trabajo es la misma, solo se reparte en más piezas.

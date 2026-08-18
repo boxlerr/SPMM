@@ -751,6 +751,66 @@ export function PlanningPreviewModal({
         [results]
     );
 
+    /**
+     * Cuándo arranca y cuándo termina REALMENTE este plan, y cuántos días hábiles
+     * ocupa. Se saca de las fechas que calculó el planificador, no del rango que
+     * eligió el usuario: si no eligió ninguno igual hay un período — el que hizo
+     * falta — y hasta ahora no se veía por ningún lado (Julián, 18/08: "por más
+     * que no esté marcado ahí el rango de fechas, igual debe decírtelo").
+     */
+    const spanPlan = React.useMemo(() => {
+        const inicios = results.map(r => r.fecha_inicio_estimada).filter(Boolean) as string[];
+        const fines = results.map(r => r.fecha_fin_estimada).filter(Boolean) as string[];
+        if (inicios.length === 0 || fines.length === 0) return null;
+        const desde = inicios.reduce((a, b) => (a < b ? a : b));
+        const hasta = fines.reduce((a, b) => (a > b ? a : b));
+        // Días hábiles entre ambas puntas (sin domingos; el sábado puede o no
+        // trabajarse según los horarios de cada uno, así que se cuenta).
+        const d0 = new Date(desde.slice(0, 10));
+        const d1 = new Date(hasta.slice(0, 10));
+        let habiles = 0;
+        for (const d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
+            if (d.getDay() !== 0) habiles++;
+        }
+        return { desde, hasta, habiles };
+    }, [results]);
+
+    /**
+     * "18/8 07:00 → 27/8 10:30" para una OT. Toma la primera fecha de arranque y
+     * la última de fin entre sus procesos; el año se omite a propósito (la
+     * planificación es siempre a semanas vista y el año solo ocupa lugar).
+     */
+    const spanDeOT = (items: PlanificacionResult[]) => {
+        const inicios = items.map(i => i.fecha_inicio_estimada).filter(Boolean) as string[];
+        const fines = items.map(i => i.fecha_fin_estimada).filter(Boolean) as string[];
+        if (inicios.length === 0 || fines.length === 0) return "—";
+        const corta = (iso: string) => {
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return "";
+            return `${d.getDate()}/${d.getMonth() + 1} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+        };
+        return `${corta(inicios.reduce((a, b) => (a < b ? a : b)))} → ${corta(fines.reduce((a, b) => (a > b ? a : b)))}`;
+    };
+
+    /** Suma días a una fecha "YYYY-MM-DD" y la devuelve en el mismo formato. */
+    const sumarDias = (iso: string, dias: number) => {
+        const d = new Date(iso.slice(0, 10));
+        d.setDate(d.getDate() + dias);
+        return d.toISOString().slice(0, 10);
+    };
+
+    /** Recalcula el mismo plan con dos semanas más de margen. */
+    const ampliarRango = () => {
+        if (!onRecalculate) return;
+        const base = planningRange.fecha_hasta || spanPlan?.hasta?.slice(0, 10);
+        if (!base) return;
+        onRecalculate(
+            Array.from(new Set(results.map(r => r.orden_id))),
+            { fecha_desde: planningRange.fecha_desde, fecha_hasta: sumarDias(base, 14) },
+            [],
+        );
+    };
+
     return (
         <>
         <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -788,11 +848,34 @@ export function PlanningPreviewModal({
                                         {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
                                     </Badge>
                                 )}
-                                {planningRange.fecha_desde && planningRange.fecha_hasta && (
+                                {/* El período REAL que ocupa el plan. Antes solo se mostraba
+                                    cuando el usuario había elegido un rango a mano; sin rango
+                                    elegido no se veía nada y no había forma de saber hasta
+                                    cuándo llegaban las fechas. */}
+                                {spanPlan && (
                                     <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
                                         <Calendar className="w-3 h-3" />
-                                        {formatDate(planningRange.fecha_desde)} → {formatDate(planningRange.fecha_hasta)}
+                                        {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
+                                        <span className="text-slate-500">· {spanPlan.habiles} días</span>
                                     </Badge>
+                                )}
+                                {planningRange.fecha_hasta && (
+                                    <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 gap-1">
+                                        Tope elegido: {formatDate(planningRange.fecha_hasta)}
+                                    </Badge>
+                                )}
+                                {displayedExcedentes.length > 0 && onRecalculate && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={ampliarRango}
+                                        disabled={isCalculating}
+                                        className="h-6 px-2 text-[11px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                        title="Recalcula el mismo plan con dos semanas más de margen"
+                                    >
+                                        <Calendar className="w-3 h-3" />
+                                        Ampliar 2 semanas
+                                    </Button>
                                 )}
                             </div>
                         </div>
@@ -1170,6 +1253,7 @@ export function PlanningPreviewModal({
                                             <th className="px-4 py-3 text-center">Progreso</th>
                                             <th className="px-4 py-3 text-center">Prioridad</th>
                                             <th className="px-4 py-3 text-center">Prometida</th>
+                                            <th className="px-4 py-3 text-center">Trabajo</th>
                                             <th className="px-4 py-3 text-center">Alertas</th>
                                             <th className="px-4 py-3 text-center w-12"></th>
                                         </tr>
@@ -1281,6 +1365,13 @@ export function PlanningPreviewModal({
                                                             </Badge>
                                                         </td>
                                                         <td className="px-4 py-3 text-center text-inherit opacity-90">{formatDate(firstItem.fecha_prometida)}</td>
+                                                        {/* Cuándo se toca esta OT: de la primera pieza a la última.
+                                                            Estaba solo dentro de cada proceso (12 fechas por OT) y
+                                                            no había forma de ver de un vistazo cuándo arranca y
+                                                            cuándo se termina — pedido de Julián el 18/08. */}
+                                                        <td className="px-4 py-3 text-center text-inherit opacity-90 whitespace-nowrap">
+                                                            {spanDeOT(effectiveItems)}
+                                                        </td>
                                                         <td className="px-4 py-3 text-center">
                                                             {isOrderLate ? (
                                                                 <TooltipProvider delayDuration={150}>
@@ -1351,7 +1442,7 @@ export function PlanningPreviewModal({
                                                     </tr>
                                                     {isExpanded && (
                                                         <tr className="bg-gray-50/50">
-                                                            <td colSpan={13} className="px-0 py-0 border-b shadow-inner">
+                                                            <td colSpan={14} className="px-0 py-0 border-b shadow-inner">
                                                                 <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
                                                                     <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
                                                                     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">

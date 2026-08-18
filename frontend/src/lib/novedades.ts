@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "maquinas-en-cola-y-fechas-visibles",
+        fecha: "2026-08-18",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Si la máquina está ocupada, ahora hace cola en vez de quedarse sin máquina",
+        detalle:
+            "Cuando había más trabajo que máquinas, el sistema dejaba procesos «Sin asignar» en la columna Maquinaria en lugar de correr la fecha. Ahora hace lo lógico: espera su turno en la máquina y la fecha se corre al día siguiente. Además, arriba de la vista previa ves el período real del plan (de cuándo a cuándo y cuántos días), cada OT tiene una columna «Trabajo» que dice cuándo arranca y cuándo termina, y si algo no entró aparece un botón para ampliar el rango dos semanas y recalcular. Los avisos ahora resaltan en negrita la máquina, el rango o la persona que hay que tocar, y cuentan hasta qué fecha llega el trabajo.",
+        href: "/operaciones",
+    },
+    {
         id: "buscador-varias-ots-y-avisos-claros",
         fecha: "2026-08-16",
         tipo: "mejora",
