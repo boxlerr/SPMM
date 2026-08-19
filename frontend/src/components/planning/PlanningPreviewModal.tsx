@@ -95,6 +95,10 @@ interface PlanningPreviewModalProps {
     isCalculating?: boolean;
     /** Qué traba este plan y cómo se destraba (lo calcula el backend). */
     diagnosticos?: Diagnostico[];
+    /** Avisa de cada retoque hecho a mano para que se guarde en el borrador.
+     *  Sin esto el autoguardado solo vería el plan que devolvió el solver, y el
+     *  trabajo de acomodar máquinas y operarios se perdería igual. */
+    onEdicionesChange?: (ediciones: Record<string, any>, forzarOrdenIds: number[]) => void;
 }
 
 export function PlanningPreviewModal({
@@ -114,6 +118,7 @@ export function PlanningPreviewModal({
     onRecalculate,
     isCalculating = false,
     diagnosticos = [],
+    onEdicionesChange,
 }: PlanningPreviewModalProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -124,6 +129,13 @@ export function PlanningPreviewModal({
     const [expandedOrderIds, setExpandedOrderIds] = React.useState<number[]>([]);
     // Decisión por orden excedente: true = forzar (incluir igual), false = descartar (default)
     const [forzarOrdenIds, setForzarOrdenIds] = React.useState<Set<number>>(new Set());
+
+    // Cada retoque sube al borrador. Va en un efecto y no dentro de cada setter
+    // porque los cambios entran por varios lados (celda, popover, atajo) y con un
+    // solo lugar no hay forma de que alguno se olvide de avisar.
+    React.useEffect(() => {
+        onEdicionesChange?.(editedResults, Array.from(forzarOrdenIds));
+    }, [editedResults, forzarOrdenIds, onEdicionesChange]);
 
     // D1 (feedback 06/07): agregar procesos SUELTOS. `pendingAddProcesos` mapea
     // orden_id -> set de proceso_ids elegidos; `expandedAddIds` = OTs expandidas en

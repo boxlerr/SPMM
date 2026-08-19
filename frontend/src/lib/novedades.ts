@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "borradores-de-planificacion",
+        fecha: "2026-08-19",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El plan que calculaste ya no se pierde: queda como borrador",
+        detalle:
+            "Antes, si cerrabas la vista previa sin confirmar, se perdía todo: el cálculo de varios minutos y cada cambio que hubieras hecho a mano. Ahora se guarda solo, apenas termina de calcular y cada vez que cambiás una máquina, un operario o un horario. En Planificar Órdenes tenés arriba el botón «Retomar borrador»: lo abrís y aparece tal cual lo dejaste, sin volver a calcular. Se guarda en dos lados a la vez — en tu computadora, así sobrevive a un corte de luz o a cerrar la ventana sin querer, y en el sistema, así lo abre cualquiera desde cualquier máquina. Si el borrador tiene más de una hora te avisa que los datos pudieron cambiar, y podés recalcular con un botón. Cuando confirmás el plan, el borrador se borra solo.",
+        href: "/operaciones",
+    },
+    {
         id: "barra-de-avance-y-lote-de-la-semana",
         fecha: "2026-08-19",
         tipo: "mejora",

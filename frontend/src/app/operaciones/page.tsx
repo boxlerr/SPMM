@@ -1,7 +1,7 @@
 "use client"
 
 
-import React, { useState, useEffect, useMemo } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
@@ -34,6 +34,8 @@ import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
 import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
 import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
+import { useBorradorPlan } from "@/hooks/useBorradorPlan"
+import type { BorradorPlan } from "@/lib/borradorPlan"
 import {
   Select,
   SelectContent,
@@ -102,6 +104,13 @@ export default function OperacionesPage() {
   const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; listo: boolean }>(
     { activo: false, ots: 0, listo: false }
   )
+  // Autoguardado del plan sin confirmar. El navegador escribe en cada cambio (cubre
+  // el cierre accidental y el corte de luz); la base va debounceada y es la copia
+  // que ve cualquiera desde cualquier máquina. Ver hooks/useBorradorPlan.
+  const { registrarCambio, guardarYa, olvidar, adoptar } = useBorradorPlan()
+  // Lo que devolvió el solver, para poder recomponer el borrador entero cuando lo
+  // único que cambió fue una edición hecha dentro de la vista previa.
+  const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "guardadoEn"> | null>(null)
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -929,7 +938,24 @@ export default function OperacionesPage() {
 
       setPreviewResults(enrichedResults);
       setExcedentesResults(enrichedExcedentes);
-      setDiagnosticosPlan(Array.isArray(responseData?.diagnosticos) ? responseData.diagnosticos : []);
+      const diags = Array.isArray(responseData?.diagnosticos) ? responseData.diagnosticos : [];
+      setDiagnosticosPlan(diags);
+
+      // El cálculo recién terminado es lo caro de todo esto: se guarda sin esperar
+      // el debounce, antes de que el usuario llegue a tocar nada.
+      baseBorrador.current = {
+        ordenesIds: ids,
+        rango: range,
+        resultados: enrichedResults,
+        excedentes: enrichedExcedentes,
+        diagnosticos: diags,
+      };
+      void guardarYa({
+        ...baseBorrador.current,
+        ediciones: {},
+        forzarOrdenIds: [],
+        guardadoEn: new Date().toISOString(),
+      });
 
       // Calculate current operator loads for the WEEK of the FIRST PLANNED ITEM
       const loads: Record<number, { current: number, new: number }> = {};
@@ -1070,9 +1096,26 @@ export default function OperacionesPage() {
         };
       };
 
-      setPreviewResults(planificadosRaw.map(enrich));
-      setExcedentesResults(excedentesRaw.map(enrich));
-      setDiagnosticosPlan(Array.isArray(responseData?.diagnosticos) ? responseData.diagnosticos : []);
+      const recalcResultados = planificadosRaw.map(enrich);
+      const recalcExcedentes = excedentesRaw.map(enrich);
+      const recalcDiags = Array.isArray(responseData?.diagnosticos) ? responseData.diagnosticos : [];
+      setPreviewResults(recalcResultados);
+      setExcedentesResults(recalcExcedentes);
+      setDiagnosticosPlan(recalcDiags);
+
+      baseBorrador.current = {
+        ordenesIds: ids,
+        rango: range,
+        resultados: recalcResultados,
+        excedentes: recalcExcedentes,
+        diagnosticos: recalcDiags,
+      };
+      void guardarYa({
+        ...baseBorrador.current,
+        ediciones: {},
+        forzarOrdenIds: [],
+        guardadoEn: new Date().toISOString(),
+      });
 
       // Distinguimos:
       //   - "sin lugar" reales: OTs excedentes que el usuario NO forzó (decisión pendiente).
@@ -1096,6 +1139,45 @@ export default function OperacionesPage() {
       setIsPreviewCalculating(false);
       setCalculando({ activo: false, ots: 0, listo: false });
     }
+  };
+
+  /** Cada retoque de la vista previa (máquina, operario, horario, forzar una OT).
+   *  Guarda en el navegador al instante y en la base a los pocos segundos. */
+  const handleEdicionesBorrador = useCallback((ediciones: Record<string, any>, forzarOrdenIds: number[]) => {
+    const base = baseBorrador.current;
+    // Sin base no hay plan calculado todavía: el modal dispara este efecto al
+    // montarse con las ediciones vacías, y eso no es un borrador.
+    if (!base) return;
+    registrarCambio({ ...base, ediciones, forzarOrdenIds, guardadoEn: new Date().toISOString() });
+  }, [registrarCambio]);
+
+  /** Retomar un plan calculado y sin confirmar: se abre tal cual quedó, sin
+   *  recalcular. Lo que se pierde recalculando son los minutos del solver y los
+   *  retoques hechos a mano, así que se restauran los dos. */
+  const handleAbrirBorrador = (borrador: BorradorPlan) => {
+    setPreviewResults(borrador.resultados || []);
+    setExcedentesResults(borrador.excedentes || []);
+    setDiagnosticosPlan(borrador.diagnosticos || []);
+    setSelectedOrderIds(borrador.ordenesIds || []);
+    setPlanningRange(borrador.rango || {});
+    baseBorrador.current = {
+      ordenesIds: borrador.ordenesIds || [],
+      rango: borrador.rango || {},
+      resultados: borrador.resultados || [],
+      excedentes: borrador.excedentes || [],
+      diagnosticos: borrador.diagnosticos || [],
+    };
+    // El autosave pasa a pisar ESTE borrador en vez de crear uno nuevo.
+    adoptar(borrador);
+    setIsSelectionModalOpen(false);
+    setIsPreviewOpen(true);
+  };
+
+  /** Cerrar la vista previa sin confirmar no descarta nada: se sincroniza ya, sin
+   *  esperar el debounce, así el borrador queda completo para el que lo retome. */
+  const handleCerrarPreview = () => {
+    void guardarYa();
+    setIsPreviewOpen(false);
   };
 
   const handleConfirmPlan = async (manualPlanOrForzar?: any[] | { forzarOrdenIds: number[] }) => {
@@ -1140,6 +1222,10 @@ export default function OperacionesPage() {
       }
 
       toast.success("Planificación guardada exitosamente");
+      // Dejó de ser un borrador: ahora es el plan. Si no se olvida acá, la próxima
+      // vez Planificar Órdenes ofrece "retomar" algo que ya está confirmado.
+      olvidar();
+      baseBorrador.current = null;
       setIsPreviewOpen(false);
       setSelectedOrderIds([]);
       setPlanningRange({});
@@ -2059,6 +2145,7 @@ export default function OperacionesPage() {
         isLoading={false}
         onDataRefresh={fetchData}
         initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
+        onAbrirBorrador={handleAbrirBorrador}
         autoSelectAll={!isReplanning}
         availableOperarios={rawOperarios}
       />
@@ -2069,11 +2156,13 @@ export default function OperacionesPage() {
 
       <PlanningPreviewModal
         isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
+        onClose={handleCerrarPreview}
         onBack={() => {
+          void guardarYa();
           setIsPreviewOpen(false);
           setIsSelectionModalOpen(true);
         }}
+        onEdicionesChange={handleEdicionesBorrador}
         onConfirm={handleConfirmPlan}
         results={previewResults}
         excedentes={excedentesResults}

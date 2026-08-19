@@ -23,6 +23,8 @@ import { cn } from "@/lib/utils"
 import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
+import { BorradoresPlan } from "./BorradoresPlan"
+import type { BorradorPlan } from "@/lib/borradorPlan"
 
 export interface PlanningRange {
     fecha_desde?: string  // "YYYY-MM-DD"
@@ -38,6 +40,8 @@ interface PlanningSelectionModalProps {
 
     onDataRefresh?: () => void
     initialSelectedIds?: number[]
+    /** Abre un plan calculado y sin confirmar, sin volver a calcularlo. */
+    onAbrirBorrador?: (borrador: BorradorPlan) => void
     autoSelectAll?: boolean
     availableOperarios?: any[]
 }
@@ -50,6 +54,7 @@ export function PlanningSelectionModal({
     isLoading = false,
     onDataRefresh,
     initialSelectedIds = [],
+    onAbrirBorrador,
     autoSelectAll = true,
     availableOperarios = []
 }: PlanningSelectionModalProps) {
@@ -328,6 +333,11 @@ export function PlanningSelectionModal({
                                 </div>
                             </PopoverContent>
                         </Popover>
+
+                        {/* El cálculo es caro (minutos con 34 OTs) y antes cerrar la
+                            vista previa lo tiraba entero. Acá se retoma sin recalcular.
+                            El componente no se dibuja si no hay borradores guardados. */}
+                        {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
 
                         {/* Zoom control: afecta a la tabla de selección. */}
                         <ZoomControl value={zoom} onChange={setZoom} />

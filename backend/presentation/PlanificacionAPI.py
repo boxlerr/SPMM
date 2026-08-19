@@ -13,6 +13,9 @@ from backend.infrastructure.PlanificacionRepository import PlanificacionReposito
 from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
 from backend.dto.PlanificacionUpdateDTO import PlanificacionUpdateDTO
 from backend.dto.QuitarOrdenesPlanificacionDTO import QuitarOrdenesPlanificacionDTO
+from backend.dto.PlanificacionBorradorDTO import GuardarBorradorDTO
+from backend.infrastructure.PlanificacionBorradorRepository import PlanificacionBorradorRepository
+from backend.core.security import get_current_user
 
 from sqlalchemy import text
 
@@ -66,6 +69,14 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             tipo, ordenes_ids, "ok",
             int((_time.monotonic() - t0) * 1000), salida=resultados,
         )
+        # El plan se confirmó: su borrador dejó de ser un borrador. Si no se borra
+        # acá, la próxima vez que abran Planificar Órdenes les ofrece "retomar" algo
+        # que ya está planificado y confirmado.
+        if not preview_mode and ordenes_ids:
+            try:
+                await PlanificacionBorradorRepository(db).borrar_por_ordenes(ordenes_ids)
+            except Exception as e:
+                logger.warning(f"No se pudo limpiar el borrador del lote confirmado: {e}")
         return resultados
     except PlanificacionException as e:
         logger.error(f"Error de Planificación: {str(e)}")
@@ -81,6 +92,67 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             int((_time.monotonic() - t0) * 1000), error=f"{type(e).__name__}: {e}",
         )
         raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al procesar la planificación. Por favor, intente con menos órdenes.")
+
+
+# ---------------------------------------------------------------------------
+# Borradores: el plan calculado y todavía NO confirmado.
+#
+# La vista previa era pura ida y vuelta —`preview=true` devolvía el resultado y no
+# se guardaba en ningún lado—, así que cerrar el modal tiraba un cálculo de varios
+# minutos. Con 34 OTs eso es la semana entera del taller.
+#
+# Ninguno de estos endpoints devuelve 5xx cuando falla el guardado: los llama un
+# autosave cada pocos segundos y una caída acá no puede voltear la pantalla en la
+# que el usuario está trabajando. La copia del navegador cubre el hueco.
+# ---------------------------------------------------------------------------
+
+@router.get("/planificacion/borradores")
+async def listar_borradores(db = Depends(get_db), _u = Depends(get_current_user)):
+    """Los borradores guardados, del más nuevo al más viejo. Sin el contenido:
+    la lista solo necesita saber cuál abrir."""
+    return await PlanificacionBorradorRepository(db).listar()
+
+
+@router.get("/planificacion/borradores/{borrador_id}")
+async def obtener_borrador(borrador_id: int, db = Depends(get_db), _u = Depends(get_current_user)):
+    borrador = await PlanificacionBorradorRepository(db).obtener(borrador_id)
+    if not borrador:
+        raise HTTPException(status_code=404, detail="Ese borrador ya no existe.")
+    return borrador
+
+
+@router.post("/planificacion/borradores")
+async def guardar_borrador(
+    body: GuardarBorradorDTO,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Crea o pisa un borrador. Devuelve el id para que el autosave siga pisando
+    el mismo en vez de dejar un reguero de copias."""
+    nombre = " ".join(
+        x for x in [current_user.get("nombre"), current_user.get("apellido")] if x
+    ) or current_user.get("username")
+
+    borrador_id = await PlanificacionBorradorRepository(db).guardar(
+        borrador_id=body.id,
+        contenido=body.contenido,
+        ordenes_ids=body.ordenes_ids,
+        cantidad_procesos=body.cantidad_procesos,
+        fecha_desde=body.fecha_desde,
+        fecha_hasta=body.fecha_hasta,
+        id_usuario=current_user.get("id_usuario"),
+        nombre_usuario=nombre,
+        automatico=body.automatico,
+    )
+    # 200 con guardado=False y no un 500: el autosave reintenta en el próximo
+    # cambio y el usuario no tiene por qué enterarse de un fallo transitorio.
+    return {"id": borrador_id, "guardado": borrador_id is not None}
+
+
+@router.delete("/planificacion/borradores/{borrador_id}")
+async def borrar_borrador(borrador_id: int, db = Depends(get_db), _u = Depends(get_current_user)):
+    borrado = await PlanificacionBorradorRepository(db).borrar(borrador_id)
+    return {"borrado": borrado}
 
 
 @router.get("/auditoria/planificacion")
