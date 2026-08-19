@@ -99,6 +99,8 @@ interface PlanningPreviewModalProps {
      *  Sin esto el autoguardado solo vería el plan que devolvió el solver, y el
      *  trabajo de acomodar máquinas y operarios se perdería igual. */
     onEdicionesChange?: (ediciones: Record<string, any>, forzarOrdenIds: number[]) => void;
+    /** Cuándo se calculó este plan (ISO). Un borrador retomado puede ser de ayer. */
+    calculadoEn?: string;
 }
 
 export function PlanningPreviewModal({
@@ -119,6 +121,7 @@ export function PlanningPreviewModal({
     isCalculating = false,
     diagnosticos = [],
     onEdicionesChange,
+    calculadoEn,
 }: PlanningPreviewModalProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -1112,6 +1115,15 @@ export function PlanningPreviewModal({
                                         const forcedArr = Array.from(forzarOrdenIds);
                                         onRecalculate(buildOrdenIdsForRecalc(forcedArr), planningRange, forcedArr);
                                     }}
+                                    /* Mismo recálculo, pero pedido a mano: el caso es
+                                       "fui a Recursos, arreglé lo que pedía el aviso y
+                                       volví". Los diagnósticos son la foto del momento
+                                       del cálculo, así que sin esto el aviso sigue rojo
+                                       aunque el problema ya no exista — y con un
+                                       borrador retomado puede ser la foto de ayer. */
+                                    onRevisar={onRecalculate ? () => handleRecalculate() : undefined}
+                                    revisando={isCalculating}
+                                    calculadoEn={calculadoEn}
                                 />
                             </div>
 

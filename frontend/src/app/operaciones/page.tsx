@@ -111,6 +111,10 @@ export default function OperacionesPage() {
   // Lo que devolvió el solver, para poder recomponer el borrador entero cuando lo
   // único que cambió fue una edición hecha dentro de la vista previa.
   const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "guardadoEn"> | null>(null)
+  /** Cuándo se calculó el plan que se está viendo. Al retomar un borrador es la
+   *  fecha del borrador, no la de ahora: es lo que permite avisar que la foto de
+   *  diagnósticos puede haber quedado vieja. */
+  const [planCalculadoEn, setPlanCalculadoEn] = useState<string | undefined>(undefined)
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -950,6 +954,7 @@ export default function OperacionesPage() {
         excedentes: enrichedExcedentes,
         diagnosticos: diags,
       };
+      setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
         ediciones: {},
@@ -1110,6 +1115,7 @@ export default function OperacionesPage() {
         excedentes: recalcExcedentes,
         diagnosticos: recalcDiags,
       };
+      setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
         ediciones: {},
@@ -1167,6 +1173,7 @@ export default function OperacionesPage() {
       excedentes: borrador.excedentes || [],
       diagnosticos: borrador.diagnosticos || [],
     };
+    setPlanCalculadoEn(borrador.guardadoEn);
     // El autosave pasa a pisar ESTE borrador en vez de crear uno nuevo.
     adoptar(borrador);
     setIsSelectionModalOpen(false);
@@ -2163,6 +2170,7 @@ export default function OperacionesPage() {
           setIsSelectionModalOpen(true);
         }}
         onEdicionesChange={handleEdicionesBorrador}
+        calculadoEn={planCalculadoEn}
         onConfirm={handleConfirmPlan}
         results={previewResults}
         excedentes={excedentesResults}

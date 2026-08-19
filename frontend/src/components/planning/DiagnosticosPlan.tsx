@@ -15,12 +15,13 @@
  *    le decía nada a nadie.
  */
 
-import { useState } from "react";
-import { AlertTriangle, Check, ChevronDown, Info, Loader2, Wrench } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Info, Loader2, RefreshCw, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
+import { antiguedadTexto, estaViejo } from "@/lib/borradorPlan";
 
 /**
  * Resalta lo que viene entre **dobles asteriscos** desde el backend.
@@ -90,10 +91,26 @@ export interface Diagnostico {
 export function DiagnosticosPlan({
     diagnosticos,
     onResuelto,
+    onRevisar,
+    revisando = false,
+    calculadoEn,
 }: {
     diagnosticos?: Diagnostico[];
     /** Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo. */
     onResuelto?: () => void;
+    /**
+     * Volver a calcular para ver si lo que se arregló afuera (en Recursos) ya está.
+     *
+     * Los diagnósticos son una foto del momento del cálculo: si vas a Recursos,
+     * cargás el rango que te pedía y volvés, el aviso sigue ahí igual de rojo
+     * aunque el problema ya no exista. Peor con un borrador retomado, que puede ser
+     * de ayer. No se puede revalidar sin recalcular —el diagnóstico se construye
+     * con lo que el solver realmente hizo—, así que esto recalcula.
+     */
+    onRevisar?: () => void;
+    revisando?: boolean;
+    /** Cuándo se calculó este plan (ISO). Sirve para avisar que la foto es vieja. */
+    calculadoEn?: string;
 }) {
     const items = diagnosticos ?? [];
     const bloqueantes = items.filter((d) => d.severidad === "bloqueante");
@@ -112,6 +129,28 @@ export function DiagnosticosPlan({
      * es donde se lee el "ojo, esto la habilita para N personas".
      */
     const [confirmando, setConfirmando] = useState<string | null>(null);
+
+    /**
+     * Los que estaban en el cálculo anterior y ya no están: se arreglaron.
+     *
+     * Sin esto, resolver algo se ve como un aviso que desaparece — y un aviso que
+     * desaparece se lee como un aviso que se perdió, no como un problema resuelto.
+     * Quedan en verde hasta el próximo recálculo.
+     */
+    const previos = useRef<Diagnostico[]>([]);
+    const [resueltos, setResueltos] = useState<Diagnostico[]>([]);
+
+    useEffect(() => {
+        const ahora = new Set(items.map((d) => d.id));
+        const antes = previos.current;
+        // Solo si ANTES había algo: en el primer render no hay nada resuelto, hay
+        // un plan recién calculado.
+        if (antes.length > 0) {
+            const idos = antes.filter((d) => !ahora.has(d.id));
+            if (idos.length > 0) setResueltos(idos);
+        }
+        previos.current = items;
+    }, [items]);
 
     /**
      * Aplica el cambio de rangos y recalcula el plan sin salir de la vista previa.
@@ -192,7 +231,9 @@ export function DiagnosticosPlan({
         }
     };
 
-    if (items.length === 0) return null;
+    // Antes se iba en null apenas la lista quedaba vacía. Justo el caso en que se
+    // resolvió lo último: el aviso desaparecía sin decir que se había arreglado.
+    if (items.length === 0 && resueltos.length === 0) return null;
 
     const toggle = (id: string) =>
         setAbiertos((prev) => {
@@ -203,38 +244,92 @@ export function DiagnosticosPlan({
         });
 
     const hayBloqueantes = bloqueantes.length > 0;
-    const resumenHeader = [
-        bloqueantes.length > 0 && `${bloqueantes.length} ${bloqueantes.length === 1 ? "traba" : "trabas"}`,
-        avisos.length > 0 && `${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"}`,
-    ].filter(Boolean).join(" y ");
+    const resumenHeader = items.length === 0
+        ? "Sin trabas ni avisos"
+        : [
+            bloqueantes.length > 0 && `${bloqueantes.length} ${bloqueantes.length === 1 ? "traba" : "trabas"}`,
+            avisos.length > 0 && `${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"}`,
+        ].filter(Boolean).join(" y ");
 
     return (
         <div className="mx-4 mt-4 mb-2 rounded-lg border bg-white overflow-hidden">
+            {/* La fila es un div y no un <button>: adentro va el de "Volver a revisar"
+                y no se pueden anidar botones. El toggle queda como botón propio. */}
+            <div
+                className={cn(
+                    "w-full flex items-center transition-colors",
+                    items.length === 0 ? "bg-emerald-50/70"
+                        : hayBloqueantes ? "bg-rose-50/70" : "bg-amber-50/60"
+                )}
+            >
             <button
                 type="button"
                 aria-expanded={!colapsado}
                 onClick={() => setColapsado((c) => !c)}
-                className={cn(
-                    "w-full px-4 py-2.5 flex items-center gap-2.5 text-left transition-colors",
-                    hayBloqueantes ? "bg-rose-50/70 hover:bg-rose-50" : "bg-amber-50/60 hover:bg-amber-50"
-                )}
+                className="flex-1 min-w-0 px-4 py-2.5 flex items-center gap-2.5 text-left"
             >
-                {hayBloqueantes ? (
+                {items.length === 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : hayBloqueantes ? (
                     <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                 ) : (
                     <Info className="w-4 h-4 text-amber-500 shrink-0" />
                 )}
                 <span className="text-sm font-semibold text-gray-900">{resumenHeader}</span>
                 <span className="text-[13px] text-gray-600 hidden sm:inline truncate">
-                    {hayBloqueantes
-                        ? "— lo rojo quedó sin resolver en el plan; tocá la línea para ver cómo se arregla"
-                        : "— el plan sale igual; tocá cada línea para el detalle"}
+                    {items.length === 0
+                        ? "— quedó todo resuelto"
+                        : hayBloqueantes
+                            ? "— lo rojo quedó sin resolver en el plan; tocá la línea para ver cómo se arregla"
+                            : "— el plan sale igual; tocá cada línea para el detalle"}
                 </span>
                 <span className="flex-1" />
                 <ChevronDown
                     className={cn("w-4 h-4 text-gray-400 shrink-0 transition-transform", colapsado && "-rotate-90")}
                 />
             </button>
+
+            {onRevisar && (
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onRevisar}
+                    disabled={revisando}
+                    className="mr-3 h-7 shrink-0 gap-1.5 text-xs text-gray-700 hover:bg-white/70"
+                    title="Recalcular para ver si lo que arreglaste en Recursos ya está"
+                >
+                    <RefreshCw className={cn("w-3.5 h-3.5", revisando && "animate-spin")} />
+                    {revisando ? "Revisando…" : "Volver a revisar"}
+                </Button>
+            )}
+            </div>
+
+            {!colapsado && estaViejo(calculadoEn) && (
+                /* Un borrador retomado puede ser de ayer: lo que se arregló en
+                   Recursos desde entonces no está reflejado acá y el aviso se lee
+                   como si el problema siguiera. */
+                <div className="border-t bg-slate-50 px-4 py-2.5 text-[13px] text-slate-600">
+                    Esta revisión se calculó <strong>{antiguedadTexto(calculadoEn)}</strong>. Si
+                    desde entonces cargaste rangos o habilidades en Recursos, tocá{" "}
+                    <strong>Volver a revisar</strong> para que se actualice.
+                </div>
+            )}
+
+            {!colapsado && resueltos.length > 0 && (
+                <ul className="divide-y border-t bg-emerald-50/40">
+                    {resueltos.map((d) => (
+                        <li key={`resuelto-${d.id}`} className="px-4 py-2.5 flex items-center gap-2.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 shrink-0">
+                                Resuelto
+                            </span>
+                            <span className="text-sm text-gray-700 truncate line-through decoration-emerald-600/40">
+                                {d.titulo}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
 
             {!colapsado && (
                 <ul className="divide-y border-t">
