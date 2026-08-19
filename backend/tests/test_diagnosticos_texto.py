@@ -154,3 +154,83 @@ def test_no_queda_punto_doble_despues_de_un_apellido_abreviado():
     from backend.application.DiagnosticoPlanificacion import _cerrar
     assert _cerrar("Agregale OFICIAL a **Leonel s.**") == "Agregale OFICIAL a **Leonel s.**"
     assert _cerrar("Agregale OFICIAL a quien lo haga") == "Agregale OFICIAL a quien lo haga."
+
+
+# --------------------------------------------------------------------------
+# Consejos que no sirven / botones
+# --------------------------------------------------------------------------
+
+MEDIO_OFICIAL, OFICIAL_PLEGADOR = 4, 2
+
+
+def _maquina(id_, rangos, nombre, cod="X-1"):
+    return (id_, set(rangos), nombre, cod)
+
+
+def test_no_ofrece_el_arreglo_que_no_cambia_nada():
+    """Para tomar una máquina hacen falta DOS cruces: el rango del OPERARIO tiene
+    que estar en la máquina, y el del PROCESO también. Poner el rango de la máquina
+    en el proceso arregla el segundo. Si ese rango no lo tiene ninguna persona real
+    —las SOLDADORAS MIG piden MEDIO OFICIAL y solo lo tiene un puesto VACANTE—, el
+    primero sigue fallando y el consejo deja todo igual."""
+    nombre_rango = {**NOMBRE_RANGO, MEDIO_OFICIAL: "MEDIO OFICIAL"}
+    nombre_operario = {**NOMBRE_OPERARIO, 18: "VACANTE MEDIO OFICIAL"}
+    operarios = OPERARIOS + [(18, MEDIO_OFICIAL)]
+    proc = (15130, 138, 3, None, 5, 180, [OFICIAL], "SOLDADURA CON MIG", True, "SOLDADORA_MIG", {})
+    maqs = [_maquina(23, [MEDIO_OFICIAL], "SOLDADORA MIG/MAG 450 1")]
+    res = [{"orden_id": 15130, "secuencia": 3, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos(
+        [proc], operarios, maqs, res, nombre_rango, nombre_operario,
+    )
+    d = _uno(diags, "«SOLDADURA CON MIG»")
+    textos = " ".join(s["texto"] for s in d["soluciones"])
+    assert "al proceso" not in textos, "no puede ofrecer tocar el proceso: no alcanza"
+    assert "no lo tiene ninguna persona" in d["detalle"]
+
+
+def test_el_arreglo_sirve_cuando_alguien_tiene_el_rango():
+    # GUILLERMO tiene OFICIAL PLEGADOR, así que acá sí sirve tocar el proceso.
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR)]
+    proc = (15279, 87, 2, None, 5, 240, [OFICIAL], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
+    d = _uno(diags, "«PLEGADO»")
+    assert d["soluciones"][0]["texto"].startswith("Ponele")
+    assert d["soluciones"][0]["accion"] is not None
+
+
+def test_varias_maquinas_ahora_llevan_boton():
+    # Antes no se ofrecía botón con más de una máquina, y la mitad de los avisos
+    # había que resolverlos a mano haciendo exactamente lo mismo, uno por uno.
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR)]
+    proc = (1, 11, 1, None, 5, 60, [OFICIAL], "AVELLANADO", True, "AGUJEREADORA", {})
+    maqs = [_maquina(8, [OFICIAL_PLEGADOR], "AGUJEREADORA DE BANCO"),
+            _maquina(16, [OFICIAL_PLEGADOR], "AGUJEREADORA BURANI")]
+    res = [{"orden_id": 1, "secuencia": 1, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
+    d = _uno(diags, "«AVELLANADO»")
+    accion_maq = next(s["accion"] for s in d["soluciones"]
+                      if s["accion"] and s["accion"]["tipo"] == "maquinaria")
+    assert len(accion_maq["objetivos"]) == 2
+    assert {o["id"] for o in accion_maq["objetivos"]} == {8, 16}
+
+
+def test_encender_la_skill_apagada_tiene_boton():
+    diags = _diagnosticar(
+        [_proc(12676, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE])],
+        nativas_off={30: {45, 46}},
+    )
+    d = _uno(diags, "Nadie puede hacer")
+    accion = d["soluciones"][0]["accion"]
+    assert accion["tipo"] == "skill_nativa"
+    assert accion["id"] == 30 and accion["habilitado"] is True
+    assert {o["id"] for o in accion["objetivos"]} == {45, 46}

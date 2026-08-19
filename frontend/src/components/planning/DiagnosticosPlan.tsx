@@ -44,15 +44,26 @@ function conNegritas(texto: string) {
  * El cambio concreto que hace falta, listo para aplicar desde el aviso.
  *
  * `rangos` es el conjunto FINAL (los que ya tenía más los nuevos): los endpoints
- * de rangos reemplazan, no suman. Viene solo cuando el cambio es inequívoco —
- * un único proceso o una única máquina—; si son varias, el aviso manda a
- * Recursos y ahí se decide una por una.
+ * de rangos reemplazan, no suman.
+ *
+ * `objetivos` permite que una sola solución toque VARIAS cosas — las tres
+ * soldadoras MIG, los dos pasantes—. Antes, con más de una máquina no se ofrecía
+ * botón para no cambiar un parque entero de un click, pero el efecto real era que
+ * la mitad de los avisos había que resolverlos a mano en Recursos haciendo
+ * exactamente lo mismo, uno por uno. El resguardo ahora es el texto (dice a cuánta
+ * gente se le abre la máquina) más la confirmación del botón.
+ *
+ * `id`/`rangos` sueltos quedan por compatibilidad con lo ya desplegado.
  */
 export interface DiagnosticoAccion {
-    tipo: "proceso" | "maquinaria";
+    tipo: "proceso" | "maquinaria" | "skill_nativa";
     id: number;
     nombre: string;
-    rangos: number[];
+    rangos?: number[];
+    /** Para skill_nativa: a qué estado se lleva la habilidad. */
+    habilitado?: boolean;
+    /** Cada cosa a tocar. Para skill_nativa son operarios; si no, procesos o máquinas. */
+    objetivos?: { id: number; nombre: string; rangos?: number[] }[];
 }
 
 export interface DiagnosticoSolucion {
@@ -118,23 +129,59 @@ export function DiagnosticosPlan({
         setAplicando(clave);
         try {
             const base = API_URL.replace(/\/$/, "");
-            const url = accion.tipo === "proceso"
-                ? `${base}/procesos/${accion.id}/rangos`
-                : `${base}/maquinarias/${accion.id}/rangos`;
             const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-            const res = await fetch(url, {
-                method: "PUT",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({ rangos: accion.rangos }),
-            });
-            if (!res.ok) throw new Error(String(res.status));
+            const cabeceras = {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            };
+
+            // Una solución puede tocar varias cosas (las tres soldadoras MIG, los dos
+            // pasantes). Sin `objetivos` es una sola: el formato viejo.
+            const objetivos = accion.objetivos?.length
+                ? accion.objetivos
+                : [{ id: accion.id, nombre: accion.nombre, rangos: accion.rangos }];
+
+            const urlDe = (objetivoId: number) =>
+                accion.tipo === "proceso" ? `${base}/procesos/${objetivoId}/rangos`
+                    : accion.tipo === "maquinaria" ? `${base}/maquinarias/${objetivoId}/rangos`
+                        // skill_nativa: el objetivo es el operario y el proceso va en la ruta.
+                        : `${base}/operarios/${objetivoId}/skills-nativas/${accion.id}/estado`;
+
+            const cuerpoDe = (o: { rangos?: number[] }) =>
+                accion.tipo === "skill_nativa"
+                    ? { habilitado: accion.habilitado ?? true }
+                    : { rangos: o.rangos ?? accion.rangos ?? [] };
+
+            // En serie y no en paralelo: son pocos y así, si el tercero falla, los dos
+            // primeros ya quedaron aplicados y el reintento no los pisa de nuevo.
+            const fallidos: string[] = [];
+            for (const o of objetivos) {
+                try {
+                    const r = await fetch(urlDe(o.id), {
+                        method: "PUT",
+                        headers: cabeceras,
+                        body: JSON.stringify(cuerpoDe(o)),
+                    });
+                    if (!r.ok) fallidos.push(o.nombre);
+                } catch {
+                    fallidos.push(o.nombre);
+                }
+            }
+            // Todo mal es un error; algo mal se dice con nombre y apellido, porque el
+            // resto SÍ se aplicó y volver a tocar el botón repetiría lo que ya está.
+            if (fallidos.length === objetivos.length) throw new Error("todos");
+            if (fallidos.length > 0) {
+                toast.warning(`Quedó a medias: no se pudo con ${fallidos.join(", ")}`, {
+                    description: "El resto se aplicó. Terminá esos desde Recursos.",
+                });
+            }
             setAplicadas((prev) => new Set(prev).add(clave));
-            toast.success(`Listo: ${accion.nombre} actualizado`, {
-                description: "Recalculando el plan con el cambio…",
-            });
+            toast.success(
+                objetivos.length === 1
+                    ? `Listo: ${objetivos[0].nombre} actualizado`
+                    : `Listo: ${objetivos.length} actualizados`,
+                { description: "Recalculando el plan con el cambio…" },
+            );
             onResuelto?.();
         } catch {
             toast.error(`No se pudo actualizar ${accion.nombre}`, {

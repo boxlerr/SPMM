@@ -233,17 +233,65 @@ def _accion_proceso(proc_id, nombre_proc, rangos_finales):
 
 
 def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar):
-    """Cargarle rangos a UNA máquina. Con varias candidatas no se ofrece botón:
-    aplicar el cambio a un parque entero de un click es justo lo que no se quiere."""
-    if len(maquinas) != 1:
+    """Cargarle rangos a las máquinas candidatas.
+
+    Antes, con más de una máquina no se ofrecía botón: tocar un parque entero de un
+    click era justo lo que no se quería. Pero el efecto real era peor — la mitad de
+    los avisos no tenía forma rápida de resolverse y había que ir a Recursos a hacer
+    a mano exactamente el mismo cambio, una máquina por vez. El resguardo ahora es
+    otro: el texto dice a cuánta gente se le abre la máquina ANTES de tocar, y el
+    botón pide confirmación. `objetivos` lleva una entrada por máquina, cada una con
+    su conjunto final de rangos, porque no todas tienen los mismos.
+    """
+    if not maquinas:
         return None
-    m = maquinas[0]
     return {
         "tipo": "maquinaria",
-        "id": m,
-        "nombre": maq_nombre[m],
-        "rangos": sorted(set(maq_rangos.get(m, set())) | set(rangos_a_sumar)),
+        # `id` y `rangos` quedan por compatibilidad con lo ya desplegado: un
+        # frontend viejo sigue aplicando la primera máquina en vez de romperse.
+        "id": maquinas[0],
+        "nombre": maq_nombre[maquinas[0]],
+        "rangos": sorted(set(maq_rangos.get(maquinas[0], set())) | set(rangos_a_sumar)),
+        "objetivos": [
+            {
+                "id": m,
+                "nombre": maq_nombre[m],
+                "rangos": sorted(set(maq_rangos.get(m, set())) | set(rangos_a_sumar)),
+            }
+            for m in maquinas
+        ],
     }
+
+
+def _accion_encender_skill(proc_id, nombre_proc, operarios, nombre_operario):
+    """Volver a encender una habilidad apagada a mano.
+
+    Es el arreglo más seguro de todos —no le da permisos nuevos a nadie, devuelve
+    los que el rango ya daba— y era el único que no tenía botón."""
+    if not operarios:
+        return None
+    return {
+        "tipo": "skill_nativa",
+        "id": proc_id,
+        "nombre": nombre_proc,
+        "habilitado": True,
+        "objetivos": [
+            {"id": op, "nombre": (nombre_operario.get(op) or f"#{op}").strip()}
+            for op in sorted(operarios)
+        ],
+    }
+
+
+def _personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario) -> set:
+    """Quiénes tienen alguno de esos rangos, sin contar los puestos VACANTE.
+
+    Se usa para dos cosas distintas y las dos importan: decir a cuánta gente se le
+    abre una máquina, y detectar el caso en que un rango existe en el catálogo pero
+    no lo tiene ninguna persona real."""
+    ops = set()
+    for r in rangos_ids or ():
+        ops |= ops_por_rango.get(r, set())
+    return {o for o in ops if not _es_vacante(nombre_operario.get(o))}
 
 
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
@@ -252,10 +300,7 @@ def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
     Sin este número, "agregale OPERARIO CALIFICADO a la máquina" suena inofensivo
     y puede estar abriendo una máquina restringida a media planta.
     """
-    ops = set()
-    for r in rangos_ids or ():
-        ops |= ops_por_rango.get(r, set())
-    ops = {o for o in ops if not _es_vacante(nombre_operario.get(o))}
+    ops = _personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario)
     if not ops:
         return "nadie"
     nombres = sorted(_primer_nombre(nombre_operario.get(o, f"#{o}")) for o in ops)
@@ -401,6 +446,7 @@ def _procesos_que_nadie_puede_hacer(
                          f"ya {_concuerda(quienes_off, 'tiene', 'tienen')} el rango, "
                          "solo está apagado en su ficha.",
                 "donde": "Recursos › Operarios",
+                "accion": _accion_encender_skill(proc_id, d["nombre"], apagados, nombre_operario),
             })
         if directo:
             r, n = directo[0]
@@ -735,6 +781,17 @@ def _procesos_sin_maquina_compatible(
             maqs = [maq_nombre[m] for m in d["candidatas"]]
             rangos_maq_ids = {r for m in d["candidatas"] for r in maq_rangos.get(m, set())}
             rangos_maq = sorted(nombre_rango.get(r, f"#{r}") for r in rangos_maq_ids)
+            # Para que alguien tome la máquina hacen falta DOS cruces, y el solver
+            # los pide juntos (_agregar_compatibilidad_op_maq):
+            #   1) el rango del OPERARIO tiene que estar en la máquina;
+            #   2) el rango del PROCESO tiene que estar en la máquina.
+            # Ponerle el rango de la máquina al proceso arregla el (2). Si el rango
+            # de la máquina no lo tiene NINGUNA persona real, el (1) sigue fallando
+            # para todos y la máquina queda igual de inservible: era un consejo que
+            # no cambiaba nada. Pasa de verdad — las SOLDADORAS MIG piden MEDIO
+            # OFICIAL y ese rango hoy solo lo tiene un puesto VACANTE.
+            gente_de_la_maquina = _personas_con_rangos(rangos_maq_ids, ops_por_rango, nombre_operario)
+
             # Un SETUP hereda los rangos de la producción que prepara: son los que el
             # solver usó para filtrar máquinas, pero NO los que figuran en la ficha del
             # proceso. Decir "está cargado con" mandaba a buscar en Recursos algo que
@@ -747,13 +804,23 @@ def _procesos_sin_maquina_compatible(
                 if heredados else
                 f"**{nombre_proc}** está cargado con {pide}"
             )
-            detalle = (
+            cabecera = (
                 f"{_concuerda(maqs, 'La máquina', 'Las máquinas')} **{_listar(maqs)}** "
                 f"solo {_concuerda(maqs, 'la', 'las')} puede usar quien tenga "
-                f"**{_listar_rangos(rangos_maq) or 'ningún rango'}**, pero {trae}. Como no "
-                "coinciden, el sistema no reserva la máquina: el trabajo se hace igual, pero la "
-                "máquina figura libre y otra OT puede pisarla."
+                f"**{_listar_rangos(rangos_maq) or 'ningún rango'}**"
             )
+            cierre = (
+                "el trabajo se hace igual, pero la máquina figura libre y otra OT puede pisarla."
+            )
+            if rangos_maq_ids and not gente_de_la_maquina:
+                detalle = (
+                    f"{cabecera}, y hoy **no lo tiene ninguna persona**: solo figura en un puesto "
+                    f"a cubrir. Con lo cargado hoy, {_concuerda(maqs, 'esa máquina', 'esas máquinas')} "
+                    f"no {_concuerda(maqs, 'la', 'las')} puede reservar nadie, para este ni para "
+                    f"ningún otro trabajo. Además {trae}. Mientras tanto, {cierre}"
+                )
+            else:
+                detalle = f"{cabecera}, pero {trae}. Como no coinciden, el sistema no reserva la máquina: {cierre}"
             # El orden de las opciones importa y no es cosmético. Ampliar los rangos
             # DE LA MÁQUINA la abre a todo el que tenga ese rango, y eso puede ser
             # exactamente lo que el taller NO quiere: la PLEGADORA tiene OFICIAL
@@ -764,7 +831,20 @@ def _procesos_sin_maquina_compatible(
             # persona a 10. Primero va la opción que NO cambia quién puede tocar la
             # máquina, y la otra dice a cuánta gente se la abre.
             soluciones = []
-            if rangos_maq:
+            if rangos_maq_ids and not gente_de_la_maquina:
+                # Tocar el proceso acá NO alcanza (falta el cruce operario↔máquina),
+                # así que ni se ofrece: sería mandar a hacer un cambio que deja todo
+                # igual y hace pensar que el problema se resolvió.
+                soluciones.append({
+                    "texto": f"Dale **{_listar_rangos(rangos_maq)}** a quien maneja "
+                             f"**{_listar(maqs)}**: es lo único que "
+                             f"{_concuerda(maqs, 'la', 'las')} vuelve a poner en juego.",
+                    "donde": "Recursos › Operarios",
+                })
+                # La otra salida —cambiarle el rango a la máquina por uno que la gente
+                # sí tenga— ya la ofrece el "Al revés: …" de más abajo, que además
+                # avisa a cuánta gente se la abre. No hace falta decirlo dos veces.
+            elif rangos_maq:
                 soluciones.append({
                     "texto": f"Ponele **{_listar_rangos(rangos_maq)}** al proceso **{nombre_proc}**: "
                              f"es el rango de la máquina, así que no cambia quién puede usarla"

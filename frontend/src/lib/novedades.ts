@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "botones-en-todos-los-avisos",
+        fecha: "2026-08-19",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Casi todos los avisos se resuelven con el botón, y ya no te ofrece arreglos que no sirven",
+        detalle:
+            "El botón «Aplicar y recalcular» aparecía solo cuando el cambio era sobre una única máquina; si eran varias había que ir a Recursos y hacer el mismo cambio a mano, una por una. Ahora las toca a todas de una, y sigue diciéndote a cuánta gente le abrís la máquina antes de que la toques. También tiene botón el arreglo de «volvé a encenderle esta tarea a fulano», que es el más común y el más seguro. Y se sacó un consejo que no servía: cuando la máquina pide un rango que no tiene ninguna persona —como las soldadoras MIG, que piden MEDIO OFICIAL y hoy nadie lo tiene—, el aviso te ofrecía cargarle ese rango al proceso y eso no cambiaba nada. Ahora te dice la verdad: que esas máquinas hoy no las puede reservar nadie, para ningún trabajo.",
+        href: "/operaciones",
+    },
+    {
         id: "borradores-de-planificacion",
         fecha: "2026-08-19",
         tipo: "nuevo",
