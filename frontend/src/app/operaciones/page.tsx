@@ -33,6 +33,7 @@ import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/ty
 import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
 import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
+import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
 import {
   Select,
   SelectContent,
@@ -96,6 +97,11 @@ export default function OperacionesPage() {
   // Qué traba el plan y cómo se destraba: lo calcula el backend en cada vista previa.
   const [diagnosticosPlan, setDiagnosticosPlan] = useState<any[]>([])
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
+  // Overlay de progreso del cálculo. `listo` marca que la respuesta llegó: la
+  // barra se completa y el overlay se baja cuando termina de armarse la vista previa.
+  const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; listo: boolean }>(
+    { activo: false, ots: 0, listo: false }
+  )
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -839,7 +845,7 @@ export default function OperacionesPage() {
 
     // Call API for preview
     try {
-      toast.loading("Calculando planificación...");
+      setCalculando({ activo: true, ots: ids.length, listo: false });
       // Con timeout: el 15/08 el servidor murió a mitad de un cálculo y el
       // "Calculando planificación..." quedó clavado para siempre — sin límite,
       // un request muerto es indistinguible de uno lento. 3 minutos alcanza de
@@ -856,7 +862,9 @@ export default function OperacionesPage() {
         }),
       });
 
-      toast.dismiss();
+      // La respuesta llegó: la barra se completa. El overlay se baja en el finally,
+      // recién cuando terminó también de armarse la vista previa.
+      setCalculando(c => ({ ...c, listo: true }));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -962,7 +970,6 @@ export default function OperacionesPage() {
       setIsPreviewOpen(true);
 
     } catch (error) {
-      toast.dismiss();
       // Distinguir "tardó demasiado / se cortó" de cualquier otro error: son
       // acciones distintas para el usuario (esperar y reintentar vs avisar).
       const esTimeout = error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
@@ -971,6 +978,10 @@ export default function OperacionesPage() {
           ? "El cálculo tardó demasiado y se cortó. Probá con menos OTs o un rango de fechas más corto."
           : "No se pudo calcular la planificación: se cortó la conexión con el servidor. Probá de nuevo."
       );
+    } finally {
+      // En el finally y no en cada salida: hay varios `return` tempranos y con uno
+      // solo que se olvide, la pantalla queda tapada por el overlay para siempre.
+      setCalculando({ activo: false, ots: 0, listo: false });
     }
   };
 
@@ -995,6 +1006,7 @@ export default function OperacionesPage() {
       return;
     }
     setIsPreviewCalculating(true);
+    setCalculando({ activo: true, ots: ids.length, listo: false });
     setSelectedOrderIds(ids);
     setPlanningRange(range);
 
@@ -1013,6 +1025,8 @@ export default function OperacionesPage() {
           procesos_por_orden: procesosPorOrden && Object.keys(procesosPorOrden).length > 0 ? procesosPorOrden : undefined,
         }),
       });
+
+      setCalculando(c => ({ ...c, listo: true }));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -1080,6 +1094,7 @@ export default function OperacionesPage() {
       toast.error("Error al recalcular la planificación");
     } finally {
       setIsPreviewCalculating(false);
+      setCalculando({ activo: false, ots: 0, listo: false });
     }
   };
 
@@ -2027,6 +2042,14 @@ export default function OperacionesPage() {
         orderToEdit={orderToEdit}
       />
 
+
+      {/* Va por encima de los modales de planificación: el cálculo se dispara desde
+          adentro de ellos y el overlay tiene que tapar los dos. */}
+      <ProgresoPlanificacion
+        activo={calculando.activo}
+        cantidadOts={calculando.ots}
+        listo={calculando.listo}
+      />
 
       <PlanningSelectionModal
         isOpen={isSelectionModalOpen}

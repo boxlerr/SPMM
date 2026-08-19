@@ -47,6 +47,36 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "barra-de-avance-y-lote-de-la-semana",
+        fecha: "2026-08-19",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Ves cómo avanza el cálculo, y ya no te avisa por planificar la semana entera",
+        detalle:
+            "Mientras planifica ahora hay una barra con el avance, la etapa en la que va y los segundos que lleva, en vez de un cartelito que decía «Calculando planificación...» sin moverse. Y el aviso de «lote grande» dejó de saltar a las 30 órdenes: aparece recién pasadas las 50, porque 35 o 40 juntas es la semana normal. Además ya no te recomienda partir el lote, que era justo lo que no había que hacer: si planificás en dos tandas, la segunda no ve las máquinas que reservó la primera y los dos planes se pisan.",
+        href: "/operaciones",
+    },
+    {
+        id: "soldadura-reserva-la-soldadora",
+        fecha: "2026-08-19",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "La soldadura ya reserva la soldadora, y el pulido dejó de ocuparla",
+        detalle:
+            "Hasta ahora la soldadura salía con «No necesita» en la columna Maquinaria: las cuatro soldadoras del taller no quedaban tomadas por nadie. Y al revés, trabajos de banco como el pulido se quedaban una máquina que no usan —en el armario de LKM, el pulido reservaba la soldadora TIG y se la bloqueaba a la OT que sí la necesitaba—. Ahora la soldadura con TIG y la soldadura con MIG toman cada una su máquina, que no se sustituyen entre sí, y el trabajo que no se hace en una máquina determinada se planifica sin reservar ninguna y te lo dice.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-dicen-la-causa-real",
+        fecha: "2026-08-19",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los avisos dicen los nombres completos y la causa real",
+        detalle:
+            "Ya no aparece «y 1 más»: cuando un aviso nombra gente, máquinas o rangos, los lista a todos, porque son justo los que hay que ir a tocar. Si un proceso lo puede hacer alguien pero lo tiene apagado en su ficha, el aviso ahora lo dice con nombre y apellido en vez de «ningún operario disponible lo tiene» —y el primer arreglo que ofrece es volver a encenderlo, que es un click—. Cuando un aviso pide un rango, aclara que alcanza con uno de la lista y no con todos. Y si el mismo nombre de proceso aparece dos veces en el catálogo, te avisa por qué se repite el aviso.",
+        href: "/operaciones",
+    },
+    {
         id: "resolver-desde-el-aviso",
         fecha: "2026-08-18",
         tipo: "nuevo",

@@ -494,7 +494,12 @@ def _crear_variables_y_dominios(
     skills_manuales = skills_manuales or {}
 
     op_to_rango = {op_id: r_id for (op_id, r_id) in operarios}
-    REAL_OP_IDS = [op_id for (op_id, _) in operarios]
+    # `operarios` es una lista de PARES (operario, rango): quien tiene tres rangos
+    # aparece tres veces. Sin deduplicar, _agregar_no_solape_operarios —el bloque
+    # más caro del modelo— construía el juego completo de booleanos e intervalos
+    # opcionales una vez por rango en lugar de una vez por persona (21 pasadas para
+    # 12 operarios). Mismo patrón de dedup que ya se usa para `operarios_validos`.
+    REAL_OP_IDS = list(dict.fromkeys(op_id for (op_id, _) in operarios))
     DUMMY_OP_ID = 999999
 
     #REAL_MAQ_IDS = [m_id for (m_id, _rs, _n) in maquinarias]
@@ -700,12 +705,20 @@ def _crear_variables_y_dominios(
 
         elif tipo_proc == "PRODUCCION_MAQUINA":
             # Lógica PRODUCCION
-            # 1. Filtrar por familia requerida si existe
-            candidates = REAL_MAQ_IDS[:]
-            
+            # 1. Filtrar por familia requerida
             if familia_req:
-                candidates = [m for m in candidates if maq_to_familia.get(m) == familia_req]
-            
+                candidates = [m for m in REAL_MAQ_IDS if maq_to_familia.get(m) == familia_req]
+            else:
+                # Sin familia no se sabe QUÉ máquina pide el proceso. Antes el dominio
+                # arrancaba con las 31 y solo lo achicaba el filtro por rango, así que
+                # cualquier máquina que cruzara un rango entraba como candidata: PULIDO
+                # (OFICIAL) se reservaba la SOLDADORA TIG (OFICIAL) porque la
+                # penalización del dummy hace más barato agarrar una máquina real que
+                # ninguna. Reservar la máquina equivocada es peor que no reservar: la
+                # bloquea para la OT que sí la necesita. Sin familia va al dummy, y el
+                # diagnóstico lo explica ("no dice en qué máquina se hace").
+                candidates = []
+
             # 2. Filtrar por rangos si existen
             if rangos_proc:
                 req = set(rangos_proc)
@@ -1958,11 +1971,23 @@ def familia_requerida_from_proceso(nombre_proc: str) -> str:
     if "OXICORTE" in n or "SOPLETE" in n:
         return "OXICORTE"
 
-    # Caso especial: Soldadura? Por defecto soldadura a veces no tiene máquina especifica en BD,
-    # pero si hay máquinas de soldar, se deberia agregar aqui. 
-    # Por ahora no se pidió explícitamente Soldadura como familia de máquina crítica, 
-    # pero el usuario pasó lista.
-    
+    # Soldadura. Va última a propósito: cualquier familia explícita de arriba gana
+    # (un "SOLDADURA EN TORNO" es trabajo de torno). El taller tiene cuatro
+    # soldadoras y hasta ahora no se reservaba ninguna, porque acá no había rama de
+    # soldadura y el parche fue clasificar toda la soldadura como trabajo MANUAL en
+    # _get_tipo_proceso. Con eso, «soldadura con tig» decía «No necesita» máquina
+    # mientras «pulido» —que no tiene familia— se reservaba la SOLDADORA TIG.
+    #
+    # TIG y MIG/MAG son máquinas distintas y no se sustituyen, así que son familias
+    # separadas. «SOLDADURA» a secas no dice cuál es: se devuelve "" y va sin
+    # máquina, que es la verdad, en vez de dejarla elegir cualquiera.
+    if "SOLDA" in n:
+        if "TIG" in n:
+            return "SOLDADORA_TIG"
+        if "MIG" in n or "MAG" in n:
+            return "SOLDADORA_MIG"
+        return ""
+
     return ""
 
 
@@ -1990,11 +2015,12 @@ def _get_tipo_proceso(nombre_proceso: str) -> str:
         "ENDEREZ", "PINTU", "ARMADO", "AJUSTE", "CONTROL", "REVISION",
         "DISENO", "PLANIFICACION", "CUBICACION", "CONSULTAR",
         "SOLICITAR", "TRABAJO DE FORMA", "MANUAL",
-        # A1 (feedback Metlo 06/07): la soldadura depende del soldador (skill/rango),
-        # no de una máquina específica. Sin esto caía en PRODUCCION_MAQUINA y buscaba
-        # una familia de máquina inexistente → el proceso quedaba "sin nadie".
-        # "SOLDA" cubre SOLDADURA / SOLDAR / SOLDADO / SOLDADURA MIG, etc.
-        "SOLDA",
+        # Acá estuvo "SOLDA" desde el 06/07 (feedback Metlo): la soldadura caía en
+        # PRODUCCION_MAQUINA, buscaba una familia de máquina que no existía y el
+        # proceso quedaba sin nadie. El parche era sobre el síntoma —el agujero real
+        # estaba en familia_requerida_from_proceso, que no tenía rama de soldadura—
+        # y a cambio dejaba las cuatro soldadoras del taller sin reservar nunca.
+        # Ahora las familias SOLDADORA_TIG / SOLDADORA_MIG existen, así que sale.
     ]
     
     if any(k in n for k in keywords_manual):

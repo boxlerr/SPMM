@@ -363,20 +363,26 @@ export function PlanningSelectionModal({
                 {/* Content Area */}
                 <div className="flex-1 overflow-hidden bg-gray-50 flex flex-col">
                     <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col gap-4">
-                        {selectedIds.length > 30 && (
+                        {/* El umbral estaba en 30 y saltaba en la semana normal del taller
+                            —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
+                            contrario de lo que hay que hacer: partir el lote hace que el
+                            segundo cálculo no vea las máquinas que reservó el primero y
+                            salgan dos planes que se pisan. Ahora avisa recién a las 50, y
+                            avisa de lo único cierto: que va a tardar. */}
+                        {selectedIds.length > 50 && (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 flex gap-4 items-start shrink-0 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
                                 <div className="bg-amber-100 p-2 rounded-full shrink-0">
                                     <AlertTriangle className="w-6 h-6 text-amber-600" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <h4 className="font-bold text-amber-800 text-sm">
-                                        Atención: Lote grande de órdenes ({selectedIds.length})
+                                        Son muchas órdenes juntas ({selectedIds.length})
                                     </h4>
                                     <p className="text-xs text-amber-700/90 leading-relaxed max-w-[800px]">
-                                        Estás intentando planificar un gran volumen de procesos simultáneamente. Nuestro planificador inteligente evalúa matemáticamente todas las combinaciones posibles de máquinas, operarios y turnos. Procesar tantas órdenes juntas puede exceder el límite de tiempo de cálculo interno y resultar en error.
+                                        Se pueden planificar igual, pero el cálculo va a tardar unos minutos: el planificador prueba todas las combinaciones de máquinas, operarios y turnos antes de decidir. Vas a ver una barra con el avance.
                                     </p>
                                     <p className="text-xs font-semibold text-amber-800 mt-2">
-                                        Recomendación: Planificar en lotes más pequeños (ej. agrupando por sectores o prioridades urgentes) para un resultado eficiente y seguro.
+                                        Conviene hacerlo en una sola tanda y no en varias: si partís el lote, el segundo cálculo no ve las máquinas que reservó el primero y los dos planes se pisan.
                                     </p>
                                 </div>
                             </div>
