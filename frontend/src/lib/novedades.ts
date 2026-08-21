@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "avisos-formato-unico",
+        fecha: "2026-08-21",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Las trabas y los avisos se leen de un vistazo: todos con el mismo formato",
+        detalle:
+            "Cada aviso arrancaba a su manera —uno con el nombre de un proceso, otro con una cifra, otro con «Hay trabajo asignado a…»— y había que leerlos enteros para saber de qué hablaba cada uno. Ahora todos empiezan por la cosa que tiene el problema y siguen con lo que le pasa, y a la izquierda hay una columna fija que dice de qué se trata: CUELLO, SIN MÁQUINA, SIN RANGO, SIN GENTE, VACANTE o TERCEROS. Además se bajó la negrita: resalta los nombres de máquinas, procesos, rangos y personas, y las cifras — nada más.",
+        href: "/operaciones",
+    },
+    {
         id: "planificador-pantalla-completa",
         fecha: "2026-08-21",
         tipo: "mejora",

@@ -11,6 +11,21 @@ Los textos son deliberadamente CORTOS. La primera versión explicaba cada aviso 
 un párrafo y Lucas lo dijo sin vueltas: marea tanto texto. El título dice el
 problema, el detalle una o dos frases, cada solución una línea. El que quiere el
 porqué largo lo tiene en los comentarios de este archivo, que para eso están.
+
+Dos reglas de forma, de la revisión del 21/08 ("me marea tanta negrita, y cada
+traba tiene otro orden de palabras" — Julián):
+
+  1. TODOS los títulos empiezan por el SUJETO y siguen con lo que le pasa:
+     «plegado» se hace sin reservar la máquina, FRESADORA CNC es la única máquina
+     para 10 jornadas, VACANTE MEDIO OFICIAL tiene trabajo asignado. Antes cada
+     familia de aviso arrancaba a su manera —"Nadie puede hacer X", "10 jornadas
+     de trabajo para 3 máquinas", "Hay trabajo asignado a…"— y la lista se leía
+     como seis avisos de seis sistemas distintos: no había una columna donde
+     apoyar la vista para comparar uno con el de abajo.
+
+  2. La negrita marca NOMBRES del taller (máquina, proceso, rango, persona) y
+     CIFRAS. Nunca una frase, y nunca el nombre que ya está en el título. Un
+     renglón con siete negritas no resalta nada: solo grita.
 """
 from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
@@ -44,6 +59,21 @@ def _listar(nombres, conector=" y "):
     if len(nombres) == 1:
         return nombres[0]
     return ", ".join(nombres[:-1]) + conector + nombres[-1]
+
+
+def _listar_corto(nombres, tope=2):
+    """Como `_listar`, pero para TÍTULOS: corta en `tope` y cuenta el resto.
+
+    En el detalle van todos los nombres a propósito (hay que saber a quién le falta
+    el rango). En el título no: un renglón con nueve procesos deja de ser un título
+    y no se puede comparar de un vistazo con el de al lado, que es justamente para
+    lo que sirve. La lista completa está una línea más abajo.
+    """
+    nombres = list(nombres)
+    if len(nombres) <= tope:
+        return _listar(nombres)
+    resto = len(nombres) - tope
+    return f"{_listar(nombres[:tope])} y {resto} más"
 
 
 def _listar_rangos(nombres):
@@ -476,7 +506,12 @@ def _procesos_que_nadie_puede_hacer(
             "id": f"nadie-puede-{proc_id}",
             "tipo": "proceso_sin_operarios",
             "severidad": BLOQUEANTE,
-            "titulo": f"Nadie puede hacer «{d['nombre']}»",
+            # Todos los títulos arrancan por el SUJETO —el proceso, la máquina, la
+            # persona— y siguen con lo que le pasa. Antes cada uno empezaba distinto
+            # ("Nadie puede hacer X", "10 jornadas para 3 máquinas", "Hay trabajo
+            # asignado a...") y la lista se leía como seis avisos de seis sistemas
+            # distintos: no había una columna donde apoyar la vista.
+            "titulo": f"«{d['nombre']}» no lo puede hacer nadie",
             "detalle": _detalle_nadie_puede(
                 pedidos, quienes_off, vacantes, nombre_operario, d["nombre"]
             ),
@@ -583,13 +618,15 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
         hasta_txt = f" El último de estos procesos termina el **{_fecha_corta(ultima)}**." if ultima else ""
 
         n_proc = len(d["procesos"])
+        # Sujeto primero, como todos los demás: acá el sujeto es la máquina.
         titulo = (
             f"{nombres_hab[0]} es la única máquina para {_corto(d['minutos'])} de trabajo"
             if len(habilitadas) == 1
-            else f"{_corto(d['minutos'])} de trabajo para {len(habilitadas)} máquinas"
+            else f"{_listar_corto(nombres_hab)} se reparten {_corto(d['minutos'])} de trabajo"
         )
         base_txt = (
-            f"**{_listar(sorted(d['procesos']))}** solo se puede(n) hacer en "
+            f"{_listar(sorted(d['procesos']))} solo "
+            f"{_concuerda(d['procesos'], 'se puede hacer', 'se pueden hacer')} en "
             f"**{_listar(nombres_hab)}**"
         )
         if afecta_ots:
@@ -603,7 +640,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
             detalle = f"{base_txt}, y no alcanzó: {' y '.join(partes)}.{hasta_txt}"
         else:
             detalle = (
-                f"{base_txt}. Entra todo, pero **por turnos**: mientras una pieza está en la máquina, "
+                f"{base_txt}. Entra todo, pero por turnos: mientras una pieza está en la máquina, "
                 f"las otras esperan.{hasta_txt} No hay nada roto — es la capacidad real del taller."
             )
         salida.append({
@@ -814,7 +851,7 @@ def _procesos_sin_maquina_compatible(
             )
             if rangos_maq_ids and not gente_de_la_maquina:
                 detalle = (
-                    f"{cabecera}, y hoy **no lo tiene ninguna persona**: solo figura en un puesto "
+                    f"{cabecera}, y hoy no lo tiene ninguna persona: solo figura en un puesto "
                     f"a cubrir. Con lo cargado hoy, {_concuerda(maqs, 'esa máquina', 'esas máquinas')} "
                     f"no {_concuerda(maqs, 'la', 'las')} puede reservar nadie, para este ni para "
                     f"ningún otro trabajo. Además {trae}. Mientras tanto, {cierre}"
@@ -873,7 +910,7 @@ def _procesos_sin_maquina_compatible(
             if quienes:
                 detalle = (
                     f"**{_listar(quienes)}** {_concuerda(quienes, 'puede', 'pueden')} hacer "
-                    f"**{nombre_proc}**, pero para usar **{_listar(maqs)}** hace falta "
+                    f"{nombre_proc}, pero para usar **{_listar(maqs)}** hace falta "
                     f"**{_listar_rangos(rangos_maq)}** y no "
                     f"{_concuerda(quienes, 'lo tiene', 'lo tienen')}. "
                     "El trabajo se hace igual, pero la máquina no queda reservada."
@@ -963,16 +1000,17 @@ def _trabajo_tercerizado(procesos):
     ots = sorted({o for d in tercerizados.values() for o in d["ots"]})
     total = sum(d["minutos"] for d in tercerizados.values())
     cuantos = sum(d["procesos"] for d in tercerizados.values())
+    _nombres_terc = sorted(d["nombre"] for d in tercerizados.values())
 
     return [{
         "id": "trabajo-tercerizado",
         "tipo": "trabajo_tercerizado",
         "severidad": ADVERTENCIA,
-        "titulo": f"{cuantos} {_concuerda(cuantos, 'proceso', 'procesos')} del plan "
-                  f"{_concuerda(cuantos, 'es tercerizado', 'son tercerizados')}",
+        "titulo": f"{_listar_corto(_nombres_terc)} "
+                  f"{_concuerda(_nombres_terc, 'lo hace', 'los hace')} un tercero",
         "detalle": (
-            f"{_listar(sorted(d['nombre'] for d in tercerizados.values()))}. "
-            "Van sin operario ni máquina a propósito: los hace un tercero. Nada que corregir."
+            f"{_listar(_nombres_terc)}: van sin operario ni máquina a propósito. "
+            "Nada que corregir."
         ),
         "impacto": {
             "procesos": cuantos,
@@ -1010,14 +1048,16 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
     total = sum(d["minutos"] for d in por_op.values())
     ots = sorted({o for d in por_op.values() for o in d["ots"]})
     cuantos = sum(d["procesos"] for d in por_op.values())
+    _nombres_vac = sorted(d["nombre"] for d in por_op.values())
 
     return [{
         "id": "trabajo-en-vacantes",
         "tipo": "puestos_vacantes",
         "severidad": ADVERTENCIA,
-        "titulo": "Hay trabajo asignado a puestos vacantes",
+        "titulo": f"{_listar_corto(_nombres_vac)} "
+                  f"{_concuerda(_nombres_vac, 'tiene', 'tienen')} trabajo asignado",
         "detalle": (
-            f"{_listar(sorted(d['nombre'] for d in por_op.values()))} no son personas: "
+            f"{_listar(_nombres_vac)} {_concuerda(_nombres_vac, 'no es una persona', 'no son personas')}: "
             "ese trabajo no lo va a hacer nadie."
         ),
         "impacto": {

@@ -28,8 +28,13 @@ def _diagnosticar(procesos, nativas_off=None, maquinarias=()):
     )
 
 
-def _uno(diags, empieza):
-    return next(d for d in diags if d["titulo"].startswith(empieza))
+def _por_tipo(diags, tipo):
+    """Buscar por `tipo` y no por el título.
+
+    Los títulos se reescribieron el 21/08 para que todos arranquen por el sujeto, y
+    media docena de tests se cayeron por eso sin que hubiera nada roto. El `tipo` es
+    el contrato real; el título es texto para el taller y va a seguir cambiando."""
+    return next(d for d in diags if d["tipo"] == tipo)
 
 
 # --------------------------------------------------------------------------
@@ -44,7 +49,7 @@ def test_skill_apagada_no_se_reporta_como_rango_faltante():
         [_proc(12676, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE])],
         nativas_off={30: {45, 46}},
     )
-    d = _uno(diags, "Nadie puede hacer")
+    d = _por_tipo(diags, "proceso_sin_operarios")
     assert "ningún operario disponible lo tiene" not in d["detalle"]
     assert "apagado en su ficha" in d["detalle"]
     assert "Pasante 1" in d["detalle"] and "Pasante 2" in d["detalle"]
@@ -54,7 +59,7 @@ def test_skill_apagada_no_se_reporta_como_rango_faltante():
 
 def test_rango_realmente_faltante_sigue_diciendolo():
     diags = _diagnosticar([_proc(1, 99, "TEMPLADO", [OFICIAL + 90])])
-    d = _uno(diags, "Nadie puede hacer")
+    d = _por_tipo(diags, "proceso_sin_operarios")
     assert "ningún operario disponible lo tiene" in d["detalle"]
 
 
@@ -80,7 +85,7 @@ def test_las_alternativas_si_llevan_O():
         [_proc(12676, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE])],
         nativas_off={30: {45, 46}},
     )
-    d = _uno(diags, "Nadie puede hacer")
+    d = _por_tipo(diags, "proceso_sin_operarios")
     assert len(d["soluciones"]) > 1
     assert all(s["texto"].startswith("O ") for s in d["soluciones"][1:])
 
@@ -101,7 +106,7 @@ def test_dos_procesos_con_el_mismo_nombre_se_explican():
         _proc(7153, 256, "ENSAMBLAJE, PUNTEADO  Y ESCUADRADO", [], dur=180),
         _proc(12767, 6224, "ENSAMBLAJE, PUNTEADO Y ESCUADRADO", [], dur=240),
     ])
-    repetidos = [d for d in diags if d["titulo"].endswith("no tiene rango")]
+    repetidos = [d for d in diags if d["tipo"] == "proceso_sin_rango"]
     assert len(repetidos) == 2, "son procesos distintos: no se fusionan"
     for d in repetidos:
         assert "2 procesos distintos con este mismo nombre" in d["detalle"]
@@ -109,7 +114,7 @@ def test_dos_procesos_con_el_mismo_nombre_se_explican():
 
 def test_nombre_unico_no_lleva_la_aclaracion():
     diags = _diagnosticar([_proc(12767, 179, "AFILADO", [])])
-    d = _uno(diags, "«AFILADO»")
+    d = _por_tipo(diags, "proceso_sin_rango")
     assert "mismo nombre" not in d["detalle"]
 
 
@@ -184,7 +189,7 @@ def test_no_ofrece_el_arreglo_que_no_cambia_nada():
     diags = construir_diagnosticos(
         [proc], operarios, maqs, res, nombre_rango, nombre_operario,
     )
-    d = _uno(diags, "«SOLDADURA CON MIG»")
+    d = _por_tipo(diags, "maquina_incompatible")
     textos = " ".join(s["texto"] for s in d["soluciones"])
     assert "al proceso" not in textos, "no puede ofrecer tocar el proceso: no alcanza"
     assert "no lo tiene ninguna persona" in d["detalle"]
@@ -200,7 +205,7 @@ def test_el_arreglo_sirve_cuando_alguien_tiene_el_rango():
             "id_maquinaria": None, "excedente": False, "slot_extra": False}]
 
     diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
-    d = _uno(diags, "«PLEGADO»")
+    d = _por_tipo(diags, "maquina_incompatible")
     assert d["soluciones"][0]["texto"].startswith("Ponele")
     assert d["soluciones"][0]["accion"] is not None
 
@@ -217,7 +222,7 @@ def test_varias_maquinas_ahora_llevan_boton():
             "id_maquinaria": None, "excedente": False, "slot_extra": False}]
 
     diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
-    d = _uno(diags, "«AVELLANADO»")
+    d = _por_tipo(diags, "maquina_incompatible")
     accion_maq = next(s["accion"] for s in d["soluciones"]
                       if s["accion"] and s["accion"]["tipo"] == "maquinaria")
     assert len(accion_maq["objetivos"]) == 2
@@ -229,7 +234,7 @@ def test_encender_la_skill_apagada_tiene_boton():
         [_proc(12676, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE])],
         nativas_off={30: {45, 46}},
     )
-    d = _uno(diags, "Nadie puede hacer")
+    d = _por_tipo(diags, "proceso_sin_operarios")
     accion = d["soluciones"][0]["accion"]
     assert accion["tipo"] == "skill_nativa"
     assert accion["id"] == 30 and accion["habilitado"] is True

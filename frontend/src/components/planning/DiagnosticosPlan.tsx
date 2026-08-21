@@ -35,18 +35,47 @@ const VISIBLES = 4;
  *
  * Los avisos nombran máquinas, rangos, personas y fechas — los datos que hay que
  * ir a tocar — y en un párrafo plano se pierden. El backend los marca y acá se
- * dibujan en negrita. No es Markdown: solo negritas, que es lo único que hace
+ * dibujan resaltados. No es Markdown: solo negritas, que es lo único que hace
  * falta y lo único que no puede romper nada.
+ *
+ * Se dibuja en `font-medium` sobre un cuerpo gris, no en `font-semibold` sobre
+ * negro. Con cinco o seis nombres por renglón —que es lo normal en un aviso de
+ * cuello de máquina— el semibold no resalta: grita, y el ojo deja de distinguir
+ * qué es dato y qué es relleno ("me marea tanta negrita", Julián 21/08). El
+ * contraste sigue estando, lo pone la diferencia con el gris de alrededor.
  */
 function conNegritas(texto: string) {
     return texto.split(/(\*\*[^*]+\*\*)/g).map((parte, i) =>
         parte.startsWith("**") && parte.endsWith("**") && parte.length > 4 ? (
-            <strong key={i} className="font-semibold text-gray-900">{parte.slice(2, -2)}</strong>
+            <strong key={i} className="font-medium text-gray-900">{parte.slice(2, -2)}</strong>
         ) : (
             parte
         )
     );
 }
+
+/**
+ * La categoría del aviso, en una palabra y siempre en la misma columna.
+ *
+ * Es lo que permite barrer la lista sin leerla: seis rótulos posibles, ancho fijo,
+ * y los títulos arrancan todos a la misma altura. Sin esto cada línea empieza con
+ * una palabra distinta —un nombre de proceso, uno de máquina, una cifra— y para
+ * saber de qué habla cada una hay que leerlas todas enteras.
+ *
+ * El color lo da la severidad y no la categoría: rojo lo que quedó sin resolver,
+ * ámbar lo que sale igual. Así un solo elemento dice las dos cosas y no hace falta
+ * además el puntito de color que había antes.
+ */
+const CATEGORIA: Record<string, string> = {
+    proceso_sin_operarios: "Sin gente",
+    proceso_sin_rango: "Sin rango",
+    maquina_incompatible: "Sin máquina",
+    cuello_de_maquina: "Cuello",
+    trabajo_tercerizado: "Terceros",
+    puestos_vacantes: "Vacante",
+};
+
+const categoriaDe = (tipo: string) => CATEGORIA[tipo] ?? "Plan";
 
 /**
  * El cambio concreto que hace falta, listo para aplicar desde el aviso.
@@ -420,15 +449,18 @@ export function DiagnosticosPlan({
 
             {!colapsado && resueltos.length > 0 && (
                 <ul className="divide-y border-t bg-emerald-50/40">
+                    {/* Misma geometría que las filas de abajo —chip de 92px y después el
+                        título— para que los resueltos y los pendientes se lean como una
+                        sola lista y no como dos tablas pegadas. */}
                     {resueltos.map((d) => (
-                        <li key={`resuelto-${d.id}`} className="px-4 py-2.5 flex items-center gap-2.5">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 shrink-0">
+                        <li key={`resuelto-${d.id}`} className="px-4 py-2.5 flex items-center gap-3">
+                            <span className="shrink-0 w-[92px] text-center rounded border border-emerald-200 bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase tracking-wide py-1">
                                 Resuelto
                             </span>
-                            <span className="text-sm text-gray-700 truncate line-through decoration-emerald-600/40">
+                            <span className="flex-1 min-w-0 text-sm text-gray-600 truncate line-through decoration-emerald-600/40">
                                 {d.titulo}
                             </span>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                         </li>
                     ))}
                 </ul>
@@ -447,23 +479,26 @@ export function DiagnosticosPlan({
                                     onClick={() => toggle(d.id)}
                                     className="w-full px-4 py-3 flex items-start gap-3 text-left hover:bg-slate-50 transition-colors"
                                 >
-                                    {/* El punto de color reemplaza a la etiqueta "Traba"/"Aviso" de
-                                        la versión anterior: ocupaba 11 caracteres en cada fila para
-                                        repetir lo que el encabezado ya dice con el mismo color. */}
                                     <span
                                         className={cn(
-                                            "w-2 h-2 rounded-full shrink-0 mt-[7px]",
-                                            esBloq ? "bg-rose-500" : "bg-amber-500"
+                                            "shrink-0 w-[92px] mt-px text-center rounded border text-[10px] font-bold uppercase tracking-wide py-1",
+                                            esBloq
+                                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                                : "bg-amber-50 text-amber-800 border-amber-200"
                                         )}
-                                        title={esBloq ? "Traba: quedó sin resolver en el plan" : "Aviso: el plan sale igual"}
-                                    />
+                                        title={esBloq
+                                            ? "Traba: quedó sin resolver en el plan"
+                                            : "Aviso: el plan sale igual"}
+                                    >
+                                        {categoriaDe(d.tipo)}
+                                    </span>
                                     <span className="flex-1 min-w-0">
                                         <span className="block text-sm font-semibold text-gray-900">{d.titulo}</span>
                                         {/* El detalle es lo que dice QUÉ máquina y QUÉ rango tocar.
                                             Tenerlo escondido detrás de un click obligaba a abrir las
                                             once líneas para saber cuál importaba. */}
                                         <span className={cn(
-                                            "block text-[13px] text-gray-600 leading-relaxed mt-0.5 max-w-[95ch]",
+                                            "block text-[13px] text-gray-500 leading-relaxed mt-0.5 max-w-[95ch]",
                                             !activo && "line-clamp-2"
                                         )}>
                                             {conNegritas(d.detalle)}
@@ -484,7 +519,7 @@ export function DiagnosticosPlan({
                                 </button>
 
                                 {activo && (
-                                    <div className="px-4 pb-3.5 pl-9 space-y-2.5">
+                                    <div className="px-4 pb-3.5 pl-[7.75rem] space-y-2.5">
                                         {d.soluciones.length > 0 && (
                                             <div className="space-y-1.5">
                                                 {d.soluciones.map((s, i) => {
