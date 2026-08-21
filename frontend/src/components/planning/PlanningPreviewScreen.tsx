@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { PantallaPlanificador, CifraPlan } from "./PantallaPlanificador";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
+    Columns3, Layers, ListFilter, LogOut, Users,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ import type { WorkOrder } from "@/lib/types";
 import { toast } from "sonner";
 import { API_URL } from "@/config";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
+import { huellaRecursos } from "@/lib/huellaRecursos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -71,7 +73,7 @@ interface PlanificacionResult {
     any_process_started?: boolean;
 }
 
-interface PlanningPreviewModalProps {
+interface PlanningPreviewScreenProps {
     isOpen: boolean;
     onClose: () => void;
     onBack?: () => void;
@@ -101,9 +103,23 @@ interface PlanningPreviewModalProps {
     onEdicionesChange?: (ediciones: Record<string, any>, forzarOrdenIds: number[]) => void;
     /** Cuándo se calculó este plan (ISO). Un borrador retomado puede ser de ayer. */
     calculadoEn?: string;
+    /**
+     * Cómo estaban los datos de Recursos cuando se calculó este plan.
+     *
+     * Es lo que permite saber, al volver a la pantalla, si lo que dicen los avisos
+     * ya se arregló — sin tener que recalcular a lo bruto para averiguarlo. Viaja
+     * DENTRO del borrador y no se recalcula al retomarlo: si se tomara la foto de
+     * ahora, un borrador de ayer nunca detectaría lo que se cambió anoche, que es
+     * justo el caso. Ver `lib/huellaRecursos`.
+     */
+    huellaAlCalcular?: string | null;
+    /** Retoques a mano que traía el borrador que se está retomando. */
+    edicionesIniciales?: Record<string, any>;
+    /** OTs excedentes que ya venían forzadas en el borrador. */
+    forzarIdsIniciales?: number[];
 }
 
-export function PlanningPreviewModal({
+export function PlanningPreviewScreen({
     isOpen,
     onClose,
     onBack,
@@ -122,7 +138,10 @@ export function PlanningPreviewModal({
     diagnosticos = [],
     onEdicionesChange,
     calculadoEn,
-}: PlanningPreviewModalProps) {
+    huellaAlCalcular,
+    edicionesIniciales,
+    forzarIdsIniciales,
+}: PlanningPreviewScreenProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
     const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100);
@@ -146,11 +165,28 @@ export function PlanningPreviewModal({
     const [pendingAddProcesos, setPendingAddProcesos] = React.useState<Record<number, Set<number>>>({});
     const [expandedAddIds, setExpandedAddIds] = React.useState<Set<number>>(new Set());
 
-    // Reset decisiones de forzar SOLO cuando el modal se abre fresh — no en cada
-    // cambio de excedentes (porque ahora recalculamos en cada toggle y eso cambia
-    // `excedentes`, lo que borraría las decisiones del usuario).
+    /**
+     * Al entrar a la pantalla se retoma lo que traiga el borrador.
+     *
+     * El comentario de `handleAbrirBorrador` decía que al retomar un plan "se
+     * restauran los retoques hechos a mano", pero no era cierto: el borrador
+     * guardaba `ediciones` y `forzarOrdenIds` y esta pantalla nunca los recibía.
+     * Retomar un plan de ayer devolvía las asignaciones del solver y tiraba a la
+     * basura cada máquina y cada horario que alguien hubiera acomodado a mano —
+     * que es la mitad del trabajo de revisar un plan.
+     *
+     * Va acá y no en un `useState` inicial porque la pantalla queda montada entre
+     * plan y plan: el inicializador corre una sola vez en la vida del componente.
+     *
+     * Cuando el plan es nuevo, el padre manda los dos vacíos y esto los limpia,
+     * que es lo que hacía antes con `forzarOrdenIds`.
+     */
     React.useEffect(() => {
-        if (isOpen) setForzarOrdenIds(new Set());
+        if (!isOpen) return;
+        setForzarOrdenIds(new Set(forzarIdsIniciales ?? []));
+        setEditedResults((edicionesIniciales ?? {}) as Record<string, PlanificacionResult>);
+        // Solo al entrar: adentro de la pantalla mandan los cambios del usuario.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
 
     /**
@@ -773,6 +809,12 @@ export function PlanningPreviewModal({
         if (!open) return;
     };
 
+    /** Lo rojo del plan: lo que quedó sin resolver y hay que ir a arreglar. */
+    const trabasSinResolver = React.useMemo(
+        () => diagnosticos.filter(d => d.severidad === "bloqueante").length,
+        [diagnosticos]
+    );
+
     // Cantidad de OTs distintas en el plan actual (no procesos), útil para mostrar al usuario.
     const uniqueOrdersInPlan = React.useMemo(
         () => new Set(results.map(r => r.orden_id)).size,
@@ -846,76 +888,233 @@ export function PlanningPreviewModal({
         );
     };
 
+    // ---------- Revisión automática al volver de Recursos ----------
+
+    /**
+     * "Fui a las alertas, fui a Recursos, arreglé las que decía, y al volver al
+     * borrador sigue apareciendo" (Julián, 19/08).
+     *
+     * Los diagnósticos son la foto del momento del cálculo y la ÚNICA forma de
+     * refrescarlos es recalcular: se arman con lo que el solver realmente hizo, no
+     * con una consulta a la base. Hasta ahora eso obligaba a un botón —"Volver a
+     * revisar"— y el aviso resuelto seguía en rojo hasta que alguien se acordaba
+     * de tocarlo.
+     *
+     * Ahora, al volver a esta pantalla, se compara la huella de los datos de
+     * Recursos contra la que tenía el plan cuando se calculó (`lib/huellaRecursos`,
+     * tres GET chicos). Si no cambió nada, no se molesta a nadie. Si cambió, se
+     * recalcula solo y los avisos que desaparecieron quedan tachados en verde.
+     *
+     * Lo que NO se hace solo: recalcular cuando hay retoques a mano en el plan. El
+     * recálculo rehace las asignaciones automáticas, y perder de golpe las máquinas
+     * y horarios que alguien acomodó a mano —sin haber pedido nada— es peor que un
+     * aviso viejo. En ese caso se avisa y la decisión queda en el botón.
+     */
+    const [revisionAuto, setRevisionAuto] = React.useState<
+        "mirando" | "recalculando" | "con-retoques" | "no-disponible" | null
+    >(null);
+    const revisionEnCurso = React.useRef(false);
+
+    // Cada plan nuevo (o recalculado) limpia el estado del cartel: la foto que se
+    // está mirando pasó a ser la de recién.
+    React.useEffect(() => {
+        setRevisionAuto(null);
+    }, [calculadoEn]);
+
+    const revisarSiCambioAlgo = async () => {
+        if (!isOpen || !onRecalculate) return;
+        if (isCalculating || isConfirming) return;
+        if (diagnosticos.length === 0) return;      // no hay nada que pueda haberse resuelto
+        if (revisionEnCurso.current) return;
+        if (!huellaAlCalcular) {
+            // Borrador viejo (guardado antes de que esto existiera) o Recursos caído
+            // cuando se calculó: no hay contra qué comparar. Queda el botón.
+            setRevisionAuto("no-disponible");
+            return;
+        }
+
+        revisionEnCurso.current = true;
+        setRevisionAuto("mirando");
+        const ahora = await huellaRecursos();
+        revisionEnCurso.current = false;
+
+        if (ahora === null) { setRevisionAuto("no-disponible"); return; }
+        if (ahora === huellaAlCalcular) { setRevisionAuto(null); return; }
+
+        if (Object.keys(editedResults).length > 0) {
+            setRevisionAuto("con-retoques");
+            return;
+        }
+
+        setRevisionAuto("recalculando");
+        toast.info("Cambió algo en Recursos", {
+            description: "Recalculando el plan para ver qué avisos quedaron resueltos.",
+        });
+        handleRecalculate();
+    };
+
+    /**
+     * La función se guarda en una ref y el efecto depende SOLO de `isOpen`.
+     *
+     * Si el efecto dependiera de la función, se volvería a montar con cada retoque
+     * a mano (cada cambio de `editedResults` la recrea) y volvería a consultar
+     * Recursos: tres GET por cada desplegable que alguien toca. La ref además evita
+     * lo contrario —quedarse con una versión vieja de `handleRecalculate`—, porque
+     * se actualiza en cada render.
+     */
+    const revisarRef = React.useRef(revisarSiCambioAlgo);
+    React.useEffect(() => { revisarRef.current = revisarSiCambioAlgo; });
+
+    /**
+     * Cuándo se dispara: al entrar a la pantalla y cada vez que la pestaña vuelve a
+     * estar visible. Los dos casos son el mismo movimiento —"me fui a Recursos y
+     * volví"—: se vaya por el menú de la app o abriendo Recursos en otra pestaña,
+     * que es lo que ofrecen los links de los avisos.
+     */
+    React.useEffect(() => {
+        if (!isOpen) return;
+        void revisarRef.current();
+        const alVolver = () => {
+            // La pestaña oculta no es "volver": el `focus` de una ventana que sigue
+            // atrás no debería disparar un recálculo.
+            if (document.visibilityState === "visible") void revisarRef.current();
+        };
+        document.addEventListener("visibilitychange", alVolver);
+        window.addEventListener("focus", alVolver);
+        return () => {
+            document.removeEventListener("visibilitychange", alVolver);
+            window.removeEventListener("focus", alVolver);
+        };
+    }, [isOpen]);
+
+    // ---------- Filtros y columnas de la tabla del plan ----------
+
+    /**
+     * Con 40 OTs y 300 procesos la tabla no entra en la pantalla, y lo que se busca
+     * casi siempre es un subconjunto: las que llegan tarde, las que quedaron sin
+     * operario, las de un cliente. Los filtros son sobre la OT entera: si una de
+     * sus líneas cumple, la OT se muestra completa — filtrar procesos sueltos
+     * dejaría OTs a medias y el plan no se lee así.
+     */
+    const [filtroTexto, setFiltroTexto] = React.useState("");
+    const [filtros, setFiltros] = React.useState({
+        atrasadas: false,
+        forzadas: false,
+        sinOperario: false,
+        sinMaquina: false,
+    });
+    const [filtrosAbiertos, setFiltrosAbiertos] = React.useState(false);
+    const filtrosActivos = (filtroTexto ? 1 : 0) + Object.values(filtros).filter(Boolean).length;
+
+    const gruposFiltrados = React.useMemo(() => {
+        if (filtrosActivos === 0) return groupedResults;
+        const term = filtroTexto.trim().toLowerCase();
+        const salida: Record<number, PlanificacionResult[]> = {};
+        for (const [oidStr, items] of Object.entries(groupedResults)) {
+            const oid = Number(oidStr);
+            const efectivos = items.map(i => getEffectiveItem(i));
+            const primero = items[0];
+
+            if (term) {
+                const heno = [
+                    String(primero.id_otvieja ?? oid),
+                    String(oid),
+                    primero.cliente || "",
+                    primero.codigo || "",
+                    primero.articulo || "",
+                    ...items.map(i => i.nombre_proceso || ""),
+                ].join(" ").toLowerCase();
+                if (!heno.includes(term)) continue;
+            }
+            if (filtros.forzadas && !forzarOrdenIds.has(oid)) continue;
+            if (filtros.atrasadas && !efectivos.some(i =>
+                i.fecha_fin_estimada && i.fecha_prometida &&
+                new Date(i.fecha_fin_estimada) > new Date(i.fecha_prometida))) continue;
+            // Un tercerizado sin operario no es un hueco: lo hace un tercero.
+            if (filtros.sinOperario && !efectivos.some(i => !i.id_operario && !i.tercerizado)) continue;
+            // Idem un proceso manual sin máquina: no la necesita.
+            if (filtros.sinMaquina && !efectivos.some(i => !i.id_maquinaria && i.usa_maquina !== false && !i.tercerizado)) continue;
+
+            salida[oid] = items;
+        }
+        return salida;
+    }, [groupedResults, filtroTexto, filtros, filtrosActivos, forzarOrdenIds, editedResults]);
+
+    const otsFiltradas = Object.keys(gruposFiltrados).length;
+    const procesosFiltrados = Object.values(gruposFiltrados).reduce((a, xs) => a + xs.length, 0);
+
+    /**
+     * Qué columnas se ven. Trece columnas entran en un monitor de escritorio y en
+     * ninguna otra cosa; el que planifica desde una notebook mira siempre las
+     * mismas cuatro o cinco. Queda guardado en el navegador para no re-elegirlo
+     * cada vez.
+     */
+    const COLUMNAS = React.useMemo(() => ([
+        { clave: "entrada", titulo: "Entrada" },
+        { clave: "cliente", titulo: "Cliente" },
+        { clave: "codigo", titulo: "Código" },
+        { clave: "articulo", titulo: "Artículo" },
+        { clave: "cantidad", titulo: "Cant." },
+        { clave: "material", titulo: "Mat." },
+        { clave: "progreso", titulo: "Progreso" },
+        { clave: "prioridad", titulo: "Prioridad" },
+        { clave: "prometida", titulo: "Prometida" },
+        { clave: "trabajo", titulo: "Trabajo" },
+        { clave: "alertas", titulo: "Alertas" },
+    ] as const), []);
+    const CLAVE_COLUMNAS = "plan_preview_columnas";
+    const [ocultas, setOcultas] = React.useState<Set<string>>(new Set());
+    React.useEffect(() => {
+        try {
+            const crudo = localStorage.getItem(CLAVE_COLUMNAS);
+            if (crudo) setOcultas(new Set(JSON.parse(crudo)));
+        } catch { /* si no se puede leer, se ven todas */ }
+    }, []);
+    const alternarColumna = (clave: string) => {
+        setOcultas(prev => {
+            const next = new Set(prev);
+            if (next.has(clave)) next.delete(clave);
+            else next.add(clave);
+            try { localStorage.setItem(CLAVE_COLUMNAS, JSON.stringify(Array.from(next))); } catch { /* nada */ }
+            return next;
+        });
+    };
+    const ve = (clave: string) => !ocultas.has(clave);
+    // Expandir + ID + acciones son fijas: sin ellas la fila no se puede ni abrir ni sacar.
+    const totalColumnas = 3 + COLUMNAS.filter(c => ve(c.clave)).length;
+
+    /** Panel de carga ancho: dos columnas y sin recortar los rangos. */
+    const [cargaCompleta, setCargaCompleta] = React.useState(false);
+
+    /** Para que "Ver detalles" de la cifra de trabas lleve al panel de avisos. */
+    const panelAvisos = React.useRef<HTMLDivElement | null>(null);
+    const irAAvisos = () => panelAvisos.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
     return (
         <>
-        <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-            <DialogContent
-                showCloseButton={false}
-                className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[90vh] flex flex-col p-0 gap-0"
-                onPointerDownOutside={(e) => e.preventDefault()}
-                onInteractOutside={(e) => e.preventDefault()}
-                onEscapeKeyDown={(e) => e.preventDefault()}
-            >
-                {/* Header rediseñado: título, KPIs rápidos del plan, acciones (Agregar OTs / Recalcular) y X de cerrar. */}
-                <DialogHeader className="px-6 py-4 border-b border-gray-100 bg-white shrink-0">
-                    <div className="flex items-start justify-between gap-3">
+        <PantallaPlanificador
+            visible={isOpen}
+            cabecera={
+                <>
+                    <div className="px-6 pt-4 pb-3 flex items-start justify-between gap-4">
                         <div className="min-w-0 flex-1">
-                            <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                                <CalendarClock className="w-5 h-5 text-blue-600" />
-                                Vista Previa de Planificación
-                            </DialogTitle>
-                            <DialogDescription className="mt-0.5">
+                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                                <CalendarClock className="w-5 h-5 text-blue-600 shrink-0" />
+                                Vista previa de planificación
+                                {/* Que se lea que esto TODAVÍA no es el plan: es lo que
+                                    distingue esta pantalla de Operaciones, que se le
+                                    parece bastante y sí muestra lo ya guardado. */}
+                                <span className="text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                    En revisión
+                                </span>
+                            </h1>
+                            <p className="text-sm text-gray-500 mt-0.5">
                                 Revisá y ajustá la programación antes de confirmar. Podés agregar más OTs o recalcular sin salir de esta vista.
-                            </DialogDescription>
-                            {/* KPIs rápidos del plan */}
-                            <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px]">
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1">
-                                    <Cog className="w-3 h-3" />
-                                    {uniqueOrdersInPlan} OT{uniqueOrdersInPlan === 1 ? "" : "s"} en plan
-                                </Badge>
-                                <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200 gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    {results.length} proceso{results.length === 1 ? "" : "s"} · {formatMinutesShort(totalDemandMinutes)}
-                                </Badge>
-                                {displayedExcedentes.length > 0 && (
-                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
-                                        <AlertTriangle className="w-3 h-3" />
-                                        {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
-                                    </Badge>
-                                )}
-                                {/* El período REAL que ocupa el plan. Antes solo se mostraba
-                                    cuando el usuario había elegido un rango a mano; sin rango
-                                    elegido no se veía nada y no había forma de saber hasta
-                                    cuándo llegaban las fechas. */}
-                                {spanPlan && (
-                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
-                                        <Calendar className="w-3 h-3" />
-                                        {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
-                                        <span className="text-slate-500">· {spanPlan.habiles} días hábiles</span>
-                                    </Badge>
-                                )}
-                                {planningRange.fecha_hasta && (
-                                    <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 gap-1">
-                                        Tope elegido: {formatDate(planningRange.fecha_hasta)}
-                                    </Badge>
-                                )}
-                                {displayedExcedentes.length > 0 && onRecalculate && (
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={ampliarRango}
-                                        disabled={isCalculating}
-                                        className="h-6 px-2 text-[11px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
-                                        title="Recalcula el mismo plan con dos semanas más de margen"
-                                    >
-                                        <Calendar className="w-3 h-3" />
-                                        Ampliar 2 semanas
-                                    </Button>
-                                )}
-                            </div>
+                            </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
+
                             {unplannedOrders.length > 0 && onRecalculate && (
                                 <Popover open={addPopoverOpen} onOpenChange={setAddPopoverOpen}>
                                     <PopoverTrigger asChild>
@@ -1069,24 +1268,135 @@ export function PlanningPreviewModal({
                                     </PopoverContent>
                                 </Popover>
                             )}
-                            {/* (Recalcular manual removido: ahora el recálculo es automático
-                                cada vez que se agrega o se elimina una OT del plan.) */}
                             <ZoomControl value={zoom} onChange={setZoom} />
-                            {/* X explícita: único cierre del modal (además del botón "Volver" del footer). */}
+                            {/* Salida del planificador. Ya no cierra un modal: deja la
+                                pantalla y vuelve a Operaciones. El borrador se guarda,
+                                así que no es un "descartar" y no tiene por qué asustar. */}
                             <Button
                                 variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                size="sm"
+                                className="h-8 gap-1.5 text-gray-500 hover:text-gray-800"
                                 onClick={onClose}
                                 disabled={isConfirming || isCalculating}
-                                title="Cerrar"
+                                title="Volver a Operaciones. El plan queda guardado como borrador."
                             >
-                                <XIcon className="w-4 h-4" />
+                                <LogOut className="w-3.5 h-3.5" />
+                                Salir
                             </Button>
                         </div>
                     </div>
-                </DialogHeader>
 
+                    {/* El tamaño del plan de un vistazo. Antes eran badges de 11px
+                        apretados contra el título: para saber si el plan tenía las OTs
+                        que uno esperaba había que ponerse a leer. */}
+                    <div className="px-3 pb-1 flex items-stretch flex-wrap divide-x divide-gray-100">
+                        <CifraPlan
+                            icono={<Cog className="w-4 h-4" />}
+                            valor={uniqueOrdersInPlan}
+                            etiqueta={uniqueOrdersInPlan === 1 ? "OT en plan" : "OTs en plan"}
+                        />
+                        <CifraPlan
+                            icono={<Layers className="w-4 h-4" />}
+                            valor={results.length}
+                            etiqueta={results.length === 1 ? "Proceso" : "Procesos"}
+                        />
+                        <CifraPlan
+                            icono={<Clock className="w-4 h-4" />}
+                            valor={formatMinutesShort(totalDemandMinutes)}
+                            etiqueta="Carga total"
+                        />
+                        <CifraPlan
+                            icono={<AlertTriangle className="w-4 h-4" />}
+                            valor={trabasSinResolver}
+                            etiqueta={trabasSinResolver === 1 ? "Traba sin resolver" : "Trabas sin resolver"}
+                            tono={trabasSinResolver > 0 ? "alerta" : "ok"}
+                            accion={diagnosticos.length > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={irAAvisos}
+                                    className="text-[12px] font-medium text-gray-600 hover:text-gray-900 whitespace-nowrap"
+                                >
+                                    Ver detalles <span className="text-gray-400">›</span>
+                                </button>
+                            ) : undefined}
+                        />
+                    </div>
+
+                    {/* Contexto del plan: qué período ocupa de verdad, qué tope se eligió
+                        y qué quedó afuera. */}
+                    <div className="px-6 pb-3 flex flex-wrap items-center gap-2 text-[11px]">
+                                {/* Las OTs, los procesos y la carga ya están arriba como cifras:
+                                    repetirlos acá era leer dos veces lo mismo. Queda solo lo que
+                                    las cifras no dicen. */}
+                                {displayedExcedentes.length > 0 && (
+                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                                        <AlertTriangle className="w-3 h-3" />
+                                        {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
+                                    </Badge>
+                                )}
+                                {/* El período REAL que ocupa el plan. Antes solo se mostraba
+                                    cuando el usuario había elegido un rango a mano; sin rango
+                                    elegido no se veía nada y no había forma de saber hasta
+                                    cuándo llegaban las fechas. */}
+                                {spanPlan && (
+                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
+                                        <span className="text-slate-500">· {spanPlan.habiles} días hábiles</span>
+                                    </Badge>
+                                )}
+                                {planningRange.fecha_hasta && (
+                                    <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 gap-1">
+                                        Tope elegido: {formatDate(planningRange.fecha_hasta)}
+                                    </Badge>
+                                )}
+                                {displayedExcedentes.length > 0 && onRecalculate && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={ampliarRango}
+                                        disabled={isCalculating}
+                                        className="h-6 px-2 text-[11px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                        title="Recalcula el mismo plan con dos semanas más de margen"
+                                    >
+                                        <Calendar className="w-3 h-3" />
+                                        Ampliar 2 semanas
+                                    </Button>
+                                )}
+                    </div>
+                </>
+            }
+            pie={
+                <div className="px-6 py-4 flex items-center justify-between gap-3">
+                    {/* Lado izquierdo: contexto + Volver */}
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} className="border-gray-300 text-gray-700 hover:bg-gray-50">
+                            Volver
+                        </Button>
+                        {forzarOrdenIds.size > 0 && (
+                            <span className="text-amber-700">
+                                <strong>{forzarOrdenIds.size}</strong> excedente{forzarOrdenIds.size === 1 ? "" : "s"} forzada{forzarOrdenIds.size === 1 ? "" : "s"}
+                            </span>
+                        )}
+                    </div>
+                    {/* Lado derecho: confirmar */}
+                    <Button
+                        onClick={onClickConfirmar}
+                        disabled={isConfirming || isCalculating || (results.length === 0 && displayedExcedentes.length === 0)}
+                        className="bg-blue-600 hover:bg-blue-700 shadow-md px-6"
+                    >
+                        {isConfirming ? (
+                            <span className="flex items-center gap-2">
+                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                Confirmando...
+                            </span>
+                        ) : (
+                            <>Confirmar y guardar planificación</>
+                        )}
+                    </Button>
+                </div>
+            }
+        >
                 <div className="flex flex-1 overflow-hidden">
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         {/* Scroll nativo en lugar de Radix ScrollArea: la versión Radix no rendea
@@ -1103,7 +1413,7 @@ export function PlanningPreviewModal({
                                 hasta ahí y quedaban cortados por el panel de Carga de Operarios.
                                 `sticky left-0` lo mantiene a la vista cuando la tabla se scrollea
                                 en horizontal. */}
-                            <div className="sticky left-0 w-full">
+                            <div ref={panelAvisos} className="sticky left-0 w-full">
                                 <DiagnosticosPlan
                                     diagnosticos={diagnosticos}
                                     /* Aplicado el cambio de rangos, se recalcula el mismo
@@ -1124,10 +1434,11 @@ export function PlanningPreviewModal({
                                     onRevisar={onRecalculate ? () => handleRecalculate() : undefined}
                                     revisando={isCalculating}
                                     calculadoEn={calculadoEn}
+                                    revisionAuto={revisionAuto}
                                 />
                             </div>
 
-                            <div className="min-w-[1000px] p-0 pr-2" style={{ zoom: zoom / 100 }}>
+                            <div className="p-0 pr-2" style={{ zoom: zoom / 100 }}>
                                 {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
                                     Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}
                                 {forcedPartialMap.size > 0 && (() => {
@@ -1278,43 +1589,188 @@ export function PlanningPreviewModal({
                                     </div>
                                 )}
 
-                                {/* Encabezado claro de la tabla de planificados: estas OTs SÍ entraron en
-                                    el plan. Se va a confirmar exactamente esto al apretar "Confirmar y Guardar". */}
-                                <div className="mx-4 mt-4 mb-2 flex items-center gap-2">
-                                    <div className="h-5 w-1 bg-green-500 rounded-full" />
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-[10px] uppercase tracking-widest bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-bold">
-                                            En el plan
+                            </div>
+
+                            {/* Encabezado de la tabla de planificados: estas OTs SÍ entraron en el
+                                plan y es exactamente esto lo que se guarda al confirmar.
+
+                                `sticky left-0` y fuera del contenedor de 1000px, igual que el panel
+                                de avisos: si va adentro, al scrollear la tabla en horizontal los
+                                botones de Filtros y Columnas se van de pantalla — y Columnas existe
+                                justamente para no tener que scrollear. */}
+                            <div className="sticky left-0 w-full bg-white z-20" style={{ zoom: zoom / 100 }}>
+                                <div className="mx-4 mt-4 mb-2 flex items-center gap-2.5 flex-wrap">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                                    <span className="text-[15px] font-bold text-gray-900">
+                                        OTs planificadas ({filtrosActivos > 0 ? `${otsFiltradas} de ${uniqueOrdersInPlan}` : uniqueOrdersInPlan})
+                                    </span>
+                                    <span className="text-xs text-gray-600 bg-slate-100 rounded-full px-2.5 py-1 tabular-nums">
+                                        {filtrosActivos > 0 ? procesosFiltrados : results.length} procesos
+                                    </span>
+                                    {filtrosActivos > 0 && (
+                                        <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                                            Filtrado — al confirmar se guarda el plan entero
                                         </span>
-                                        <span className="text-sm font-bold text-gray-800">
-                                            {uniqueOrdersInPlan} OT{uniqueOrdersInPlan === 1 ? "" : "s"} planificada{uniqueOrdersInPlan === 1 ? "" : "s"}
-                                        </span>
-                                        <span className="text-xs text-gray-500">
-                                            ({results.length} procesos · estas son las que se van a guardar al confirmar)
-                                        </span>
-                                    </div>
+                                    )}
+
+                                    <span className="flex-1" />
+
+                                    {/* Filtros: con 40 OTs la tabla no entra en la pantalla y lo que se
+                                        busca casi siempre es un subconjunto. Filtran la VISTA, no el
+                                        plan: lo dice el chip de arriba, porque un filtro que además
+                                        borrara OTs del plan sería una trampa. */}
+                                    <Popover open={filtrosAbiertos} onOpenChange={setFiltrosAbiertos}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className={cn(
+                                                    "h-8 gap-1.5 text-xs",
+                                                    filtrosActivos > 0 && "border-blue-300 bg-blue-50 text-blue-800"
+                                                )}
+                                            >
+                                                <ListFilter className="w-3.5 h-3.5" />
+                                                Filtros
+                                                {filtrosActivos > 0 && (
+                                                    <Badge className="ml-0.5 bg-blue-600 text-white border-0 px-1.5 py-0 text-[10px] tabular-nums">
+                                                        {filtrosActivos}
+                                                    </Badge>
+                                                )}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[300px] p-0" align="end">
+                                            <div className="p-3 border-b bg-slate-50 text-sm font-semibold text-gray-800">
+                                                Filtrar la vista
+                                            </div>
+                                            <div className="p-3 space-y-3">
+                                                <div className="relative">
+                                                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                                    <Input
+                                                        placeholder="OT, cliente, código, artículo o proceso"
+                                                        value={filtroTexto}
+                                                        onChange={(e) => setFiltroTexto(e.target.value)}
+                                                        className="pl-8 h-8 text-xs"
+                                                    />
+                                                </div>
+                                                {([
+                                                    ["atrasadas", "Solo las que llegan tarde", "Terminan después de la fecha prometida."],
+                                                    ["sinOperario", "Solo con procesos sin operario", "Sin contar los tercerizados."],
+                                                    ["sinMaquina", "Solo con procesos sin máquina", "Sin contar los que no necesitan."],
+                                                    ["forzadas", "Solo las forzadas", "Las que entraron ampliando el rango."],
+                                                ] as const).map(([clave, titulo, ayuda]) => (
+                                                    <label key={clave} className="flex items-start gap-2 cursor-pointer">
+                                                        <Checkbox
+                                                            className="mt-0.5"
+                                                            checked={filtros[clave]}
+                                                            onCheckedChange={() => setFiltros(f => ({ ...f, [clave]: !f[clave] }))}
+                                                        />
+                                                        <span className="min-w-0">
+                                                            <span className="block text-xs font-medium text-gray-800">{titulo}</span>
+                                                            <span className="block text-[11px] text-gray-500">{ayuda}</span>
+                                                        </span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <div className="p-2 border-t bg-slate-50 flex justify-between items-center">
+                                                <span className="text-[11px] text-gray-500">
+                                                    {otsFiltradas} de {uniqueOrdersInPlan} OTs
+                                                </span>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 text-xs"
+                                                    disabled={filtrosActivos === 0}
+                                                    onClick={() => {
+                                                        setFiltroTexto("");
+                                                        setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
+                                                    }}
+                                                >
+                                                    Limpiar
+                                                </Button>
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
+
+                                    {/* Columnas: trece entran en un monitor de escritorio y en ninguna
+                                        otra cosa. Lo elegido queda guardado en el navegador. */}
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+                                                <Columns3 className="w-3.5 h-3.5" />
+                                                Columnas
+                                                {ocultas.size > 0 && (
+                                                    <Badge className="ml-0.5 bg-slate-200 text-slate-700 border-0 px-1.5 py-0 text-[10px] tabular-nums">
+                                                        −{ocultas.size}
+                                                    </Badge>
+                                                )}
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[240px] p-0" align="end">
+                                            <div className="p-3 border-b bg-slate-50">
+                                                <div className="text-sm font-semibold text-gray-800">Columnas a mostrar</div>
+                                                <p className="text-[11px] text-gray-500 mt-0.5">
+                                                    OT y acciones van siempre.
+                                                </p>
+                                            </div>
+                                            <div className="p-2 max-h-[300px] overflow-y-auto">
+                                                {COLUMNAS.map(c => (
+                                                    <label
+                                                        key={c.clave}
+                                                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer"
+                                                    >
+                                                        <Checkbox checked={ve(c.clave)} onCheckedChange={() => alternarColumna(c.clave)} />
+                                                        <span className="text-xs text-gray-800">{c.titulo}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <div className="p-2 border-t bg-slate-50 flex justify-end">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 text-xs"
+                                                    disabled={ocultas.size === 0}
+                                                    onClick={() => {
+                                                        setOcultas(new Set());
+                                                        try { localStorage.removeItem(CLAVE_COLUMNAS); } catch { /* nada */ }
+                                                    }}
+                                                >
+                                                    Mostrar todas
+                                                </Button>
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
                                 </div>
+                            </div>
+
+                            {/* El ancho mínimo sigue a las columnas que quedaron: con las trece
+                                puestas la tabla no entra y se scrollea, que para eso está; pero si
+                                alguien apagó la mitad no tiene sentido seguir forzando 1000px y
+                                hacerlo scrollear igual. */}
+                            <div
+                                className="p-0 pr-2"
+                                style={{ zoom: zoom / 100, minWidth: `${200 + COLUMNAS.filter(c => ve(c.clave)).length * 76}px` }}
+                            >
                                 <table className="w-full text-sm text-left border-collapse">
                                     <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm">
                                         <tr>
                                             <th className="px-4 py-3 w-10"></th>
                                             <th className="px-4 py-3">ID</th>
-                                            <th className="px-4 py-3">Entrada</th>
-                                            <th className="px-4 py-3">Cliente</th>
-                                            <th className="px-4 py-3">Código</th>
-                                            <th className="px-4 py-3">Artículo</th>
-                                            <th className="px-4 py-3 text-center">Cant.</th>
-                                            <th className="px-4 py-3 text-center">Mat.</th>
-                                            <th className="px-4 py-3 text-center">Progreso</th>
-                                            <th className="px-4 py-3 text-center">Prioridad</th>
-                                            <th className="px-4 py-3 text-center">Prometida</th>
-                                            <th className="px-4 py-3 text-center">Trabajo</th>
-                                            <th className="px-4 py-3 text-center">Alertas</th>
+                                            {ve("entrada") && <th className="px-4 py-3">Entrada</th>}
+                                            {ve("cliente") && <th className="px-4 py-3">Cliente</th>}
+                                            {ve("codigo") && <th className="px-4 py-3">Código</th>}
+                                            {ve("articulo") && <th className="px-4 py-3">Artículo</th>}
+                                            {ve("cantidad") && <th className="px-4 py-3 text-center">Cant.</th>}
+                                            {ve("material") && <th className="px-4 py-3 text-center">Mat.</th>}
+                                            {ve("progreso") && <th className="px-4 py-3 text-center">Progreso</th>}
+                                            {ve("prioridad") && <th className="px-4 py-3 text-center">Prioridad</th>}
+                                            {ve("prometida") && <th className="px-4 py-3 text-center">Prometida</th>}
+                                            {ve("trabajo") && <th className="px-4 py-3 text-center">Trabajo</th>}
+                                            {ve("alertas") && <th className="px-4 py-3 text-center">Alertas</th>}
                                             <th className="px-4 py-3 text-center w-12"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
-                                        {Object.entries(groupedResults).map(([ordenIdStr, items]) => {
+                                        {Object.entries(gruposFiltrados).map(([ordenIdStr, items]) => {
                                             const ordenId = parseInt(ordenIdStr);
                                             const firstItem = items[0];
                                             const isExpanded = expandedOrderIds.includes(ordenId);
@@ -1386,13 +1842,16 @@ export function PlanningPreviewModal({
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>
-                                                        <td className="px-4 py-3 text-gray-500 italic">{firstItem.cliente || "-"}</td>
-                                                        <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>
-                                                        <td className="px-4 py-3 text-inherit">{firstItem.articulo ? capitalize(firstItem.articulo) : "-"}</td>
+                                                        {ve("entrada") && <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>}
+                                                        {ve("cliente") && <td className="px-4 py-3 text-gray-500 italic">{firstItem.cliente || "-"}</td>}
+                                                        {ve("codigo") && <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>}
+                                                        {ve("articulo") && <td className="px-4 py-3 text-inherit">{firstItem.articulo ? capitalize(firstItem.articulo) : "-"}</td>}
+                                                        {ve("cantidad") && (
                                                         <td className="px-4 py-3 text-center">
                                                             {firstItem.unidades ? <Badge variant="secondary" className="bg-white/50 text-inherit border-current/20">{firstItem.unidades}</Badge> : "-"}
                                                         </td>
+                                                        )}
+                                                        {ve("material") && (
                                                         <td className="px-4 py-3 text-center">
                                                             {firstItem.estado_material === 'sin_stock' ? (
                                                                 <Badge className="bg-red-100 text-red-700 border-red-200 hover:bg-red-200">Sin Stock</Badge>
@@ -1404,6 +1863,8 @@ export function PlanningPreviewModal({
                                                                 <span className="text-gray-400">-</span>
                                                             )}
                                                         </td>
+                                                        )}
+                                                        {ve("progreso") && (
                                                         <td className="px-4 py-3 text-center">
                                                             {firstItem.unidades ? (
                                                                 <div className="flex flex-col items-center gap-1">
@@ -1414,19 +1875,25 @@ export function PlanningPreviewModal({
                                                                 </div>
                                                             ) : "-"}
                                                         </td>
+                                                        )}
+                                                        {ve("prioridad") && (
                                                         <td className="px-4 py-3 text-center">
                                                             <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
                                                                 {getPriorityLabel(firstItem.id_prioridad, firstItem.prioridad_descripcion)}
                                                             </Badge>
                                                         </td>
-                                                        <td className="px-4 py-3 text-center text-inherit opacity-90">{formatDate(firstItem.fecha_prometida)}</td>
+                                                        )}
+                                                        {ve("prometida") && <td className="px-4 py-3 text-center text-inherit opacity-90">{formatDate(firstItem.fecha_prometida)}</td>}
                                                         {/* Cuándo se toca esta OT: de la primera pieza a la última.
                                                             Estaba solo dentro de cada proceso (12 fechas por OT) y
                                                             no había forma de ver de un vistazo cuándo arranca y
                                                             cuándo se termina — pedido de Julián el 18/08. */}
+                                                        {ve("trabajo") && (
                                                         <td className="px-4 py-3 text-center text-inherit opacity-90 whitespace-nowrap">
                                                             {spanDeOT(effectiveItems)}
                                                         </td>
+                                                        )}
+                                                        {ve("alertas") && (
                                                         <td className="px-4 py-3 text-center">
                                                             {isOrderLate ? (
                                                                 <TooltipProvider delayDuration={150}>
@@ -1478,6 +1945,7 @@ export function PlanningPreviewModal({
                                                                 </TooltipProvider>
                                                             ) : null}
                                                         </td>
+                                                        )}
                                                         {/* Acciones: quitar OT del plan. Click no debe expandir la fila. */}
                                                         <td className="px-2 py-3 text-center">
                                                             <Button
@@ -1497,7 +1965,7 @@ export function PlanningPreviewModal({
                                                     </tr>
                                                     {isExpanded && (
                                                         <tr className="bg-gray-50/50">
-                                                            <td colSpan={14} className="px-0 py-0 border-b shadow-inner">
+                                                            <td colSpan={totalColumnas} className="px-0 py-0 border-b shadow-inner">
                                                                 <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
                                                                     <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
                                                                     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
@@ -1774,22 +2242,43 @@ export function PlanningPreviewModal({
                                         })}
                                     </tbody>
                                 </table >
+                                {otsFiltradas === 0 && uniqueOrdersInPlan > 0 && (
+                                    <div className="px-4 py-10 text-center">
+                                        <p className="text-sm text-gray-600">
+                                            Ninguna de las <strong>{uniqueOrdersInPlan}</strong> OTs del plan coincide con el filtro.
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="mt-3 h-8 text-xs"
+                                            onClick={() => {
+                                                setFiltroTexto("");
+                                                setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
+                                            }}
+                                        >
+                                            Limpiar filtros
+                                        </Button>
+                                    </div>
+                                )}
                             </div >
 
                         </div>
                     </div >
 
-                    {/* Operator Workload Sidebar */}
-                    < div className="w-80 bg-gray-50 border-l border-gray-200 flex flex-col shrink-0" >
+                    {/* Carga de operarios: cómo queda cada uno SI se confirma este plan. */}
+                    <div className={cn(
+                        "bg-gray-50 border-l border-gray-200 flex flex-col shrink-0 transition-[width] duration-200",
+                        cargaCompleta ? "w-[460px]" : "w-80"
+                    )}>
                         <div className="p-4 border-b border-gray-200 bg-white/50">
                             <h3 className="font-bold text-gray-800 flex items-center gap-2">
                                 <User className="w-4 h-4 text-gray-500" />
-                                Carga de Operarios
+                                Carga de operarios
                             </h3>
                             <p className="text-xs text-gray-500 mt-1">Estimación basada en la semana de planificación.</p>
                         </div>
                         <ScrollArea className="flex-1 p-4">
-                            <div className="space-y-4">
+                            <div className={cn(cargaCompleta ? "grid grid-cols-2 gap-3" : "space-y-4")}>
                                 {availableOperators
                                     .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden
                                     .sort((a, b) => {
@@ -1867,12 +2356,12 @@ export function PlanningPreviewModal({
                                                 {/* Rangos del operario: chips compactos para ver qué procesos puede hacer. */}
                                                 {rangosNombres.length > 0 && (
                                                     <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-100">
-                                                        {rangosNombres.slice(0, 4).map((nombre, i) => (
+                                                        {(cargaCompleta ? rangosNombres : rangosNombres.slice(0, 4)).map((nombre, i) => (
                                                             <span key={i} className="text-[9px] uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded font-semibold">
                                                                 {nombre}
                                                             </span>
                                                         ))}
-                                                        {rangosNombres.length > 4 && (
+                                                        {!cargaCompleta && rangosNombres.length > 4 && (
                                                             <span className="text-[9px] text-gray-400 px-1 py-0.5" title={rangosNombres.slice(4).join(", ")}>
                                                                 +{rangosNombres.length - 4}
                                                             </span>
@@ -1895,37 +2384,25 @@ export function PlanningPreviewModal({
                                 }
                             </div>
                         </ScrollArea>
-                    </div >
+                        {/* "Ver carga completa": ensancha el panel y deja de recortar. Los
+                            chips de rangos se cortaban en 4 y las tarjetas de 320px no
+                            dejan comparar a dos personas sin scrollear. No manda a otra
+                            pantalla a propósito: la carga de OTRA pantalla es la del plan
+                            YA guardado, no la de este borrador. */}
+                        <div className="p-3 border-t border-gray-200 bg-white/60">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCargaCompleta(v => !v)}
+                                className="w-full h-8 gap-1.5 text-xs text-gray-600 hover:text-gray-900"
+                            >
+                                <Users className="w-3.5 h-3.5" />
+                                {cargaCompleta ? "Ver compacto" : "Ver carga completa"}
+                            </Button>
+                        </div>
+                    </div>
                 </div >
 
-                <DialogFooter className="p-4 bg-white border-t mt-auto gap-3 shrink-0 sm:justify-between">
-                    {/* Lado izquierdo: contexto + Volver */}
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} className="border-gray-300 text-gray-700 hover:bg-gray-50">
-                            Volver
-                        </Button>
-                        {forzarOrdenIds.size > 0 && (
-                            <span className="text-amber-700">
-                                <strong>{forzarOrdenIds.size}</strong> excedente{forzarOrdenIds.size === 1 ? "" : "s"} forzada{forzarOrdenIds.size === 1 ? "" : "s"}
-                            </span>
-                        )}
-                    </div>
-                    {/* Lado derecho: confirmar */}
-                    <Button
-                        onClick={onClickConfirmar}
-                        disabled={isConfirming || isCalculating || (results.length === 0 && displayedExcedentes.length === 0)}
-                        className="bg-blue-600 hover:bg-blue-700 shadow-md px-6"
-                    >
-                        {isConfirming ? (
-                            <span className="flex items-center gap-2">
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                Confirmando...
-                            </span>
-                        ) : (
-                            <>Confirmar y Guardar</>
-                        )}
-                    </Button>
-                </DialogFooter>
 
                 {/* Overlay durante recalculo: bloquea la UI pero la deja visible para contexto. */}
                 {isCalculating && (
@@ -1939,8 +2416,7 @@ export function PlanningPreviewModal({
                         </div>
                     </div>
                 )}
-            </DialogContent >
-        </Dialog >
+        </PantallaPlanificador>
         <ConfirmationDialog
             isOpen={showForzarWarn}
             onClose={() => setShowForzarWarn(false)}

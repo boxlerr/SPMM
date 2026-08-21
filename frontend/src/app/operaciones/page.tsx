@@ -30,12 +30,13 @@ import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
 import { toast } from "sonner"
 import { convertPlanificacionToGanttTasks, calculateWorkingMinutes, addWorkMinutes } from "@/lib/gantt-utils"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
-import { PlanningPreviewModal } from "@/components/planning/PlanningPreviewModal"
+import { PlanningPreviewScreen } from "@/components/planning/PlanningPreviewScreen"
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
-import { PlanningSelectionModal } from "@/components/planning/PlanningSelectionModal"
+import { PlanningSelectionScreen } from "@/components/planning/PlanningSelectionScreen"
 import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
 import type { BorradorPlan } from "@/lib/borradorPlan"
+import { huellaRecursos } from "@/lib/huellaRecursos"
 import {
   Select,
   SelectContent,
@@ -57,7 +58,7 @@ export default function OperacionesPage() {
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima" | "carga">("lista_planificacion")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   /** OT pre-seleccionada para editar (viene del query param `?edit_ot=ID` desde
-   *  el link "Editar OT ↗" del PlanningPreviewModal, o de otra parte del sistema). */
+   *  el link "Editar OT ↗" de la vista previa, o de otra parte del sistema). */
   const [orderToEdit, setOrderToEdit] = useState<WorkOrder | null>(null)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
@@ -115,6 +116,14 @@ export default function OperacionesPage() {
    *  fecha del borrador, no la de ahora: es lo que permite avisar que la foto de
    *  diagnósticos puede haber quedado vieja. */
   const [planCalculadoEn, setPlanCalculadoEn] = useState<string | undefined>(undefined)
+  /** Cómo estaban los datos de Recursos cuando se calculó el plan que se ve.
+   *  Es lo que permite revisar solo, al volver, si lo que decían los avisos ya se
+   *  arregló — sin recalcular a lo bruto para averiguarlo. Ver lib/huellaRecursos. */
+  const [huellaPlan, setHuellaPlan] = useState<string | null | undefined>(undefined)
+  /** Lo que traía un borrador retomado, para que la vista previa lo restaure.
+   *  Con un plan nuevo van vacíos, que es lo que los limpia. */
+  const [edicionesIniciales, setEdicionesIniciales] = useState<Record<string, any>>({})
+  const [forzarIdsIniciales, setForzarIdsIniciales] = useState<number[]>([])
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -859,6 +868,9 @@ export default function OperacionesPage() {
     // Call API for preview
     try {
       setCalculando({ activo: true, ots: ids.length, listo: false });
+      // La foto de Recursos se pide JUNTO con el cálculo, no después: así no suma
+      // latencia, y queda claro que es "cómo estaban los datos cuando se planificó".
+      const huellaPromesa = huellaRecursos();
       // Con timeout: el 15/08 el servidor murió a mitad de un cálculo y el
       // "Calculando planificación..." quedó clavado para siempre — sin límite,
       // un request muerto es indistinguible de uno lento. 3 minutos alcanza de
@@ -947,13 +959,19 @@ export default function OperacionesPage() {
 
       // El cálculo recién terminado es lo caro de todo esto: se guarda sin esperar
       // el debounce, antes de que el usuario llegue a tocar nada.
+      const huella = await huellaPromesa;
       baseBorrador.current = {
         ordenesIds: ids,
         rango: range,
         resultados: enrichedResults,
         excedentes: enrichedExcedentes,
         diagnosticos: diags,
+        huella,
       };
+      setHuellaPlan(huella);
+      // Plan nuevo: no hay retoques previos que restaurar.
+      setEdicionesIniciales({});
+      setForzarIdsIniciales([]);
       setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
@@ -1042,6 +1060,8 @@ export default function OperacionesPage() {
     setPlanningRange(range);
 
     try {
+      // Igual que en el primer cálculo: la foto de Recursos se pide en paralelo.
+      const huellaPromesa = huellaRecursos();
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
@@ -1108,13 +1128,16 @@ export default function OperacionesPage() {
       setExcedentesResults(recalcExcedentes);
       setDiagnosticosPlan(recalcDiags);
 
+      const huella = await huellaPromesa;
       baseBorrador.current = {
         ordenesIds: ids,
         rango: range,
         resultados: recalcResultados,
         excedentes: recalcExcedentes,
         diagnosticos: recalcDiags,
+        huella,
       };
+      setHuellaPlan(huella);
       setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
@@ -1172,7 +1195,15 @@ export default function OperacionesPage() {
       resultados: borrador.resultados || [],
       excedentes: borrador.excedentes || [],
       diagnosticos: borrador.diagnosticos || [],
+      huella: borrador.huella ?? null,
     };
+    // La huella es la del MOMENTO DEL CÁLCULO, no la de ahora: si se tomara ahora,
+    // un borrador de ayer nunca detectaría lo que se arregló anoche.
+    setHuellaPlan(borrador.huella ?? null);
+    // Acá sí hay retoques que restaurar: el comentario de abajo lo prometía desde
+    // el 19/08 pero la vista previa nunca los recibía y se perdían todos.
+    setEdicionesIniciales(borrador.ediciones || {});
+    setForzarIdsIniciales(borrador.forzarOrdenIds || []);
     setPlanCalculadoEn(borrador.guardadoEn);
     // El autosave pasa a pisar ESTE borrador en vez de crear uno nuevo.
     adoptar(borrador);
@@ -1180,12 +1211,16 @@ export default function OperacionesPage() {
     setIsPreviewOpen(true);
   };
 
-  /** Cerrar la vista previa sin confirmar no descarta nada: se sincroniza ya, sin
+  /** Salir del planificador sin confirmar no descarta nada: se sincroniza ya, sin
    *  esperar el debounce, así el borrador queda completo para el que lo retome. */
-  const handleCerrarPreview = () => {
+  const handleSalirDelPlanificador = () => {
     void guardarYa();
     setIsPreviewOpen(false);
+    setIsSelectionModalOpen(false);
   };
+
+  /** Mientras se planifica, Operaciones cede la pantalla entera. */
+  const planificadorAbierto = isSelectionModalOpen || isPreviewOpen;
 
   const handleConfirmPlan = async (manualPlanOrForzar?: any[] | { forzarOrdenIds: number[] }) => {
     try {
@@ -1234,9 +1269,15 @@ export default function OperacionesPage() {
       olvidar();
       baseBorrador.current = null;
       setIsPreviewOpen(false);
+      setIsSelectionModalOpen(false);
       setSelectedOrderIds([]);
       setPlanningRange({});
       setExcedentesResults([]);
+      // Que no queden colgados para el próximo plan: la huella es de un plan que
+      // ya no existe y los retoques eran de ese borrador.
+      setHuellaPlan(undefined);
+      setEdicionesIniciales({});
+      setForzarIdsIniciales([]);
 
       // Refresh data
       await fetchData();
@@ -1307,12 +1348,61 @@ export default function OperacionesPage() {
 
 
   return (
-    <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
+    <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
       {/* Header normal (no sticky)
           Antes: el header era full-width (border-b shadow-sm) y el card de abajo
           estaba centrado con padding lateral, lo que los hacía verse desalineados.
           Ahora ambos son cards con los MISMOS paddings laterales que el body container,
           así sus bordes y contenidos quedan perfectamente alineados verticalmente. */}
+      {planificadorAbierto ? (
+        /* Planificar dejó de ser un modal flotando arriba de Operaciones: es una
+           pantalla, con la barra lateral de la app a la izquierda y un flujo de dos
+           pasos —elegir OTs → revisar el plan— que no se cierra por un click al
+           costado. Las dos conviven montadas (la que no toca queda en `hidden`)
+           para que "Volver" no pierda el rango de fechas ni lo tildado. */
+        <div className="w-full px-2 sm:px-4 md:px-6 lg:px-8 pt-2">
+          <PlanningSelectionScreen
+            isOpen={isSelectionModalOpen}
+            onClose={handleSalirDelPlanificador}
+            unplannedOrders={ordersForPlanning}
+            onPlan={handlePlanSelection}
+            isLoading={false}
+            onDataRefresh={fetchData}
+            initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
+            onAbrirBorrador={handleAbrirBorrador}
+            autoSelectAll={!isReplanning}
+            availableOperarios={rawOperarios}
+          />
+          <PlanningPreviewScreen
+            isOpen={isPreviewOpen}
+            onClose={handleSalirDelPlanificador}
+            onBack={() => {
+              void guardarYa();
+              setIsPreviewOpen(false);
+              setIsSelectionModalOpen(true);
+            }}
+            onEdicionesChange={handleEdicionesBorrador}
+            calculadoEn={planCalculadoEn}
+            onConfirm={handleConfirmPlan}
+            results={previewResults}
+            excedentes={excedentesResults}
+            operatorLoads={operatorLoads}
+            isConfirming={isConfirmingPlan}
+            availableOperators={rawOperarios}
+            availableMachines={rawMaquinarias}
+            unplannedOrders={ordersForPlanning}
+            selectedOrderIds={selectedOrderIds}
+            planningRange={planningRange}
+            onRecalculate={handleRecalculatePreview}
+            isCalculating={isPreviewCalculating}
+            diagnosticos={diagnosticosPlan}
+            huellaAlCalcular={huellaPlan}
+            edicionesIniciales={edicionesIniciales}
+            forzarIdsIniciales={forzarIdsIniciales}
+          />
+        </div>
+      ) : (
+      <>
       <div className="flex-shrink-0 w-full px-2 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -2105,9 +2195,11 @@ export default function OperacionesPage() {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* Sidebar rendered as Fixed Sidebar (Full Height) */}
-      <div className={"fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'translate-x-0' : 'translate-x-full')}>
+      <div className={"fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && !planificadorAbierto && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'translate-x-0' : 'translate-x-full')}>
         <TaskDetailsModal
           isOpen={isDetailsPanelOpen}
           selectedItem={selectedTask}
@@ -2144,47 +2236,11 @@ export default function OperacionesPage() {
         listo={calculando.listo}
       />
 
-      <PlanningSelectionModal
-        isOpen={isSelectionModalOpen}
-        onClose={() => setIsSelectionModalOpen(false)}
-        unplannedOrders={ordersForPlanning}
-        onPlan={handlePlanSelection}
-        isLoading={false}
-        onDataRefresh={fetchData}
-        initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
-        onAbrirBorrador={handleAbrirBorrador}
-        autoSelectAll={!isReplanning}
-        availableOperarios={rawOperarios}
-      />
       <AvailabilityConfigModal
         isOpen={isAvailabilityModalOpen}
         onClose={() => setIsAvailabilityModalOpen(false)}
       />
 
-      <PlanningPreviewModal
-        isOpen={isPreviewOpen}
-        onClose={handleCerrarPreview}
-        onBack={() => {
-          void guardarYa();
-          setIsPreviewOpen(false);
-          setIsSelectionModalOpen(true);
-        }}
-        onEdicionesChange={handleEdicionesBorrador}
-        calculadoEn={planCalculadoEn}
-        onConfirm={handleConfirmPlan}
-        results={previewResults}
-        excedentes={excedentesResults}
-        operatorLoads={operatorLoads}
-        isConfirming={isConfirmingPlan}
-        availableOperators={rawOperarios}
-        availableMachines={rawMaquinarias}
-        unplannedOrders={ordersForPlanning}
-        selectedOrderIds={selectedOrderIds}
-        planningRange={planningRange}
-        onRecalculate={handleRecalculatePreview}
-        isCalculating={isPreviewCalculating}
-        diagnosticos={diagnosticosPlan}
-      />
       {activeTab === "lista_planificacion" && (
         <ConfirmationDialog
           isOpen={isStatusConfirmOpen}

@@ -3,25 +3,32 @@
 /**
  * Qué traba este plan y cómo se destraba.
  *
- * Tercera pasada de diseño. La primera eran cajas anidadas con párrafos ("marea
+ * Cuarta pasada de diseño. La primera eran cajas anidadas con párrafos ("marea
  * tanto texto" — Lucas); la segunda comprimió todo a líneas de 11px grises y un
  * solo item abierto a la vez, y Julián la devolvió: "me marea que esté todo en
- * gris y tan chiquito, y si abro una se cierra otra". Esta versión:
+ * gris y tan chiquito, y si abro una se cierra otra"; la tercera arregló eso pero
+ * escondía el detalle hasta que abrías la línea, y el detalle es justamente lo que
+ * dice qué máquina y qué rango hay que ir a tocar. Esta versión sigue el mockup:
  *
+ *  - El detalle se lee SIEMPRE, en dos líneas, sin abrir nada. Abrir la línea
+ *    agrega las soluciones y los botones, no revela el problema.
  *  - Cada línea abre y cierra POR SU CUENTA (Set de abiertos, no un único id).
- *  - Texto a 14px con jerarquía real: título oscuro, etiqueta traba/aviso con
- *    color, detalle legible. El gris clarito queda solo para lo accesorio.
- *  - El encabezado dice qué significa cada color, porque "2 trabas" solo no
- *    le decía nada a nadie.
+ *  - Se muestran las primeras 4 y "Ver todas" despliega el resto: con 11 avisos la
+ *    tabla del plan quedaba abajo de todo y había que scrollear para verla.
+ *  - El "dónde" dejó de ser un cartelito muerto: te lleva a la pantalla, a la
+ *    pestaña y a la fila del dato que hay que arreglar, ya desplegada.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Info, Loader2, RefreshCw, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Info, Loader2, RefreshCw, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
-import { antiguedadTexto, estaViejo } from "@/lib/borradorPlan";
+import { antiguedadTexto } from "@/lib/borradorPlan";
+
+/** Cuántas líneas se ven antes de "Ver todas". */
+const VISIBLES = 4;
 
 /**
  * Resalta lo que viene entre **dobles asteriscos** desde el backend.
@@ -88,12 +95,63 @@ export interface Diagnostico {
     soluciones: DiagnosticoSolucion[];
 }
 
+/**
+ * A dónde manda el "dónde" del aviso.
+ *
+ * Antes esto era un `<span>` gris que decía "Recursos › Procesos" y no hacía nada:
+ * había que salir, encontrar la pantalla, elegir la pestaña, buscar el proceso
+ * entre 414 y recién ahí desplegar la fila. Ahora el link deja todo eso hecho.
+ *
+ * Con UN objetivo se apunta a la fila concreta (`foco`) y se precarga el buscador
+ * para que caiga en la primera página. Con varios solo se abre la pestaña: llevar
+ * a una de las tres soldadoras haría creer que el aviso habla de esa sola.
+ */
+function enlaceDe(donde: string, accion?: DiagnosticoAccion | null): string | null {
+    const d = (donde || "").toLowerCase();
+    if (!d.startsWith("recursos")) return null;
+
+    const pestania = d.includes("maquinaria") ? "maquinas"
+        : d.includes("proceso") ? "procesos"
+            : d.includes("operario") ? "operarios"
+                : null;
+    if (!pestania) return null;
+
+    const params = new URLSearchParams({ tab: pestania });
+
+    // El objetivo de una skill_nativa es el operario; en los otros casos, el
+    // proceso o la máquina que se va a tocar.
+    const objetivos = accion?.objetivos?.length
+        ? accion.objetivos
+        : accion
+            ? [{ id: accion.id, nombre: accion.nombre }]
+            : [];
+
+    if (accion && objetivos.length === 1) {
+        const clave = accion.tipo === "maquinaria" ? "maquina"
+            : accion.tipo === "skill_nativa" ? "operario"
+                : "proceso";
+        // La pestaña del link manda sobre el tipo de la acción: hay soluciones de
+        // tipo "proceso" cuyo "dónde" es Maquinarias, y ahí el id no aplica.
+        const coincide =
+            (clave === "maquina" && pestania === "maquinas") ||
+            (clave === "proceso" && pestania === "procesos") ||
+            (clave === "operario" && pestania === "operarios");
+        if (coincide) {
+            params.set("foco", String(objetivos[0].id));
+            if (objetivos[0].nombre) params.set("q", objetivos[0].nombre);
+        }
+    }
+
+    return `/recursos?${params.toString()}`;
+}
+
 export function DiagnosticosPlan({
     diagnosticos,
     onResuelto,
     onRevisar,
     revisando = false,
     calculadoEn,
+    revisionAuto = null,
 }: {
     diagnosticos?: Diagnostico[];
     /** Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo. */
@@ -106,18 +164,26 @@ export function DiagnosticosPlan({
      * aunque el problema ya no exista. Peor con un borrador retomado, que puede ser
      * de ayer. No se puede revalidar sin recalcular —el diagnóstico se construye
      * con lo que el solver realmente hizo—, así que esto recalcula.
+     *
+     * Desde el 21/08 esto pasa SOLO al volver a la pantalla (ver `revisionAuto`);
+     * el botón queda como salida manual para cuando la revisión automática no
+     * puede correr.
      */
     onRevisar?: () => void;
     revisando?: boolean;
-    /** Cuándo se calculó este plan (ISO). Sirve para avisar que la foto es vieja. */
+    /** Cuándo se calculó este plan (ISO). Sirve para decir de cuándo es la foto. */
     calculadoEn?: string;
+    /** En qué anda la revisión automática, para contarlo en vez de pedir un click. */
+    revisionAuto?: "mirando" | "recalculando" | "con-retoques" | "no-disponible" | null;
 }) {
     const items = diagnosticos ?? [];
     const bloqueantes = items.filter((d) => d.severidad === "bloqueante");
     const avisos = items.filter((d) => d.severidad !== "bloqueante");
+    const ordenados = [...bloqueantes, ...avisos];
 
     const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
     const [colapsado, setColapsado] = useState(false);
+    const [verTodas, setVerTodas] = useState(false);
     const [aplicando, setAplicando] = useState<string | null>(null);
     const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
     /**
@@ -247,71 +313,108 @@ export function DiagnosticosPlan({
     const resumenHeader = items.length === 0
         ? "Sin trabas ni avisos"
         : [
-            bloqueantes.length > 0 && `${bloqueantes.length} ${bloqueantes.length === 1 ? "traba" : "trabas"}`,
+            bloqueantes.length > 0 && `${bloqueantes.length} ${bloqueantes.length === 1 ? "traba detectada" : "trabas detectadas"}`,
             avisos.length > 0 && `${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"}`,
         ].filter(Boolean).join(" y ");
 
+    const visibles = verTodas ? ordenados : ordenados.slice(0, VISIBLES);
+    const ocultas = ordenados.length - visibles.length;
+
     return (
-        <div className="mx-4 mt-4 mb-2 rounded-lg border bg-white overflow-hidden">
-            {/* La fila es un div y no un <button>: adentro va el de "Volver a revisar"
-                y no se pueden anidar botones. El toggle queda como botón propio. */}
+        <div className={cn(
+            "mx-4 mt-4 mb-2 rounded-xl border overflow-hidden bg-white",
+            items.length === 0 ? "border-emerald-200" : hayBloqueantes ? "border-rose-200" : "border-amber-200"
+        )}>
+            {/* La fila es un div y no un <button>: adentro van "Ver todas" y "Volver a
+                revisar", y no se pueden anidar botones. El toggle queda como botón propio. */}
             <div
                 className={cn(
-                    "w-full flex items-center transition-colors",
+                    "w-full flex items-center gap-2",
                     items.length === 0 ? "bg-emerald-50/70"
                         : hayBloqueantes ? "bg-rose-50/70" : "bg-amber-50/60"
                 )}
             >
-            <button
-                type="button"
-                aria-expanded={!colapsado}
-                onClick={() => setColapsado((c) => !c)}
-                className="flex-1 min-w-0 px-4 py-2.5 flex items-center gap-2.5 text-left"
-            >
-                {items.length === 0 ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : hayBloqueantes ? (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                ) : (
-                    <Info className="w-4 h-4 text-amber-500 shrink-0" />
-                )}
-                <span className="text-sm font-semibold text-gray-900">{resumenHeader}</span>
-                <span className="text-[13px] text-gray-600 hidden sm:inline truncate">
-                    {items.length === 0
-                        ? "— quedó todo resuelto"
-                        : hayBloqueantes
-                            ? "— lo rojo quedó sin resolver en el plan; tocá la línea para ver cómo se arregla"
-                            : "— el plan sale igual; tocá cada línea para el detalle"}
-                </span>
-                <span className="flex-1" />
-                <ChevronDown
-                    className={cn("w-4 h-4 text-gray-400 shrink-0 transition-transform", colapsado && "-rotate-90")}
-                />
-            </button>
-
-            {onRevisar && (
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onRevisar}
-                    disabled={revisando}
-                    className="mr-3 h-7 shrink-0 gap-1.5 text-xs text-gray-700 hover:bg-white/70"
-                    title="Recalcular para ver si lo que arreglaste en Recursos ya está"
+                <button
+                    type="button"
+                    aria-expanded={!colapsado}
+                    onClick={() => setColapsado((c) => !c)}
+                    className="flex-1 min-w-0 px-4 py-3 flex items-start gap-3 text-left"
                 >
-                    <RefreshCw className={cn("w-3.5 h-3.5", revisando && "animate-spin")} />
-                    {revisando ? "Revisando…" : "Volver a revisar"}
-                </Button>
-            )}
+                    {items.length === 0 ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-px" />
+                    ) : hayBloqueantes ? (
+                        <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-px" />
+                    ) : (
+                        <Info className="w-5 h-5 text-amber-500 shrink-0 mt-px" />
+                    )}
+                    <span className="min-w-0">
+                        <span className="block text-[15px] font-semibold text-gray-900">{resumenHeader}</span>
+                        <span className="block text-[13px] text-gray-600 mt-0.5">
+                            {items.length === 0
+                                ? "Quedó todo resuelto."
+                                : hayBloqueantes
+                                    ? "Lo rojo quedó sin resolver en el plan. Resolvelas para optimizar tu planificación."
+                                    : "El plan sale igual. Resolvelos para optimizar tu planificación."}
+                        </span>
+                    </span>
+                    <span className="flex-1" />
+                    <ChevronDown
+                        className={cn("w-4 h-4 text-gray-400 shrink-0 mt-1 transition-transform", colapsado && "-rotate-90")}
+                    />
+                </button>
+
+                {ocultas > 0 && !colapsado && (
+                    <button
+                        type="button"
+                        onClick={() => setVerTodas(true)}
+                        className="shrink-0 text-[13px] font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
+                    >
+                        Ver todas <span className="text-gray-400">›</span>
+                    </button>
+                )}
+
+                {onRevisar && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onRevisar}
+                        disabled={revisando}
+                        className="mr-3 h-7 shrink-0 gap-1.5 text-xs text-gray-700 hover:bg-white/70"
+                        title="Recalcular ahora para ver si lo que arreglaste en Recursos ya está"
+                    >
+                        <RefreshCw className={cn("w-3.5 h-3.5", revisando && "animate-spin")} />
+                        {revisando ? "Revisando…" : "Volver a revisar"}
+                    </Button>
+                )}
             </div>
 
-            {!colapsado && estaViejo(calculadoEn) && (
-                /* Un borrador retomado puede ser de ayer: lo que se arregló en
-                   Recursos desde entonces no está reflejado acá y el aviso se lee
-                   como si el problema siguiera. */
-                <div className="border-t bg-slate-50 px-4 py-2.5 text-[13px] text-slate-600">
-                    Esta revisión se calculó <strong>{antiguedadTexto(calculadoEn)}</strong>. Si
-                    desde entonces cargaste rangos o habilidades en Recursos, tocá{" "}
-                    <strong>Volver a revisar</strong> para que se actualice.
+            {!colapsado && (
+                /* De cuándo es esta foto y quién la mantiene al día. Antes acá había
+                   un "tocá Volver a revisar" que aparecía recién a la hora; ahora la
+                   revisión corre sola al volver a la pantalla y lo único que falta
+                   decir es eso, para que nadie quede esperando un botón. */
+                <div className="border-t bg-slate-50 px-4 py-2 text-[12px] text-slate-600 flex items-center gap-2">
+                    {revisionAuto === "mirando" && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" />}
+                    {revisionAuto === "recalculando" && <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500 shrink-0" />}
+                    {revisionAuto === "con-retoques" && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                    <span>
+                        {revisionAuto === "mirando"
+                            ? "Fijándose si cambió algo en Recursos…"
+                            : revisionAuto === "recalculando"
+                                ? <>Cambió algo en Recursos: <strong>recalculando el plan</strong> para ver qué quedó resuelto.</>
+                                : revisionAuto === "con-retoques"
+                                    ? <>
+                                        Cambió algo en Recursos, pero <strong>no recalculo solo</strong> porque tenés
+                                        cambios hechos a mano en este plan y el recálculo los rehace.
+                                        {" "}Tocá <strong>Volver a revisar</strong> cuando quieras.
+                                    </>
+                                    : revisionAuto === "no-disponible"
+                                        ? <>No se pudo consultar Recursos{calculadoEn ? <> (esta revisión es {antiguedadTexto(calculadoEn)})</> : null}. Si arreglaste algo, tocá <strong>Volver a revisar</strong>.</>
+                                        : <>
+                                            Revisión del plan {calculadoEn ? antiguedadTexto(calculadoEn) : "recién"}.
+                                            {" "}Si vas a Recursos y arreglás algo, al volver acá se revisa y se recalcula solo.
+                                        </>}
+                    </span>
                 </div>
             )}
 
@@ -333,7 +436,7 @@ export function DiagnosticosPlan({
 
             {!colapsado && (
                 <ul className="divide-y border-t">
-                    {[...bloqueantes, ...avisos].map((d) => {
+                    {visibles.map((d) => {
                         const activo = abiertos.has(d.id);
                         const esBloq = d.severidad === "bloqueante";
                         return (
@@ -342,95 +445,115 @@ export function DiagnosticosPlan({
                                     type="button"
                                     aria-expanded={activo}
                                     onClick={() => toggle(d.id)}
-                                    className="w-full px-4 py-2.5 flex items-center gap-3 text-left hover:bg-slate-50 transition-colors"
+                                    className="w-full px-4 py-3 flex items-start gap-3 text-left hover:bg-slate-50 transition-colors"
                                 >
+                                    {/* El punto de color reemplaza a la etiqueta "Traba"/"Aviso" de
+                                        la versión anterior: ocupaba 11 caracteres en cada fila para
+                                        repetir lo que el encabezado ya dice con el mismo color. */}
                                     <span
                                         className={cn(
-                                            // amber-700 y no 600: a 11px el 600 sobre blanco no
-                                            // llega al contraste AA y era ilegible — justo lo
-                                            // que este rediseño vino a arreglar.
-                                            "text-[11px] font-semibold uppercase tracking-wide shrink-0 w-11",
-                                            esBloq ? "text-rose-600" : "text-amber-700"
+                                            "w-2 h-2 rounded-full shrink-0 mt-[7px]",
+                                            esBloq ? "bg-rose-500" : "bg-amber-500"
                                         )}
-                                    >
-                                        {esBloq ? "Traba" : "Aviso"}
-                                    </span>
-                                    <span className="flex-1 min-w-0 text-sm font-medium text-gray-900 truncate">
-                                        {d.titulo}
+                                        title={esBloq ? "Traba: quedó sin resolver en el plan" : "Aviso: el plan sale igual"}
+                                    />
+                                    <span className="flex-1 min-w-0">
+                                        <span className="block text-sm font-semibold text-gray-900">{d.titulo}</span>
+                                        {/* El detalle es lo que dice QUÉ máquina y QUÉ rango tocar.
+                                            Tenerlo escondido detrás de un click obligaba a abrir las
+                                            once líneas para saber cuál importaba. */}
+                                        <span className={cn(
+                                            "block text-[13px] text-gray-600 leading-relaxed mt-0.5 max-w-[95ch]",
+                                            !activo && "line-clamp-2"
+                                        )}>
+                                            {conNegritas(d.detalle)}
+                                        </span>
                                     </span>
                                     <span
-                                        className="hidden sm:inline-flex items-center rounded-full bg-slate-100 text-slate-600 text-xs px-2 py-0.5 tabular-nums shrink-0"
-                                        title={`OTs: ${d.impacto.ots.map((n) => `#${n}`).join(", ")}`}
+                                        className="hidden sm:inline-flex items-center rounded-full bg-slate-100 text-slate-600 text-xs px-2.5 py-1 tabular-nums shrink-0 mt-px"
+                                        title={d.impacto.ots.length > 0 ? `OTs: ${d.impacto.ots.map((n) => `#${n}`).join(", ")}` : undefined}
                                     >
                                         {d.impacto.resumen}
                                     </span>
                                     <ChevronDown
                                         className={cn(
-                                            "w-4 h-4 text-gray-400 shrink-0 transition-transform",
+                                            "w-4 h-4 text-gray-400 shrink-0 mt-1.5 transition-transform",
                                             activo && "rotate-180"
                                         )}
                                     />
                                 </button>
 
                                 {activo && (
-                                    <div className="px-4 pb-3.5 pl-[4.25rem] space-y-2.5">
-                                        <p className="text-sm text-gray-700 leading-relaxed max-w-[80ch]">
-                                            {conNegritas(d.detalle)}
-                                        </p>
+                                    <div className="px-4 pb-3.5 pl-9 space-y-2.5">
                                         {d.soluciones.length > 0 && (
                                             <div className="space-y-1.5">
                                                 {d.soluciones.map((s, i) => {
-                                                  const clave = `${d.id}-${i}`;
-                                                  const hecha = aplicadas.has(clave);
-                                                  return (
-                                                    <div key={i} className="flex items-start gap-2 text-sm">
-                                                        <Wrench className="w-3.5 h-3.5 mt-[3px] shrink-0 text-emerald-600" />
-                                                        <span className="text-gray-800 leading-relaxed">
-                                                            {conNegritas(s.texto)}
-                                                            {/* Hay soluciones que no mandan a ninguna pantalla
-                                                                ("está bien así"): sin esto quedaba un chip vacío. */}
-                                                            {s.donde && (
-                                                                <>
-                                                                    {" "}
-                                                                    <span className="inline-block rounded bg-slate-100 text-slate-600 text-xs px-1.5 py-px whitespace-nowrap align-baseline">
-                                                                        {s.donde}
-                                                                    </span>
-                                                                </>
-                                                            )}
-                                                            {s.accion && (
-                                                                <>
-                                                                    {" "}
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant={hecha ? "ghost" : "outline"}
-                                                                        disabled={hecha || aplicando !== null}
-                                                                        onClick={() => aplicar(clave, s.accion!)}
-                                                                        onBlur={() => confirmando === clave && setConfirmando(null)}
-                                                                        className={cn(
-                                                                            "h-6 px-2 text-[11px] gap-1 align-baseline",
-                                                                            hecha
-                                                                                ? "text-emerald-700"
-                                                                                : confirmando === clave
-                                                                                    ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
-                                                                                    : "border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+                                                    const clave = `${d.id}-${i}`;
+                                                    const hecha = aplicadas.has(clave);
+                                                    const link = enlaceDe(s.donde, s.accion);
+                                                    return (
+                                                        <div key={i} className="flex items-start gap-2 text-sm">
+                                                            <Wrench className="w-3.5 h-3.5 mt-[3px] shrink-0 text-emerald-600" />
+                                                            <span className="text-gray-800 leading-relaxed">
+                                                                {conNegritas(s.texto)}
+                                                                {/* Hay soluciones que no mandan a ninguna pantalla
+                                                                    ("está bien así"): sin esto quedaba un chip vacío. */}
+                                                                {s.donde && (
+                                                                    <>
+                                                                        {" "}
+                                                                        {link ? (
+                                                                            <a
+                                                                                href={link}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                                className="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 text-xs px-1.5 py-px whitespace-nowrap align-baseline transition-colors"
+                                                                                title="Abrir en otra pestaña, ya parado en lo que hay que tocar"
+                                                                            >
+                                                                                {s.donde}
+                                                                                <ArrowUpRight className="w-3 h-3" />
+                                                                            </a>
+                                                                        ) : (
+                                                                            <span className="inline-block rounded bg-slate-100 text-slate-600 text-xs px-1.5 py-px whitespace-nowrap align-baseline">
+                                                                                {s.donde}
+                                                                            </span>
                                                                         )}
-                                                                    >
-                                                                        {aplicando === clave ? (
-                                                                            <Loader2 className="w-3 h-3 animate-spin" />
-                                                                        ) : hecha ? (
-                                                                            <Check className="w-3 h-3" />
-                                                                        ) : null}
-                                                                        {hecha
-                                                                            ? "Aplicado"
-                                                                            : confirmando === clave
-                                                                                ? "Tocá de nuevo para confirmar"
-                                                                                : "Aplicar y recalcular"}
-                                                                    </Button>
-                                                                </>
-                                                            )}
-                                                        </span>
-                                                    </div>
-                                                  );
+                                                                    </>
+                                                                )}
+                                                                {s.accion && (
+                                                                    <>
+                                                                        {" "}
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant={hecha ? "ghost" : "outline"}
+                                                                            disabled={hecha || aplicando !== null}
+                                                                            onClick={() => aplicar(clave, s.accion!)}
+                                                                            onBlur={() => confirmando === clave && setConfirmando(null)}
+                                                                            className={cn(
+                                                                                "h-6 px-2 text-[11px] gap-1 align-baseline",
+                                                                                hecha
+                                                                                    ? "text-emerald-700"
+                                                                                    : confirmando === clave
+                                                                                        ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                                                                                        : "border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+                                                                            )}
+                                                                        >
+                                                                            {aplicando === clave ? (
+                                                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                                            ) : hecha ? (
+                                                                                <Check className="w-3 h-3" />
+                                                                            ) : null}
+                                                                            {hecha
+                                                                                ? "Aplicado"
+                                                                                : confirmando === clave
+                                                                                    ? "Tocá de nuevo para confirmar"
+                                                                                    : "Aplicar y recalcular"}
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+                                                            </span>
+                                                        </div>
+                                                    );
                                                 })}
                                             </div>
                                         )}
@@ -451,6 +574,25 @@ export function DiagnosticosPlan({
                         );
                     })}
                 </ul>
+            )}
+
+            {!colapsado && ocultas > 0 && (
+                <button
+                    type="button"
+                    onClick={() => setVerTodas(true)}
+                    className="w-full border-t px-4 py-2.5 text-[13px] font-medium text-gray-600 hover:bg-slate-50 transition-colors"
+                >
+                    Ver las {ocultas} restantes
+                </button>
+            )}
+            {!colapsado && verTodas && ordenados.length > VISIBLES && (
+                <button
+                    type="button"
+                    onClick={() => setVerTodas(false)}
+                    className="w-full border-t px-4 py-2.5 text-[13px] font-medium text-gray-500 hover:bg-slate-50 transition-colors"
+                >
+                    Mostrar solo las primeras {VISIBLES}
+                </button>
             )}
         </div>
     );

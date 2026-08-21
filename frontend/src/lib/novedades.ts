@@ -47,6 +47,66 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "planificador-pantalla-completa",
+        fecha: "2026-08-21",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Planificar ocupa la pantalla entera: se terminaron las ventanas flotantes",
+        detalle:
+            "Antes elegir las OTs y revisar el plan eran dos ventanas grises flotando arriba de Operaciones, que se cerraban con un click al costado y no dejaban ver el menú. Ahora es una pantalla, con el menú de la izquierda a la vista y el mismo recorrido de siempre: Paso 1 elegís las OTs, Paso 2 revisás el plan y confirmás. Arriba del plan quedan las cuatro cifras que importan —OTs, procesos, carga total y trabas sin resolver— en grande y sin tener que buscarlas.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-se-revisan-solos",
+        fecha: "2026-08-21",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Si arreglás un aviso en Recursos, al volver aparece resuelto y el plan se rehace solo",
+        detalle:
+            "Antes había que acordarse de tocar «Volver a revisar»: ibas a Recursos, cargabas el rango que el aviso te pedía, volvías al borrador y el aviso seguía igual de rojo aunque el problema ya no existiera. Ahora, al volver a la pantalla, el sistema se fija solo si cambió algo en Recursos; si cambió, recalcula y lo que se arregló queda tachado en verde como «Resuelto». Si no tocaste nada, no te hace esperar. El botón sigue estando por si querés forzarlo, y cuando tenés cambios hechos a mano en el plan te avisa en vez de pisártelos.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-llevan-al-dato",
+        fecha: "2026-08-21",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "El «Recursos › Procesos» de cada aviso ahora es un link que te deja parado en el dato",
+        detalle:
+            "Era un cartelito gris que no hacía nada: había que salir del plan, buscar la pantalla, elegir la pestaña y encontrar el proceso entre 414. Ahora lo tocás y se abre en otra pestaña, ya en la pestaña correcta, con el buscador cargado y la fila abierta lista para editar. Además el detalle de cada aviso se lee de entrada, sin tener que desplegarlo.",
+        href: "/operaciones",
+    },
+    {
+        id: "plan-filtros-y-columnas",
+        fecha: "2026-08-21",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "La tabla del plan tiene Filtros y Columnas",
+        detalle:
+            "Con 40 OTs la tabla no entra en la pantalla. «Filtros» te deja ver solo las que llegan tarde, las que quedaron sin operario o sin máquina, las forzadas, o buscar por cliente, código o proceso. «Columnas» apaga las que no mirás, y se acuerda de tu elección. Ojo: filtran lo que ves, no lo que se guarda — al confirmar se guarda el plan completo, y te lo avisa arriba de la tabla.",
+        href: "/operaciones",
+    },
+    {
+        id: "borrador-conserva-retoques",
+        fecha: "2026-08-21",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Retomar un borrador ya no pierde los cambios que hiciste a mano",
+        detalle:
+            "Al retomar un plan sin confirmar volvían las asignaciones del planificador y se perdía cada máquina, operario y horario que habías acomodado vos. Ahora vuelven tal cual los dejaste, junto con las OTs que habías forzado.",
+        href: "/operaciones",
+    },
+    {
+        id: "recursos-procesos-no-se-cae",
+        fecha: "2026-08-21",
+        tipo: "arreglo",
+        seccion: "Recursos › Procesos",
+        titulo: "La pestaña Procesos ya no se cae con un proceso recién creado",
+        detalle:
+            "Si creabas un proceso y entrabas a la pestaña sin recargar la página, la pantalla quedaba en blanco con un error. Ahora ese proceso muestra un guion en la columna «Quién puede hacerlo» hasta que se actualizan los datos, y el resto de la lista se ve igual.",
+        href: "/recursos",
+    },
+    {
         id: "botones-en-todos-los-avisos",
         fecha: "2026-08-19",
         tipo: "mejora",

@@ -43,6 +43,18 @@ export type BorradorPlan = {
     forzarOrdenIds: number[];
     /** Cuándo se calculó. Es lo que permite avisar que puede haber quedado viejo. */
     guardadoEn: string;
+    /**
+     * Cómo estaban los datos de Recursos cuando se calculó este plan.
+     *
+     * Viaja con el borrador —y no se recalcula al retomarlo— porque es lo que
+     * permite detectar que alguien arregló afuera lo que el plan reportaba: un
+     * borrador de ayer comparado contra la foto de ahora nunca vería el cambio de
+     * anoche, que es justo el caso que importa. Ver `lib/huellaRecursos`.
+     *
+     * Ausente en los borradores guardados antes del 21/08: ahí la revisión
+     * automática no puede correr y queda el botón "Volver a revisar".
+     */
+    huella?: string | null;
 };
 
 export type BorradorResumen = {

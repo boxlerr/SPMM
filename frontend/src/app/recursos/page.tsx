@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -95,6 +95,70 @@ export default function RecursosPage() {
       fetchProcesos();
     }
   }, [tabActiva]);
+
+  /**
+   * `?tab=procesos&foco=123&q=plegado` — entrar directo a lo que hay que tocar.
+   *
+   * Los avisos del planificador terminan en "Recursos › Procesos", y hasta ahora
+   * eso era un cartelito: había que salir del plan, encontrar esta pantalla,
+   * elegir la pestaña, buscar el proceso entre 414 (paginados de a 20) y recién
+   * ahí desplegar la fila. El link del aviso ahora deja todo eso hecho.
+   *
+   * `q` precarga el buscador para que la fila caiga en la primera página; sin eso
+   * el proceso podía estar en la página 12 y el `foco` no se veía por ningún lado.
+   */
+  const focoAplicado = useRef(false);
+  /** Operario del `?foco=`: se guarda acá y se abre recién cuando la lista cargó. */
+  const [operarioAFocalizar, setOperarioAFocalizar] = useState<number | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined" || focoAplicado.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (!tab) return;
+    if (!["operarios", "maquinas", "procesos", "rangos", "sectores"].includes(tab)) return;
+    focoAplicado.current = true;
+
+    setTabActiva(tab as typeof tabActiva);
+    const q = params.get("q");
+    if (q && tab === "procesos") setBusquedaProceso(q);
+
+    const foco = Number(params.get("foco"));
+    if (Number.isFinite(foco) && foco > 0) {
+      if (tab === "procesos") setProcesoAbierto(foco);
+      if (tab === "maquinas") setMaquinaAbierta(foco);
+      if (tab === "operarios") setOperarioAFocalizar(foco);
+    }
+
+    // El query param se limpia para que un F5 no vuelva a arrastrar el foco de un
+    // aviso que quizás ya se resolvió.
+    const url = new URL(window.location.href);
+    ["tab", "foco", "q"].forEach((k) => url.searchParams.delete(k));
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+
+  useEffect(() => {
+    if (operarioAFocalizar === null || operarios.length === 0) return;
+    const op = operarios.find((o) => o.id === operarioAFocalizar);
+    setOperarioAFocalizar(null);
+    if (op) void handleVerOperario(op);
+  }, [operarioAFocalizar, operarios]);
+
+  /**
+   * Lleva a la vista la fila desplegada por el `?foco=`, que puede estar abajo.
+   *
+   * Depende también del largo de las listas: cuando el link entra directo a una
+   * pestaña, la fila todavía no existe —el fetch está en curso— y buscarla por id
+   * no encuentra nada. Al llegar los datos, el efecto corre de nuevo y ahí sí.
+   */
+  useEffect(() => {
+    const id = procesoAbierto ? `proceso-${procesoAbierto}` : maquinaAbierta ? `maquina-${maquinaAbierta}` : null;
+    if (!id) return;
+    // Un tick: la fila se despliega en este mismo render y todavía no está en el DOM.
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [procesoAbierto, maquinaAbierta, procesos.length, maquinas.length, currentProcesosPage]);
 
   const fetchOperarios = async () => {
     const data = await api.fetchData(`${cleanUrl}/operarios`);
@@ -419,6 +483,7 @@ export default function RecursosPage() {
                     {maquinas.map((maquina) => (
                       <React.Fragment key={maquina.id}>
                       <tr
+                        id={`maquina-${maquina.id}`}
                         className={`hover:bg-muted/50 transition-colors ${coberturaListo && (rangosPorMaquina.get(maquina.id)?.length ?? 0) === 0 ? "bg-amber-50/40" : ""}`}
                       >
                         <td className="px-4 py-2 text-sm font-medium">{maquina.nombre}</td>
@@ -664,13 +729,18 @@ export default function RecursosPage() {
                       const sinNadie = problema === "nadie";
                       return (
                       <React.Fragment key={proceso.id}>
-                      <tr className={`hover:bg-muted/50 transition-colors ${enUso && sinNadie ? "bg-rose-50/50" : enUso && sinRango ? "bg-amber-50/40" : ""}`}>
+                      <tr id={`proceso-${proceso.id}`} className={`hover:bg-muted/50 transition-colors ${enUso && sinNadie ? "bg-rose-50/50" : enUso && sinRango ? "bg-amber-50/40" : ""}`}>
                         <td className="px-4 py-2 text-sm font-medium">{proceso.nombre}</td>
                         {/* La pregunta que importa de un proceso no es qué rangos tiene
                             cargados sino si hay alguien que pueda hacerlo. Se puede tener
                             tres rangos y que no los tenga ninguna persona disponible. */}
                         <td className="px-4 py-2 text-sm">
-                          {!coberturaListo ? (
+                          {/* `!cob` además de `!coberturaListo`: la cobertura se cachea a
+                              nivel módulo, así que un proceso creado después de esa consulta
+                              no está en el mapa. Sin este chequeo, la rama de abajo hacía
+                              `cob!.rangos.map(...)` sobre undefined y la pestaña Procesos se
+                              caía entera con un TypeError. */}
+                          {!coberturaListo || !cob ? (
                             <span className="text-muted-foreground text-xs">—</span>
                           ) : sinNadie ? (
                             <Button

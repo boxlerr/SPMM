@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { PantallaPlanificador } from "./PantallaPlanificador"
 import { Button } from "@/components/ui/button"
 import { PlanningListTable } from "./PlanningListTable"
 import { WorkOrder } from "@/lib/types"
@@ -20,7 +20,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, Search, X } from "lucide-react"
+import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { BorradoresPlan } from "./BorradoresPlan"
@@ -31,7 +31,8 @@ export interface PlanningRange {
     fecha_hasta?: string  // "YYYY-MM-DD"
 }
 
-interface PlanningSelectionModalProps {
+interface PlanningSelectionScreenProps {
+    /** Se mantiene montada y oculta cuando no es el paso activo: ver PantallaPlanificador. */
     isOpen: boolean
     onClose: () => void
     unplannedOrders: WorkOrder[]
@@ -46,7 +47,7 @@ interface PlanningSelectionModalProps {
     availableOperarios?: any[]
 }
 
-export function PlanningSelectionModal({
+export function PlanningSelectionScreen({
     isOpen,
     onClose,
     unplannedOrders,
@@ -57,7 +58,7 @@ export function PlanningSelectionModal({
     onAbrirBorrador,
     autoSelectAll = true,
     availableOperarios = []
-}: PlanningSelectionModalProps) {
+}: PlanningSelectionScreenProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
     // Zoom compartido con el resto de Operaciones.
@@ -211,13 +212,34 @@ export function PlanningSelectionModal({
     const estimatedTime = calculateEstimatedTime()
 
     return (
-        <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[95vh] flex flex-col p-0 gap-0">
+        <PantallaPlanificador
+            visible={isOpen}
+            cabecera={
+                <>
+                    <div className="px-6 pt-4 pb-3 flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                                <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
+                                Planificar órdenes
+                                <span className="text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                                    Paso 1 de 2
+                                </span>
+                            </h1>
+                            <p className="text-sm text-gray-500 mt-0.5">
+                                Elegí qué OTs entran en el plan y, si hace falta, entre qué fechas. Se calcula sobre lo tildado.
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                            {/* El cálculo es caro (minutos con 34 OTs) y antes cerrar la
+                                vista previa lo tiraba entero. Acá se retoma sin recalcular.
+                                El componente no se dibuja si no hay borradores guardados. */}
+                            {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
+                            {/* Zoom control: afecta a la tabla de selección. */}
+                            <ZoomControl value={zoom} onChange={setZoom} />
+                        </div>
+                    </div>
 
-                {/* Header with Integrated Stats */}
-                <DialogHeader className="px-6 py-4 border-b flex flex-row items-center justify-between shrink-0">
-                    <div className="flex items-center gap-4 flex-wrap">
-                        <DialogTitle className="text-xl">Planificar Órdenes</DialogTitle>
+                    <div className="px-6 pb-3 flex items-center gap-2.5 flex-wrap">
                         {estimatedTime && (
                             <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-3 py-1 text-sm font-medium">
                                 <Clock className="w-3.5 h-3.5" />
@@ -334,18 +356,10 @@ export function PlanningSelectionModal({
                             </PopoverContent>
                         </Popover>
 
-                        {/* El cálculo es caro (minutos con 34 OTs) y antes cerrar la
-                            vista previa lo tiraba entero. Acá se retoma sin recalcular.
-                            El componente no se dibuja si no hay borradores guardados. */}
-                        {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
-
-                        {/* Zoom control: afecta a la tabla de selección. */}
-                        <ZoomControl value={zoom} onChange={setZoom} />
                     </div>
-                </DialogHeader>
 
-                {/* Filter Toolbar Section - Symmetric & Compact */}
-                <div className="px-6 py-0 border-b bg-slate-50/80 shrink-0">
+                    {/* Filter Toolbar Section - Symmetric & Compact */}
+                    <div className="px-6 py-0 border-t bg-slate-50/80">
                     <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders}>
                         {/* Misma estética que el resto de filtros: "Categoría: valor"
                             con el valor en negrita cuando hay algo aplicado. */}
@@ -367,59 +381,14 @@ export function PlanningSelectionModal({
                             </SelectContent>
                         </Select>
                     </WorkOrderFilters>
-                </div>
-
-
-                {/* Content Area */}
-                <div className="flex-1 overflow-hidden bg-gray-50 flex flex-col">
-                    <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col gap-4">
-                        {/* El umbral estaba en 30 y saltaba en la semana normal del taller
-                            —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
-                            contrario de lo que hay que hacer: partir el lote hace que el
-                            segundo cálculo no vea las máquinas que reservó el primero y
-                            salgan dos planes que se pisan. Ahora avisa recién a las 50, y
-                            avisa de lo único cierto: que va a tardar. */}
-                        {selectedIds.length > 50 && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 flex gap-4 items-start shrink-0 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
-                                <div className="bg-amber-100 p-2 rounded-full shrink-0">
-                                    <AlertTriangle className="w-6 h-6 text-amber-600" />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <h4 className="font-bold text-amber-800 text-sm">
-                                        Son muchas órdenes juntas ({selectedIds.length})
-                                    </h4>
-                                    <p className="text-xs text-amber-700/90 leading-relaxed max-w-[800px]">
-                                        Se pueden planificar igual, pero el cálculo va a tardar unos minutos: el planificador prueba todas las combinaciones de máquinas, operarios y turnos antes de decidir. Vas a ver una barra con el avance.
-                                    </p>
-                                    <p className="text-xs font-semibold text-amber-800 mt-2">
-                                        Conviene hacerlo en una sola tanda y no en varias: si partís el lote, el segundo cálculo no ve las máquinas que reservó el primero y los dos planes se pisan.
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-                        <div className="bg-white border rounded-lg shadow-sm flex-1 min-h-0 relative overflow-hidden flex flex-col">
-                            <div className="absolute inset-0 overflow-auto">
-                                <PlanningListTable
-                                    tableZoom={zoom}
-                                    data={filteredOrders}
-                                    selectedIds={selectedIds}
-                                    onSelectionChange={setSelectedIds}
-                                    isLoading={isLoading}
-                                    onRowClick={() => { }}
-                                    onDataChange={onDataRefresh}
-                                    hideStatus={true}
-                                    highlightedIds={initialSelectedIds}
-                                    pinSelectedOnTop
-                                />
-                            </div>
-                        </div>
                     </div>
-                </div>
-
-                {/* Footer */}
-                <DialogFooter className="px-6 py-4 border-t bg-white gap-2 shrink-0">
-                    <Button variant="outline" onClick={onClose}>
-                        Cancelar
+                </>
+            }
+            pie={
+                <>
+                    <div className="px-6 py-4 flex items-center justify-end gap-2">
+                    <Button variant="outline" onClick={onClose} className="text-gray-600">
+                        Salir del planificador
                     </Button>
                     <Button
                         onClick={() => {
@@ -476,8 +445,56 @@ export function PlanningSelectionModal({
                             </>
                         )}
                     </Button>
-                </DialogFooter>
-            </DialogContent >
-        </Dialog >
+                    </div>
+                </>
+            }
+        >
+            {/* Content Area */}
+            <div className="flex-1 min-w-0 overflow-hidden bg-gray-50 flex flex-col">
+                    <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col gap-4">
+                        {/* El umbral estaba en 30 y saltaba en la semana normal del taller
+                            —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
+                            contrario de lo que hay que hacer: partir el lote hace que el
+                            segundo cálculo no vea las máquinas que reservó el primero y
+                            salgan dos planes que se pisan. Ahora avisa recién a las 50, y
+                            avisa de lo único cierto: que va a tardar. */}
+                        {selectedIds.length > 50 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 flex gap-4 items-start shrink-0 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                                <div className="bg-amber-100 p-2 rounded-full shrink-0">
+                                    <AlertTriangle className="w-6 h-6 text-amber-600" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <h4 className="font-bold text-amber-800 text-sm">
+                                        Son muchas órdenes juntas ({selectedIds.length})
+                                    </h4>
+                                    <p className="text-xs text-amber-700/90 leading-relaxed max-w-[800px]">
+                                        Se pueden planificar igual, pero el cálculo va a tardar unos minutos: el planificador prueba todas las combinaciones de máquinas, operarios y turnos antes de decidir. Vas a ver una barra con el avance.
+                                    </p>
+                                    <p className="text-xs font-semibold text-amber-800 mt-2">
+                                        Conviene hacerlo en una sola tanda y no en varias: si partís el lote, el segundo cálculo no ve las máquinas que reservó el primero y los dos planes se pisan.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                        <div className="bg-white border rounded-lg shadow-sm flex-1 min-h-0 relative overflow-hidden flex flex-col">
+                            <div className="absolute inset-0 overflow-auto">
+                                <PlanningListTable
+                                    tableZoom={zoom}
+                                    data={filteredOrders}
+                                    selectedIds={selectedIds}
+                                    onSelectionChange={setSelectedIds}
+                                    isLoading={isLoading}
+                                    onRowClick={() => { }}
+                                    onDataChange={onDataRefresh}
+                                    hideStatus={true}
+                                    highlightedIds={initialSelectedIds}
+                                    pinSelectedOnTop
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+        </PantallaPlanificador>
     )
 }
