@@ -107,6 +107,10 @@ class OrdenTrabajoService:
                 # maquinaria_id viene como string opcional desde el modal; '' / None = sin preselección.
                 _maq = getattr(proc_dto, "maquinaria_id", None)
                 id_maquinaria = int(_maq) if (_maq not in (None, "", "0")) else None
+                # operario_id ya venía en el DTO desde siempre, pero no había columna
+                # donde guardarlo: el modal lo mandaba y el backend lo tiraba.
+                _op = getattr(proc_dto, "operario_id", None)
+                id_operario = int(_op) if (_op not in (None, "", "0")) else None
                 db.add(OrdenTrabajoProceso(
                     id_orden_trabajo=orden.id,
                     id_proceso=proc_dto.proceso_id,
@@ -114,6 +118,7 @@ class OrdenTrabajoService:
                     tiempo_proceso=proc_dto.tiempo_proceso or 0,
                     cant_operarios=proc_dto.cant_operarios or 1,
                     id_maquinaria=id_maquinaria,
+                    id_operario=id_operario,
                 ))
 
             # Planos (archivos ya leídos arriba).
@@ -544,7 +549,7 @@ class OrdenTrabajoService:
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None, id_operario: int | None = None):
         logger.info(f"Service - Agregar proceso {id_proceso} a Orden {id_orden}")
 
         # Verify order exists
@@ -558,7 +563,7 @@ class OrdenTrabajoService:
         if ya_existe:
             raise BusinessException(f"Este proceso ya está cargado en la OT.")
 
-        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria)
+        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria, id_operario)
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
 
@@ -577,6 +582,7 @@ class OrdenTrabajoService:
                 "tiempo_proceso": p.tiempo_proceso,
                 "cant_operarios": p.cant_operarios,
                 "id_maquinaria": p.id_maquinaria,
+                "id_operario": p.id_operario,
                 "orden": p.orden,
             }
             for p in procs

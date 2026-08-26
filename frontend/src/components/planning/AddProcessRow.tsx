@@ -24,13 +24,15 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
     const [loading, setLoading] = React.useState(false);
     const [procesos, setProcesos] = React.useState<any[]>([]);
     const [maquinarias, setMaquinarias] = React.useState<any[]>([]);
+    const [operarios, setOperarios] = React.useState<any[]>([]);
     const [rows, setRows] = React.useState<ProcesoRow[]>([]);
 
     const fetchCatalogos = async () => {
         try {
-            const [pRes, mRes] = await Promise.all([
+            const [pRes, mRes, oRes] = await Promise.all([
                 fetch(`${API_URL}/procesos`, { headers: getAuthHeaders() }),
                 fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() }),
+                fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() }),
             ]);
             if (pRes.ok) {
                 const data = await pRes.json();
@@ -39,6 +41,10 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
             if (mRes.ok) {
                 const data = await mRes.json();
                 setMaquinarias(Array.isArray(data) ? data : (data?.data || []));
+            }
+            if (oRes.ok) {
+                const data = await oRes.json();
+                setOperarios(Array.isArray(data) ? data : (data?.data || []));
             }
         } catch (e) {
             console.error(e);
@@ -72,6 +78,8 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                         cant_operarios: parseInt(item.cant_operarios) || 1,
                         // id_maquinaria: máquina preseleccionada ('' -> null = planificador decide)
                         id_maquinaria: item.maquina_id ? parseInt(item.maquina_id) : null,
+                        // id_operario: persona preseleccionada ('' -> null = planificador decide)
+                        id_operario: item.operario_id ? parseInt(item.operario_id) : null,
                     })
                 });
                 if (!res.ok) {
@@ -144,6 +152,7 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                 onChange={setRows}
                 procesos={procesos}
                 maquinarias={maquinarias}
+                operarios={operarios}
             />
 
             <div className="flex items-center justify-end mt-1">

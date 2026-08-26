@@ -24,6 +24,15 @@ class OrdenTrabajoProceso(Base):
     # El sync (sync_db.py) NO la pisa (no está en su MERGE), igual que cant_operarios.
     id_maquinaria = Column(Integer, ForeignKey("maquinaria.id"), nullable=True)
 
+    # Persona PRESELECCIONADA para este proceso (pedido de Lucas, 26-ago-2026: "en
+    # orden, al crear trabajo, falta persona en proceso"). Mismo contrato que la
+    # máquina de arriba:
+    #   - NULL  = sin preselección: el planificador elige la persona.
+    #   - <id>  = preselección: se fuerza ese proceso a esa persona.
+    # Requiere la migración backend/scripts/migrations/2026-08-26_operario_en_proceso.sql
+    # corrida ANTES de desplegar. El sync (sync_db.py) no la pisa.
+    id_operario = Column(Integer, ForeignKey("operario.id"), nullable=True)
+
     # New fields for real time tracking
     inicio_real = Column(DateTime, nullable=True)
     fin_real = Column(DateTime, nullable=True)

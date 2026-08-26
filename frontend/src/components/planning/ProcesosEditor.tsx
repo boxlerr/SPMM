@@ -22,6 +22,9 @@
  *    real como max(orden)+1). Acá se muestra como #n informativo.
  *  - `maquina_id`: '' = sin máquina preseleccionada (el planificador elige). Elegir
  *    una máquina ES la "preselección": se fuerza ese proceso a esa máquina.
+ *  - `operario_id`: lo mismo para la persona (pedido de Lucas, 26-ago-2026: "al crear
+ *    trabajo falta persona en proceso"). '' = el planificador elige. Elegir a alguien
+ *    lo fuerza, y pisa el filtro por rango: es una decisión de quien carga la OT.
  */
 
 import React from "react";
@@ -44,12 +47,15 @@ export interface ProcesoRow {
     cant_operarios: string;
     /** máquina preseleccionada; '' = sin preselección (planificador libre) */
     maquina_id: string;
+    /** persona preseleccionada; '' = sin preselección (planificador libre) */
+    operario_id: string;
     /** tilde incluir/excluir: sólo se guardan los tildados */
     incluido: boolean;
 }
 
 export interface ProcesoCatalogoItem { id: number; nombre: string; }
 export interface MaquinaCatalogoItem { id: number; nombre: string; cod_maquina?: string; }
+export interface OperarioCatalogoItem { id: number; nombre: string; apellido?: string; }
 
 export function makeEmptyRow(): ProcesoRow {
     return {
@@ -58,6 +64,7 @@ export function makeEmptyRow(): ProcesoRow {
         tiempo: "",
         cant_operarios: "1",
         maquina_id: "",
+        operario_id: "",
         incluido: true,
     };
 }
@@ -67,13 +74,15 @@ interface ProcesosEditorProps {
     onChange: (rows: ProcesoRow[]) => void;
     procesos: ProcesoCatalogoItem[];
     maquinarias: MaquinaCatalogoItem[];
+    /** catálogo de personas; si no viene, la columna queda en "Sin asignar" */
+    operarios?: OperarioCatalogoItem[];
     disabled?: boolean;
     /** callback del botón "Traer historial" (opcional; si no viene, no se muestra) */
     onTraerHistorial?: () => void;
     historialLoading?: boolean;
 }
 
-const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,200px)_110px_40px] gap-2 items-center";
+const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,180px)_minmax(0,180px)_90px_40px] gap-2 items-center";
 
 /**
  * Mantiene sólo el desplazamiento vertical del drag (bloquea el eje X). Sin esto,
@@ -90,11 +99,19 @@ export function ProcesosEditor({
     onChange,
     procesos,
     maquinarias,
+    operarios = [],
     disabled = false,
     onTraerHistorial,
     historialLoading = false,
 }: ProcesosEditorProps) {
     const procesoOptions = procesos.map((p) => ({ value: p.id.toString(), label: p.nombre }));
+    const operarioOptions = [
+        { value: "", label: "Sin asignar" },
+        ...operarios.map((o) => ({
+            value: o.id.toString(),
+            label: [o.nombre, o.apellido].filter(Boolean).join(" ").trim(),
+        })),
+    ];
     const maquinaOptions = [
         { value: "", label: "Sin máquina" },
         ...maquinarias.map((m) => ({
@@ -173,6 +190,7 @@ export function ProcesosEditor({
                     <div>Proceso</div>
                     <div className="text-center">Minutos</div>
                     <div>Máquina</div>
+                    <div>Persona</div>
                     <div className="text-center">Cant. emp.</div>
                     <div></div>
                 </div>
@@ -290,6 +308,25 @@ export function ProcesosEditor({
                                                             )}
                                                         </div>
 
+                                                        {/* Persona (elegir = preseleccionar) */}
+                                                        <div className="min-w-0 flex items-center gap-1">
+                                                            <div className="min-w-0 flex-1">
+                                                                <SearchableSelect
+                                                                    options={operarioOptions}
+                                                                    value={row.operario_id}
+                                                                    onValueChange={(v) => update(row.id, { operario_id: v })}
+                                                                    placeholder="Sin asignar"
+                                                                    disabled={disabled}
+                                                                />
+                                                            </div>
+                                                            {!!row.operario_id && (
+                                                                <Lock
+                                                                    className="w-3.5 h-3.5 shrink-0 text-amber-500"
+                                                                    aria-label="Persona forzada (preseleccionada)"
+                                                                />
+                                                            )}
+                                                        </div>
+
                                                         {/* Cantidad de empleados */}
                                                         <div>
                                                             <Input
@@ -332,8 +369,9 @@ export function ProcesosEditor({
 
             <p className="text-[11px] text-gray-400 flex items-center gap-1.5">
                 <Lock className="w-3 h-3 text-amber-500" />
-                Elegir una máquina fuerza que ese proceso se planifique en esa máquina (preselección).
-                Dejá <span className="font-medium">"Sin máquina"</span> para que el planificador decida.
+                Elegir máquina o persona fuerza que ese proceso se planifique así (preselección), aunque
+                el rango no se lo habilite. Dejalo en <span className="font-medium">"Sin máquina"</span> y{" "}
+                <span className="font-medium">"Sin asignar"</span> para que el planificador decida.
             </p>
         </div>
     );

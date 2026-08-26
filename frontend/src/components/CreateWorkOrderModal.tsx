@@ -218,6 +218,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         cant_operarios: p.cant_operarios ? p.cant_operarios.toString() : "1",
                         // id_maquinaria puede no estar en el tipo TS todavía; lo leemos defensivo.
                         maquina_id: (p as any).id_maquinaria ? (p as any).id_maquinaria.toString() : "",
+                        operario_id: (p as any).id_operario ? (p as any).id_operario.toString() : "",
                         incluido: true,
                     }));
                     setProcesses(mappedProcesses);
@@ -476,6 +477,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     tiempo_proceso: parseInt(p.tiempo) || 0,
                     cant_operarios: parseInt(p.cant_operarios) || 1,
                     maquinaria_id: p.maquina_id ? p.maquina_id : null,
+                    operario_id: p.operario_id ? p.operario_id : null,
                 }))
         };
 
@@ -632,6 +634,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 tiempo: it.tiempo_proceso != null ? it.tiempo_proceso.toString() : "",
                 cant_operarios: it.cant_operarios != null ? it.cant_operarios.toString() : "1",
                 maquina_id: it.id_maquinaria ? it.id_maquinaria.toString() : "",
+                operario_id: it.id_operario ? it.id_operario.toString() : "",
                 incluido: true,
             }));
             setProcesses(nuevos);
@@ -1269,7 +1272,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     <div className="space-y-1 mb-1">
                                         <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
                                         <p className="text-sm text-gray-500">
-                                            Elegí proceso, máquina, minutos y cantidad de empleados. Destildá los que esta vez no van (opcional).
+                                            Elegí proceso, máquina, persona, minutos y cantidad de empleados. Destildá los que esta vez no van (opcional).
                                         </p>
                                     </div>
 
@@ -1278,6 +1281,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         onChange={setProcesses}
                                         procesos={procesosOptions}
                                         maquinarias={maquinarias}
+                                        operarios={operarios}
                                         disabled={isLegacyOT}
                                         onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
                                         historialLoading={historialLoading}

@@ -200,12 +200,14 @@ class AgregarProcesoRequest(BaseModel):
     cant_operarios: int | None = None
     # Máquina preseleccionada (None = sin preselección, el planificador elige).
     id_maquinaria: int | None = None
+    # Persona preseleccionada (None = sin preselección, el planificador elige).
+    id_operario: int | None = None
 
 @router.post("/ordenes/{id_orden}/procesos")
 async def agregar_proceso_orden(id_orden: int, body: AgregarProcesoRequest, db=Depends(get_db)):
     logger.info(f"API - Inicio POST /ordenes/{id_orden}/procesos")
     service = OrdenTrabajoService(db)
-    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden, body.cant_operarios or 1, body.id_maquinaria)
+    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden, body.cant_operarios or 1, body.id_maquinaria, body.id_operario)
 
 
 @router.delete("/ordenes/{id_orden}/procesos/{id_proceso}")

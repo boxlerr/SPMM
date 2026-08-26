@@ -368,7 +368,8 @@ def _normalizar_procesos(procesos, prioridad_pesos):
     return procesos_norm, H
 
 
-def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=None):
+def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=None,
+                            preseleccion_op=None):
     """Parte los procesos que no entran en ningún tramo laboral.
 
     Un proceso de 12 horas no cabe en ninguna ventana, así que el modelo lo dejaba
@@ -384,15 +385,17 @@ def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=No
     El corte es parejo (750 min -> 3 partes de 250, no 270+270+210) para que no
     quede una última parte mínima colgando y para repartir mejor entre días.
 
-    Devuelve (procesos_norm, cant_op_map, preseleccion_maq, partes), donde `partes`
+    Devuelve (procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes),
+    donde `partes`
     mapea la clave original a las claves nuevas:
         {(orden_id, secuencia_orig): {"orig": tupla, "claves": [(orden_id, sec_new), ...]}}
     """
     cant_op_map = cant_op_map or {}
     preseleccion_maq = preseleccion_maq or {}
+    preseleccion_op = preseleccion_op or {}
 
     nuevos, partes = [], {}
-    nuevo_cant_op, nueva_presel = {}, {}
+    nuevo_cant_op, nueva_presel, nueva_presel_op = {}, {}, {}
 
     for proc in procesos_norm:
         (orden_id, proc_id, secuencia, fecha_prometida, peso, dur,
@@ -417,6 +420,8 @@ def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=No
                 nuevo_cant_op[(orden_id, sec_nueva)] = cant_op_map[clave_orig]
             if clave_orig in preseleccion_maq:
                 nueva_presel[(orden_id, sec_nueva)] = preseleccion_maq[clave_orig]
+            if clave_orig in preseleccion_op:
+                nueva_presel_op[(orden_id, sec_nueva)] = preseleccion_op[clave_orig]
 
         partes[clave_orig] = {"orig": proc, "claves": claves}
 
@@ -427,7 +432,7 @@ def _partir_procesos_largos(procesos_norm, cant_op_map=None, preseleccion_maq=No
                 f"de {duraciones} min, mismo operario y misma máquina."
             )
 
-    return nuevos, nuevo_cant_op, nueva_presel, partes
+    return nuevos, nuevo_cant_op, nueva_presel, nueva_presel_op, partes
 
 
 def _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars=None):
@@ -464,6 +469,7 @@ def _crear_variables_y_dominios(
     op_planos=None,
     ots_con_plano=None,
     skills_manuales=None,
+    preseleccion_op=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -617,6 +623,22 @@ def _crear_variables_y_dominios(
 
         if DUMMY_OP_ID not in operarios_validos:
             operarios_validos.append(DUMMY_OP_ID)
+
+        # Preselección de operario: si al cargar la OT se eligió quién hace este
+        # proceso, se FUERZA — dominio = solo esa persona, sin fallback al dummy—,
+        # igual que la máquina preseleccionada de más abajo.
+        #
+        # Va DESPUÉS de todos los filtros (rango, nativa apagada, planos) y los pisa a
+        # propósito: es una decisión de quien carga la OT, que sabe cosas que los rangos
+        # no dicen. Si la persona no llega a entrar por horario, el proceso queda sin
+        # asignar y el diagnóstico lo muestra: preferimos eso a que lo agarre otro sin
+        # que nadie se entere de que la elección se ignoró.
+        _presel_op = (preseleccion_op or {}).get((orden_id, secuencia))
+        if _presel_op and _presel_op in REAL_OP_IDS:
+            operarios_validos = [_presel_op]
+            logger.info(
+                f"PRESELECCIÓN: forzando operario {_presel_op} en proceso {orden_id}/{secuencia}"
+            )
 
         # Variable de operario
         op_var = model.NewIntVarFromDomain(
@@ -1612,7 +1634,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None):
     model = cp_model.CpModel()
 
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
@@ -1682,8 +1704,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
 
     # ---- Partir los que no entran en un tramo laboral ----
     # H no cambia: la suma total de trabajo es la misma, solo se reparte en más piezas.
-    procesos_norm, cant_op_map, preseleccion_maq, partes = _partir_procesos_largos(
-        procesos_norm, cant_op_map, preseleccion_maq
+    procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes = _partir_procesos_largos(
+        procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op
     )
 
     # ---- Coordinación de dominios: SETUP hereda de PRODUCCIÓN ----
@@ -1743,6 +1765,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         op_planos,
         ots_con_plano,
         skills_manuales,
+        preseleccion_op,
     )
 
     # ---- Restricciones ----
@@ -2123,6 +2146,7 @@ async def planificar(
     procesos_para_solver = []
     cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
     preseleccion_maq = {}  # (orden_id, secuencia) -> id_maquinaria forzada (preselección Metlo)
+    preseleccion_op = {}   # (orden_id, secuencia) -> id_operario forzado (elegido al cargar la OT)
     procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
 
     # -----------------------
@@ -2138,16 +2162,28 @@ async def planificar(
             _presel_maq = getattr(rel, "id_maquinaria", None)
             if _presel_maq:
                 preseleccion_maq[(orden.id, rel.orden)] = _presel_maq
+            # Preselección de persona: si en la OT se eligió quién lo hace, se fuerza.
+            _presel_op = getattr(rel, "id_operario", None)
+            if _presel_op:
+                preseleccion_op[(orden.id, rel.orden)] = _presel_op
 
             # Duración mínima
             dur_min = rel.tiempo_proceso or 1
 
-            # Nombre del proceso
+            # Nombre del proceso, con la mayúscula del catálogo. Se guardaba en
+            # minúscula y ese es el texto que termina en los avisos del planificador:
+            # el taller leía «soldadura con mig» y no reconocía su propio proceso.
+            # Bajarlo acá no hacía falta para nada — todo lo que clasifica por nombre
+            # (_get_tipo_proceso, familia_requerida_from_proceso, _maquinas_por_nombre)
+            # pasa por _norm, que ya normaliza mayúsculas y acentos.
             nombre_proceso = (
-                rel.proceso.nombre.strip().lower()
+                rel.proceso.nombre.strip()
                 if rel.proceso and rel.proceso.nombre
                 else ""
             )
+            # El match por nombre de máquina de más abajo sí compara en minúscula
+            # contra el nombre crudo de la máquina, así que se baja ahí y no antes.
+            nombre_proceso_lower = nombre_proceso.lower()
 
             # Clasificar si usa máquina
             usa_maquina = proceso_usa_maquina(nombre_proceso)
@@ -2165,7 +2201,7 @@ async def planificar(
             # Detectar máquina por coincidencia de nombre
             # SOLO si no hay rangos válidos
             # -------------------------------
-            if not rangos_validos and nombre_proceso:
+            if not rangos_validos and nombre_proceso_lower:
                 for _, rangos_maquina, nombre_maquina, _cod in maquinarias:
 
                     if not rangos_maquina:
@@ -2177,8 +2213,8 @@ async def planificar(
                     )
 
                     if nombre_maquina_lower and (
-                        nombre_maquina_lower in nombre_proceso or
-                        nombre_proceso in nombre_maquina_lower
+                        nombre_maquina_lower in nombre_proceso_lower or
+                        nombre_proceso_lower in nombre_maquina_lower
                     ):
                         rangos_validos = list(rangos_maquina)
                         break
@@ -2245,6 +2281,7 @@ async def planificar(
         skills_manuales,
         calendarios,
         blocked_dates,
+        preseleccion_op,
     )
 
     planificados, excedentes = _split_resultados(resultados)
@@ -2361,7 +2398,7 @@ async def planificar_pendientes(
 
                 cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
                 dur_min = rel.tiempo_proceso or 1
-                nombre_proceso = rel.proceso.nombre.lower() if rel.proceso else ""
+                nombre_proceso = rel.proceso.nombre.strip() if rel.proceso else ""
                 usa_maquina = proceso_usa_maquina(nombre_proceso)
                 rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
                 familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""

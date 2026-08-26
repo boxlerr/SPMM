@@ -11,11 +11,14 @@ class _FakeProceso:
 
 
 class _FakeOTP:
-    def __init__(self, id_proceso, tiempo, cant, maq, orden, nombre):
+    def __init__(self, id_proceso, tiempo, cant, maq, orden, nombre, op=None):
         self.id_proceso = id_proceso
         self.tiempo_proceso = tiempo
         self.cant_operarios = cant
         self.id_maquinaria = maq
+        # Persona preseleccionada (26/08): el historial la trae para que "Traer
+        # historial" reponga también quién lo hizo la vez pasada.
+        self.id_operario = op
         self.orden = orden
         self.proceso = _FakeProceso(nombre)
 
@@ -39,7 +42,7 @@ def _make_service(repo):
 
 async def test_historial_serializa_y_pasa_parametros():
     repo = _FakeRepo([
-        _FakeOTP(2, 45, 1, 10, 1, "CORTE LASER"),
+        _FakeOTP(2, 45, 1, 10, 1, "CORTE LASER", op=7),
         _FakeOTP(3, 90, 2, None, 2, "SOLDADURA MIG"),
     ])
     svc = _make_service(repo)
@@ -52,10 +55,11 @@ async def test_historial_serializa_y_pasa_parametros():
     assert len(resp.data) == 2
     assert resp.data[0] == {
         "id_proceso": 2, "nombre_proceso": "CORTE LASER", "tiempo_proceso": 45,
-        "cant_operarios": 1, "id_maquinaria": 10, "orden": 1,
+        "cant_operarios": 1, "id_maquinaria": 10, "id_operario": 7, "orden": 1,
     }
-    # sin máquina preseleccionada -> None
+    # sin máquina ni persona preseleccionada -> None
     assert resp.data[1]["id_maquinaria"] is None
+    assert resp.data[1]["id_operario"] is None
 
 
 async def test_historial_vacio_devuelve_lista_vacia():

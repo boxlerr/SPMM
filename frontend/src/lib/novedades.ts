@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "persona-en-el-proceso-de-la-ot",
+        fecha: "2026-08-26",
+        tipo: "nuevo",
+        seccion: "Operaciones › Nueva OT",
+        titulo: "Al cargar una OT ya podés decir quién hace cada proceso",
+        detalle:
+            "En el paso Procesos apareció la columna Persona, al lado de Máquina. Si elegís a alguien, el plan lo respeta aunque el rango no se lo habilite: es tu decisión, no la del sistema. Dejalo en «Sin asignar» y el planificador elige como hasta ahora. El candado amarillo te marca las filas donde forzaste máquina o persona, y «Traer historial» ahora también te repone quién lo hizo la vez pasada.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-del-plan-mas-claros",
+        fecha: "2026-08-26",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los avisos del plan dicen qué pasa, con los nombres bien escritos",
+        detalle:
+            "Los procesos salían en minúscula y sin siglas —«soldadura con mig», «torno t1»— y costaba reconocerlos. Ahora se leen como se escriben: «Soldadura con MIG», «Torno T1», «Preparación de soldadora MIG». Y el título dice qué pasa en vez de cómo lo llama el sistema: donde antes decía «se hace sin reservar la máquina» ahora dice «la máquina queda libre y otra OT puede tomarla», y cada aviso distingue si no hay máquina cargada, si el trabajo va a mano, o si el rango del proceso no coincide con el de la máquina. La explicación quedó en frases cortas y se aclara cuándo cargar la habilidad a mano destraba y cuándo no.",
+        href: "/operaciones",
+    },
+    {
         id: "avisos-formato-unico",
         fecha: "2026-08-21",
         tipo: "mejora",

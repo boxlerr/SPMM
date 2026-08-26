@@ -27,6 +27,8 @@ traba tiene otro orden de palabras" — Julián):
      CIFRAS. Nunca una frase, y nunca el nombre que ya está en el título. Un
      renglón con siete negritas no resalta nada: solo grita.
 """
+import re
+
 from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
     familia_requerida_from_proceso,
@@ -37,6 +39,52 @@ from backend.application.PlanificacionService import (
 
 BLOQUEANTE = "bloqueante"
 ADVERTENCIA = "advertencia"
+
+# Siglas del taller que NO son palabras: si se las escribe como palabra el proceso
+# deja de reconocerse («soldadura con mig» no lo lee nadie como MIG).
+_SIGLAS = {"MIG", "MAG", "TIG", "CNC", "CNCC", "ELEC", "PU", "OT"}
+
+# El catálogo viene del legacy, tipeado en mayúscula y sin tildes. En mayúscula no
+# se notaba; escrito como frase, «Preparacion de soldadora» sí. Solo van las
+# palabras que están de verdad en el catálogo: no es un corrector ortográfico.
+_CON_TILDE = {
+    "PREPARACION": "preparación", "PROGRAMACION": "programación",
+    "REPARACION": "reparación", "TERMINACION": "terminación",
+    "FABRICACION": "fabricación", "REVISION": "revisión",
+    "REGULACION": "regulación", "MAQUINA": "máquina",
+    "HIDRAULICA": "hidráulica", "MECANIZACION": "mecanización",
+}
+
+
+def _bonito(nombre: str) -> str:
+    """El nombre del proceso, escrito como se escribe una frase.
+
+    El catálogo lo guarda TODO EN MAYÚSCULA y el planificador lo bajaba entero a
+    minúscula, así que los avisos decían «soldadura con mig» y «torno t1»: Lucas no
+    reconocía sus propios procesos. Se escribe con mayúscula inicial y minúsculas,
+    pero las siglas (MIG, TIG, CNC) y los códigos de máquina (T1, F7CC) quedan como
+    están — son el dato que distingue un proceso de otro.
+
+    Se aplica al ENTRAR, una sola vez por proceso, y no en cada texto: todo lo que
+    clasifica por nombre pasa por _norm, que normaliza mayúsculas y acentos, así que
+    embellecer acá no cambia ninguna decisión del diagnóstico.
+    """
+    palabras = []
+    for palabra in (nombre or "").split():
+        trozos = []
+        for t in re.split(r"([/\-])", palabra):
+            if t in ("/", "-"):
+                trozos.append(t)
+            elif t.upper() in _SIGLAS or (any(c.isdigit() for c in t) and any(c.isalpha() for c in t)):
+                trozos.append(t.upper())
+            else:
+                trozos.append(_CON_TILDE.get(t.upper(), t.lower()))
+        palabras.append("".join(trozos))
+    texto = " ".join(palabras)
+    for i, ch in enumerate(texto):
+        if ch.isalpha():
+            return texto[:i] + ch.upper() + texto[i + 1:]
+    return texto
 
 
 def _corto(minutos: int) -> str:
@@ -412,7 +460,7 @@ def _procesos_que_nadie_puede_hacer(
         if _get_tipo_proceso(nombre or "") == "ADMIN":
             continue
         d = por_proceso.setdefault(proc_id, {
-            "nombre": (nombre or f"#{proc_id}").strip(),
+            "nombre": _bonito(nombre) or f"#{proc_id}",
             "rangos": set(rangos), "ots": set(), "minutos": 0, "procesos": 0,
             "familia": familia, "usa_maquina": usa_maq,
         })
@@ -511,7 +559,7 @@ def _procesos_que_nadie_puede_hacer(
             # ("Nadie puede hacer X", "10 jornadas para 3 máquinas", "Hay trabajo
             # asignado a...") y la lista se leía como seis avisos de seis sistemas
             # distintos: no había una columna donde apoyar la vista.
-            "titulo": f"«{d['nombre']}» no lo puede hacer nadie",
+            "titulo": f"{d['nombre']}: hoy no lo puede hacer nadie",
             "detalle": _detalle_nadie_puede(
                 pedidos, quienes_off, vacantes, nombre_operario, d["nombre"]
             ),
@@ -555,7 +603,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
         g["minutos"] += dur
         g["ots"].add(orden_id)
         g["rangos"] |= rangos
-        g["procesos"].add((nombre or "").strip())
+        g["procesos"].add(_bonito(nombre))
         g["de_la_familia"] |= set(de_la_familia)
         # (orden, secuencia) y no (orden, proceso): una OT puede traer el mismo
         # proceso dos veces y son instancias distintas — con la clave por proceso,
@@ -709,7 +757,7 @@ def _procesos_sin_maquina_compatible(
         if not usa_maq or (orden_id, _sec) not in sin_maquina:
             continue
         rangos = set(rangos or ())
-        nombre = (nombre or f"#{proc_id}").strip()
+        nombre = _bonito(nombre) or f"#{proc_id}"
 
         # Candidatas con el MISMO criterio que el solver, que ramifica por tipo:
         #   SETUP              → por familia, y si no hay, por nombre de máquina.
@@ -834,30 +882,43 @@ def _procesos_sin_maquina_compatible(
             # proceso. Decir "está cargado con" mandaba a buscar en Recursos algo que
             # ahí no está — PREPARACION PLEGADORA tiene OFICIAL, y MEDIO OFICIAL y
             # OPERARIO CALIFICADO los hereda de PLEGADO.
+            # La frase larga —"X solo la puede usar quien tenga A, pero P está cargado
+            # con B, como no coinciden el sistema no reserva la máquina: el trabajo se
+            # hace igual pero…"— es una sola oración con tres subordinadas. Lucas la
+            # leyó y escribió "redacción del texto se hace confuso". Va cortada: qué
+            # pide la máquina, qué pide el proceso, y recién después qué pasa por eso.
             heredados = set(d["rangos"]) != set(d["crudos"])
-            pide = f"**{_listar_rangos(rangos_proc) or 'ningún rango'}**"
-            trae = (
-                f"**{nombre_proc}** trae {pide}, heredados del proceso de producción que prepara"
-                if heredados else
-                f"**{nombre_proc}** está cargado con {pide}"
-            )
+            pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
+            pide_proc = _listar_rangos(rangos_proc) or "ningún rango"
             cabecera = (
-                f"{_concuerda(maqs, 'La máquina', 'Las máquinas')} **{_listar(maqs)}** "
-                f"solo {_concuerda(maqs, 'la', 'las')} puede usar quien tenga "
-                f"**{_listar_rangos(rangos_maq) or 'ningún rango'}**"
+                f"Para tomar {_concuerda(maqs, 'la máquina', 'las máquinas')} "
+                f"**{_listar(maqs)}** hace falta **{pide_maq}**. "
+                f"Este trabajo pide **{pide_proc}**, que no está en esa lista"
             )
+            # De dónde salió el rango, cuando no es el que figura en la ficha: un SETUP
+            # usa los de la producción que prepara, y sin decirlo mandaba a buscar en
+            # Recursos un rango que ahí no está cargado.
+            trae = " — lo hereda del trabajo de producción que prepara" if heredados else ""
+            # Lo de la skill va entre paréntesis y al final: no es lo que hay que
+            # hacer, es lo que NO va a funcionar. Lucas lo preguntó mirando este mismo
+            # aviso ("¿acá ninguno tiene una skill para hacer eso?") y la respuesta es
+            # que no destraba: el solver pide DOS cruces y la skill solo cubre el de
+            # la persona, el del proceso contra la máquina sigue fallando.
             cierre = (
-                "el trabajo se hace igual, pero la máquina figura libre y otra OT puede pisarla."
+                "El trabajo se hace igual, pero la máquina queda figurando libre y otra OT "
+                "puede tomarla al mismo tiempo. (La skill a mano no lo destraba: habilita "
+                "a la persona, no a la máquina.)"
             )
             if rangos_maq_ids and not gente_de_la_maquina:
                 detalle = (
-                    f"{cabecera}, y hoy no lo tiene ninguna persona: solo figura en un puesto "
-                    f"a cubrir. Con lo cargado hoy, {_concuerda(maqs, 'esa máquina', 'esas máquinas')} "
-                    f"no {_concuerda(maqs, 'la', 'las')} puede reservar nadie, para este ni para "
-                    f"ningún otro trabajo. Además {trae}. Mientras tanto, {cierre}"
+                    f"{cabecera}{trae}. Y **{pide_maq}** hoy no lo tiene ninguna persona: "
+                    f"solo figura en un puesto a cubrir, así que "
+                    f"{_concuerda(maqs, 'esa máquina', 'esas máquinas')} no "
+                    f"{_concuerda(maqs, 'la', 'las')} puede tomar nadie, ni para este trabajo ni "
+                    f"para ningún otro. {cierre}"
                 )
             else:
-                detalle = f"{cabecera}, pero {trae}. Como no coinciden, el sistema no reserva la máquina: {cierre}"
+                detalle = f"{cabecera}{trae}. {cierre}"
             # El orden de las opciones importa y no es cosmético. Ampliar los rangos
             # DE LA MÁQUINA la abre a todo el que tenga ese rango, y eso puede ser
             # exactamente lo que el taller NO quiere: la PLEGADORA tiene OFICIAL
@@ -885,7 +946,9 @@ def _procesos_sin_maquina_compatible(
                 soluciones.append({
                     "texto": f"Ponele **{_listar_rangos(rangos_maq)}** al proceso **{nombre_proc}**: "
                              f"es el rango de la máquina, así que no cambia quién puede usarla"
-                             + (f" — hoy lo tiene {_cuenta_personas(rangos_maq_ids, ops_por_rango, nombre_operario)}." if rangos_maq_ids else "."),
+                             + (f" — hoy {_concuerda(len(gente_de_la_maquina), 'lo tiene', 'lo tienen')} "
+                                f"{_cuenta_personas(rangos_maq_ids, ops_por_rango, nombre_operario)}."
+                                if rangos_maq_ids else "."),
                     "donde": "Recursos › Procesos",
                     "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids),
                 })
@@ -932,13 +995,36 @@ def _procesos_sin_maquina_compatible(
                     "donde": "Recursos › Maquinarias",
                     "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"]),
                 })
+            # Acá la skill a mano SÍ destraba —el solver la toma como habilitación en la
+            # máquina, ver _agregar_compatibilidad_op_maq— y es el cambio más chico de
+            # los tres: no le toca el rango a nadie más. En el caso de arriba
+            # (rango_maquina) no sirve y por eso ahí se dice que no alcanza.
+            soluciones.append({
+                "texto": "Cargale la skill a mano en la ficha de esa persona: "
+                         "la habilita solo a ella, sin tocarle el rango a nadie.",
+                "donde": "Recursos › Operarios",
+            })
             _como_alternativa(soluciones)
+
+        # El título viejo era el mismo para las cuatro causas —"«X» se hace sin
+        # reservar la máquina"— y Lucas lo dijo derecho: "no entiendo el título". No
+        # es lo mismo que no haya máquina cargada, que el trabajo vaya a mano, o que
+        # la máquina exista y quede libre para que otra OT la pise. Cada causa dice
+        # lo suyo, y las dos que son traba dicen la consecuencia, que es lo que él
+        # necesita saber para decidir si le importa.
+        titulo = {
+            "sin_maquina": f"{nombre_proc}: no hay ninguna máquina cargada para este trabajo",
+            "sin_familia": f"{nombre_proc}: no toma ninguna máquina",
+        }.get(
+            d["causa"],
+            f"{nombre_proc}: la máquina queda libre y otra OT puede tomarla",
+        )
 
         salida.append({
             "id": f"maquina-incompatible-{proc_id}",
             "tipo": "maquina_incompatible",
             "severidad": severidad,
-            "titulo": f"«{nombre_proc}» se hace sin reservar la máquina",
+            "titulo": titulo,
             "detalle": detalle,
             "impacto": {
                 "procesos": d["procesos"],
@@ -956,7 +1042,7 @@ def _procesos_sin_rango(procesos):
     for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, _um, _fam, _sk) in procesos:
         if rangos:
             continue
-        d = sin_rango.setdefault(proc_id, {"nombre": (nombre or f"#{proc_id}").strip(),
+        d = sin_rango.setdefault(proc_id, {"nombre": _bonito(nombre) or f"#{proc_id}",
                                            "ots": set(), "minutos": 0, "procesos": 0})
         d["ots"].add(orden_id)
         d["minutos"] += dur
@@ -966,7 +1052,7 @@ def _procesos_sin_rango(procesos):
         "id": f"sin-rango-{proc_id}",
         "tipo": "proceso_sin_rango",
         "severidad": ADVERTENCIA,
-        "titulo": f"«{d['nombre']}» no tiene rango",
+        "titulo": f"{d['nombre']}: sin rango, se lo puede llevar cualquiera",
         "detalle": "Se lo puede llevar cualquiera, sepa hacerlo o no. El plan sale igual.",
         "impacto": {
             "procesos": d["procesos"],
@@ -988,7 +1074,7 @@ def _trabajo_tercerizado(procesos):
     for (orden_id, proc_id, _sec, _fp, _prio, dur, _rangos, nombre, _um, _fam, _sk) in procesos:
         if _get_tipo_proceso(nombre or "") != "ADMIN":
             continue
-        d = tercerizados.setdefault(proc_id, {"nombre": (nombre or f"#{proc_id}").strip(),
+        d = tercerizados.setdefault(proc_id, {"nombre": _bonito(nombre) or f"#{proc_id}",
                                               "ots": set(), "minutos": 0, "procesos": 0})
         d["ots"].add(orden_id)
         d["minutos"] += dur
