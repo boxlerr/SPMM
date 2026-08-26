@@ -216,7 +216,7 @@ export function PlanningSelectionScreen({
             visible={isOpen}
             cabecera={
                 <>
-                    <div className="px-6 pt-4 pb-3 flex items-start justify-between gap-4">
+                    <div className="px-6 pt-3 pb-2 flex items-start justify-between gap-4">
                         <div className="min-w-0">
                             <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
                                 <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
@@ -239,7 +239,7 @@ export function PlanningSelectionScreen({
                         </div>
                     </div>
 
-                    <div className="px-6 pb-3 flex items-center gap-2.5 flex-wrap">
+                    <div className="px-6 pb-2 flex items-center gap-2.5 flex-wrap">
                         {estimatedTime && (
                             <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-3 py-1 text-sm font-medium">
                                 <Clock className="w-3.5 h-3.5" />
@@ -360,7 +360,7 @@ export function PlanningSelectionScreen({
 
                     {/* Filter Toolbar Section - Symmetric & Compact */}
                     <div className="px-6 py-0 border-t bg-slate-50/80">
-                    <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders}>
+                    <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders} compacto>
                         {/* Misma estética que el resto de filtros: "Categoría: valor"
                             con el valor en negrita cuando hay algo aplicado. */}
                         <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>
@@ -451,7 +451,7 @@ export function PlanningSelectionScreen({
         >
             {/* Content Area */}
             <div className="flex-1 min-w-0 overflow-hidden bg-gray-50 flex flex-col">
-                    <div className="flex-1 overflow-auto p-4 sm:p-6 flex flex-col gap-4">
+                    <div className="flex-1 overflow-auto p-3 flex flex-col gap-3">
                         {/* El umbral estaba en 30 y saltaba en la semana normal del taller
                             —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
                             contrario de lo que hay que hacer: partir el lote hace que el
@@ -489,6 +489,7 @@ export function PlanningSelectionScreen({
                                     hideStatus={true}
                                     highlightedIds={initialSelectedIds}
                                     pinSelectedOnTop
+                                    compacto
                                 />
                             </div>
                         </div>

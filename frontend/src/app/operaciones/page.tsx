@@ -1359,8 +1359,15 @@ export default function OperacionesPage() {
            pantalla, con la barra lateral de la app a la izquierda y un flujo de dos
            pasos —elegir OTs → revisar el plan— que no se cierra por un click al
            costado. Las dos conviven montadas (la que no toca queda en `hidden`)
-           para que "Volver" no pierda el rango de fechas ni lo tildado. */
-        <div className="w-full px-2 sm:px-4 md:px-6 lg:px-8 pt-2">
+           para que "Volver" no pierda el rango de fechas ni lo tildado.
+
+           Sin padding propio: el layout de la app ya envuelve todo en un `p-6`
+           (LayoutWrapper). El `px-8` que había acá se sumaba a ese y dejaba 56px de
+           margen muerto de cada lado —"aprovechar mejor el espacio de la derecha y la
+           izquierda", Julián 26/08—, y el `pt-2` sumaba 8px de alto que el shell no
+           descuenta (usa 100vh-3rem, que son justo los 48px del p-6): el pie quedaba
+           mordido y el contenedor scrolleaba de a poquito. */
+        <div className="w-full">
           <PlanningSelectionScreen
             isOpen={isSelectionModalOpen}
             onClose={handleSalirDelPlanificador}

@@ -75,6 +75,9 @@ interface PlanningListTableProps {
      *  cambiar la búsqueda (no con cada tilde): reordenar en vivo movía la fila
      *  bajo el cursor y el siguiente click caía en la OT equivocada. */
     pinSelectedOnTop?: boolean;
+    /** Modo compacto: sin el margen de arriba y con menos aire entre buscador y tabla.
+        Lo usa el planificador, donde la tabla ya vive adentro de una tarjeta. */
+    compacto?: boolean;
 }
 
 /** Columnas ordenables de la tabla. TODAS las columnas con dato ordenan; las que
@@ -163,7 +166,8 @@ function _PlanningListTable({
     hideStatus = false,
     highlightedIds = [],
     tableZoom = 100,
-    pinSelectedOnTop = false
+    pinSelectedOnTop = false,
+    compacto = false
 }: PlanningListTableProps) {
 
     // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
@@ -922,7 +926,11 @@ function _PlanningListTable({
     }
 
     return (
-        <div className="space-y-4 mt-6">
+        /* `mt-6` es el aire que la tabla necesita en las pestañas de Operaciones, donde
+           arranca pegada a la barra de tabs. Dentro del planificador ese margen sobra
+           —ya está adentro de una tarjeta con su propio padding— y son 24px que le
+           faltan a la lista. */
+        <div className={compacto ? "space-y-2" : "space-y-4 mt-6"}>
             {/* B1 (feedback 06/07): barra flotante de cambios pendientes de operario/máquina.
                 Aparece solo cuando hay reasignaciones sin guardar; el avance y las fechas siguen al toque. */}
             {Object.keys(pendingRes).length > 0 && (

@@ -39,9 +39,12 @@ interface WorkOrderFiltersProps {
     setFilters: React.Dispatch<React.SetStateAction<WorkOrderFilterState>>;
     orders: WorkOrder[];
     children?: React.ReactNode;
+    /** Modo compacto: menos aire y selects más angostos. Lo usa el planificador, donde
+        cada píxel que se come la barra de filtros es una fila menos de la lista. */
+    compacto?: boolean;
 }
 
-export function WorkOrderFilters({ filters, setFilters, orders, children }: WorkOrderFiltersProps) {
+export function WorkOrderFilters({ filters, setFilters, orders, children, compacto = false }: WorkOrderFiltersProps) {
     const [clientSearchTerm, setClientSearchTerm] = useState("");
 
     const uniqueClients = Array.from(new Set(orders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort();
@@ -121,7 +124,10 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
     );
 
     return (
-        <div className="px-4 py-3 bg-slate-50/80 rounded-xl border border-gray-100 shadow-sm space-y-2.5 mb-4 mt-2">
+        <div className={cn(
+            "bg-slate-50/80 rounded-xl border border-gray-100 shadow-sm",
+            compacto ? "px-3 py-2 space-y-2 mb-2 mt-0" : "px-4 py-3 space-y-2.5 mb-4 mt-2",
+        )}>
             {/* Fila 1: prioridad + toggles + colores + limpiar (todo alineado a una sola línea con
                 separadores verticales para agrupar visualmente). Limpiar Filtros queda a la derecha
                 pero pegado al grupo Colores (no flotando con ml-auto que generaba un hueco enorme). */}
@@ -209,7 +215,13 @@ export function WorkOrderFilters({ filters, setFilters, orders, children }: Work
                 grandes en pantallas anchas). Quedan pegados uno al lado del otro con gap uniforme
                 y wrappan naturalmente cuando no entran. La clase `[&>*]:` aplica el sizing
                 a todos los hijos directos sin repetirlo en cada Select. */}
-            <div className="flex flex-wrap gap-2 [&>*]:flex-1 [&>*]:min-w-[160px] [&>*]:max-w-[200px]">
+            {/* En compacto los selects arrancan más angostos para que los siete entren
+                en UNA fila: con min-w 160 el séptimo ("Orden") se caía solo a una
+                segunda fila casi vacía y se llevaba 40px de alto por nada. */}
+            <div className={cn(
+                "flex flex-wrap gap-2 [&>*]:flex-1 [&>*]:max-w-[200px]",
+                compacto ? "[&>*]:min-w-[132px]" : "[&>*]:min-w-[160px]",
+            )}>
                 {/* Client Selector */}
                 <Popover>
                     <PopoverTrigger asChild>

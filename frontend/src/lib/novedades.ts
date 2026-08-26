@@ -68,7 +68,7 @@ export const NOVEDADES: Novedad[] = [
     },
     {
         id: "avisos-formato-unico",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "mejora",
         seccion: "Operaciones › Planificación",
         titulo: "Las trabas y los avisos se leen de un vistazo: todos con el mismo formato",
@@ -78,17 +78,17 @@ export const NOVEDADES: Novedad[] = [
     },
     {
         id: "planificador-pantalla-completa",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "mejora",
         seccion: "Operaciones › Planificación",
         titulo: "Planificar ocupa la pantalla entera: se terminaron las ventanas flotantes",
         detalle:
-            "Antes elegir las OTs y revisar el plan eran dos ventanas grises flotando arriba de Operaciones, que se cerraban con un click al costado y no dejaban ver el menú. Ahora es una pantalla, con el menú de la izquierda a la vista y el mismo recorrido de siempre: Paso 1 elegís las OTs, Paso 2 revisás el plan y confirmás. Arriba del plan quedan las cuatro cifras que importan —OTs, procesos, carga total y trabas sin resolver— en grande y sin tener que buscarlas.",
+            "Antes elegir las OTs y revisar el plan eran dos ventanas grises flotando arriba de Operaciones, que se cerraban con un click al costado y no dejaban ver el menú. Ahora es una pantalla, con el menú de la izquierda a la vista y el mismo recorrido de siempre: Paso 1 elegís las OTs, Paso 2 revisás el plan y confirmás. Arriba del plan quedan las cuatro cifras que importan —OTs, procesos, carga total y trabas sin resolver— en grande y sin tener que buscarlas, con el período del plan al lado de la bajada en vez de colgando solo abajo. Y las dos pantallas usan el ancho completo: se sacó un margen de más que dejaba cinco centímetros en blanco a cada lado, y se le quitó aire a los filtros para que entren varias filas más de la lista sin tener que scrollear.",
         href: "/operaciones",
     },
     {
         id: "avisos-se-revisan-solos",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "mejora",
         seccion: "Operaciones › Planificación",
         titulo: "Si arreglás un aviso en Recursos, al volver aparece resuelto y el plan se rehace solo",
@@ -98,7 +98,7 @@ export const NOVEDADES: Novedad[] = [
     },
     {
         id: "avisos-llevan-al-dato",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "mejora",
         seccion: "Operaciones › Planificación",
         titulo: "El «Recursos › Procesos» de cada aviso ahora es un link que te deja parado en el dato",
@@ -108,7 +108,7 @@ export const NOVEDADES: Novedad[] = [
     },
     {
         id: "plan-filtros-y-columnas",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "nuevo",
         seccion: "Operaciones › Planificación",
         titulo: "La tabla del plan tiene Filtros y Columnas",
@@ -118,7 +118,7 @@ export const NOVEDADES: Novedad[] = [
     },
     {
         id: "borrador-conserva-retoques",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "arreglo",
         seccion: "Operaciones › Planificación",
         titulo: "Retomar un borrador ya no pierde los cambios que hiciste a mano",
@@ -128,7 +128,7 @@ export const NOVEDADES: Novedad[] = [
     },
     {
         id: "recursos-procesos-no-se-cae",
-        fecha: "2026-08-21",
+        fecha: "2026-08-26",
         tipo: "arreglo",
         seccion: "Recursos › Procesos",
         titulo: "La pestaña Procesos ya no se cae con un proceso recién creado",

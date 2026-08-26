@@ -1096,7 +1096,7 @@ export function PlanningPreviewScreen({
             visible={isOpen}
             cabecera={
                 <>
-                    <div className="px-6 pt-4 pb-3 flex items-start justify-between gap-4">
+                    <div className="px-6 pt-3 pb-2 flex items-start justify-between gap-4">
                         <div className="min-w-0 flex-1">
                             <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
                                 <CalendarClock className="w-5 h-5 text-blue-600 shrink-0" />
@@ -1111,6 +1111,52 @@ export function PlanningPreviewScreen({
                             <p className="text-sm text-gray-500 mt-0.5">
                                 Revisá y ajustá la programación antes de confirmar. Podés agregar más OTs o recalcular sin salir de esta vista.
                             </p>
+                            {/* El período del plan y los avisos de rango colgaban en una fila
+                                propia debajo de las cifras: un chip chiquito solo a la izquierda
+                                con medio metro de blanco al lado, que era el "queda flotando de
+                                una forma rara" de Julián (26/08). Van acá, pegados al subtítulo:
+                                son contexto de lo que se está mirando, igual que la bajada, y así
+                                el espacio a su derecha lo llenan los botones de acción. */}
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                                    {/* Las OTs, los procesos y la carga ya están arriba como cifras:
+                                        repetirlos acá era leer dos veces lo mismo. Queda solo lo que
+                                        las cifras no dicen. */}
+                                    {displayedExcedentes.length > 0 && (
+                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                                            <AlertTriangle className="w-3 h-3" />
+                                            {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
+                                        </Badge>
+                                    )}
+                                    {/* El período REAL que ocupa el plan. Antes solo se mostraba
+                                        cuando el usuario había elegido un rango a mano; sin rango
+                                        elegido no se veía nada y no había forma de saber hasta
+                                        cuándo llegaban las fechas. */}
+                                    {spanPlan && (
+                                        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
+                                            <Calendar className="w-3 h-3" />
+                                            {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
+                                            <span className="text-slate-500">· {spanPlan.habiles} días hábiles</span>
+                                        </Badge>
+                                    )}
+                                    {planningRange.fecha_hasta && (
+                                        <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 gap-1">
+                                            Tope elegido: {formatDate(planningRange.fecha_hasta)}
+                                        </Badge>
+                                    )}
+                                    {displayedExcedentes.length > 0 && onRecalculate && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={ampliarRango}
+                                            disabled={isCalculating}
+                                            className="h-6 px-2 text-[11px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                            title="Recalcula el mismo plan con dos semanas más de margen"
+                                        >
+                                            <Calendar className="w-3 h-3" />
+                                            Ampliar 2 semanas
+                                        </Button>
+                                    )}
+                            </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
@@ -1289,7 +1335,7 @@ export function PlanningPreviewScreen({
                     {/* El tamaño del plan de un vistazo. Antes eran badges de 11px
                         apretados contra el título: para saber si el plan tenía las OTs
                         que uno esperaba había que ponerse a leer. */}
-                    <div className="px-3 pb-1 flex items-stretch flex-wrap divide-x divide-gray-100">
+                    <div className="px-2 pb-2 flex items-stretch flex-wrap divide-x divide-gray-100">
                         <CifraPlan
                             icono={<Cog className="w-4 h-4" />}
                             valor={uniqueOrdersInPlan}
@@ -1324,46 +1370,6 @@ export function PlanningPreviewScreen({
 
                     {/* Contexto del plan: qué período ocupa de verdad, qué tope se eligió
                         y qué quedó afuera. */}
-                    <div className="px-6 pb-3 flex flex-wrap items-center gap-2 text-[11px]">
-                                {/* Las OTs, los procesos y la carga ya están arriba como cifras:
-                                    repetirlos acá era leer dos veces lo mismo. Queda solo lo que
-                                    las cifras no dicen. */}
-                                {displayedExcedentes.length > 0 && (
-                                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
-                                        <AlertTriangle className="w-3 h-3" />
-                                        {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
-                                    </Badge>
-                                )}
-                                {/* El período REAL que ocupa el plan. Antes solo se mostraba
-                                    cuando el usuario había elegido un rango a mano; sin rango
-                                    elegido no se veía nada y no había forma de saber hasta
-                                    cuándo llegaban las fechas. */}
-                                {spanPlan && (
-                                    <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
-                                        <Calendar className="w-3 h-3" />
-                                        {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
-                                        <span className="text-slate-500">· {spanPlan.habiles} días hábiles</span>
-                                    </Badge>
-                                )}
-                                {planningRange.fecha_hasta && (
-                                    <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 gap-1">
-                                        Tope elegido: {formatDate(planningRange.fecha_hasta)}
-                                    </Badge>
-                                )}
-                                {displayedExcedentes.length > 0 && onRecalculate && (
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={ampliarRango}
-                                        disabled={isCalculating}
-                                        className="h-6 px-2 text-[11px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
-                                        title="Recalcula el mismo plan con dos semanas más de margen"
-                                    >
-                                        <Calendar className="w-3 h-3" />
-                                        Ampliar 2 semanas
-                                    </Button>
-                                )}
-                    </div>
                 </>
             }
             pie={
