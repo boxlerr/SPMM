@@ -624,8 +624,14 @@ export function DiagnosticosPlan({
                                                 </span>
                                                 <span
                                                     className={cn(
+                                                        // Dos renglones y no `truncate`: con una sola línea se cortaban
+                                                        // cuatro de los seis títulos del plan real, y en «Control de
+                                                        // medidas: hoy no lo puede hacer n…» lo que se perdía era
+                                                        // justo «nadie». El título es lo único que tiene que
+                                                        // entenderse sin abrir la tarjeta; que crezca un renglón
+                                                        // cuesta menos que dejarlo a medias.
                                                         "min-w-0 flex-1 text-[13px] font-semibold leading-tight text-gray-900",
-                                                        !activo && "truncate"
+                                                        !activo && "line-clamp-2"
                                                     )}
                                                     title={d.titulo}
                                                 >
