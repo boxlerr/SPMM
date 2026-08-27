@@ -20,7 +20,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Info, Loader2, RefreshCw, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Cog, Hourglass, Info, Loader2, RefreshCw, Tag, Truck, UserPlus, UserX, Wrench } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,7 +29,10 @@ import { API_URL } from "@/config";
 import { antiguedadTexto } from "@/lib/borradorPlan";
 
 /** Cuántas líneas se ven antes de "Ver todas". */
-const VISIBLES = 4;
+// Con la tarjeta compacta seis avisos ocupan casi lo mismo que ocupaban cuatro filas
+// de las viejas (384px contra 356px, medido en Chrome): mostrar cuatro sería dejar
+// pantalla sin usar y hacer tocar "Ver todas" de gusto.
+const VISIBLES = 6;
 
 /**
  * Resalta lo que viene entre **dobles asteriscos** desde el backend.
@@ -369,6 +373,22 @@ export function DiagnosticosPlan({
     const visibles = verTodas ? ordenados : ordenados.slice(0, VISIBLES);
     const ocultas = ordenados.length - visibles.length;
 
+    /**
+     * Un ícono por categoría, para reconocer de qué va el aviso antes de leerlo.
+     *
+     * Va DENTRO del chip, al lado del rótulo, y no en un cuadrado aparte como en
+     * el mockup: seis pictogramas sueltos son seis adivinanzas, y esta lista se
+     * barre de arriba abajo sin leerla entera. La palabra sigue mandando.
+     */
+    const ICONO: Record<string, LucideIcon> = {
+        proceso_sin_operarios: UserX,
+        proceso_sin_rango: Tag,
+        maquina_incompatible: Cog,
+        cuello_de_maquina: Hourglass,
+        trabajo_tercerizado: Truck,
+        puestos_vacantes: UserPlus,
+    };
+
     return (
         <div className={cn(
             "mx-4 mt-4 mb-2 rounded-xl border overflow-hidden bg-white",
@@ -388,25 +408,25 @@ export function DiagnosticosPlan({
                     aria-expanded={!colapsado}
                     onClick={alternarColapso}
                     className={cn(
-                        "flex-1 min-w-0 px-4 flex gap-3 text-left",
-                        // Plegada la tira es UNA línea de ~40px en vez de ~64. Lo que
-                        // sobrevive es lo que importa: el color (rojo = hay trabas), el
-                        // resumen ("3 trabas detectadas y 2 avisos") y el chevron. La
-                        // explicación de qué hacer con eso se lee al abrir.
-                        colapsado ? "py-2 items-center" : "py-3 items-start",
+                        "flex-1 min-w-0 px-3 flex gap-2.5 text-left",
+                        // Plegada la tira es UNA línea de ~36px. Lo que sobrevive es lo
+                        // que importa: el color (rojo = hay trabas), el resumen ("3 trabas
+                        // detectadas y 2 avisos") y el chevron. La explicación de qué hacer
+                        // con eso se lee al abrir.
+                        colapsado ? "py-2 items-center" : "py-2 items-start",
                     )}
                 >
                     {items.length === 0 ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-px" />
+                        <CheckCircle2 className="w-[18px] h-[18px] text-emerald-600 shrink-0 mt-px" />
                     ) : hayBloqueantes ? (
-                        <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-px" />
+                        <AlertTriangle className="w-[18px] h-[18px] text-rose-600 shrink-0 mt-px" />
                     ) : (
-                        <Info className="w-5 h-5 text-amber-500 shrink-0 mt-px" />
+                        <Info className="w-[18px] h-[18px] text-amber-500 shrink-0 mt-px" />
                     )}
                     <span className="min-w-0">
-                        <span className="block text-[15px] font-semibold text-gray-900">{resumenHeader}</span>
+                        <span className="block text-[14px] font-semibold text-gray-900 leading-tight">{resumenHeader}</span>
                         {!colapsado && (
-                            <span className="block text-[13px] text-gray-600 mt-0.5">
+                            <span className="block text-[12px] text-gray-600 leading-snug mt-px">
                                 {items.length === 0
                                     ? "Quedó todo resuelto."
                                     : hayBloqueantes
@@ -417,37 +437,41 @@ export function DiagnosticosPlan({
                     </span>
                     <span className="flex-1" />
                     {colapsado && (
-                        <span className="text-[13px] font-medium text-gray-600 shrink-0 whitespace-nowrap">
+                        <span className="text-[12px] font-medium text-gray-600 shrink-0 whitespace-nowrap">
                             Ver {items.length === 1 ? "el aviso" : "los avisos"}
                         </span>
                     )}
                     <ChevronDown
-                        className={cn("w-4 h-4 text-gray-400 shrink-0 transition-transform", colapsado ? "-rotate-90" : "mt-1")}
+                        className={cn("w-4 h-4 text-gray-400 shrink-0 transition-transform", colapsado ? "-rotate-90" : "mt-0.5")}
                     />
                 </button>
 
+                {/* Con borde, como en el mockup: es la salida a "las veo todas" y tiene
+                    que verse como acción, no como texto suelto. */}
                 {ocultas > 0 && !colapsado && (
                     <button
                         type="button"
                         onClick={() => setVerTodas(true)}
-                        className="shrink-0 text-[13px] font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
+                        className="shrink-0 h-7 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white/70 px-2.5 text-[12px] font-medium text-gray-700 hover:bg-white hover:text-gray-900 whitespace-nowrap transition-colors"
                     >
-                        Ver todas <span className="text-gray-400">›</span>
+                        Ver las {ordenados.length} <span aria-hidden="true">→</span>
                     </button>
                 )}
 
-                {onRevisar && (
+                {onRevisar ? (
                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={onRevisar}
                         disabled={revisando}
-                        className="mr-3 h-7 shrink-0 gap-1.5 text-xs text-gray-700 hover:bg-white/70"
+                        className="mr-2 h-7 shrink-0 gap-1.5 text-xs text-gray-700 hover:bg-white/70"
                         title="Recalcular ahora para ver si lo que arreglaste en Recursos ya está"
                     >
                         <RefreshCw className={cn("w-3.5 h-3.5", revisando && "animate-spin")} />
                         {revisando ? "Revisando…" : "Volver a revisar"}
                     </Button>
+                ) : (
+                    <span className="w-2 shrink-0" />
                 )}
             </div>
 
@@ -456,10 +480,10 @@ export function DiagnosticosPlan({
                    un "tocá Volver a revisar" que aparecía recién a la hora; ahora la
                    revisión corre sola al volver a la pantalla y lo único que falta
                    decir es eso, para que nadie quede esperando un botón. */
-                <div className="border-t bg-slate-50 px-4 py-2 text-[12px] text-slate-600 flex items-center gap-2">
-                    {revisionAuto === "mirando" && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 shrink-0" />}
-                    {revisionAuto === "recalculando" && <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500 shrink-0" />}
-                    {revisionAuto === "con-retoques" && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                <div className="border-t bg-slate-50 px-3 py-1.5 text-[11.5px] leading-snug text-slate-600 flex items-center gap-2">
+                    {revisionAuto === "mirando" && <Loader2 className="w-3 h-3 animate-spin text-slate-400 shrink-0" />}
+                    {revisionAuto === "recalculando" && <RefreshCw className="w-3 h-3 animate-spin text-blue-500 shrink-0" />}
+                    {revisionAuto === "con-retoques" && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
                     <span>
                         {revisionAuto === "mirando"
                             ? "Fijándose si cambió algo en Recursos…"
@@ -481,109 +505,284 @@ export function DiagnosticosPlan({
                 </div>
             )}
 
+            {/* Misma geometría que las tarjetas de abajo —barra de color, chip del mismo
+                ancho, título— para que resueltos y pendientes se lean como una sola
+                lista y no como dos tablas pegadas. De una línea: son la confirmación de
+                que algo se arregló, no algo para leer. */}
             {!colapsado && resueltos.length > 0 && (
-                <ul className="divide-y border-t bg-emerald-50/40">
-                    {/* Misma geometría que las filas de abajo —chip de 92px y después el
-                        título— para que los resueltos y los pendientes se lean como una
-                        sola lista y no como dos tablas pegadas. */}
+                <ul className="border-t bg-emerald-50/40 p-2 space-y-1">
                     {resueltos.map((d) => (
-                        <li key={`resuelto-${d.id}`} className="px-4 py-2.5 flex items-center gap-3">
-                            <span className="shrink-0 w-[92px] text-center rounded border border-emerald-200 bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase tracking-wide py-1">
+                        <li
+                            key={`resuelto-${d.id}`}
+                            className="flex items-center gap-2 rounded-lg border border-l-[3px] border-emerald-200 border-l-emerald-500 bg-white/70 px-2 py-1"
+                        >
+                            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                            <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
                                 Resuelto
                             </span>
-                            <span className="flex-1 min-w-0 text-sm text-gray-600 truncate line-through decoration-emerald-600/40">
+                            <span className="flex-1 min-w-0 truncate text-[13px] leading-tight text-gray-500 line-through decoration-emerald-600/40">
                                 {d.titulo}
                             </span>
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                         </li>
                     ))}
                 </ul>
             )}
 
+            {/* Cada aviso es una tarjeta con barra de color y dos columnas: a la
+                izquierda QUÉ PASA (orden, severidad, categoría, título, detalle e
+                impacto), a la derecha QUÉ HACER (la solución, dónde se arregla y el
+                botón). Antes la solución vivía escondida detrás de un click: para
+                saber qué hacer con once avisos había que abrir once.
+
+                Todo apretado a propósito ("no me gusta que ocupen tanto espacio,
+                pueden entrar más trabas", Lucas 26/08): la tarjeta mide 60px medidos
+                contra los 89px de la fila anterior, y encima ya trae la solución
+                adentro, que antes costaba otro click y otros ~70px. */}
             {!colapsado && (
-                <ul className="divide-y border-t">
-                    {visibles.map((d) => {
+                <ul className="border-t bg-slate-50/60 p-2 space-y-1">
+                    {visibles.map((d, i) => {
                         const activo = abiertos.has(d.id);
                         const esBloq = d.severidad === "bloqueante";
-                        return (
-                            <li key={d.id} className={cn(activo && "bg-slate-50/60")}>
-                                <button
-                                    type="button"
-                                    aria-expanded={activo}
-                                    onClick={() => toggle(d.id)}
-                                    className="w-full px-4 py-3 flex items-start gap-3 text-left hover:bg-slate-50 transition-colors"
-                                >
-                                    <span
-                                        className={cn(
-                                            "shrink-0 w-[92px] mt-px text-center rounded border text-[10px] font-bold uppercase tracking-wide py-1",
-                                            esBloq
-                                                ? "bg-rose-50 text-rose-700 border-rose-200"
-                                                : "bg-amber-50 text-amber-800 border-amber-200"
-                                        )}
-                                        title={esBloq
-                                            ? "Traba: quedó sin resolver en el plan"
-                                            : "Aviso: el plan sale igual"}
-                                    >
-                                        {categoriaDe(d.tipo)}
-                                    </span>
-                                    <span className="flex-1 min-w-0">
-                                        <span className="block text-sm font-semibold text-gray-900">{d.titulo}</span>
-                                        {/* El detalle es lo que dice QUÉ máquina y QUÉ rango tocar.
-                                            Tenerlo escondido detrás de un click obligaba a abrir las
-                                            once líneas para saber cuál importaba. */}
-                                        <span className={cn(
-                                            "block text-[13px] text-gray-500 leading-relaxed mt-0.5 max-w-[95ch]",
-                                            !activo && "line-clamp-2"
-                                        )}>
-                                            {conNegritas(d.detalle)}
-                                        </span>
-                                    </span>
-                                    <span
-                                        className="hidden sm:inline-flex items-center rounded-full bg-slate-100 text-slate-600 text-xs px-2.5 py-1 tabular-nums shrink-0 mt-px"
-                                        title={d.impacto.ots.length > 0 ? `OTs: ${d.impacto.ots.map((n) => `#${n}`).join(", ")}` : undefined}
-                                    >
-                                        {d.impacto.resumen}
-                                    </span>
-                                    <ChevronDown
-                                        className={cn(
-                                            "w-4 h-4 text-gray-400 shrink-0 mt-1.5 transition-transform",
-                                            activo && "rotate-180"
-                                        )}
-                                    />
-                                </button>
+                        const Icono = ICONO[d.tipo] ?? Info;
 
+                        // Plegada se muestra UNA solución: la primera que se puede aplicar
+                        // de un botón y, si ninguna se puede, la primera a secas. Las demás
+                        // se cuentan al lado del texto y salen enteras al desplegar.
+                        const conBoton = d.soluciones.findIndex((s) => s.accion);
+                        const iSol = conBoton >= 0 ? conBoton : (d.soluciones.length > 0 ? 0 : -1);
+                        const sol = iSol >= 0 ? d.soluciones[iSol] : null;
+                        // Misma clave que la lista desplegada: aplicar desde cualquiera de
+                        // los dos lados marca el mismo botón.
+                        const claveSol = `${d.id}-${iSol}`;
+                        const hecha = aplicadas.has(claveSol);
+                        const link = sol ? enlaceDe(sol.donde, sol.accion) : null;
+                        const otras = d.soluciones.length - 1;
+
+                        // El backend ya manda el impacto masticado ("3 proc · 2 OT · 4 h").
+                        // Se parte en chips en vez de reescribirlo: mismos datos, sin
+                        // inventar campos y sin decir dos veces lo mismo.
+                        const impacto = d.impacto.resumen.split("·").map((t) => t.trim()).filter(Boolean);
+                        const otsTexto = d.impacto.ots.length > 0
+                            ? `OTs: ${d.impacto.ots.map((n) => `#${n}`).join(", ")}`
+                            : undefined;
+
+                        return (
+                            <li
+                                key={d.id}
+                                className={cn(
+                                    "rounded-lg border border-l-[3px] bg-white overflow-hidden",
+                                    esBloq ? "border-rose-200 border-l-rose-500" : "border-amber-200 border-l-amber-400",
+                                    activo && "shadow-sm"
+                                )}
+                            >
+                                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
+                                    {/* ── Qué pasa ──
+                                        Es un <button> entero para que el bloque del problema
+                                        despliegue el detalle sin apuntarle al chevron. Adentro
+                                        solo van spans: no se puede anidar nada clickeable. */}
+                                    <button
+                                        type="button"
+                                        aria-expanded={activo}
+                                        onClick={() => toggle(d.id)}
+                                        className="flex min-w-0 items-start gap-2 text-left"
+                                    >
+                                        <span className="mt-[3px] shrink-0 grid place-items-center w-4 h-4 rounded-full bg-slate-100 text-slate-500 text-[9px] font-bold tabular-nums">
+                                            {i + 1}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            {/* Severidad, categoría y título en el mismo renglón: son
+                                                tres cosas cortas y darle una línea a cada una era la
+                                                mitad del alto de la tarjeta. */}
+                                            <span className="flex items-center gap-1.5">
+                                                <span
+                                                    className={cn(
+                                                        "shrink-0 w-[38px] text-center rounded px-1 text-[9px] font-bold uppercase leading-[15px] tracking-wide",
+                                                        esBloq ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"
+                                                    )}
+                                                    title={esBloq
+                                                        ? "Traba: quedó sin resolver en el plan"
+                                                        : "Aviso: el plan sale igual"}
+                                                >
+                                                    {esBloq ? "Alta" : "Media"}
+                                                </span>
+                                                {/* Ancho fijo y siempre en la misma columna: es lo que
+                                                    permite barrer la lista sin leerla. 96px entra el más
+                                                    largo de los seis rótulos ("Sin máquina", 91px). */}
+                                                <span className={cn(
+                                                    "shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-semibold leading-[15px] whitespace-nowrap",
+                                                    esBloq
+                                                        ? "bg-rose-50 text-rose-700 border-rose-200"
+                                                        : "bg-amber-50 text-amber-800 border-amber-200"
+                                                )}>
+                                                    <Icono className="w-3 h-3 shrink-0" />
+                                                    {categoriaDe(d.tipo)}
+                                                </span>
+                                                <span
+                                                    className={cn(
+                                                        "min-w-0 flex-1 text-[13px] font-semibold leading-tight text-gray-900",
+                                                        !activo && "truncate"
+                                                    )}
+                                                    title={d.titulo}
+                                                >
+                                                    {d.titulo}
+                                                </span>
+                                            </span>
+
+                                            {/* El detalle es lo que dice QUÉ máquina y QUÉ rango tocar:
+                                                se lee siempre, sin abrir nada. Plegado, dos líneas.
+                                                Los números del impacto van al final del mismo renglón:
+                                                así no le comen ancho al título y no cuestan alto. */}
+                                            <span className="mt-0.5 flex items-start gap-2">
+                                                <span className={cn(
+                                                    "min-w-0 flex-1 text-[11.5px] leading-[1.35] text-gray-600",
+                                                    !activo && "line-clamp-2"
+                                                )}>
+                                                    {conNegritas(d.detalle)}
+                                                </span>
+                                                <span className="mt-px hidden shrink-0 items-center gap-1 md:flex" title={otsTexto}>
+                                                    {impacto.map((t) => (
+                                                        <span key={t} className="rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 tabular-nums">
+                                                            {t}
+                                                        </span>
+                                                    ))}
+                                                </span>
+                                            </span>
+                                        </span>
+                                    </button>
+
+                                    {/* ── Qué hacer ──
+                                        Columna propia con divisor. Abajo de lg no hay dos columnas:
+                                        pasa abajo, separada por una línea. */}
+                                    <div className="flex min-w-0 items-start gap-2 border-t pt-1.5 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-3">
+                                        <div className="min-w-0 flex-1">
+                                            {sol ? (
+                                                <>
+                                                    <span className="flex items-center gap-2">
+                                                        <span className={cn(
+                                                            "shrink-0 whitespace-nowrap text-[9px] font-bold uppercase leading-[15px] tracking-wider",
+                                                            esBloq ? "text-rose-600" : "text-amber-600"
+                                                        )}>
+                                                            Solución
+                                                        </span>
+                                                        {/* El "dónde" vive siempre en el mismo lugar y lleva a
+                                                            la pantalla, la pestaña y la fila que hay que tocar.
+                                                            Acá arriba no lo puede comer el clamp del texto. */}
+                                                        {sol.donde && (link ? (
+                                                            <a
+                                                                href={link}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="ml-auto inline-flex min-w-0 items-center gap-0.5 rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                                                title={`${sol.donde} — se abre en otra pestaña, ya parado en lo que hay que tocar`}
+                                                            >
+                                                                <span className="truncate">{sol.donde}</span>
+                                                                <ArrowUpRight className="w-2.5 h-2.5 shrink-0" />
+                                                            </a>
+                                                        ) : (
+                                                            <span className="ml-auto min-w-0 truncate rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-500" title={sol.donde}>
+                                                                {sol.donde}
+                                                            </span>
+                                                        ))}
+                                                    </span>
+                                                    <p className={cn(
+                                                        "mt-0.5 text-[11.5px] font-medium leading-[1.35] text-gray-800",
+                                                        !activo && "line-clamp-2"
+                                                    )}>
+                                                        {conNegritas(sol.texto)}
+                                                        {otras > 0 && !activo && (
+                                                            <span className="ml-1 font-normal text-gray-400">
+                                                                +{otras} {otras === 1 ? "opción" : "opciones"}
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                </>
+                                            ) : (
+                                                <span className="text-[11px] text-gray-400">Este aviso no trae una solución sugerida.</span>
+                                            )}
+                                        </div>
+
+                                        {/* Los botones van en su propia columnita: así quedan
+                                            alineados de tarjeta en tarjeta y no empujan el alto con
+                                            un renglón más. */}
+                                        <div className="flex shrink-0 items-center gap-1">
+                                            {sol?.accion && (
+                                                <Button
+                                                    size="sm"
+                                                    disabled={hecha || aplicando !== null}
+                                                    onClick={() => aplicar(claveSol, sol.accion!)}
+                                                    onBlur={() => confirmando === claveSol && setConfirmando(null)}
+                                                    title={confirmando === claveSol
+                                                        ? "Tocá de nuevo para confirmar el cambio"
+                                                        : "Aplica el cambio en Recursos y recalcula el plan"}
+                                                    className={cn(
+                                                        "h-6 w-[8.5rem] justify-center gap-1 px-1.5 text-[10.5px] font-semibold shadow-none",
+                                                        hecha
+                                                            ? "bg-transparent text-emerald-700 hover:bg-transparent"
+                                                            : confirmando === claveSol
+                                                                ? "bg-amber-500 text-white hover:bg-amber-600"
+                                                                : "bg-emerald-600 text-white hover:bg-emerald-700"
+                                                    )}
+                                                >
+                                                    {aplicando === claveSol ? (
+                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                    ) : hecha ? (
+                                                        <Check className="w-3 h-3" />
+                                                    ) : null}
+                                                    {hecha
+                                                        ? "Aplicado"
+                                                        : confirmando === claveSol
+                                                            ? "Tocá de nuevo"
+                                                            : "Aplicar y recalcular"}
+                                                </Button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                aria-expanded={activo}
+                                                onClick={() => toggle(d.id)}
+                                                title={activo ? "Ocultar detalles" : "Ver detalles"}
+                                                aria-label={activo ? "Ocultar detalles" : "Ver detalles"}
+                                                className="grid h-6 w-6 shrink-0 place-items-center rounded text-gray-400 hover:bg-slate-100 hover:text-gray-600 transition-colors"
+                                            >
+                                                <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", activo && "rotate-180")} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Abierto: TODAS las soluciones (no solo la que se ve plegada),
+                                    cada una con su link y su botón, más las OTs. */}
                                 {activo && (
-                                    <div className="px-4 pb-3.5 pl-[7.75rem] space-y-2.5">
+                                    <div className="border-t bg-slate-50/70 px-2 py-1.5 space-y-1.5">
                                         {d.soluciones.length > 0 && (
-                                            <div className="space-y-1.5">
-                                                {d.soluciones.map((s, i) => {
-                                                    const clave = `${d.id}-${i}`;
-                                                    const hecha = aplicadas.has(clave);
-                                                    const link = enlaceDe(s.donde, s.accion);
+                                            <ul className="space-y-1">
+                                                {d.soluciones.map((s, idx) => {
+                                                    const clave = `${d.id}-${idx}`;
+                                                    const hechaEsta = aplicadas.has(clave);
+                                                    const linkEste = enlaceDe(s.donde, s.accion);
                                                     return (
-                                                        <div key={i} className="flex items-start gap-2 text-sm">
-                                                            <Wrench className="w-3.5 h-3.5 mt-[3px] shrink-0 text-emerald-600" />
-                                                            <span className="text-gray-800 leading-relaxed">
+                                                        <li key={idx} className="flex items-start gap-1.5 text-[11.5px] leading-[1.4]">
+                                                            <Wrench className="w-3 h-3 mt-[3px] shrink-0 text-emerald-600" />
+                                                            <span className="text-gray-800">
                                                                 {conNegritas(s.texto)}
                                                                 {/* Hay soluciones que no mandan a ninguna pantalla
                                                                     ("está bien así"): sin esto quedaba un chip vacío. */}
                                                                 {s.donde && (
                                                                     <>
                                                                         {" "}
-                                                                        {link ? (
+                                                                        {linkEste ? (
                                                                             <a
-                                                                                href={link}
+                                                                                href={linkEste}
                                                                                 target="_blank"
                                                                                 rel="noopener noreferrer"
                                                                                 onClick={(e) => e.stopPropagation()}
-                                                                                className="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 text-xs px-1.5 py-px whitespace-nowrap align-baseline transition-colors"
+                                                                                className="inline-flex items-center gap-0.5 rounded bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 text-[10px] px-1.5 py-px whitespace-nowrap align-baseline transition-colors"
                                                                                 title="Abrir en otra pestaña, ya parado en lo que hay que tocar"
                                                                             >
                                                                                 {s.donde}
-                                                                                <ArrowUpRight className="w-3 h-3" />
+                                                                                <ArrowUpRight className="w-2.5 h-2.5" />
                                                                             </a>
                                                                         ) : (
-                                                                            <span className="inline-block rounded bg-slate-100 text-slate-600 text-xs px-1.5 py-px whitespace-nowrap align-baseline">
+                                                                            <span className="inline-block rounded bg-slate-100 text-slate-600 text-[10px] px-1.5 py-px whitespace-nowrap align-baseline">
                                                                                 {s.donde}
                                                                             </span>
                                                                         )}
@@ -594,13 +793,13 @@ export function DiagnosticosPlan({
                                                                         {" "}
                                                                         <Button
                                                                             size="sm"
-                                                                            variant={hecha ? "ghost" : "outline"}
-                                                                            disabled={hecha || aplicando !== null}
+                                                                            variant={hechaEsta ? "ghost" : "outline"}
+                                                                            disabled={hechaEsta || aplicando !== null}
                                                                             onClick={() => aplicar(clave, s.accion!)}
                                                                             onBlur={() => confirmando === clave && setConfirmando(null)}
                                                                             className={cn(
-                                                                                "h-6 px-2 text-[11px] gap-1 align-baseline",
-                                                                                hecha
+                                                                                "h-5 px-1.5 text-[10px] gap-1 align-baseline",
+                                                                                hechaEsta
                                                                                     ? "text-emerald-700"
                                                                                     : confirmando === clave
                                                                                         ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
@@ -608,11 +807,11 @@ export function DiagnosticosPlan({
                                                                             )}
                                                                         >
                                                                             {aplicando === clave ? (
-                                                                                <Loader2 className="w-3 h-3 animate-spin" />
-                                                                            ) : hecha ? (
-                                                                                <Check className="w-3 h-3" />
+                                                                                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                                                            ) : hechaEsta ? (
+                                                                                <Check className="w-2.5 h-2.5" />
                                                                             ) : null}
-                                                                            {hecha
+                                                                            {hechaEsta
                                                                                 ? "Aplicado"
                                                                                 : confirmando === clave
                                                                                     ? "Tocá de nuevo para confirmar"
@@ -621,15 +820,15 @@ export function DiagnosticosPlan({
                                                                     </>
                                                                 )}
                                                             </span>
-                                                        </div>
+                                                        </li>
                                                     );
                                                 })}
-                                            </div>
+                                            </ul>
                                         )}
-                                        <p className="text-xs text-gray-500">
-                                            {/* En mobile el chip del resumen no entra en la fila,
-                                                así que acá es el único lugar donde se ve. */}
-                                            <span className="sm:hidden">
+                                        <p className="text-[10.5px] text-gray-500">
+                                            {/* Abajo de md los chips del impacto no entran en la
+                                                tarjeta, así que acá es el único lugar donde se ven. */}
+                                            <span className="md:hidden">
                                                 {d.impacto.resumen}
                                                 {d.impacto.ots.length > 0 ? " — " : ""}
                                             </span>
@@ -649,7 +848,7 @@ export function DiagnosticosPlan({
                 <button
                     type="button"
                     onClick={() => setVerTodas(true)}
-                    className="w-full border-t px-4 py-2.5 text-[13px] font-medium text-gray-600 hover:bg-slate-50 transition-colors"
+                    className="w-full border-t px-3 py-1.5 text-[12px] font-medium text-gray-600 hover:bg-slate-50 transition-colors"
                 >
                     Ver las {ocultas} restantes
                 </button>
@@ -658,7 +857,7 @@ export function DiagnosticosPlan({
                 <button
                     type="button"
                     onClick={() => setVerTodas(false)}
-                    className="w-full border-t px-4 py-2.5 text-[13px] font-medium text-gray-500 hover:bg-slate-50 transition-colors"
+                    className="w-full border-t px-3 py-1.5 text-[12px] font-medium text-gray-500 hover:bg-slate-50 transition-colors"
                 >
                     Mostrar solo las primeras {VISIBLES}
                 </button>

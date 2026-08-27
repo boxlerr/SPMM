@@ -43,3 +43,6 @@ backend/scripts/out/
 
 # Virtualenv de Windows que se coló por el typo (el ignore de arriba dice venv/)
 ven/
+
+# Scratch de trabajo (réplicas de markup para medir, dumps). No va al repo.
+tmp/
