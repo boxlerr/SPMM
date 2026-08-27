@@ -946,15 +946,22 @@ function _PlanningListTable({
                     </Button>
                 </div>
             )}
-            <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                    placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
-                    className={cn("pl-10 border-gray-300 focus:border-red-500 focus:ring-red-500", compacto && "h-8 text-xs")}
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
-            </div>
+            {/* En compacto el buscador NO va acá: es la cabecera de la tarjeta de la
+                tabla, unos renglones más abajo. Suelto quedaba separado de la tabla por el
+                riel de la barra de scroll horizontal —que `scrollbar-top` manda arriba— y
+                entre las dos cosas se veía una banda blanca que Julián marcó dos veces
+                ("quedan esos espacios entre el buscador y las OT, pierde espacio"). */}
+            {!compacto && (
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                        placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
+                        className={cn("pl-10 border-gray-300 focus:border-red-500 focus:ring-red-500", compacto && "h-8 text-xs")}
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+            )}
 
             {/* Mobile Card View (< md) */}
             <div className="md:hidden space-y-4">
@@ -1040,8 +1047,23 @@ function _PlanningListTable({
             </div>
 
             {/* Desktop Table View (>= md). El `zoom` aplica SOLO acá (no al search ni a las tarjetas mobile). */}
-            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
-                <div ref={scrollContainerRef} className={cn("w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top", !compacto && "pt-4")}>
+            <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
+                {compacto && (
+                    <div className="relative p-2 border-b border-gray-100 bg-white">
+                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                            placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
+                            className="pl-9 h-8 text-xs border-gray-200 focus:border-red-500 focus:ring-red-500"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                )}
+                <div
+                    ref={scrollContainerRef}
+                    className={cn("w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top", !compacto && "pt-4")}
+                    style={{ zoom: tableZoom / 100 }}
+                >
                     <table className={cn("w-full min-w-[1600px] text-sm text-left", compacto && "[&_td]:py-2 [&_th]:py-2")}>
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                             <tr>

@@ -453,8 +453,8 @@ export function PlanningSelectionScreen({
             }
         >
             {/* Content Area */}
-            <div className="flex-1 min-w-0 overflow-hidden bg-gray-50 flex flex-col">
-                    <div className="flex-1 overflow-auto p-2 flex flex-col gap-3">
+            <div className="flex-1 min-w-0 bg-gray-50 flex flex-col">
+                    <div className="flex-1 p-2 flex flex-col gap-3">
                         {/* El umbral estaba en 30 y saltaba en la semana normal del taller
                             —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
                             contrario de lo que hay que hacer: partir el lote hace que el
@@ -479,8 +479,11 @@ export function PlanningSelectionScreen({
                                 </div>
                             </div>
                         )}
-                        <div className="bg-white border rounded-lg shadow-sm flex-1 min-h-0 relative overflow-hidden flex flex-col">
-                            <div className="absolute inset-0 overflow-auto">
+                        {/* Sin `absolute inset-0 overflow-auto`: la tarjeta crece con la
+                            lista y el scroll es el de la página, uno solo. Antes eran tres
+                            scrolls metidos uno adentro del otro. */}
+                        <div className="bg-white border rounded-lg shadow-sm flex-1">
+                            <div>
                                 <PlanningListTable
                                     tableZoom={zoom}
                                     data={filteredOrders}

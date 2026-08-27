@@ -45,14 +45,37 @@ export function PantallaPlanificador({
     return (
         <div
             className={cn(
-                "h-[calc(100vh-3rem)] flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden",
+                // `min-h` y no `h`: la pantalla ARRANCA ocupando el alto disponible pero CRECE
+                // con el contenido. Con altura fija, la lista quedaba encerrada en un scroll
+                // interno adentro de otro scroll interno y Julián lo dijo así: "me incomoda
+                // estar encerrado ahí con tantos scroll dentro de modales, me gustaría que se
+                // haga más larga la lista y me acompañe el side de la derecha".
+                //
+                // El patrón es el de UIAB Conecta (src/app/perfil/layout.tsx): el contenedor
+                // usa min-h, la página scrollea de una sola manera, y lo que tiene que quedar
+                // a la vista se resuelve con `sticky` en vez de con alturas fijas.
+                //
+                // `svh` y no `vh`: en iOS la barra de Safari hace que 100vh no entre en
+                // pantalla. Mismo motivo que allá.
+                "min-h-[calc(100svh-3rem)] flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm",
                 !visible && "hidden",
                 className,
             )}
         >
-            <div className="shrink-0 border-b border-gray-100 bg-white">{cabecera}</div>
-            <div className="relative flex-1 min-h-0 flex">{children}</div>
-            {pie && <div className="shrink-0 border-t border-gray-200 bg-white">{pie}</div>}
+            {/* Sticky y no shrink-0: la cabecera queda a la vista mientras la lista corre por
+                abajo, sin necesidad de que el contenedor tenga alto fijo. z-30 para pasarle
+                por encima a los encabezados sticky de las tablas, que están en z-10/z-20. */}
+            <div className="sticky top-0 z-30 border-b border-gray-100 bg-white rounded-t-xl">
+                {cabecera}
+            </div>
+            <div className="relative flex-1 flex items-start">{children}</div>
+            {/* El pie se pega abajo: Confirmar y Volver siempre alcanzables sin scrollear
+                hasta el final de 11 OTs. */}
+            {pie && (
+                <div className="sticky bottom-0 z-30 border-t border-gray-200 bg-white rounded-b-xl">
+                    {pie}
+                </div>
+            )}
         </div>
     );
 }

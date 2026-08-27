@@ -1489,13 +1489,16 @@ export function PlanningPreviewScreen({
                 </div>
             }
         >
-                <div className="flex flex-1 overflow-hidden">
+                <div className="flex flex-1 items-start">
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         {/* Scroll nativo en lugar de Radix ScrollArea: la versión Radix no rendea
                             scrollbar horizontal por default y la tabla (min-w 1000px) quedaba pisada
                             por el sidebar de Carga de Operarios. Con overflow-auto el navegador
                             maneja ambos ejes y muestra scrollbar cuando hace falta. */}
-                        <div className="flex-1 overflow-auto">
+                        {/* Sin overflow propio: el scroll es el de la página. Antes esta
+                            columna scrolleaba adentro del shell y el shell adentro del layout,
+                            y revisar 11 OTs era pelear con tres barras. */}
+                        <div className="flex-1">
                             {/* Qué traba el plan y cómo se destraba. Va primero de todo: es lo que
                                 puede cambiar la decisión de guardar o de ir a arreglar un dato antes
                                 de planificar.
@@ -1854,7 +1857,7 @@ export function PlanningPreviewScreen({
                                             {ve("entrada") && <th className="px-4 py-3">Entrada</th>}
                                             {ve("cliente") && <th className="px-4 py-3">Cliente</th>}
                                             {ve("codigo") && <th className="px-4 py-3">Código</th>}
-                                            {ve("articulo") && <th className="px-4 py-3">Artículo</th>}
+                                            {ve("articulo") && <th className="px-4 py-3 min-w-[220px]">Artículo</th>}
                                             {ve("cantidad") && <th className="px-4 py-3 text-center">Cant.</th>}
                                             {ve("material") && <th className="px-4 py-3 text-center">Mat.</th>}
                                             {ve("progreso") && <th className="px-4 py-3 text-center">Progreso</th>}
@@ -1941,7 +1944,16 @@ export function PlanningPreviewScreen({
                                                         {ve("entrada") && <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>}
                                                         {ve("cliente") && <td className="px-4 py-3 text-gray-500 italic">{firstItem.cliente || "-"}</td>}
                                                         {ve("codigo") && <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>}
-                                                        {ve("articulo") && <td className="px-4 py-3 text-inherit">{firstItem.articulo ? capitalize(firstItem.articulo) : "-"}</td>}
+                                                        {ve("articulo") && (
+                                                            <td className="px-4 py-2 text-inherit max-w-[320px]">
+                                                                <span
+                                                                    className="line-clamp-2 leading-snug"
+                                                                    title={firstItem.articulo || ""}
+                                                                >
+                                                                    {firstItem.articulo ? capitalize(firstItem.articulo) : "-"}
+                                                                </span>
+                                                            </td>
+                                                        )}
                                                         {ve("cantidad") && (
                                                         <td className="px-4 py-3 text-center">
                                                             {firstItem.unidades ? <Badge variant="secondary" className="bg-white/50 text-inherit border-current/20">{firstItem.unidades}</Badge> : "-"}
@@ -2374,6 +2386,11 @@ export function PlanningPreviewScreen({
                         en la pantalla chica, que es donde duele, no devuelve nada. */}
                     <div className={cn(
                         "bg-gray-50 border-l border-gray-200 flex flex-col shrink-0 transition-[width] duration-200",
+                        // Sticky con alto propio: la carga de operarios queda a la vista
+                        // mientras la lista corre al lado, en vez de irse para arriba a los
+                        // dos scrolls. `top-[136px]` la deja justo abajo de la cabecera
+                        // sticky (título + riel de cifras).
+                        "sticky top-[136px] max-h-[calc(100svh-14rem)] self-start overflow-y-auto",
                         !cargaAbierta ? "w-11"
                             : cargaCompleta ? "w-[min(34vw,520px)]"
                                 : "w-[min(24vw,380px)] min-w-[300px]"
