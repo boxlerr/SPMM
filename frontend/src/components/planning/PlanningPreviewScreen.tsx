@@ -1856,7 +1856,7 @@ export function PlanningPreviewScreen({
                                             <th className="px-4 py-3 w-10"></th>
                                             <th className="px-4 py-3">ID</th>
                                             {ve("entrada") && <th className="px-4 py-3">Entrada</th>}
-                                            {ve("cliente") && <th className="px-4 py-3">Cliente</th>}
+                                            {ve("cliente") && <th className="px-4 py-3 min-w-[160px]">Cliente</th>}
                                             {ve("codigo") && <th className="px-4 py-3">Código</th>}
                                             {ve("articulo") && <th className="px-4 py-3 min-w-[220px]">Artículo</th>}
                                             {ve("cantidad") && <th className="px-4 py-3 text-center">Cant.</th>}
@@ -1943,7 +1943,13 @@ export function PlanningPreviewScreen({
                                                             </div>
                                                         </td>
                                                         {ve("entrada") && <td className="px-4 py-3 text-inherit opacity-90">{formatDate(firstItem.fecha_entrada)}</td>}
-                                                        {ve("cliente") && <td className="px-4 py-3 text-gray-500 italic">{firstItem.cliente || "-"}</td>}
+                                                        {ve("cliente") && (
+                                                            <td className="px-4 py-2 text-gray-500 italic">
+                                                                <span className="line-clamp-2 leading-snug" title={firstItem.cliente || ""}>
+                                                                    {firstItem.cliente || "-"}
+                                                                </span>
+                                                            </td>
+                                                        )}
                                                         {ve("codigo") && <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>}
                                                         {ve("articulo") && (
                                                             <td className="px-4 py-2 text-inherit max-w-[320px]">
