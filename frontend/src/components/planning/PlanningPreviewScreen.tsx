@@ -2083,15 +2083,15 @@ export function PlanningPreviewScreen({
                                                             <td colSpan={totalColumnas} className="px-0 py-0 border-b shadow-inner">
                                                                 <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
                                                                     <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
-                                                                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
-                                                                        <div className="grid grid-cols-[auto_1fr_200px_200px_180px] gap-0 text-sm">
+                                                                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm w-max max-w-full">
+                                                                        <div className="grid grid-cols-[auto_minmax(200px,340px)_190px_210px_180px] gap-0 text-sm">
                                                                             {/* Inner Header */}
                                                                             <div className="contents text-xs font-bold text-gray-500 uppercase bg-gray-100/50">
-                                                                                <div className="px-4 py-2 border-b">#</div>
-                                                                                <div className="px-4 py-2 border-b">Proceso</div>
-                                                                                <div className="px-4 py-2 border-b">Operario</div>
-                                                                                <div className="px-4 py-2 border-b">Maquinaria</div>
-                                                                                <div className="px-4 py-2 border-b">Inicio Estimado</div>
+                                                                                <div className="px-3 py-1.5 border-b">#</div>
+                                                                                <div className="px-3 py-1.5 border-b">Proceso</div>
+                                                                                <div className="px-3 py-1.5 border-b">Operario</div>
+                                                                                <div className="px-3 py-1.5 border-b">Maquinaria</div>
+                                                                                <div className="px-3 py-1.5 border-b">Inicio</div>
                                                                             </div>
 
                                                                             {/* Inner Body: procesos auto-asignados (editables) */}
@@ -2099,13 +2099,15 @@ export function PlanningPreviewScreen({
                                                                                 const effectiveItem = getEffectiveItem(item);
                                                                                 return (
                                                                                     <div key={`${item.orden_id}-${item.proceso_id}`} className="contents group/row">
-                                                                                        <div className="px-4 py-3 border-b flex items-center text-gray-400 font-mono text-xs">
+                                                                                        <div className="px-3 py-1.5 border-b flex items-center text-gray-400 font-mono text-xs">
                                                                                             {idx + 1}
                                                                                         </div>
-                                                                                        <div className="px-4 py-3 border-b flex flex-col justify-center">
-                                                                                            <span className="font-medium text-gray-800">{capitalize(effectiveItem.nombre_proceso)}</span>
-                                                                                            <div className="flex items-center gap-2 mt-0.5">
-                                                                                                <span className="text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
+                                                                                        {/* Nombre y minutos en la MISMA línea: apilados sumaban un renglón
+                                                                                            por proceso para un dato de cuatro caracteres. */}
+                                                                                        <div className="px-3 py-1.5 border-b flex flex-col justify-center">
+                                                                                            <div className="flex items-baseline gap-2 min-w-0">
+                                                                                                <span className="font-medium text-gray-800 truncate" title={effectiveItem.nombre_proceso}>{capitalize(effectiveItem.nombre_proceso)}</span>
+                                                                                                <span className="shrink-0 text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
                                                                                                 {/* Tercerizado: sale sin operario y sin máquina a propósito, porque
                                                                                                     lo hace un tercero. Sin esta marca se lee como un hueco por
                                                                                                     falta de rango, que es un problema distinto. */}
@@ -2398,7 +2400,12 @@ export function PlanningPreviewScreen({
                         // mientras la lista corre al lado, en vez de irse para arriba a los
                         // dos scrolls. `top-[136px]` la deja justo abajo de la cabecera
                         // sticky (título + riel de cifras).
-                        "sticky top-[136px] h-[calc(100svh-13rem)] self-start overflow-hidden",
+                        // `max-h` y no `h`: con alto fijo, cuando la lista de avisos es corta
+                        // la fila mide menos que el panel y el panel se desborda por abajo,
+                        // pisando el pie. Con max-h se estira hasta donde hay lugar y no más.
+                        // `flex flex-col` para que el ScrollArea de adentro pueda tomar el
+                        // resto y ser el único que scrollea.
+                        "sticky top-[136px] max-h-[calc(100svh-13rem)] self-start overflow-hidden flex flex-col",
                         !cargaAbierta ? "w-11"
                             : cargaCompleta ? "w-[min(34vw,520px)]"
                                 : "w-[min(24vw,380px)] min-w-[300px]"
