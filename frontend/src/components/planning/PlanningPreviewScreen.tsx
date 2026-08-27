@@ -2398,7 +2398,7 @@ export function PlanningPreviewScreen({
                         // mientras la lista corre al lado, en vez de irse para arriba a los
                         // dos scrolls. `top-[136px]` la deja justo abajo de la cabecera
                         // sticky (título + riel de cifras).
-                        "sticky top-[136px] max-h-[calc(100svh-14rem)] self-start overflow-y-auto",
+                        "sticky top-[136px] h-[calc(100svh-13rem)] self-start overflow-hidden",
                         !cargaAbierta ? "w-11"
                             : cargaCompleta ? "w-[min(34vw,520px)]"
                                 : "w-[min(24vw,380px)] min-w-[300px]"
@@ -2448,7 +2448,7 @@ export function PlanningPreviewScreen({
                                 <ChevronRight className="w-4 h-4" />
                             </button>
                         </div>
-                        <ScrollArea className="flex-1 p-4">
+                        <ScrollArea className="flex-1 min-h-0 p-4">
                             <div className={cn(cargaCompleta ? "grid grid-cols-2 gap-3" : "space-y-4")}>
                                 {availableOperators
                                     .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden

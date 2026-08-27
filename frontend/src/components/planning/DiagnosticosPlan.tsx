@@ -390,10 +390,7 @@ export function DiagnosticosPlan({
     };
 
     return (
-        <div className={cn(
-            "mx-4 mt-4 mb-2 rounded-xl border overflow-hidden bg-white",
-            items.length === 0 ? "border-emerald-200" : hayBloqueantes ? "border-rose-200" : "border-amber-200"
-        )}>
+        <div className="mx-4 mt-4 mb-2 rounded-xl border border-gray-200 overflow-hidden bg-white">
             {/* La fila es un div y no un <button>: adentro van "Ver todas" y "Volver a
                 revisar", y no se pueden anidar botones. El toggle queda como botón propio. */}
             <div
@@ -570,8 +567,8 @@ export function DiagnosticosPlan({
                             <li
                                 key={d.id}
                                 className={cn(
-                                    "rounded-lg border border-l-[3px] bg-white overflow-hidden",
-                                    esBloq ? "border-rose-200 border-l-rose-500" : "border-amber-200 border-l-amber-400",
+                                    "rounded-lg border border-gray-200 border-l-[3px] bg-white overflow-hidden",
+                                    esBloq ? "border-l-rose-500" : "border-l-amber-400",
                                     activo && "shadow-sm"
                                 )}
                             >

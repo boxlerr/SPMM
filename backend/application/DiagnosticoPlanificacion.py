@@ -395,6 +395,14 @@ def _quien_lo_hace(cuantos: int, rangos_proc) -> str:
     )
 
 
+def _cuantas_personas(rangos_ids, ops_por_rango, nombre_operario) -> str:
+    """"3 personas" — el número pelado, sin la nómina."""
+    n = len(_personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario))
+    if n == 0:
+        return "nadie"
+    return f"**{n}** {_concuerda(n, 'persona', 'personas')}"
+
+
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
     """"3 personas (GUILLERMO C., PABLO Z. y MATIAS V.)" — a cuánta gente alcanza un rango.
 
@@ -970,22 +978,18 @@ def _procesos_sin_maquina_compatible(
                     "donde": "Recursos › Operarios",
                 })
             elif rangos_maq:
-                quienes_maq = _cuenta_personas(rangos_maq_ids, ops_por_rango, nombre_operario)
                 soluciones.append({
-                    "texto": f"Ponele **{pide_maq}** al proceso: ese rango "
-                             + _concuerda(maqs, "la máquina ya lo acepta", "las máquinas ya lo aceptan")
-                             + ", así que no le abrís la máquina a nadie nuevo y el trabajo "
-                             f"pasa a caer en {quienes_maq}.",
+                    "texto": f"Ponele **{pide_maq}** al proceso: es el rango que "
+                             + _concuerda(maqs, "la máquina ya acepta", "las máquinas ya aceptan")
+                             + ", así que no se la abrís a nadie nuevo.",
                     "donde": "Recursos › Procesos",
                     "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids),
                 })
-            abre_a = _cuenta_personas(d["rangos"], ops_por_rango, nombre_operario)
+            abre_a = _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario)
             soluciones.append({
                 "texto": f"Al revés: agregale **{pide_proc}** a "
                          + _concuerda(maqs, "la máquina", f"las {len(maqs)} máquinas")
-                         + f" **{_listar(maqs)}** — ojo, eso "
-                         + _concuerda(maqs, "la", "las")
-                         + f" habilita para {abre_a}.",
+                         + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a {abre_a}.",
                 "donde": "Recursos › Maquinarias",
                 "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"]),
             })
@@ -993,9 +997,7 @@ def _procesos_sin_maquina_compatible(
             # Va DESPUÉS del "O ", y sin "O ", porque no es una opción: es el atajo que
             # el taller va a intentar igual. Lucas lo preguntó mirando este mismo aviso.
             soluciones.append({
-                "texto": "No sirve cargarle la habilidad a mano a nadie: eso habilita a la "
-                         "persona, y acá lo que no coincide es lo que pide el trabajo con lo "
-                         "que pide la máquina.",
+                "texto": "La habilidad a mano no destraba esto: habilita a la persona, no a la máquina.",
                 "donde": "",
             })
 
@@ -1046,9 +1048,8 @@ def _procesos_sin_maquina_compatible(
                 soluciones.append({
                     "texto": f"Agregale **{_listar_rangos(rangos_proc)}** a "
                              + _concuerda(maqs, "la máquina", "las máquinas")
-                             + f" **{_listar(maqs)}** — ojo, eso "
-                             + _concuerda(maqs, "la", "las")
-                             + f" habilita para {_cuenta_personas(d['rangos'], ops_por_rango, nombre_operario)}.",
+                             + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a "
+                             + _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario) + ".",
                     "donde": "Recursos › Maquinarias",
                     "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"]),
                 })
