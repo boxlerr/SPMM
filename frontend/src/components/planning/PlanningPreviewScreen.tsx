@@ -1850,15 +1850,15 @@ export function PlanningPreviewScreen({
                                 className="p-0 pr-2"
                                 style={{ zoom: zoom / 100, minWidth: `${200 + COLUMNAS.filter(c => ve(c.clave)).length * 76}px` }}
                             >
-                                <table className="w-full text-sm text-left border-collapse">
+                                <table className="w-full text-sm text-left border-collapse [&_td]:py-2">
                                     <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm [&_th]:py-2">
                                         <tr>
                                             <th className="px-4 py-3 w-10"></th>
                                             <th className="px-4 py-3">ID</th>
                                             {ve("entrada") && <th className="px-4 py-3">Entrada</th>}
-                                            {ve("cliente") && <th className="px-4 py-3 min-w-[160px]">Cliente</th>}
+                                            {ve("cliente") && <th className="px-4 py-3 min-w-[190px]">Cliente</th>}
                                             {ve("codigo") && <th className="px-4 py-3">Código</th>}
-                                            {ve("articulo") && <th className="px-4 py-3 min-w-[220px]">Artículo</th>}
+                                            {ve("articulo") && <th className="px-4 py-3 min-w-[300px]">Artículo</th>}
                                             {ve("cantidad") && <th className="px-4 py-3 text-center">Cant.</th>}
                                             {ve("material") && <th className="px-4 py-3 text-center">Mat.</th>}
                                             {ve("progreso") && <th className="px-4 py-3 text-center">Progreso</th>}
@@ -1952,7 +1952,7 @@ export function PlanningPreviewScreen({
                                                         )}
                                                         {ve("codigo") && <td className="px-4 py-3 font-mono text-xs text-inherit opacity-80">{firstItem.codigo || "-"}</td>}
                                                         {ve("articulo") && (
-                                                            <td className="px-4 py-2 text-inherit max-w-[320px]">
+                                                            <td className="px-4 py-2 text-inherit max-w-[420px]">
                                                                 <span
                                                                     className="line-clamp-2 leading-snug"
                                                                     title={firstItem.articulo || ""}
