@@ -25,6 +25,8 @@
  * estado sigue vivo y volver es instantáneo.
  */
 
+import React from "react";
+
 import { cn } from "@/lib/utils";
 
 export function PantallaPlanificador({
@@ -42,8 +44,25 @@ export function PantallaPlanificador({
     children: React.ReactNode;
     className?: string;
 }) {
+    // El alto REAL de la cabecera, publicado como variable CSS para que lo que tenga que
+    // quedar pegado abajo de ella (hoy: el panel de Carga de operarios) no dependa de un
+    // número escrito a mano. Estaba en `top-[136px]` y la cabecera no siempre mide 136:
+    // crece cuando el título envuelve o cuando aparece una fila más de chips, y ahí el
+    // panel se despegaba de arriba al scrollear (Julián, 27/08).
+    const cabeceraRef = React.useRef<HTMLDivElement | null>(null);
+    const [altoCabecera, setAltoCabecera] = React.useState(136);
+    React.useEffect(() => {
+        const el = cabeceraRef.current;
+        if (!el || typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver(() => setAltoCabecera(el.getBoundingClientRect().height));
+        ro.observe(el);
+        setAltoCabecera(el.getBoundingClientRect().height);
+        return () => ro.disconnect();
+    }, [visible]);
+
     return (
         <div
+            style={{ "--alto-cabecera": `${Math.round(altoCabecera)}px` } as React.CSSProperties}
             className={cn(
                 // `min-h` y no `h`: la pantalla ARRANCA ocupando el alto disponible pero CRECE
                 // con el contenido. Con altura fija, la lista quedaba encerrada en un scroll
@@ -65,7 +84,7 @@ export function PantallaPlanificador({
             {/* Sticky y no shrink-0: la cabecera queda a la vista mientras la lista corre por
                 abajo, sin necesidad de que el contenedor tenga alto fijo. z-30 para pasarle
                 por encima a los encabezados sticky de las tablas, que están en z-10/z-20. */}
-            <div className="sticky top-0 z-30 border-b border-gray-100 bg-white rounded-t-xl">
+            <div ref={cabeceraRef} className="sticky top-0 z-30 border-b border-gray-100 bg-white rounded-t-xl">
                 {cabecera}
             </div>
             {/* `min-w-0`: sin eso, este flex item no puede achicarse por debajo del

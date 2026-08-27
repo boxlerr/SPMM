@@ -2147,7 +2147,10 @@ export function PlanningPreviewScreen({
                                                                                                 value={effectiveItem.id_operario?.toString() || "0"}
                                                                                                 onValueChange={(val) => handleUpdate(item, 'id_operario', val === "0" ? null : parseInt(val))}
                                                                                             >
-                                                                                                <SelectTrigger className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100">
+                                                                                                {/* Mismo cuidado que en el select de máquina: sin min-w-0 y sin
+                                                                                                    truncar, un nombre largo empuja la caja y se monta sobre la
+                                                                                                    columna de al lado. */}
+                                                                                                <SelectTrigger className="h-8 min-w-0 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:truncate [&>span]:block [&>span]:text-left">
                                                                                                     <SelectValue placeholder="Sin asignar" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
@@ -2175,7 +2178,9 @@ export function PlanningPreviewScreen({
                                                                                                 onValueChange={(val) => handleUpdate(item, 'id_maquinaria', val === "0" ? null : parseInt(val))}
                                                                                             >
                                                                                                 <SelectTrigger
-                                                                                                    className="h-8 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100"
+                                                                                                    // `min-w-0` + truncado del texto: "AGUJEREADORA DE BANCO BURANI"
+                                                                                                    // se salía de la caja y se montaba encima de la columna Inicio.
+                                                                                                    className="h-8 min-w-0 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:truncate [&>span]:block [&>span]:text-left"
                                                                                                     title={effectiveItem.usa_maquina === false
                                                                                                         ? "Proceso manual: no usa máquina. Podés asignarle una igual si querés."
                                                                                                         : undefined}
@@ -2405,7 +2410,7 @@ export function PlanningPreviewScreen({
                         // pisando el pie. Con max-h se estira hasta donde hay lugar y no más.
                         // `flex flex-col` para que el ScrollArea de adentro pueda tomar el
                         // resto y ser el único que scrollea.
-                        "sticky top-[136px] max-h-[calc(100svh-13rem)] self-start overflow-hidden flex flex-col",
+                        "sticky top-[var(--alto-cabecera)] max-h-[calc(100svh-var(--alto-cabecera)-5rem)] self-start overflow-hidden flex flex-col",
                         !cargaAbierta ? "w-11"
                             : cargaCompleta ? "w-[min(34vw,520px)]"
                                 : "w-[min(24vw,380px)] min-w-[300px]"
