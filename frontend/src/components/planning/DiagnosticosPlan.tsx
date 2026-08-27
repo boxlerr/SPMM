@@ -575,7 +575,12 @@ export function DiagnosticosPlan({
                                     activo && "shadow-sm"
                                 )}
                             >
-                                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
+                                {/* 7fr/4fr y no 5fr/4fr: con 5fr el título entraba en ~250px y se
+                                    cortaba en los cinco avisos del plan real ("Soldadura con MIG: sus
+                                    3 máquina…"), que es justo lo que tiene que leerse de un vistazo.
+                                    Verificado en producción. La columna de la derecha se banca 4fr: le
+                                    alcanza para dos líneas de solución y el botón. */}
+                                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
                                     {/* ── Qué pasa ──
                                         Es un <button> entero para que el bloque del problema
                                         despliegue el detalle sin apuntarle al chevron. Adentro
