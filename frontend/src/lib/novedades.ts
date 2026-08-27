@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "avisos-dicen-quien-puede-y-que-pasa",
+        fecha: "2026-08-26",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los avisos ahora separan quién puede hacer el trabajo de qué pasa con la máquina",
+        detalle:
+            "Antes un mismo aviso mezclaba las dos cosas y no se entendía: decía que la máquina no se reservaba y más abajo que el rango «hoy lo tienen 3 personas», así que no quedaba claro si había gente o no había nadie. Ahora el aviso arranca contestando lo primero —«Quién lo hace no es el problema: lo pueden hacer 6 personas y se hace igual»— y recién después explica lo de la máquina y qué se pierde: que queda figurando libre y otra OT puede tomarla a la misma hora. El título dice el proceso y qué le pasa, en un renglón. Y donde un arreglo NO sirve, ahora te lo dice: cargar la habilidad a mano no destraba cuando lo que no coincide es lo que pide el trabajo con lo que pide la máquina.",
+        href: "/operaciones",
+    },
+    {
+        id: "planificador-entra-mas-en-pantalla",
+        fecha: "2026-08-26",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Entran muchas más OTs en pantalla, en los dos pasos",
+        detalle:
+            "Al elegir las OTs entraban 4 y ahora entran unas 7: los chips de arriba subieron al lado del título, se fue una banda blanca que sobraba arriba de la tabla y las filas ocupan lo que tienen que ocupar. En la vista previa el período del plan pasó a ser la primera cifra de arriba, del mismo tamaño que las demás y no un cartelito perdido; las cifras dejaron de flotar sueltas; la tira de avisos arranca plegada cuando no quedó ninguna traba sin resolver (si quedó alguna, se abre igual que siempre); y el panel de Carga de operarios se pliega a un costado cuando querés que la tabla respire, y vuelve donde estaba.",
+        href: "/operaciones",
+    },
+    {
         id: "persona-en-el-proceso-de-la-ot",
         fecha: "2026-08-26",
         tipo: "nuevo",

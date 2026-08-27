@@ -1086,9 +1086,73 @@ export function PlanningPreviewScreen({
     /** Panel de carga ancho: dos columnas y sin recortar los rangos. */
     const [cargaCompleta, setCargaCompleta] = React.useState(false);
 
-    /** Para que "Ver detalles" de la cifra de trabas lleve al panel de avisos. */
+    /**
+     * El panel de operarios se pliega a un riel y vuelve.
+     *
+     * "Me gustaría que me acompañe el side de la derecha con los operarios"
+     * (Julián, 26/08). Con 320px fijos no acompaña: la tabla pide min-w ~1036px y
+     * en una notebook de 1366 no entra, aparece scroll horizontal — la otra mitad
+     * del "tantos scroll dentro". Se descartó overlay (vuelve al modal flotando
+     * que ya se sacó el 19/08, y hay que abrirlo y cerrarlo: eso no es acompañar)
+     * y ancho fluido solo (no devuelve nada justo en la pantalla chica, que es
+     * donde duele). Queda plegable: sigue SIEMPRE en pantalla como columna, y
+     * plegado le devuelve 276px de ancho a la tabla.
+     *
+     * Se guarda en el navegador, igual que las columnas: el panel queda como uno
+     * lo dejó la vez pasada.
+     */
+    const CLAVE_CARGA = "plan_preview_carga_abierta";
+    const [cargaAbierta, setCargaAbierta] = React.useState(true);
+    React.useEffect(() => {
+        try { if (localStorage.getItem(CLAVE_CARGA) === "0") setCargaAbierta(false); } catch { /* queda abierto */ }
+    }, []);
+    const alternarCarga = () => setCargaAbierta(v => {
+        try { localStorage.setItem(CLAVE_CARGA, v ? "0" : "1"); } catch { /* nada */ }
+        return !v;
+    });
+
+    /** Cuántos operarios quedan pasados de las 44h si se confirma este plan.
+     *  Es lo que hace que plegar el panel resuma en vez de esconder: el riel lo
+     *  sigue mostrando en rojo. */
+    const sobrecargados = React.useMemo(() => availableOperators.filter(op => {
+        const propio = results
+            .map(r => getEffectiveItem(r))
+            .filter(r => r.id_operario === op.id)
+            .reduce((s, r) => s + (r.duracion_min || 0), 0);
+        return ((operatorLoads[op.id] || 0) + propio) / 60 > 44;
+    }).length, [availableOperators, operatorLoads, results, editedResults]);
+
+    /**
+     * La tira de avisos arranca PLEGADA — pero sólo si el plan no tiene trabas.
+     *
+     * "Quiero poder ver más OT también en la preview": desplegada se come ~290px,
+     * o sea 5 filas de OT, antes de que empiece la tabla. Pero una traba sin
+     * resolver puede cambiar la decisión de guardar, así que eso NO se pliega
+     * solo. Y aun plegada quedan a la vista la barra de color con el resumen
+     * ("2 avisos"), el chevron y la cifra del riel: no se esconde nada sin rastro.
+     *
+     * Se decide UNA sola vez, al abrir la pantalla con los diagnósticos ya
+     * cargados. Si después se resuelve algo, el panel no se vuelve a plegar solo:
+     * justo ahí es cuando aparecen los tachados en verde, que son la devolución
+     * de que el arreglo funcionó.
+     */
+    const [avisosColapsados, setAvisosColapsados] = React.useState(false);
+    const colapsoDecidido = React.useRef(false);
+    React.useEffect(() => {
+        if (!isOpen || colapsoDecidido.current || diagnosticos.length === 0) return;
+        colapsoDecidido.current = true;
+        setAvisosColapsados(trabasSinResolver === 0);
+    }, [isOpen, diagnosticos.length, trabasSinResolver]);
+
+    /** Para que "Ver detalles" de la cifra de trabas lleve al panel de avisos.
+     *  Despliega ANTES de scrollear: llevar a un panel plegado sería mandar a la
+     *  nada, el consejo muerto de siempre. El rAF espera al re-render para que el
+     *  scroll apunte al panel ya abierto. */
     const panelAvisos = React.useRef<HTMLDivElement | null>(null);
-    const irAAvisos = () => panelAvisos.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const irAAvisos = () => {
+        setAvisosColapsados(false);
+        requestAnimationFrame(() => panelAvisos.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    };
 
     return (
         <>
@@ -1096,10 +1160,15 @@ export function PlanningPreviewScreen({
             visible={isOpen}
             cabecera={
                 <>
-                    <div className="px-6 pt-3 pb-2 flex items-start justify-between gap-4">
+                    {/* Una sola línea. El alto de esta fila ya lo fija el h-8 de los
+                        botones de la derecha, así que el título se achica gratis:
+                        text-xl (28px de línea) → text-[17px] (24px) no cambia nada de
+                        lo que se ve y el `items-center` deja de reservar alto para una
+                        bajada que ya no existe. */}
+                    <div className="px-6 py-2 flex items-center justify-between gap-4">
                         <div className="min-w-0 flex-1">
-                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
-                                <CalendarClock className="w-5 h-5 text-blue-600 shrink-0" />
+                            <h1 className="text-[17px] font-bold text-gray-900 flex items-center gap-2 whitespace-nowrap">
+                                <CalendarClock className="w-4 h-4 text-blue-600 shrink-0" />
                                 Vista previa de planificación
                                 {/* Que se lea que esto TODAVÍA no es el plan: es lo que
                                     distingue esta pantalla de Operaciones, que se le
@@ -1108,57 +1177,39 @@ export function PlanningPreviewScreen({
                                     En revisión
                                 </span>
                             </h1>
-                            <p className="text-sm text-gray-500 mt-0.5">
-                                Revisá y ajustá la programación antes de confirmar. Podés agregar más OTs o recalcular sin salir de esta vista.
-                            </p>
-                            {/* El período del plan y los avisos de rango colgaban en una fila
-                                propia debajo de las cifras: un chip chiquito solo a la izquierda
-                                con medio metro de blanco al lado, que era el "queda flotando de
-                                una forma rara" de Julián (26/08). Van acá, pegados al subtítulo:
-                                son contexto de lo que se está mirando, igual que la bajada, y así
-                                el espacio a su derecha lo llenan los botones de acción. */}
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                                    {/* Las OTs, los procesos y la carga ya están arriba como cifras:
-                                        repetirlos acá era leer dos veces lo mismo. Queda solo lo que
-                                        las cifras no dicen. */}
-                                    {displayedExcedentes.length > 0 && (
-                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
-                                            <AlertTriangle className="w-3 h-3" />
-                                            {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
-                                        </Badge>
-                                    )}
-                                    {/* El período REAL que ocupa el plan. Antes solo se mostraba
-                                        cuando el usuario había elegido un rango a mano; sin rango
-                                        elegido no se veía nada y no había forma de saber hasta
-                                        cuándo llegaban las fechas. */}
-                                    {spanPlan && (
-                                        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 gap-1">
-                                            <Calendar className="w-3 h-3" />
-                                            {formatDate(spanPlan.desde)} → {formatDate(spanPlan.hasta)}
-                                            <span className="text-slate-500">· {spanPlan.habiles} días hábiles</span>
-                                        </Badge>
-                                    )}
-                                    {planningRange.fecha_hasta && (
-                                        <Badge variant="outline" className="bg-slate-50 text-slate-600 border-slate-200 gap-1">
-                                            Tope elegido: {formatDate(planningRange.fecha_hasta)}
-                                        </Badge>
-                                    )}
-                                    {displayedExcedentes.length > 0 && onRecalculate && (
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={ampliarRango}
-                                            disabled={isCalculating}
-                                            className="h-6 px-2 text-[11px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
-                                            title="Recalcula el mismo plan con dos semanas más de margen"
-                                        >
-                                            <Calendar className="w-3 h-3" />
-                                            Ampliar 2 semanas
-                                        </Button>
-                                    )}
-                            </div>
+
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
+                            {/* Lo que quedó afuera, y el botón para arreglarlo, compartiendo
+                                fila con las acciones. Antes eran una TERCERA fila de chips de
+                                11px bajo el título: 30px de alto reservados siempre para dos
+                                cosas que aparecen a veces. Acá no cuestan un píxel, porque la
+                                fila ya mide lo que mide un botón h-8.
+
+                                El período del plan se fue al riel de cifras, con el peso que
+                                pedía Julián el 26/08 ("la fecha, que es algo re importante, no
+                                se le da nada de importancia ahí chiquito"), y el "Tope elegido"
+                                se pliega adentro de esa misma celda: repetirlo suelto cuando
+                                coincide con el cierre real del plan era leer dos veces lo mismo. */}
+                            {displayedExcedentes.length > 0 && (
+                                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1 text-[11px]">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    {new Set(displayedExcedentes.map(e => e.orden_id)).size} sin lugar
+                                </Badge>
+                            )}
+                            {displayedExcedentes.length > 0 && onRecalculate && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={ampliarRango}
+                                    disabled={isCalculating}
+                                    className="h-8 px-2.5 text-xs gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                    title="Recalcula el mismo plan con dos semanas más de margen"
+                                >
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    Ampliar 2 semanas
+                                </Button>
+                            )}
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
 
                             {unplannedOrders.length > 0 && onRecalculate && (
@@ -1332,10 +1383,47 @@ export function PlanningPreviewScreen({
                         </div>
                     </div>
 
-                    {/* El tamaño del plan de un vistazo. Antes eran badges de 11px
-                        apretados contra el título: para saber si el plan tenía las OTs
-                        que uno esperaba había que ponerse a leer. */}
-                    <div className="px-2 pb-2 flex items-stretch flex-wrap divide-x divide-gray-100">
+                    {/* El riel de cifras: el tamaño del plan de un vistazo.
+
+                        Por qué "flotaban" (Julián, 26/08). Eran cuatro bloques sobre
+                        blanco puro, sin fondo, sin borde y sin nada abajo; el separador
+                        era `divide-x` sobre un contenedor con `flex-wrap`, que le pone
+                        borde izquierdo al primer item de la segunda fila — un separador
+                        colgando de la nada — y la celda de trabas era la única con
+                        `rounded-lg ring-1`, una tarjetita suelta en el medio.
+
+                        Ahora es una grilla exacta de una sola fila. Los separadores no
+                        son bordes: son el `bg-gray-200` del contenedor asomando por el
+                        `gap-px`, así que no puede quedar ninguno colgando ni sobrar
+                        ninguno. Va sin `px-2 pb-2`: llega a los dos bordes y se apoya en
+                        el `border-b` que ya pone PantallaPlanificador. Eso es lo que lo
+                        ancla — un riel, no cuatro cosas al aire. */}
+                    <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr_1.3fr] gap-px bg-gray-200 border-t border-gray-200">
+                        {/* La fecha primero y la celda más ancha del riel.
+
+                            Estaba en un Badge de 11px perdido entre otros tres chips.
+                            Acá tiene la MISMA tipografía que las otras cifras: el peso
+                            que pidió el cliente sale de la posición (primera), del ancho
+                            (1.5fr) y del acento azul, no de píxeles nuevos de alto —
+                            reusa una fila que ya estaba. El tope elegido se cuenta en la
+                            etiqueta sólo cuando NO coincide con el cierre real del plan,
+                            que es el único caso en que dice algo ("pediste hasta el 5/9
+                            pero el plan cierra el 31/8"); si coincide, va en el title. */}
+                        <CifraPlan
+                            tono="fecha"
+                            icono={<Calendar className="w-4 h-4" />}
+                            valor={spanPlan
+                                ? <>{formatDate(spanPlan.desde)} <span className="text-gray-400 font-normal">→</span> {formatDate(spanPlan.hasta)}</>
+                                : "—"}
+                            etiqueta={spanPlan
+                                ? (planningRange.fecha_hasta && planningRange.fecha_hasta.slice(0, 10) !== spanPlan.hasta.slice(0, 10)
+                                    ? `${spanPlan.habiles} días hábiles · tope ${formatDate(planningRange.fecha_hasta)}`
+                                    : `${spanPlan.habiles} días hábiles`)
+                                : "Período del plan"}
+                            title={planningRange.fecha_hasta
+                                ? `Período que ocupa el plan. Tope elegido al planificar: ${formatDate(planningRange.fecha_hasta)}`
+                                : "Período que ocupa el plan"}
+                        />
                         <CifraPlan
                             icono={<Cog className="w-4 h-4" />}
                             valor={uniqueOrdersInPlan}
@@ -1368,8 +1456,6 @@ export function PlanningPreviewScreen({
                         />
                     </div>
 
-                    {/* Contexto del plan: qué período ocupa de verdad, qué tope se eligió
-                        y qué quedó afuera. */}
                 </>
             }
             pie={
@@ -1422,6 +1508,10 @@ export function PlanningPreviewScreen({
                             <div ref={panelAvisos} className="sticky left-0 w-full">
                                 <DiagnosticosPlan
                                     diagnosticos={diagnosticos}
+                                    /* El plegado lo maneja la pantalla, no la tira: la cifra
+                                       "Trabas sin resolver" tiene que poder desplegarla. */
+                                    colapsado={avisosColapsados}
+                                    onColapsadoChange={setAvisosColapsados}
                                     /* Aplicado el cambio de rangos, se recalcula el mismo
                                        plan al toque: el aviso desaparece solo si de verdad
                                        se resolvió, y las fechas se actualizan con el dato
@@ -1605,7 +1695,7 @@ export function PlanningPreviewScreen({
                                 botones de Filtros y Columnas se van de pantalla — y Columnas existe
                                 justamente para no tener que scrollear. */}
                             <div className="sticky left-0 w-full bg-white z-20" style={{ zoom: zoom / 100 }}>
-                                <div className="mx-4 mt-4 mb-2 flex items-center gap-2.5 flex-wrap">
+                                <div className="mx-4 mt-3 mb-1.5 flex items-center gap-2.5 flex-wrap">
                                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
                                     <span className="text-[15px] font-bold text-gray-900">
                                         OTs planificadas ({filtrosActivos > 0 ? `${otsFiltradas} de ${uniqueOrdersInPlan}` : uniqueOrdersInPlan})
@@ -1757,7 +1847,7 @@ export function PlanningPreviewScreen({
                                 style={{ zoom: zoom / 100, minWidth: `${200 + COLUMNAS.filter(c => ve(c.clave)).length * 76}px` }}
                             >
                                 <table className="w-full text-sm text-left border-collapse">
-                                    <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm">
+                                    <thead className="bg-gray-50 text-gray-500 font-medium uppercase text-xs sticky top-0 z-10 shadow-sm [&_th]:py-2">
                                         <tr>
                                             <th className="px-4 py-3 w-10"></th>
                                             <th className="px-4 py-3">ID</th>
@@ -2271,17 +2361,67 @@ export function PlanningPreviewScreen({
                         </div>
                     </div >
 
-                    {/* Carga de operarios: cómo queda cada uno SI se confirma este plan. */}
+                    {/* Carga de operarios: cómo queda cada uno SI se confirma este plan.
+
+                        Plegable y de ancho fluido, para que "acompañe" (Julián, 26/08).
+                        Un panel fijo de 320px no acompaña: la tabla pide min-w ~1036px y
+                        en 1366 no entra, así que aparece scroll horizontal ADENTRO del
+                        scroll vertical. Plegado son 44px y la tabla entra entera.
+
+                        Lo que NO se hizo: overlay/drawer sobre la tabla — es volver al
+                        modal flotando que se sacó el 19/08 y obliga a abrir y cerrar cada
+                        vez, que es lo contrario de acompañar. Ni ancho fluido a secas:
+                        en la pantalla chica, que es donde duele, no devuelve nada. */}
                     <div className={cn(
                         "bg-gray-50 border-l border-gray-200 flex flex-col shrink-0 transition-[width] duration-200",
-                        cargaCompleta ? "w-[460px]" : "w-80"
+                        !cargaAbierta ? "w-11"
+                            : cargaCompleta ? "w-[min(34vw,520px)]"
+                                : "w-[min(24vw,380px)] min-w-[300px]"
                     )}>
-                        <div className="p-4 border-b border-gray-200 bg-white/50">
-                            <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                                <User className="w-4 h-4 text-gray-500" />
-                                Carga de operarios
-                            </h3>
-                            <p className="text-xs text-gray-500 mt-1">Estimación basada en la semana de planificación.</p>
+                        {!cargaAbierta ? (
+                            /* El riel plegado no es una franja muerta: sigue diciendo
+                               cuántos operarios quedan pasados de las 44h. Plegar resume,
+                               no esconde. */
+                            <button
+                                type="button"
+                                onClick={alternarCarga}
+                                title="Mostrar la carga de operarios"
+                                className="flex-1 w-full flex flex-col items-center gap-3 py-3 hover:bg-gray-100 transition-colors"
+                            >
+                                <ChevronRight className="w-4 h-4 text-gray-400 rotate-180 shrink-0" />
+                                <User className="w-4 h-4 text-gray-500 shrink-0" />
+                                {sobrecargados > 0 && (
+                                    <span className="rounded-full bg-rose-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center tabular-nums shrink-0">
+                                        {sobrecargados}
+                                    </span>
+                                )}
+                                <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-500 [writing-mode:vertical-rl]">
+                                    Carga de operarios
+                                </span>
+                            </button>
+                        ) : (
+                        <>
+                        <div className="px-4 py-3 border-b border-gray-200 bg-white/50 flex items-start gap-2">
+                            <div className="min-w-0 flex-1">
+                                <h3 className="font-bold text-gray-800 flex items-center gap-2 flex-wrap">
+                                    <User className="w-4 h-4 text-gray-500" />
+                                    Carga de operarios
+                                    {sobrecargados > 0 && (
+                                        <span className="rounded-full bg-rose-100 text-rose-700 text-[11px] font-bold px-2 py-0.5 tabular-nums">
+                                            {sobrecargados} pasados
+                                        </span>
+                                    )}
+                                </h3>
+                                <p className="text-xs text-gray-500 mt-1">Estimación basada en la semana de planificación.</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={alternarCarga}
+                                title="Plegar el panel y darle el ancho a la tabla"
+                                className="p-1 -mr-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 shrink-0"
+                            >
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
                         </div>
                         <ScrollArea className="flex-1 p-4">
                             <div className={cn(cargaCompleta ? "grid grid-cols-2 gap-3" : "space-y-4")}>
@@ -2406,6 +2546,8 @@ export function PlanningPreviewScreen({
                                 {cargaCompleta ? "Ver compacto" : "Ver carga completa"}
                             </Button>
                         </div>
+                        </>
+                        )}
                     </div>
                 </div >
 

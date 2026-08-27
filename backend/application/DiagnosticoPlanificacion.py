@@ -372,6 +372,29 @@ def _personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario) -> set:
     return {o for o in ops if not _es_vacante(nombre_operario.get(o))}
 
 
+def _quien_lo_hace(cuantos: int, rangos_proc) -> str:
+    """La primera frase: cuánta gente puede HACER el trabajo. Nada de máquinas acá.
+
+    Es el arreglo de fondo del 26/08. El aviso viejo contaba en una sola oración dos
+    permisos distintos —quién sabe hacer el trabajo y quién puede tomar la máquina— y
+    el taller no distinguía cuál le estaban contando. Lucas, leyendo una solución que
+    decía "hoy lo tiene 3 personas": "¿es que ya hay 3 personas o no hay nadie con la
+    capacidad para hacerlo? y si hay 3 que pueden hacerlo, ¿por qué no se las asigna?".
+
+    Arranca con "Quién lo hace no es el problema" a propósito: sale al cruce de la
+    pregunta antes de que se la haga, que es lo único que evita releer el aviso entero.
+    """
+    if cuantos == 0:
+        return "No lo puede hacer nadie de los disponibles: va a salir «sin asignar»."
+    pide = _listar_rangos(rangos_proc)
+    con_rango = f"pide **{pide}**, " if pide else ""
+    return (
+        f"Quién lo hace no es el problema: {con_rango}lo "
+        f"{_concuerda(cuantos, 'tiene', 'tienen')} **{cuantos}** "
+        f"{_concuerda(cuantos, 'persona', 'personas')} y se hace igual."
+    )
+
+
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
     """"3 personas (GUILLERMO C., PABLO Z. y MATIAS V.)" — a cuánta gente alcanza un rango.
 
@@ -427,7 +450,7 @@ def _detalle_nadie_puede(pedidos, quienes_off, vacantes, nombre_operario, nombre
     if quienes_off:
         return (
             f"**{_listar(quienes_off)}** {_concuerda(quienes_off, 'tiene', 'tienen')} "
-            f"{_listar(pedidos)}, así que {_concuerda(quienes_off, 'podría', 'podrían')} "
+            f"{_listar_rangos(pedidos)}, así que {_concuerda(quienes_off, 'podría', 'podrían')} "
             f"hacerlo, pero **{nombre_proc}** está apagado en su ficha. "
             "Va a salir «sin asignar»."
         )
@@ -436,11 +459,11 @@ def _detalle_nadie_puede(pedidos, quienes_off, vacantes, nombre_operario, nombre
             (nombre_operario.get(op) or f"#{op}").strip() for op in vacantes
         ))
         return (
-            f"Pide {_listar(pedidos)} y solo lo tiene {nombres}, que es un puesto a "
+            f"Pide **{_listar_rangos(pedidos)}** y solo lo tiene {nombres}, que es un puesto a "
             "cubrir y no una persona. Va a salir «sin asignar»."
         )
     return (
-        f"Pide {_listar(pedidos)} y ningún operario disponible lo tiene. "
+        f"Pide **{_listar_rangos(pedidos)}** y ningún operario disponible lo tiene. "
         "Va a salir «sin asignar»."
     )
 
@@ -541,11 +564,13 @@ def _procesos_que_nadie_puede_hacer(
                 "donde": "Recursos › Procesos y Rangos",
             })
         soluciones.append({
-            "texto": f"Dale {_listar(pedidos)} a quien hace este trabajo.",
+            "texto": f"Dale **{_listar_rangos(pedidos)}** a alguien más: con cualquiera de "
+                     f"{_concuerda(pedidos, 'ese rango', 'esos rangos')} alcanza.",
             "donde": "Recursos › Operarios",
         })
         soluciones.append({
-            "texto": "Cargale la skill a mano en su ficha (habilita solo a esa persona).",
+            "texto": "Cargale la habilidad a mano en la ficha de quien lo vaya a hacer: "
+                     "habilita solo a esa persona.",
             "donde": "Recursos › Operarios",
         })
         _como_alternativa(soluciones)
@@ -828,17 +853,32 @@ def _procesos_sin_maquina_compatible(
         rangos_proc = [nombre_rango.get(r, f"#{r}") for r in sorted(d["rangos"])]
         nombre_proc = d["nombre"]
 
+        # La PRIMERA frase de todos estos avisos dice cuánta gente puede HACER el
+        # trabajo, y la segunda —recién la segunda— habla de la máquina. Nunca las dos
+        # cosas en la misma oración.
+        #
+        # Es el arreglo de fondo del 26/08. El texto viejo mezclaba los dos permisos y
+        # el taller no sabía cuál le estaban contando: la solución decía "hoy lo tiene 3
+        # personas" y Lucas preguntó "¿entonces hay 3 personas o no hay nadie con la
+        # capacidad para hacerlo? y si hay 3 que pueden hacerlo, ¿por qué no se las
+        # asigna?". Son dos cruces distintos y hay que nombrarlos por separado.
+        n_hacen = len(d["personas"])
+
         if d["causa"] == "sin_maquina":
             severidad = ADVERTENCIA
+            titulo = f"{nombre_proc}: no hay ninguna máquina cargada para este trabajo"
             detalle = (
-                f"No hay ninguna máquina cargada que corresponda a **{nombre_proc}**. "
-                "El trabajo se planifica igual, solo que sin reservar máquina."
+                f"{_quien_lo_hace(n_hacen, rangos_proc)} No hay ninguna máquina cargada "
+                "que le corresponda, así que va sin reservar ninguna."
             )
             soluciones = [{
-                "texto": "Si este trabajo usa una máquina, cargala con los mismos rangos que el proceso. "
-                         "Si va sin máquina, dejalo así: no molesta.",
+                "texto": "Si este trabajo usa una máquina, cargala con los mismos rangos que el proceso.",
                 "donde": "Recursos › Maquinarias",
+            }, {
+                "texto": "Si va a mano, dejalo así: el aviso no molesta.",
+                "donde": "",
             }]
+            _como_alternativa(soluciones)
 
         elif d["causa"] == "sin_familia":
             # Típicamente trabajo de banco (PULIDO, AFILADO, ENGOMADO). El nombre del
@@ -846,122 +886,118 @@ def _procesos_sin_maquina_compatible(
             # no en Recursos: no hay nada que Lucas pueda cargar para resolverlo. Es
             # aviso, no traba, porque lo más probable es que efectivamente vaya a mano.
             severidad = ADVERTENCIA
+            titulo = f"{nombre_proc}: no se sabe en qué máquina se hace"
             detalle = (
-                f"Por el nombre no se sabe en qué máquina se hace **{nombre_proc}**, así que "
-                "se planifica sin reservar ninguna. El trabajo sale igual y a horario; lo único "
-                "que no pasa es que quede una máquina tomada para esta OT."
+                f"{_quien_lo_hace(n_hacen, rangos_proc)} Lo único que no pasa es que quede "
+                "una máquina reservada: por el nombre del proceso no hay manera de saber "
+                "cuál usa."
             )
             soluciones = [{
                 "texto": "Si va a mano, o en un banco que no se comparte, está bien así: "
                          "no hay nada que corregir.",
                 "donde": "",
             }, {
-                "texto": "Si en realidad se hace siempre en una máquina determinada, pedile al "
-                         "equipo que la vincule: esto no se carga desde Recursos.",
+                "texto": "Si siempre se hace en una máquina determinada, pedile al equipo "
+                         "que la vincule: esto no se carga desde Recursos.",
                 "donde": "",
             }]
+            _como_alternativa(soluciones)
 
         elif d["causa"] == "rango_maquina":
             severidad = BLOQUEANTE
             maqs = [maq_nombre[m] for m in d["candidatas"]]
             rangos_maq_ids = {r for m in d["candidatas"] for r in maq_rangos.get(m, set())}
             rangos_maq = sorted(nombre_rango.get(r, f"#{r}") for r in rangos_maq_ids)
-            # Para que alguien tome la máquina hacen falta DOS cruces, y el solver
-            # los pide juntos (_agregar_compatibilidad_op_maq):
+            pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
+            pide_proc = _listar_rangos(rangos_proc) or "ningún rango"
+            # Para que alguien tome la máquina hacen falta DOS cruces, y el solver los
+            # pide juntos (_agregar_compatibilidad_op_maq):
             #   1) el rango del OPERARIO tiene que estar en la máquina;
             #   2) el rango del PROCESO tiene que estar en la máquina.
-            # Ponerle el rango de la máquina al proceso arregla el (2). Si el rango
-            # de la máquina no lo tiene NINGUNA persona real, el (1) sigue fallando
-            # para todos y la máquina queda igual de inservible: era un consejo que
-            # no cambiaba nada. Pasa de verdad — las SOLDADORAS MIG piden MEDIO
-            # OFICIAL y ese rango hoy solo lo tiene un puesto VACANTE.
+            # Acá falla el (2). Ponerle a la máquina el rango del proceso arregla el (2),
+            # pero si ese rango no lo tiene NINGUNA persona real el (1) sigue fallando
+            # para todos y la máquina queda igual de inservible: era un consejo que no
+            # cambiaba nada. Pasa de verdad — las SOLDADORAS MIG piden MEDIO OFICIAL y
+            # ese rango hoy solo lo tiene un puesto VACANTE.
             gente_de_la_maquina = _personas_con_rangos(rangos_maq_ids, ops_por_rango, nombre_operario)
+
+            titulo = (
+                f"{nombre_proc}: "
+                + _concuerda(maqs, "su máquina no acepta", f"sus {len(maqs)} máquinas no aceptan")
+                + " el rango que pide"
+            )
 
             # Un SETUP hereda los rangos de la producción que prepara: son los que el
             # solver usó para filtrar máquinas, pero NO los que figuran en la ficha del
-            # proceso. Decir "está cargado con" mandaba a buscar en Recursos algo que
-            # ahí no está — PREPARACION PLEGADORA tiene OFICIAL, y MEDIO OFICIAL y
-            # OPERARIO CALIFICADO los hereda de PLEGADO.
-            # La frase larga —"X solo la puede usar quien tenga A, pero P está cargado
-            # con B, como no coinciden el sistema no reserva la máquina: el trabajo se
-            # hace igual pero…"— es una sola oración con tres subordinadas. Lucas la
-            # leyó y escribió "redacción del texto se hace confuso". Va cortada: qué
-            # pide la máquina, qué pide el proceso, y recién después qué pasa por eso.
+            # proceso. Sin decirlo, el aviso mandaba a buscar en Recursos un rango que
+            # ahí no está cargado.
             heredados = set(d["rangos"]) != set(d["crudos"])
-            pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
-            pide_proc = _listar_rangos(rangos_proc) or "ningún rango"
-            cabecera = (
-                f"Para tomar {_concuerda(maqs, 'la máquina', 'las máquinas')} "
-                f"**{_listar(maqs)}** hace falta **{pide_maq}**. "
-                f"Este trabajo pide **{pide_proc}**, que no está en esa lista"
-            )
-            # De dónde salió el rango, cuando no es el que figura en la ficha: un SETUP
-            # usa los de la producción que prepara, y sin decirlo mandaba a buscar en
-            # Recursos un rango que ahí no está cargado.
-            trae = " — lo hereda del trabajo de producción que prepara" if heredados else ""
-            # Lo de la skill va entre paréntesis y al final: no es lo que hay que
-            # hacer, es lo que NO va a funcionar. Lucas lo preguntó mirando este mismo
-            # aviso ("¿acá ninguno tiene una skill para hacer eso?") y la respuesta es
-            # que no destraba: el solver pide DOS cruces y la skill solo cubre el de
-            # la persona, el del proceso contra la máquina sigue fallando.
-            cierre = (
-                "El trabajo se hace igual, pero la máquina queda figurando libre y otra OT "
-                "puede tomarla al mismo tiempo. (La skill a mano no lo destraba: habilita "
-                "a la persona, no a la máquina.)"
+            frase_gente = _quien_lo_hace(n_hacen, rangos_proc)
+            if heredados:
+                frase_gente += (
+                    " Ojo: es una preparación, así que se planifica con el rango del "
+                    f"trabajo que prepara —**{pide_proc}**—, no con el que tiene en su ficha."
+                )
+            frase_maquina = (
+                f"El problema es la máquina: **{_listar(maqs)}** "
+                + _concuerda(maqs, "solo acepta", "solo aceptan")
+                + f" **{pide_maq}**, así que "
+                + _concuerda(maqs, "no queda reservada", "ninguna queda reservada")
+                + " y otra OT puede tomar" + _concuerda(maqs, "la", "las") + " a la misma hora."
             )
             if rangos_maq_ids and not gente_de_la_maquina:
-                detalle = (
-                    f"{cabecera}{trae}. Y **{pide_maq}** hoy no lo tiene ninguna persona: "
-                    f"solo figura en un puesto a cubrir, así que "
-                    f"{_concuerda(maqs, 'esa máquina', 'esas máquinas')} no "
-                    f"{_concuerda(maqs, 'la', 'las')} puede tomar nadie, ni para este trabajo ni "
-                    f"para ningún otro. {cierre}"
+                frase_maquina += (
+                    f" Peor: **{pide_maq}** hoy no lo tiene ninguna persona, solo un puesto "
+                    f"a cubrir, así que {_concuerda(maqs, 'esa máquina', 'esas máquinas')} no "
+                    f"{_concuerda(maqs, 'la', 'las')} puede tomar nadie para ningún trabajo."
                 )
-            else:
-                detalle = f"{cabecera}{trae}. {cierre}"
-            # El orden de las opciones importa y no es cosmético. Ampliar los rangos
-            # DE LA MÁQUINA la abre a todo el que tenga ese rango, y eso puede ser
-            # exactamente lo que el taller NO quiere: la PLEGADORA tiene OFICIAL
-            # PLEGADOR y lo tiene una sola persona, con 7 operarios explícitamente
-            # deshabilitados en su proceso de preparación — está restringida a
-            # propósito. Este aviso llegó a recomendar "agregale MEDIO OFICIAL y
-            # OPERARIO CALIFICADO a la PLEGADORA", que la habría abierto de 1
-            # persona a 10. Primero va la opción que NO cambia quién puede tocar la
-            # máquina, y la otra dice a cuánta gente se la abre.
+            detalle = f"{frase_gente} {frase_maquina}"
+
+            # El orden de las opciones importa y no es cosmético. Ampliar los rangos DE
+            # LA MÁQUINA la abre a todo el que tenga ese rango, y eso puede ser
+            # exactamente lo que el taller NO quiere: la PLEGADORA tiene OFICIAL PLEGADOR
+            # y lo tiene una sola persona, con 7 operarios explícitamente deshabilitados
+            # en su proceso de preparación — está restringida a propósito. Primero va la
+            # opción que NO cambia quién puede tocar la máquina, y la otra dice a cuánta
+            # gente se la abre.
             soluciones = []
             if rangos_maq_ids and not gente_de_la_maquina:
-                # Tocar el proceso acá NO alcanza (falta el cruce operario↔máquina),
-                # así que ni se ofrece: sería mandar a hacer un cambio que deja todo
-                # igual y hace pensar que el problema se resolvió.
+                # Tocar el proceso acá NO alcanza (falta el cruce operario↔máquina), así
+                # que ni se ofrece: sería mandar a hacer un cambio que deja todo igual.
                 soluciones.append({
-                    "texto": f"Dale **{_listar_rangos(rangos_maq)}** a quien maneja "
-                             f"**{_listar(maqs)}**: es lo único que "
-                             f"{_concuerda(maqs, 'la', 'las')} vuelve a poner en juego.",
+                    "texto": f"Dale **{pide_maq}** a quien maneja **{_listar(maqs)}**: es lo "
+                             f"único que {_concuerda(maqs, 'la', 'las')} vuelve a poner en juego.",
                     "donde": "Recursos › Operarios",
                 })
-                # La otra salida —cambiarle el rango a la máquina por uno que la gente
-                # sí tenga— ya la ofrece el "Al revés: …" de más abajo, que además
-                # avisa a cuánta gente se la abre. No hace falta decirlo dos veces.
             elif rangos_maq:
+                quienes_maq = _cuenta_personas(rangos_maq_ids, ops_por_rango, nombre_operario)
                 soluciones.append({
-                    "texto": f"Ponele **{_listar_rangos(rangos_maq)}** al proceso **{nombre_proc}**: "
-                             f"es el rango de la máquina, así que no cambia quién puede usarla"
-                             + (f" — hoy {_concuerda(len(gente_de_la_maquina), 'lo tiene', 'lo tienen')} "
-                                f"{_cuenta_personas(rangos_maq_ids, ops_por_rango, nombre_operario)}."
-                                if rangos_maq_ids else "."),
+                    "texto": f"Ponele **{pide_maq}** al proceso: ese rango "
+                             + _concuerda(maqs, "la máquina ya lo acepta", "las máquinas ya lo aceptan")
+                             + ", así que no le abrís la máquina a nadie nuevo y el trabajo "
+                             f"pasa a caer en {quienes_maq}.",
                     "donde": "Recursos › Procesos",
                     "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids),
                 })
             abre_a = _cuenta_personas(d["rangos"], ops_por_rango, nombre_operario)
             soluciones.append({
-                "texto": f"Al revés: agregale **{_listar_rangos(rangos_proc)}** a "
-                         f"{_concuerda(maqs, 'la máquina', 'las máquinas')} "
-                         f"**{_listar(maqs)}** — ojo, eso {_concuerda(maqs, 'la', 'las')} "
-                         f"habilita para {abre_a}.",
+                "texto": f"Al revés: agregale **{pide_proc}** a "
+                         + _concuerda(maqs, "la máquina", f"las {len(maqs)} máquinas")
+                         + f" **{_listar(maqs)}** — ojo, eso "
+                         + _concuerda(maqs, "la", "las")
+                         + f" habilita para {abre_a}.",
                 "donde": "Recursos › Maquinarias",
                 "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"]),
             })
             _como_alternativa(soluciones)
+            # Va DESPUÉS del "O ", y sin "O ", porque no es una opción: es el atajo que
+            # el taller va a intentar igual. Lucas lo preguntó mirando este mismo aviso.
+            soluciones.append({
+                "texto": "No sirve cargarle la habilidad a mano a nadie: eso habilita a la "
+                         "persona, y acá lo que no coincide es lo que pide el trabajo con lo "
+                         "que pide la máquina.",
+                "donde": "",
+            })
 
         else:  # rango_persona
             severidad = BLOQUEANTE
@@ -970,55 +1006,53 @@ def _procesos_sin_maquina_compatible(
             rangos_maq = sorted({
                 nombre_rango.get(r, f"#{r}") for m in d["usables"] for r in maq_rangos.get(m, set())
             })
+            pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
+            titulo = (
+                f"{nombre_proc}: los que lo hacen no pueden tomar "
+                + _concuerda(maqs, "la máquina", "las máquinas")
+                + f" {_listar(maqs)}"
+            )
             if quienes:
                 detalle = (
-                    f"**{_listar(quienes)}** {_concuerda(quienes, 'puede', 'pueden')} hacer "
-                    f"{nombre_proc}, pero para usar **{_listar(maqs)}** hace falta "
-                    f"**{_listar_rangos(rangos_maq)}** y no "
-                    f"{_concuerda(quienes, 'lo tiene', 'lo tienen')}. "
-                    "El trabajo se hace igual, pero la máquina no queda reservada."
+                    f"Acá el trabajo y la máquina se entienden; los que no llegan son las "
+                    f"personas: **{_listar(quienes)}** "
+                    + _concuerda(quienes, "puede", "pueden")
+                    + f" hacer este trabajo, pero la máquina pide **{pide_maq}** y no "
+                    + _concuerda(quienes, "lo tiene", "lo tienen")
+                    + ". Se hace igual, pero la máquina no queda reservada y otra OT puede "
+                      "tomarla a la misma hora."
                 )
             else:
                 detalle = (
-                    f"Nadie disponible puede hacer **{nombre_proc}**, así que tampoco se reserva "
-                    f"**{_listar(maqs)}**."
+                    f"{_quien_lo_hace(0, rangos_proc)} Y como no hay quién, tampoco se "
+                    f"reserva **{_listar(maqs)}**."
                 )
             destino = f"**{_listar(quienes)}**" if quienes else "quien haga este trabajo"
             soluciones = [{
-                "texto": _cerrar(f"Agregale **{_listar_rangos(rangos_maq)}** a {destino}"),
+                "texto": _cerrar(f"Dale **{pide_maq}** a {destino}: con eso "
+                                 + _concuerda(quienes, "puede", "pueden") + " tomar la máquina"),
                 "donde": "Recursos › Operarios",
             }]
+            # Acá la habilidad a mano SÍ destraba —el solver la toma como habilitación en
+            # la máquina, ver _agregar_compatibilidad_op_maq— y es el cambio más chico de
+            # los tres: no le toca el rango a nadie más. En rango_maquina no sirve, y por
+            # eso allá se dice explícitamente que no alcanza.
+            soluciones.append({
+                "texto": "Cargale la habilidad a mano en su ficha: acá sí destraba, y no le "
+                         "tocás el rango a nadie más.",
+                "donde": "Recursos › Operarios",
+            })
             if rangos_proc:
                 soluciones.append({
                     "texto": f"Agregale **{_listar_rangos(rangos_proc)}** a "
-                             f"{_concuerda(maqs, 'la máquina', 'las máquinas')} **{_listar(maqs)}**.",
+                             + _concuerda(maqs, "la máquina", "las máquinas")
+                             + f" **{_listar(maqs)}** — ojo, eso "
+                             + _concuerda(maqs, "la", "las")
+                             + f" habilita para {_cuenta_personas(d['rangos'], ops_por_rango, nombre_operario)}.",
                     "donde": "Recursos › Maquinarias",
                     "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"]),
                 })
-            # Acá la skill a mano SÍ destraba —el solver la toma como habilitación en la
-            # máquina, ver _agregar_compatibilidad_op_maq— y es el cambio más chico de
-            # los tres: no le toca el rango a nadie más. En el caso de arriba
-            # (rango_maquina) no sirve y por eso ahí se dice que no alcanza.
-            soluciones.append({
-                "texto": "Cargale la skill a mano en la ficha de esa persona: "
-                         "la habilita solo a ella, sin tocarle el rango a nadie.",
-                "donde": "Recursos › Operarios",
-            })
             _como_alternativa(soluciones)
-
-        # El título viejo era el mismo para las cuatro causas —"«X» se hace sin
-        # reservar la máquina"— y Lucas lo dijo derecho: "no entiendo el título". No
-        # es lo mismo que no haya máquina cargada, que el trabajo vaya a mano, o que
-        # la máquina exista y quede libre para que otra OT la pise. Cada causa dice
-        # lo suyo, y las dos que son traba dicen la consecuencia, que es lo que él
-        # necesita saber para decidir si le importa.
-        titulo = {
-            "sin_maquina": f"{nombre_proc}: no hay ninguna máquina cargada para este trabajo",
-            "sin_familia": f"{nombre_proc}: no toma ninguna máquina",
-        }.get(
-            d["causa"],
-            f"{nombre_proc}: la máquina queda libre y otra OT puede tomarla",
-        )
 
         salida.append({
             "id": f"maquina-incompatible-{proc_id}",
@@ -1052,8 +1086,10 @@ def _procesos_sin_rango(procesos):
         "id": f"sin-rango-{proc_id}",
         "tipo": "proceso_sin_rango",
         "severidad": ADVERTENCIA,
-        "titulo": f"{d['nombre']}: sin rango, se lo puede llevar cualquiera",
-        "detalle": "Se lo puede llevar cualquiera, sepa hacerlo o no. El plan sale igual.",
+        "titulo": f"{d['nombre']}: se lo puede llevar cualquiera, sepa o no",
+        "detalle": "No tiene ningún rango cargado, así que el plan se lo puede dar a "
+                   "cualquiera que esté libre. Sale igual, pero nadie está mirando quién "
+                   "lo agarra.",
         "impacto": {
             "procesos": d["procesos"],
             "ots": sorted(d["ots"]),
@@ -1061,7 +1097,7 @@ def _procesos_sin_rango(procesos):
             "resumen": _resumen(d["procesos"], d["ots"], d["minutos"]),
         },
         "soluciones": [{
-            "texto": "Cargale sus rangos.",
+            "texto": "Cargale los rangos que hacen falta para hacerlo.",
             "donde": "Recursos › Procesos",
         }],
     } for proc_id, d in sin_rango.items()]
@@ -1093,10 +1129,11 @@ def _trabajo_tercerizado(procesos):
         "tipo": "trabajo_tercerizado",
         "severidad": ADVERTENCIA,
         "titulo": f"{_listar_corto(_nombres_terc)} "
-                  f"{_concuerda(_nombres_terc, 'lo hace', 'los hace')} un tercero",
+                  f"{_concuerda(_nombres_terc, 'sale', 'salen')} del taller",
         "detalle": (
-            f"{_listar(_nombres_terc)}: van sin operario ni máquina a propósito. "
-            "Nada que corregir."
+            f"{_concuerda(_nombres_terc, 'Va', 'Van')} sin operario ni máquina a propósito: "
+            f"{_concuerda(_nombres_terc, 'lo hace', 'los hace')} alguien de afuera y el plan "
+            "solo les guarda el lugar en la secuencia de la OT. Nada que corregir."
         ),
         "impacto": {
             "procesos": cuantos,
@@ -1140,11 +1177,13 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
         "id": "trabajo-en-vacantes",
         "tipo": "puestos_vacantes",
         "severidad": ADVERTENCIA,
-        "titulo": f"{_listar_corto(_nombres_vac)} "
-                  f"{_concuerda(_nombres_vac, 'tiene', 'tienen')} trabajo asignado",
+        "titulo": f"{_listar_corto(_nombres_vac)}: ese trabajo no lo va a hacer nadie",
         "detalle": (
-            f"{_listar(_nombres_vac)} {_concuerda(_nombres_vac, 'no es una persona', 'no son personas')}: "
-            "ese trabajo no lo va a hacer nadie."
+            f"El plan le cargó trabajo a {_concuerda(_nombres_vac, 'un puesto', 'puestos')} que "
+            f"todavía {_concuerda(_nombres_vac, 'está', 'están')} sin cubrir: "
+            f"{_concuerda(_nombres_vac, 'figura', 'figuran')} como disponible y el planificador "
+            f"{_concuerda(_nombres_vac, 'lo toma', 'los toma')} como si "
+            f"{_concuerda(_nombres_vac, 'fuera una persona', 'fueran personas')}."
         ),
         "impacto": {
             "procesos": cuantos,

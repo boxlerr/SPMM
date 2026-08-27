@@ -181,6 +181,8 @@ export function DiagnosticosPlan({
     revisando = false,
     calculadoEn,
     revisionAuto = null,
+    colapsado: colapsadoProp,
+    onColapsadoChange,
 }: {
     diagnosticos?: Diagnostico[];
     /** Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo. */
@@ -204,6 +206,17 @@ export function DiagnosticosPlan({
     calculadoEn?: string;
     /** En qué anda la revisión automática, para contarlo en vez de pedir un click. */
     revisionAuto?: "mirando" | "recalculando" | "con-retoques" | "no-disponible" | null;
+    /**
+     * Plegado controlado desde la pantalla.
+     *
+     * Desplegada esta tira se come ~290px arriba de la tabla del plan. Quién
+     * decide si arranca plegada es el padre, porque es el único que sabe si el
+     * plan tiene trabas sin resolver (con trabas no se pliega) y el único que
+     * necesita poder abrirla desde la cifra "Trabas sin resolver". Sin estas
+     * props el componente sigue andando con su estado propio.
+     */
+    colapsado?: boolean;
+    onColapsadoChange?: (v: boolean) => void;
 }) {
     const items = diagnosticos ?? [];
     const bloqueantes = items.filter((d) => d.severidad === "bloqueante");
@@ -211,7 +224,14 @@ export function DiagnosticosPlan({
     const ordenados = [...bloqueantes, ...avisos];
 
     const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
-    const [colapsado, setColapsado] = useState(false);
+    // Controlada por el padre si le pasan la prop; con estado propio si no.
+    const [colapsadoLocal, setColapsadoLocal] = useState(false);
+    const colapsado = colapsadoProp ?? colapsadoLocal;
+    const alternarColapso = () => {
+        const next = !colapsado;
+        setColapsadoLocal(next);
+        onColapsadoChange?.(next);
+    };
     const [verTodas, setVerTodas] = useState(false);
     const [aplicando, setAplicando] = useState<string | null>(null);
     const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
@@ -366,8 +386,15 @@ export function DiagnosticosPlan({
                 <button
                     type="button"
                     aria-expanded={!colapsado}
-                    onClick={() => setColapsado((c) => !c)}
-                    className="flex-1 min-w-0 px-4 py-3 flex items-start gap-3 text-left"
+                    onClick={alternarColapso}
+                    className={cn(
+                        "flex-1 min-w-0 px-4 flex gap-3 text-left",
+                        // Plegada la tira es UNA línea de ~40px en vez de ~64. Lo que
+                        // sobrevive es lo que importa: el color (rojo = hay trabas), el
+                        // resumen ("3 trabas detectadas y 2 avisos") y el chevron. La
+                        // explicación de qué hacer con eso se lee al abrir.
+                        colapsado ? "py-2 items-center" : "py-3 items-start",
+                    )}
                 >
                     {items.length === 0 ? (
                         <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-px" />
@@ -378,17 +405,24 @@ export function DiagnosticosPlan({
                     )}
                     <span className="min-w-0">
                         <span className="block text-[15px] font-semibold text-gray-900">{resumenHeader}</span>
-                        <span className="block text-[13px] text-gray-600 mt-0.5">
-                            {items.length === 0
-                                ? "Quedó todo resuelto."
-                                : hayBloqueantes
-                                    ? "Lo rojo quedó sin resolver en el plan. Resolvelas para optimizar tu planificación."
-                                    : "El plan sale igual. Resolvelos para optimizar tu planificación."}
-                        </span>
+                        {!colapsado && (
+                            <span className="block text-[13px] text-gray-600 mt-0.5">
+                                {items.length === 0
+                                    ? "Quedó todo resuelto."
+                                    : hayBloqueantes
+                                        ? "Lo rojo quedó sin resolver en el plan. Resolvelas para optimizar tu planificación."
+                                        : "El plan sale igual. Resolvelos para optimizar tu planificación."}
+                            </span>
+                        )}
                     </span>
                     <span className="flex-1" />
+                    {colapsado && (
+                        <span className="text-[13px] font-medium text-gray-600 shrink-0 whitespace-nowrap">
+                            Ver {items.length === 1 ? "el aviso" : "los avisos"}
+                        </span>
+                    )}
                     <ChevronDown
-                        className={cn("w-4 h-4 text-gray-400 shrink-0 mt-1 transition-transform", colapsado && "-rotate-90")}
+                        className={cn("w-4 h-4 text-gray-400 shrink-0 transition-transform", colapsado ? "-rotate-90" : "mt-1")}
                     />
                 </button>
 

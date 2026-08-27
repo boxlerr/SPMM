@@ -930,7 +930,7 @@ function _PlanningListTable({
            arranca pegada a la barra de tabs. Dentro del planificador ese margen sobra
            —ya está adentro de una tarjeta con su propio padding— y son 24px que le
            faltan a la lista. */
-        <div className={compacto ? "space-y-2" : "space-y-4 mt-6"}>
+        <div className={compacto ? "space-y-1.5" : "space-y-4 mt-6"}>
             {/* B1 (feedback 06/07): barra flotante de cambios pendientes de operario/máquina.
                 Aparece solo cuando hay reasignaciones sin guardar; el avance y las fechas siguen al toque. */}
             {Object.keys(pendingRes).length > 0 && (
@@ -950,7 +950,7 @@ function _PlanningListTable({
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                     placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
-                    className="pl-10 border-gray-300 focus:border-red-500 focus:ring-red-500"
+                    className={cn("pl-10 border-gray-300 focus:border-red-500 focus:ring-red-500", compacto && "h-8 text-xs")}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -1041,8 +1041,8 @@ function _PlanningListTable({
 
             {/* Desktop Table View (>= md). El `zoom` aplica SOLO acá (no al search ni a las tarjetas mobile). */}
             <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
-                <div ref={scrollContainerRef} className="w-full overflow-x-auto pt-4 scrollbar-horizontal-visible scrollbar-top">
-                    <table className="w-full min-w-[1600px] text-sm text-left">
+                <div ref={scrollContainerRef} className={cn("w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top", !compacto && "pt-4")}>
+                    <table className={cn("w-full min-w-[1600px] text-sm text-left", compacto && "[&_td]:py-2 [&_th]:py-2")}>
                         <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
                             <tr>
                                 <th className="w-12 px-2 py-3">
@@ -1384,7 +1384,7 @@ function _PlanningListTable({
                                                 (ese x/y es justamente el criterio con el que ordena la columna). */}
                                             <td className="px-3 py-3 text-center">
                                                 {(item.procesos && item.procesos.length > 0) ? (
-                                                    <div className="flex flex-col items-center gap-0.5">
+                                                    <div className={cn("flex justify-center", compacto ? "flex-row items-center gap-1.5" : "flex-col items-center gap-0.5")}>
                                                         <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
                                                         <span
                                                             className="text-[10px] font-mono text-gray-500"
@@ -1437,11 +1437,19 @@ function _PlanningListTable({
                                                     }}
                                                     title="Click para registrar entrega"
                                                 >
-                                                    <DeliveryProgress
-                                                        total={item.unidades}
-                                                        delivered={item.cantidad_entregada}
-                                                        compact={true}
-                                                    />
+                                                    {compacto ? (
+                                                        <span className="text-xs font-medium text-gray-700 tabular-nums whitespace-nowrap">
+                                                            {item.cantidad_entregada || 0}
+                                                            <span className="text-gray-400">/</span>
+                                                            {item.unidades ?? "-"}
+                                                        </span>
+                                                    ) : (
+                                                        <DeliveryProgress
+                                                            total={item.unidades}
+                                                            delivered={item.cantidad_entregada}
+                                                            compact={true}
+                                                        />
+                                                    )}
                                                 </div>
                                             </td>
 

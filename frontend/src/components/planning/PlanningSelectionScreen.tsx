@@ -216,30 +216,26 @@ export function PlanningSelectionScreen({
             visible={isOpen}
             cabecera={
                 <>
-                    <div className="px-6 pt-3 pb-2 flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                    <div className="px-6 pt-2 pb-2 flex items-center justify-between gap-4">
+                        <div className="min-w-0 flex items-baseline gap-3">
+                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 shrink-0">
                                 <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
                                 Planificar órdenes
                                 <span className="text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
                                     Paso 1 de 2
                                 </span>
                             </h1>
-                            <p className="text-sm text-gray-500 mt-0.5">
+                            <p className="text-sm text-gray-500 min-w-0 truncate hidden xl:block">
                                 Elegí qué OTs entran en el plan y, si hace falta, entre qué fechas. Se calcula sobre lo tildado.
                             </p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                            {/* El cálculo es caro (minutos con 34 OTs) y antes cerrar la
-                                vista previa lo tiraba entero. Acá se retoma sin recalcular.
-                                El componente no se dibuja si no hay borradores guardados. */}
-                            {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
-                            {/* Zoom control: afecta a la tabla de selección. */}
-                            <ZoomControl value={zoom} onChange={setZoom} />
-                        </div>
-                    </div>
-
-                    <div className="px-6 pb-2 flex items-center gap-2.5 flex-wrap">
+                        <div className="flex items-center gap-2.5 shrink-0">
+                            {/* Los chips de estado y el rango de fechas subieron acá: la fila
+                                propia que tenían abajo eran 40px que le faltaban a la lista. */}
+                            {/* Los chips de estado y el rango de fechas subieron acá desde
+                                su propia fila: eran 40px de alto para cuatro controles chicos
+                                que entran de sobra al lado del título, y esos 40px son media
+                                fila más de lista. */}
                         {estimatedTime && (
                             <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-3 py-1 text-sm font-medium">
                                 <Clock className="w-3.5 h-3.5" />
@@ -355,8 +351,15 @@ export function PlanningSelectionScreen({
                                 </div>
                             </PopoverContent>
                         </Popover>
-
+                            {/* El cálculo es caro (minutos con 34 OTs) y antes cerrar la
+                                vista previa lo tiraba entero. Acá se retoma sin recalcular.
+                                El componente no se dibuja si no hay borradores guardados. */}
+                            {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
+                            {/* Zoom control: afecta a la tabla de selección. */}
+                            <ZoomControl value={zoom} onChange={setZoom} />
+                        </div>
                     </div>
+
 
                     {/* Filter Toolbar Section - Symmetric & Compact */}
                     <div className="px-6 py-0 border-t bg-slate-50/80">
@@ -386,7 +389,7 @@ export function PlanningSelectionScreen({
             }
             pie={
                 <>
-                    <div className="px-6 py-4 flex items-center justify-end gap-2">
+                    <div className="px-6 py-3 flex items-center justify-end gap-2">
                     <Button variant="outline" onClick={onClose} className="text-gray-600">
                         Salir del planificador
                     </Button>
@@ -451,7 +454,7 @@ export function PlanningSelectionScreen({
         >
             {/* Content Area */}
             <div className="flex-1 min-w-0 overflow-hidden bg-gray-50 flex flex-col">
-                    <div className="flex-1 overflow-auto p-3 flex flex-col gap-3">
+                    <div className="flex-1 overflow-auto p-2 flex flex-col gap-3">
                         {/* El umbral estaba en 30 y saltaba en la semana normal del taller
                             —Lucas planifica 35 a 40 OTs de una— recomendando justo lo
                             contrario de lo que hay que hacer: partir el lote hace que el

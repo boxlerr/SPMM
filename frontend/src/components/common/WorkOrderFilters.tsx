@@ -126,7 +126,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
     return (
         <div className={cn(
             "bg-slate-50/80 rounded-xl border border-gray-100 shadow-sm",
-            compacto ? "px-3 py-2 space-y-2 mb-2 mt-0" : "px-4 py-3 space-y-2.5 mb-4 mt-2",
+            compacto ? "px-3 py-2 space-y-2 mb-0 mt-0" : "px-4 py-3 space-y-2.5 mb-4 mt-2",
         )}>
             {/* Fila 1: prioridad + toggles + colores + limpiar (todo alineado a una sola línea con
                 separadores verticales para agrupar visualmente). Limpiar Filtros queda a la derecha

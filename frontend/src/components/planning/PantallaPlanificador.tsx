@@ -70,33 +70,44 @@ export function CifraPlan({
     etiqueta,
     tono = "neutral",
     accion,
+    title,
 }: {
     icono: React.ReactNode;
     valor: React.ReactNode;
     etiqueta: string;
-    tono?: "neutral" | "alerta" | "ok";
+    /** "fecha" = la celda del período del plan: mismo peso que las otras cifras,
+     *  acento azul para que se lea como el dato que ordena todo lo demás. */
+    tono?: "neutral" | "alerta" | "ok" | "fecha";
     accion?: React.ReactNode;
+    title?: string;
 }) {
     return (
+        // Sin flex-1 ni min-w: el ancho lo reparte la grilla del riel, y el fondo
+        // blanco es lo que deja ver los separadores (el gap-px del contenedor).
+        // La tarjeta redondeada con ring de la celda "alerta" era la que flotaba
+        // en medio de una tira sin fondo: ahora pinta la celda entera, de borde a
+        // borde, y sigue igual de roja.
         <div
+            title={title}
             className={cn(
-                "flex-1 min-w-[150px] flex items-center gap-3 px-4 py-3",
-                tono === "alerta" && "bg-rose-50/60 rounded-lg ring-1 ring-rose-100",
+                "min-w-0 flex items-center gap-2.5 px-3 py-2",
+                tono === "alerta" ? "bg-rose-50" : "bg-white",
             )}
         >
             <div
                 className={cn(
-                    "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                    "w-8 h-8 rounded-md flex items-center justify-center shrink-0",
                     tono === "alerta" ? "bg-rose-100 text-rose-600"
                         : tono === "ok" ? "bg-emerald-100 text-emerald-600"
-                            : "bg-slate-100 text-slate-500",
+                            : tono === "fecha" ? "bg-blue-100 text-blue-700"
+                                : "bg-slate-100 text-slate-500",
                 )}
             >
                 {icono}
             </div>
             <div className="min-w-0">
                 <div className={cn(
-                    "text-xl font-bold leading-tight tabular-nums",
+                    "text-lg font-bold leading-tight tabular-nums truncate",
                     tono === "alerta" ? "text-rose-600" : "text-gray-900",
                 )}>
                     {valor}
