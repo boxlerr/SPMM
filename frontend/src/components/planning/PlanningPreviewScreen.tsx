@@ -1,5 +1,6 @@
 import React from 'react';
 import { PantallaPlanificador, CifraPlan } from "./PantallaPlanificador";
+import { nombreLindo, nombrePersona } from "@/lib/nombres";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -1946,7 +1947,7 @@ export function PlanningPreviewScreen({
                                                         {ve("cliente") && (
                                                             <td className="px-4 py-2 text-gray-500 italic">
                                                                 <span className="line-clamp-2 leading-snug" title={firstItem.cliente || ""}>
-                                                                    {firstItem.cliente || "-"}
+                                                                    {nombreLindo(firstItem.cliente) || "-"}
                                                                 </span>
                                                             </td>
                                                         )}
@@ -2084,7 +2085,7 @@ export function PlanningPreviewScreen({
                                                                 <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
                                                                     <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
                                                                     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm w-max max-w-full">
-                                                                        <div className="grid grid-cols-[auto_minmax(200px,340px)_190px_210px_180px] gap-0 text-sm">
+                                                                        <div className="grid grid-cols-[auto_minmax(200px,340px)_auto_auto_auto] gap-0 text-sm">
                                                                             {/* Inner Header */}
                                                                             <div className="contents text-xs font-bold text-gray-500 uppercase bg-gray-100/50">
                                                                                 <div className="px-3 py-1.5 border-b">#</div>
@@ -2150,7 +2151,7 @@ export function PlanningPreviewScreen({
                                                                                                 {/* Mismo cuidado que en el select de máquina: sin min-w-0 y sin
                                                                                                     truncar, un nombre largo empuja la caja y se monta sobre la
                                                                                                     columna de al lado. */}
-                                                                                                <SelectTrigger className="h-8 min-w-0 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:truncate [&>span]:block [&>span]:text-left">
+                                                                                                <SelectTrigger className="h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left">
                                                                                                     <SelectValue placeholder="Sin asignar" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
@@ -2164,7 +2165,7 @@ export function PlanningPreviewScreen({
                                                                                                                 disabled={!op.disponible && !isPruebas}
                                                                                                                 className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
                                                                                                             >
-                                                                                                                {op.nombre} {op.apellido} {(!op.disponible && !isPruebas) && "(Ausente)"}
+                                                                                                                {nombrePersona(op.nombre, op.apellido)} {(!op.disponible && !isPruebas) && "(Ausente)"}
                                                                                                             </SelectItem>
                                                                                                         );
                                                                                                     })}
@@ -2180,7 +2181,7 @@ export function PlanningPreviewScreen({
                                                                                                 <SelectTrigger
                                                                                                     // `min-w-0` + truncado del texto: "AGUJEREADORA DE BANCO BURANI"
                                                                                                     // se salía de la caja y se montaba encima de la columna Inicio.
-                                                                                                    className="h-8 min-w-0 text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:truncate [&>span]:block [&>span]:text-left"
+                                                                                                    className="h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left"
                                                                                                     title={effectiveItem.usa_maquina === false
                                                                                                         ? "Proceso manual: no usa máquina. Podés asignarle una igual si querés."
                                                                                                         : undefined}
@@ -2195,7 +2196,7 @@ export function PlanningPreviewScreen({
                                                                                                     </SelectItem>
                                                                                                     {availableMachines.map(m => (
                                                                                                         <SelectItem key={m.id} value={m.id.toString()}>
-                                                                                                            {m.nombre}
+                                                                                                            {nombreLindo(m.nombre)}
                                                                                                         </SelectItem>
                                                                                                     ))}
                                                                                                 </SelectContent>
@@ -2309,7 +2310,7 @@ export function PlanningPreviewScreen({
                                                                                                                 disabled={!op.disponible && !isPruebas}
                                                                                                                 className={(!op.disponible && !isPruebas) ? "text-gray-400 italic" : ""}
                                                                                                             >
-                                                                                                                {op.nombre} {op.apellido}
+                                                                                                                {nombrePersona(op.nombre, op.apellido)}
                                                                                                             </SelectItem>
                                                                                                         );
                                                                                                     })}
@@ -2333,7 +2334,7 @@ export function PlanningPreviewScreen({
                                                                                                         {effU.usa_maquina === false ? "No necesita" : "Sin asignar"}
                                                                                                     </SelectItem>
                                                                                                     {availableMachines.map(m => (
-                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>{m.nombre}</SelectItem>
+                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>{nombreLindo(m.nombre)}</SelectItem>
                                                                                                     ))}
                                                                                                 </SelectContent>
                                                                                             </Select>
@@ -2502,7 +2503,7 @@ export function PlanningPreviewScreen({
                                             <div key={op.id} className="bg-white p-3 rounded-lg border shadow-sm">
                                                 <div className="flex justify-between items-start mb-1.5 gap-2">
                                                     <div className="min-w-0 flex-1">
-                                                        <div className="text-sm font-medium text-gray-800 truncate">{op.nombre} {op.apellido}</div>
+                                                        <div className="text-sm font-medium text-gray-800 truncate">{nombrePersona(op.nombre, op.apellido)}</div>
                                                         {/* Subtítulo uniforme: sector → si no hay, rango principal → si no, "Sin sector".
                                                             Antes se ocultaba cuando el operario no tenía sector, dejando tarjetas sin subtítulo. */}
                                                         {op.sector ? (
