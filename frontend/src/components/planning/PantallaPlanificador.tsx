@@ -68,7 +68,11 @@ export function PantallaPlanificador({
             <div className="sticky top-0 z-30 border-b border-gray-100 bg-white rounded-t-xl">
                 {cabecera}
             </div>
-            <div className="relative flex-1 flex items-start">{children}</div>
+            {/* `min-w-0`: sin eso, este flex item no puede achicarse por debajo del
+                ancho mínimo de lo que tiene adentro (min-width de un flex item es `auto`,
+                no 0) y cualquier tabla ancha termina scrolleando la página entera de
+                costado en vez de scrollear ella sola. */}
+            <div className="relative flex-1 min-w-0 flex items-start">{children}</div>
             {/* El pie se pega abajo: Confirmar y Volver siempre alcanzables sin scrollear
                 hasta el final de 11 OTs. */}
             {pie && (

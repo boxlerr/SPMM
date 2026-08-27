@@ -1489,7 +1489,7 @@ export function PlanningPreviewScreen({
                 </div>
             }
         >
-                <div className="flex flex-1 items-start">
+                <div className="flex flex-1 min-w-0 items-start">
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         {/* Scroll nativo en lugar de Radix ScrollArea: la versión Radix no rendea
                             scrollbar horizontal por default y la tabla (min-w 1000px) quedaba pisada

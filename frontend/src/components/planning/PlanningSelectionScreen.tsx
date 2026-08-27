@@ -216,7 +216,7 @@ export function PlanningSelectionScreen({
             visible={isOpen}
             cabecera={
                 <>
-                    <div className="px-6 pt-2 pb-2 flex items-center justify-between gap-4">
+                    <div className="px-6 pt-2 pb-2 flex items-center justify-between gap-x-4 gap-y-1 flex-wrap">
                         <div className="min-w-0 flex items-baseline gap-3">
                             <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 shrink-0">
                                 <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
@@ -229,7 +229,7 @@ export function PlanningSelectionScreen({
                                 Elegí qué OTs entran en el plan y, si hace falta, entre qué fechas. Se calcula sobre lo tildado.
                             </p>
                         </div>
-                        <div className="flex items-center gap-2.5 shrink-0">
+                        <div className="flex items-center gap-2.5 flex-wrap justify-end min-w-0">
                             {/* Los chips de estado y el rango de fechas subieron acá: la fila
                                 propia que tenían abajo eran 40px que le faltaban a la lista. */}
                             {/* Los chips de estado y el rango de fechas subieron acá desde
