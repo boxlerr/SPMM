@@ -1498,7 +1498,7 @@ export function PlanningPreviewScreen({
                         {/* Sin overflow propio: el scroll es el de la página. Antes esta
                             columna scrolleaba adentro del shell y el shell adentro del layout,
                             y revisar 11 OTs era pelear con tres barras. */}
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                             {/* Qué traba el plan y cómo se destraba. Va primero de todo: es lo que
                                 puede cambiar la decisión de guardar o de ir a arreglar un dato antes
                                 de planificar.
@@ -1845,6 +1845,7 @@ export function PlanningPreviewScreen({
                                 puestas la tabla no entra y se scrollea, que para eso está; pero si
                                 alguien apagó la mitad no tiene sentido seguir forzando 1000px y
                                 hacerlo scrollear igual. */}
+                            <div className="w-full overflow-x-auto scrollbar-horizontal-visible">
                             <div
                                 className="p-0 pr-2"
                                 style={{ zoom: zoom / 100, minWidth: `${200 + COLUMNAS.filter(c => ve(c.clave)).length * 76}px` }}
@@ -2369,6 +2370,7 @@ export function PlanningPreviewScreen({
                                     </div>
                                 )}
                             </div >
+                            </div>
 
                         </div>
                     </div >
