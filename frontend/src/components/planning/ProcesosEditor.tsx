@@ -39,6 +39,10 @@ import { cn } from "@/lib/utils";
 export interface ProcesoRow {
     /** id temporal de UI (no es el id de proceso) */
     id: string;
+    /** id de la PASADA en la base (orden_trabajo_proceso.id) si la fila ya existe.
+     *  Vacío = línea nueva. Sin esto, al editar una OT con el mismo proceso repetido
+     *  no se sabe cuál fila es cuál y se pierde el estado/avance de las pasadas. */
+    id_otp?: number;
     /** id del proceso del catálogo (string para los selects) */
     proceso_id: string;
     /** tiempo estimado en minutos */

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { isOperatorQualified } from "@/lib/gantt-utils";
+import { limitacionDeMaquina } from "@/lib/maquinas";
 import { API_URL } from "@/config";
 
 interface Operario {
@@ -57,6 +58,8 @@ const capitalizeFirstLetter = (text: string): string => {
 interface Maquinaria {
     id: number;
     nombre: string;
+    /** Nota libre que se carga en Recursos; se muestra al elegir la máquina. */
+    limitacion?: string | null;
 }
 
 interface TaskDetailsModalProps {
@@ -376,11 +379,20 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                             <SelectItem value="0" className="text-gray-400 italic">
                                                 Sin asignar
                                             </SelectItem>
-                                            {maquinarias.map((m) => (
-                                                <SelectItem key={m.id} value={m.id.toString()}>
-                                                    {m.nombre}
-                                                </SelectItem>
-                                            ))}
+                                            {maquinarias.map((m) => {
+                                                const limitacion = limitacionDeMaquina(m);
+                                                return (
+                                                    <SelectItem
+                                                        key={m.id}
+                                                        value={m.id.toString()}
+                                                        detail={limitacion
+                                                            ? <span className="text-amber-700" title={limitacion}>⚠ {limitacion}</span>
+                                                            : undefined}
+                                                    >
+                                                        {m.nombre}
+                                                    </SelectItem>
+                                                );
+                                            })}
                                         </SelectContent>
                                     </Select>
                                 ) : (

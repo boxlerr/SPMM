@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Date, Boolean, DateTime, Unicode, UnicodeText, Uuid
+from sqlalchemy import BigInteger, Column, Integer, Date, Boolean, DateTime, Unicode, UnicodeText, Uuid
 from backend.infrastructure.db import Base
 import datetime
 import uuid
@@ -9,6 +9,12 @@ class Planificacion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     orden_id = Column(Integer, nullable=False)
     proceso_id = Column(Integer, nullable=False)
+    # A qué PASADA de la OT corresponde esta fila. Desde el 28/08/2026 el mismo proceso
+    # puede ir varias veces en la misma orden, así que (orden_id, proceso_id) ya no
+    # alcanza para saber de cuál se está hablando. NULL = plan viejo, de antes del
+    # cambio: se resuelve al replanificar.
+    # Migración: 2026-08-28_proceso_repetido_en_ot.sql
+    id_orden_trabajo_proceso = Column(BigInteger, nullable=True)
     id_operario = Column(Integer)
     id_rango_operario = Column(Integer)
     id_maquinaria = Column(Integer)

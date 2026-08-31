@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "un-proceso-varias-veces-en-la-ot",
+        fecha: "2026-08-28",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Un proceso puede repetirse en la misma OT, como está cargado en el sistema viejo",
+        detalle:
+            "Si una OT pasa tres veces por el torno CNC, en el sistema viejo son tres renglones. Acá entraba uno solo: los demás se perdían o se sumaban dentro del primero, así que veías un bloque enorme en un paso en lugar de las pasadas repartidas entre los otros procesos. Ahora entran todas y cada una lleva su paso, su tiempo y su estado por separado: podés marcar terminada la primera pasada y dejar pendiente la tercera. Al agregar procesos sueltos al plan también las elegís de a una. Ojo: si una OT tiene un proceso repetido y no debería, eso viene así del sistema viejo — se copia tal cual y lo corregís vos.",
+        href: "/operaciones",
+    },
+    {
+        id: "maquinas-muestran-su-limitacion",
+        fecha: "2026-08-28",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Al elegir la máquina ves su limitación, no solo el nombre",
+        detalle:
+            "La limitación que cargás en Recursos —«Falla en avance automático», «No entra material de más de 3 metros»— ahora aparece en el desplegable, en un renglón chico debajo del nombre de cada máquina. Antes solo estaba en Recursos: para saberlo había que salir de la planificación, buscar la máquina y volver, así que en la práctica se elegía a ciegas. Cuando la máquina elegida tiene una limitación, el casillero queda en ámbar y el texto completo se lee apoyando el mouse encima. Se ve igual en la vista previa, en la lista de planificación y en el detalle de una tarea del cronograma. Ojo: es un dato para vos, el planificador automático no lo tiene en cuenta al repartir el trabajo.",
+        href: "/operaciones",
+    },
+    {
         id: "avisos-dicen-quien-puede-y-que-pasa",
         fecha: "2026-08-26",
         tipo: "mejora",

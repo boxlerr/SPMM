@@ -16,6 +16,11 @@ class PlanificarRequestDTO(BaseModel):
     # se planifican TODOS sus procesos (comportamiento actual). Sirve para el
     # replan donde solo falta un proceso de una orden.
     procesos_por_orden: Optional[Dict[int, List[int]]] = None
+    # Igual que `procesos_por_orden` pero eligiendo PASADAS puntuales: mapea orden_id
+    # -> lista de orden_trabajo_proceso.id. Hace falta desde que el mismo proceso
+    # puede ir varias veces en una OT (la 7497 tiene TORNO CNC 13 veces): elegir "el
+    # proceso" no dice cuál de las 13. Si viene, manda sobre `procesos_por_orden`.
+    lineas_por_orden: Optional[Dict[int, List[int]]] = None
 
     @model_validator(mode="after")
     def _validar_rango(self):

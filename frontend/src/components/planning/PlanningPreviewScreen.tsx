@@ -1,6 +1,7 @@
 import React from 'react';
 import { PantallaPlanificador, CifraPlan } from "./PantallaPlanificador";
 import { nombreLindo, nombrePersona } from "@/lib/nombres";
+import { limitacionDeMaquina } from "@/lib/maquinas";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -93,7 +94,7 @@ interface PlanningPreviewScreenProps {
     /** Rango de fechas elegido en el modal anterior (para recalcular con el mismo). */
     planningRange?: { fecha_desde?: string; fecha_hasta?: string };
     /** Recalcula el plan con un nuevo set de OTs + el mismo rango + las decisiones de forzar. */
-    onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[], procesosPorOrden?: Record<number, number[]>) => void;
+    onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[], lineasPorOrden?: Record<number, number[]>) => void;
     /** True mientras se está recalculando (para mostrar spinner). */
     isCalculating?: boolean;
     /** Qué traba este plan y cómo se destraba (lo calcula el backend). */
@@ -160,10 +161,13 @@ export function PlanningPreviewScreen({
         onEdicionesChange?.(editedResults, Array.from(forzarOrdenIds));
     }, [editedResults, forzarOrdenIds, onEdicionesChange]);
 
-    // D1 (feedback 06/07): agregar procesos SUELTOS. `pendingAddProcesos` mapea
-    // orden_id -> set de proceso_ids elegidos; `expandedAddIds` = OTs expandidas en
-    // el popover para ver sus procesos.
-    const [pendingAddProcesos, setPendingAddProcesos] = React.useState<Record<number, Set<number>>>({});
+    // D1 (feedback 06/07): agregar procesos SUELTOS. `pendingAddLineas` mapea
+    // orden_id -> set de ids de PASADA (orden_trabajo_proceso.id) elegidas;
+    // `expandedAddIds` = OTs expandidas en el popover para ver sus procesos.
+    // Antes guardaba proceso_ids: no alcanza desde que el mismo proceso puede ir
+    // varias veces en la OT (la 7497 tiene TORNO CNC 13 veces) — tildar "torno cnc"
+    // habría metido las 13 pasadas de una.
+    const [pendingAddLineas, setPendingAddLineas] = React.useState<Record<number, Set<number>>>({});
     const [expandedAddIds, setExpandedAddIds] = React.useState<Set<number>>(new Set());
 
     /**
@@ -447,7 +451,7 @@ export function PlanningPreviewScreen({
     // Limpiar selección "para agregar" cuando cambia el set de resultados (ya fueron incluidas).
     React.useEffect(() => {
         setPendingAddIds(new Set());
-        setPendingAddProcesos({});
+        setPendingAddLineas({});
         setExpandedAddIds(new Set());
     }, [results.length, isOpen]);
 
@@ -488,12 +492,12 @@ export function PlanningPreviewScreen({
     };
 
     // D1: seleccionar/deseleccionar un proceso suelto de una OT.
-    const togglePendingProceso = (ordenId: number, procesoId: number) => {
-        setPendingAddProcesos(prev => {
+    const togglePendingLinea = (ordenId: number, lineaId: number) => {
+        setPendingAddLineas(prev => {
             const next = { ...prev };
             const set = new Set(next[ordenId] || []);
-            if (set.has(procesoId)) set.delete(procesoId);
-            else set.add(procesoId);
+            if (set.has(lineaId)) set.delete(lineaId);
+            else set.add(lineaId);
             if (set.size === 0) delete next[ordenId];
             else next[ordenId] = set;
             return next;
@@ -513,47 +517,47 @@ export function PlanningPreviewScreen({
     // de OTs que NO se agregan enteras).
     const totalPendingAdd = React.useMemo(() => {
         let n = pendingAddIds.size;
-        for (const [oidStr, set] of Object.entries(pendingAddProcesos)) {
+        for (const [oidStr, set] of Object.entries(pendingAddLineas)) {
             if (!pendingAddIds.has(Number(oidStr))) n += set.size;
         }
         return n;
-    }, [pendingAddIds, pendingAddProcesos]);
+    }, [pendingAddIds, pendingAddLineas]);
 
     /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
-    const handleRecalculate = (extraIds: number[] = [], procesosPorOrden?: Record<number, number[]>) => {
+    const handleRecalculate = (extraIds: number[] = [], lineasPorOrden?: Record<number, number[]>) => {
         if (!onRecalculate) {
             toast.error("Recalcular no está disponible en este contexto.");
             return;
         }
         const forcedArr = Array.from(forzarOrdenIds);
         const mergedIds = buildOrdenIdsForRecalc(forcedArr, extraIds);
-        onRecalculate(mergedIds, planningRange, forcedArr, procesosPorOrden);
+        onRecalculate(mergedIds, planningRange, forcedArr, lineasPorOrden);
     };
 
     const handleAddSelectedAndRecalculate = () => {
         const wholeOts = Array.from(pendingAddIds);
         // OTs de las que se eligieron procesos SUELTOS (excluyendo las que ya van enteras).
-        const procOrdenIds = Object.keys(pendingAddProcesos)
+        const procOrdenIds = Object.keys(pendingAddLineas)
             .map(Number)
-            .filter(oid => !pendingAddIds.has(oid) && (pendingAddProcesos[oid]?.size || 0) > 0);
+            .filter(oid => !pendingAddIds.has(oid) && (pendingAddLineas[oid]?.size || 0) > 0);
         const extras = Array.from(new Set([...wholeOts, ...procOrdenIds]));
         if (extras.length === 0) {
             toast.error("No seleccionaste ninguna OT ni proceso para agregar.");
             return;
         }
-        // procesos_por_orden solo para las OTs de las que se eligieron procesos sueltos.
-        const procesosPorOrden: Record<number, number[]> = {};
+        // lineas_por_orden solo para las OTs de las que se eligieron procesos sueltos.
+        const lineasPorOrden: Record<number, number[]> = {};
         for (const oid of procOrdenIds) {
-            procesosPorOrden[oid] = Array.from(pendingAddProcesos[oid]);
+            lineasPorOrden[oid] = Array.from(pendingAddLineas[oid]);
         }
         // Limpiamos inmediatamente la selección y cerramos el popover ANTES de
         // disparar el recálculo, para que cuando vuelva a abrir esté vacío.
         setPendingAddIds(new Set());
-        setPendingAddProcesos({});
+        setPendingAddLineas({});
         setExpandedAddIds(new Set());
         setAddSearchTerm("");
         setAddPopoverOpen(false);
-        handleRecalculate(extras, Object.keys(procesosPorOrden).length > 0 ? procesosPorOrden : undefined);
+        handleRecalculate(extras, Object.keys(lineasPorOrden).length > 0 ? lineasPorOrden : undefined);
     };
 
     /** Saca una OT del plan y recalcula (sin esa OT). Pensado para el botón "x"
@@ -1265,7 +1269,7 @@ export function PlanningPreviewScreen({
                                                         const checked = pendingAddIds.has(o.id);
                                                         const expanded = expandedAddIds.has(o.id);
                                                         const procs: any[] = Array.isArray(o.procesos) ? o.procesos : [];
-                                                        const selProcs = pendingAddProcesos[o.id] || new Set<number>();
+                                                        const selProcs = pendingAddLineas[o.id] || new Set<number>();
                                                         return (
                                                             <div key={o.id} className={cn("text-xs", checked && "bg-blue-50")}>
                                                                 <div className={cn("flex items-start gap-2 px-3 py-2 transition-colors", !checked && "hover:bg-gray-50")}>
@@ -1317,12 +1321,15 @@ export function PlanningPreviewScreen({
                                                                         {checked && (
                                                                             <div className="text-[10px] text-blue-600 italic">La OT completa ya está seleccionada.</div>
                                                                         )}
-                                                                        {[...procs].sort((a, b) => (a.orden || 0) - (b.orden || 0)).map((p) => {
-                                                                            const pid = p.proceso?.id;
+                                                                        {[...procs].sort((a, b) => (a.orden || 0) - (b.orden || 0) || (a.id || 0) - (b.id || 0)).map((p) => {
+                                                                            // Se tilda la PASADA (p.id), no el proceso: la misma OT
+                                                                            // puede tener el mismo proceso en varios pasos y cada
+                                                                            // uno se elige por separado.
+                                                                            const pid = p.id;
                                                                             const psel = selProcs.has(pid);
                                                                             return (
-                                                                                <label key={pid} className={cn("flex items-center gap-2 px-2 py-1 rounded cursor-pointer", psel ? "bg-blue-100/60" : "hover:bg-gray-100")}>
-                                                                                    <Checkbox checked={psel} onCheckedChange={() => togglePendingProceso(o.id, pid)} />
+                                                                                <label key={pid ?? `${p.proceso?.id}-${p.orden}`} className={cn("flex items-center gap-2 px-2 py-1 rounded cursor-pointer", psel ? "bg-blue-100/60" : "hover:bg-gray-100")}>
+                                                                                    <Checkbox checked={psel} onCheckedChange={() => togglePendingLinea(o.id, pid)} />
                                                                                     <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-600 text-[9px] font-bold shrink-0">{p.orden}</span>
                                                                                     <span className="truncate flex-1 text-gray-700">{capitalize(p.proceso?.nombre || "")}</span>
                                                                                     {p.tiempo_proceso != null && <span className="text-[10px] text-gray-400 shrink-0">{p.tiempo_proceso}m</span>}
@@ -1347,7 +1354,7 @@ export function PlanningPreviewScreen({
                                                     size="sm"
                                                     variant="ghost"
                                                     className="h-7 text-xs"
-                                                    onClick={() => { setPendingAddIds(new Set()); setPendingAddProcesos({}); setAddSearchTerm(""); }}
+                                                    onClick={() => { setPendingAddIds(new Set()); setPendingAddLineas({}); setAddSearchTerm(""); }}
                                                     disabled={totalPendingAdd === 0}
                                                 >
                                                     Limpiar
@@ -2098,6 +2105,9 @@ export function PlanningPreviewScreen({
                                                                             {/* Inner Body: procesos auto-asignados (editables) */}
                                                                             {items.map((item, idx) => {
                                                                                 const effectiveItem = getEffectiveItem(item);
+                                                                                const limitacionElegida = limitacionDeMaquina(
+                                                                                    availableMachines.find((m: any) => m.id === effectiveItem.id_maquinaria)
+                                                                                );
                                                                                 return (
                                                                                     <div key={`${item.orden_id}-${item.proceso_id}`} className="contents group/row">
                                                                                         <div className="px-3 py-1.5 border-b flex items-center text-gray-400 font-mono text-xs">
@@ -2181,10 +2191,18 @@ export function PlanningPreviewScreen({
                                                                                                 <SelectTrigger
                                                                                                     // `min-w-0` + truncado del texto: "AGUJEREADORA DE BANCO BURANI"
                                                                                                     // se salía de la caja y se montaba encima de la columna Inicio.
-                                                                                                    className="h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left"
-                                                                                                    title={effectiveItem.usa_maquina === false
-                                                                                                        ? "Proceso manual: no usa máquina. Podés asignarle una igual si querés."
-                                                                                                        : undefined}
+                                                                                                    className={cn(
+                                                                                                        "h-8 w-full text-xs border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-blue-100 [&>span]:whitespace-nowrap [&>span]:text-left",
+                                                                                                        // La limitación no entra en la caja sin ensanchar la columna, así que
+                                                                                                        // acá queda el aviso en ámbar y el texto completo en el globito.
+                                                                                                        limitacionElegida && "border-amber-300 bg-amber-50/50"
+                                                                                                    )}
+                                                                                                    title={[
+                                                                                                        effectiveItem.usa_maquina === false
+                                                                                                            ? "Proceso manual: no usa máquina. Podés asignarle una igual si querés."
+                                                                                                            : "",
+                                                                                                        limitacionElegida ? `Limitación: ${limitacionElegida}` : "",
+                                                                                                    ].filter(Boolean).join(" — ") || undefined}
                                                                                                 >
                                                                                                     <SelectValue placeholder="Sin asignar" />
                                                                                                 </SelectTrigger>
@@ -2194,11 +2212,20 @@ export function PlanningPreviewScreen({
                                                                                                     <SelectItem value="0" className="text-gray-400 italic">
                                                                                                         {effectiveItem.usa_maquina === false ? "No necesita" : "Sin asignar"}
                                                                                                     </SelectItem>
-                                                                                                    {availableMachines.map(m => (
-                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>
-                                                                                                            {nombreLindo(m.nombre)}
-                                                                                                        </SelectItem>
-                                                                                                    ))}
+                                                                                                    {availableMachines.map(m => {
+                                                                                                        const limitacion = limitacionDeMaquina(m);
+                                                                                                        return (
+                                                                                                            <SelectItem
+                                                                                                                key={m.id}
+                                                                                                                value={m.id.toString()}
+                                                                                                                detail={limitacion
+                                                                                                                    ? <span className="text-amber-700" title={limitacion}>⚠ {limitacion}</span>
+                                                                                                                    : undefined}
+                                                                                                            >
+                                                                                                                {nombreLindo(m.nombre)}
+                                                                                                            </SelectItem>
+                                                                                                        );
+                                                                                                    })}
                                                                                                 </SelectContent>
                                                                                             </Select>
                                                                                         </div>
@@ -2261,6 +2288,9 @@ export function PlanningPreviewScreen({
                                                                                     const fitCount = forcedPartialMap.get(ordenId)!.fitCount;
                                                                                     const effU = getEffectiveItem(u);
                                                                                     const assigned = isUnfitManuallyAssigned(u);
+                                                                                    const limitacionU = limitacionDeMaquina(
+                                                                                        availableMachines.find((m: any) => m.id === effU.id_maquinaria)
+                                                                                    );
                                                                                     return (
                                                                                         <div
                                                                                             key={`unfit-${u.proceso_id}-${idx}`}
@@ -2320,22 +2350,37 @@ export function PlanningPreviewScreen({
                                                                                                 value={effU.id_maquinaria?.toString() || "0"}
                                                                                                 onValueChange={(val) => handleUpdate(u, 'id_maquinaria', val === "0" ? null : parseInt(val))}
                                                                                             >
-                                                                                                <SelectTrigger className={cn(
-                                                                                                    "h-7 text-[11px] px-2",
-                                                                                                    // Un manual sin máquina no es un pendiente: no va en rojo.
-                                                                                                    effU.usa_maquina === false && !effU.id_maquinaria
-                                                                                                        ? "border-gray-200 bg-gray-50/50"
-                                                                                                        : !effU.id_maquinaria ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
-                                                                                                )}>
+                                                                                                <SelectTrigger
+                                                                                                    className={cn(
+                                                                                                        "h-7 text-[11px] px-2",
+                                                                                                        // Un manual sin máquina no es un pendiente: no va en rojo.
+                                                                                                        effU.usa_maquina === false && !effU.id_maquinaria
+                                                                                                            ? "border-gray-200 bg-gray-50/50"
+                                                                                                            : !effU.id_maquinaria ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
+                                                                                                    )}
+                                                                                                    // El verde acá dice "ya lo resolviste": la limitación no se lo pisa, va en el globito.
+                                                                                                    title={limitacionU ? `Limitación: ${limitacionU}` : undefined}
+                                                                                                >
                                                                                                     <SelectValue placeholder="Máquina" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
                                                                                                     <SelectItem value="0" className="text-gray-400 italic">
                                                                                                         {effU.usa_maquina === false ? "No necesita" : "Sin asignar"}
                                                                                                     </SelectItem>
-                                                                                                    {availableMachines.map(m => (
-                                                                                                        <SelectItem key={m.id} value={m.id.toString()}>{nombreLindo(m.nombre)}</SelectItem>
-                                                                                                    ))}
+                                                                                                    {availableMachines.map(m => {
+                                                                                                        const limitacion = limitacionDeMaquina(m);
+                                                                                                        return (
+                                                                                                            <SelectItem
+                                                                                                                key={m.id}
+                                                                                                                value={m.id.toString()}
+                                                                                                                detail={limitacion
+                                                                                                                    ? <span className="text-amber-700" title={limitacion}>⚠ {limitacion}</span>
+                                                                                                                    : undefined}
+                                                                                                            >
+                                                                                                                {nombreLindo(m.nombre)}
+                                                                                                            </SelectItem>
+                                                                                                        );
+                                                                                                    })}
                                                                                                 </SelectContent>
                                                                                             </Select>
                                                                                             <Input

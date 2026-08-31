@@ -9,6 +9,11 @@ class OrdenTrabajoProcesoCreateDTO(BaseModel):
     tiempo_proceso: int # Nuevo campo en minutos
     cant_operarios: Optional[int] = 1  # Operarios que requiere el proceso en simultáneo
     # fecha_inicio y fecha_fin ya no se envian desde el create modal
+    # Al EDITAR: id de la pasada que se está tocando (orden_trabajo_proceso.id). El
+    # mismo proceso puede ir varias veces en la OT, así que sin esto no se sabe cuál
+    # de las repetidas es cuál y se pierde el estado/avance al guardar. Vacío = línea
+    # nueva.
+    id_otp: Optional[int] = None
 
 class OrdenTrabajoRequestDTO(BaseModel):
     id_otvieja: int # Este es el numero visible

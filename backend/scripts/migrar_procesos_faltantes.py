@@ -72,11 +72,13 @@ async def main():
         catalogo = {r["nombre"].strip().upper(): r["id"]
                     for r in await c.fetch("select id, nombre from proceso")}
 
-        # Se agrupa por (OT, proceso) sumando tiempos y quedándose con el primer orden.
-        # El legacy tiene el mismo proceso repetido en varias líneas (son partes del
-        # laburo, no procesos distintos): insertarlas sueltas es lo que dejó 120 OTs
-        # con ROSCADO dos veces en la migración de julio.
-        agrupado, sin_match = {}, {}
+        # UNA FILA POR LÍNEA DEL LEGACY. Hasta el 28/08/2026 acá se agrupaba por
+        # (OT, proceso) sumando los tiempos, porque la PK de orden_trabajo_proceso no
+        # dejaba repetir un proceso dentro de la misma OT. Ya no: la fila tiene id
+        # propio y el legacy carga una fila por PASADA. Si el taller puso TORNO CNC
+        # 13 veces, van las 13 — cómo trabajan es decisión de ellos.
+        # Ver migrations/2026-08-28_proceso_repetido_en_ot.sql.
+        filas, sin_match = [], {}
         for r in crudas:
             nom = _nombre(r["proceso"])
             if not nom:
@@ -85,16 +87,21 @@ async def main():
             if pid is None:
                 sin_match[nom] = sin_match.get(nom, 0) + 1
                 continue
-            clave = (por_vieja[r["idot"]], pid)
-            d = agrupado.setdefault(clave, {"orden": r["orden"] or 1, "minutos": 0})
-            d["orden"] = min(d["orden"], r["orden"] or 1)
-            d["minutos"] += _minutos(r["total"])
+            filas.append({
+                "id_ot": por_vieja[r["idot"]],
+                "id_proceso": pid,
+                "orden": r["orden"] or 1,
+                "minutos": _minutos(r["total"]),
+            })
 
-        ots_tocadas = {k[0] for k in agrupado}
+        filas.sort(key=lambda f: (f["id_ot"], f["orden"]))
+        ots_tocadas = {f["id_ot"] for f in filas}
+        repetidas = len(filas) - len({(f["id_ot"], f["id_proceso"]) for f in filas})
         print(f"OTs abiertas sin procesos      : {len(por_vieja)}")
         print(f"Líneas leídas del legacy       : {len(crudas)}")
-        print(f"Filas a insertar (agrupadas)   : {len(agrupado)} en {len(ots_tocadas)} OTs")
-        print(f"Minutos totales                : {sum(d['minutos'] for d in agrupado.values())}")
+        print(f"Filas a insertar (tal cual)    : {len(filas)} en {len(ots_tocadas)} OTs")
+        print(f"   de esas, pasadas repetidas  : {repetidas}")
+        print(f"Minutos totales                : {sum(f['minutos'] for f in filas)}")
         if sin_match:
             print(f"\nNombres que NO están en el catálogo de SPMM ({len(sin_match)}):")
             for n, veces in sorted(sin_match.items(), key=lambda x: -x[1]):
@@ -102,7 +109,7 @@ async def main():
         else:
             print("\nTodos los nombres resuelven contra el catálogo de SPMM.")
 
-        sin_tiempo = sum(1 for d in agrupado.values() if d["minutos"] == 0)
+        sin_tiempo = sum(1 for f in filas if f["minutos"] == 0)
         print(f"\nFilas que quedarían con tiempo 0: {sin_tiempo}")
 
         if not APLICAR:
@@ -111,12 +118,12 @@ async def main():
 
         insertadas = 0
         async with c.transaction():
-            for (id_ot, id_proc), d in agrupado.items():
+            for f in filas:
                 await c.execute("""
                     insert into orden_trabajo_proceso
                         (id_orden_trabajo, id_proceso, orden, id_estado, tiempo_proceso, cant_operarios)
                     values ($1, $2, $3, 1, $4, 1)
-                """, id_ot, id_proc, d["orden"], d["minutos"])
+                """, f["id_ot"], f["id_proceso"], f["orden"], f["minutos"])
                 insertadas += 1
         print(f"\nINSERTADAS {insertadas} filas en {len(ots_tocadas)} OTs.")
         print("revertir: delete from orden_trabajo_proceso where id_orden_trabajo in ("
@@ -125,4 +132,7 @@ async def main():
         await c.close()
 
 
-asyncio.run(main())
+# Sólo al ejecutarlo. Sin este guard, importar los helpers (_nombre/_minutos) desde
+# otro script disparaba la corrida entera contra producción.
+if __name__ == "__main__":
+    asyncio.run(main())

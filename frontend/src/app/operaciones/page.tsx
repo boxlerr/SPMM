@@ -648,7 +648,7 @@ export default function OperacionesPage() {
       const response = await fetch(`${API_URL}/ordenes/` + targetTask.orden_id + "/procesos/" + targetTask.proceso_id + "/estado", {
         method: "PUT",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        body: JSON.stringify({ id_estado: idEstado }),
+        body: JSON.stringify({ id_estado: idEstado, id_otp: (targetTask as any).id_orden_trabajo_proceso }),
       });
       if (!response.ok) throw new Error("Failed to update status");
     } catch (error) {
@@ -701,17 +701,19 @@ export default function OperacionesPage() {
 
 
   const [isStatusConfirmOpen, setIsStatusConfirmOpen] = useState(false);
-  const [pendingStatusUpdate, setPendingStatusUpdate] = useState<{ ordenId: number, procesoId: number, newStatusId: number } | null>(null);
+  const [pendingStatusUpdate, setPendingStatusUpdate] = useState<{ ordenId: number, procesoId: number, newStatusId: number, idOtp?: number } | null>(null);
 
   const confirmStatusChange = () => {
     if (pendingStatusUpdate) {
-      executeProcessStatusChange(pendingStatusUpdate.ordenId, pendingStatusUpdate.procesoId, pendingStatusUpdate.newStatusId);
+      executeProcessStatusChange(pendingStatusUpdate.ordenId, pendingStatusUpdate.procesoId, pendingStatusUpdate.newStatusId, pendingStatusUpdate.idOtp);
       setPendingStatusUpdate(null);
     }
     setIsStatusConfirmOpen(false);
   };
 
-  const handleProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number) => {
+  // `idOtp` = orden_trabajo_proceso.id, la PASADA puntual. El mismo proceso puede ir
+  // varias veces en la OT, así que sin esto el backend tiene que adivinar cuál.
+  const handleProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number, idOtp?: number) => {
     // Find current status
     const order = ordenesTrabajo.find(o => o.id === ordenId);
     if (!order) return;
@@ -722,23 +724,24 @@ export default function OperacionesPage() {
 
     // Check if reverting from Finalizado (3) to Pendiente (1)
     if (currentStatusId === 3 && newStatusId === 1) {
-      setPendingStatusUpdate({ ordenId, procesoId, newStatusId });
+      setPendingStatusUpdate({ ordenId, procesoId, newStatusId, idOtp });
       setIsStatusConfirmOpen(true);
       return;
     }
 
     // Otherwise proceed directly
-    executeProcessStatusChange(ordenId, procesoId, newStatusId);
+    executeProcessStatusChange(ordenId, procesoId, newStatusId, idOtp);
   };
 
-  const executeProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number) => {
+  const executeProcessStatusChange = async (ordenId: number, procesoId: number, newStatusId: number, idOtp?: number) => {
     // 1. Optimistic update local state (ordenesTrabajo)
     setOrdenesTrabajo(prev => prev.map(order => {
       if (order.id !== ordenId) return order;
       return {
         ...order,
         procesos: order.procesos.map(proc => {
-          if (proc.proceso.id !== procesoId) return proc;
+          // Por PASADA si se sabe cuál; si no, por proceso (igual que antes).
+          if (idOtp != null ? proc.id !== idOtp : proc.proceso.id !== procesoId) return proc;
 
           let statusDesc = 'Pendiente';
           if (newStatusId === 2) statusDesc = 'En Proceso';
@@ -791,7 +794,7 @@ export default function OperacionesPage() {
       const response = await fetch(`${API_URL}/ordenes/` + ordenId + "/procesos/" + procesoId + "/estado", {
         method: "PUT",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        body: JSON.stringify({ id_estado: newStatusId }),
+        body: JSON.stringify({ id_estado: newStatusId, id_otp: idOtp }),
       });
 
       if (!response.ok) throw new Error("Failed to update status");
@@ -807,7 +810,9 @@ export default function OperacionesPage() {
           return {
             ...order,
             procesos: order.procesos.map(proc => {
-              if (proc.proceso.id !== procesoId) return proc;
+              // Si vino la pasada, se toca sólo esa; si no, se cae al proceso (una OT
+              // sin repetidos se comporta igual que antes).
+              if (idOtp != null ? proc.id !== idOtp : proc.proceso.id !== procesoId) return proc;
               return {
                 ...proc,
                 inicio_real: inicio_real,
@@ -843,6 +848,9 @@ export default function OperacionesPage() {
         body: JSON.stringify({
           ordenes: newOrderedProcesses.map(p => ({
             id_proceso: p.proceso.id,
+            // Sin la pasada, reordenar una OT con el mismo proceso repetido movía
+            // siempre la misma fila.
+            id_otp: p.id,
             orden: p.orden
           }))
         })
@@ -1048,7 +1056,7 @@ export default function OperacionesPage() {
     ids: number[],
     range: { fecha_desde?: string; fecha_hasta?: string },
     forzarIds: number[] = [],
-    procesosPorOrden?: Record<number, number[]>,
+    lineasPorOrden?: Record<number, number[]>,
   ) => {
     if (ids.length === 0) {
       toast.error("No hay OTs para recalcular.");
@@ -1072,8 +1080,10 @@ export default function OperacionesPage() {
           fecha_desde: range.fecha_desde,
           fecha_hasta: range.fecha_hasta,
           forzar_ordenes_ids: forzarIds.length > 0 ? forzarIds : undefined,
-          // D1: si se eligieron procesos sueltos, se mandan para planificar solo esos de esas OTs.
-          procesos_por_orden: procesosPorOrden && Object.keys(procesosPorOrden).length > 0 ? procesosPorOrden : undefined,
+          // D1: si se eligieron procesos sueltos, se mandan para planificar solo esos de
+          // esas OTs. Van ids de PASADA (orden_trabajo_proceso.id), no de proceso: el
+          // mismo proceso puede estar varias veces en la OT y se elige de a una.
+          lineas_por_orden: lineasPorOrden && Object.keys(lineasPorOrden).length > 0 ? lineasPorOrden : undefined,
         }),
       });
 

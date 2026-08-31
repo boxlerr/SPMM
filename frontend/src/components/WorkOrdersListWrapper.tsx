@@ -82,6 +82,7 @@ export default function WorkOrdersListWrapper({
                     isDelayed: false,
                     orden: proc.orden,
                     procesoId: proc.proceso?.id,
+                    idOtp: proc.id,
                     isUnplanned: true,
                     notes: order.observaciones || order.detalle || '',
                     quantity: order.unidades,
@@ -170,7 +171,10 @@ export default function WorkOrdersListWrapper({
         }
         setTaskToDelete(null);
         try {
-            const res = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/${procesoId}`, {
+            // `id_otp` dice QUÉ pasada borrar: sin él, una OT con el mismo proceso
+            // repetido borraría la primera y no la que se tocó.
+            const otpQS = taskToDelete.idOtp !== undefined ? `?id_otp=${taskToDelete.idOtp}` : "";
+            const res = await fetch(`${API_URL}/ordenes/${ordenId}/procesos/${procesoId}${otpQS}`, {
                 method: "DELETE",
                 headers: getAuthHeaders(),
             });
@@ -274,7 +278,7 @@ export default function WorkOrdersListWrapper({
             const res = await fetch(`${API_URL}/ordenes/${selectedTask.orden_id}/procesos/${selectedTask.proceso_id}/estado`, {
                 method: "PUT",
                 headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-                body: JSON.stringify({ id_estado: idEstado }),
+                body: JSON.stringify({ id_estado: idEstado, id_otp: (selectedTask as any).id_orden_trabajo_proceso }),
             });
             if (!res.ok) throw new Error("save failed");
         } catch (error) {
@@ -286,20 +290,29 @@ export default function WorkOrdersListWrapper({
 
     const handleProcessReorder = async (ordenId: number, orderedTasks: GanttTask[]) => {
         // Construyo el payload usando procesoId directo (sirve para planificados y no planificados).
+        // Va la PASADA además del proceso: con el mismo proceso repetido en la OT,
+        // mandar solo id_proceso movía siempre la misma fila.
         const ordenes = orderedTasks
-            .map((t, idx) => t.procesoId !== undefined ? { id_proceso: t.procesoId, orden: idx + 1 } : null)
-            .filter((x): x is { id_proceso: number; orden: number } => x !== null);
+            .map((t, idx) => t.procesoId !== undefined
+                ? { id_proceso: t.procesoId, id_otp: t.idOtp, orden: idx + 1 }
+                : null)
+            .filter((x) => x !== null) as { id_proceso: number; id_otp?: number; orden: number }[];
 
-        // Optimistic: actualizo orden en tasks (por procesoId) y secuencia en rawPlanificacion.
+        // Optimistic: actualizo orden en tasks y secuencia en rawPlanificacion, por
+        // pasada cuando la hay y por proceso cuando no (OTs sin repetidos).
+        const ordenByOtp = new Map(ordenes.filter(o => o.id_otp !== undefined).map(o => [o.id_otp, o.orden]));
         const ordenByProcId = new Map(ordenes.map(o => [o.id_proceso, o.orden]));
+        const nuevoOrden = (otp?: number, procId?: number) =>
+            (otp !== undefined ? ordenByOtp.get(otp) : undefined) ??
+            (procId !== undefined ? ordenByProcId.get(procId) : undefined);
         setTasks(prev => prev.map(t => {
             if (t.workOrderId !== ordenId || t.procesoId === undefined) return t;
-            const newOrden = ordenByProcId.get(t.procesoId);
+            const newOrden = nuevoOrden(t.idOtp, t.procesoId);
             return newOrden !== undefined ? { ...t, orden: newOrden } : t;
         }));
         setRawPlanificacion(prev => prev.map(p => {
             if (p.orden_id !== ordenId) return p;
-            const newOrden = ordenByProcId.get(p.proceso_id);
+            const newOrden = nuevoOrden((p as any).id_orden_trabajo_proceso, p.proceso_id);
             return newOrden !== undefined ? { ...p, secuencia: newOrden } : p;
         }));
 
@@ -343,7 +356,7 @@ export default function WorkOrdersListWrapper({
                     const res = await fetch(`${API_URL}/ordenes/${item.orden_id}/procesos/${item.proceso_id}/estado`, {
                         method: "PUT",
                         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-                        body: JSON.stringify({ id_estado: idEstado }),
+                        body: JSON.stringify({ id_estado: idEstado, id_otp: (item as any).id_orden_trabajo_proceso }),
                     });
                     if (!res.ok) throw new Error("save failed");
                 } catch (error) {

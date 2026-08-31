@@ -2079,6 +2079,51 @@ def _filtrar_procesos_por_orden(procesos, orden_id, procesos_por_orden):
     return [rel for rel in procesos if getattr(rel, "id_proceso", None) in permitidos]
 
 
+def _filtrar_lineas_por_orden(procesos, orden_id, lineas_por_orden):
+    """
+    Igual que `_filtrar_procesos_por_orden` pero eligiendo PASADAS puntuales
+    (orden_trabajo_proceso.id) en vez de procesos.
+
+    Hace falta desde que el mismo proceso puede ir varias veces en una OT: elegir
+    "TORNO CNC" en una OT que lo tiene 13 veces no dice cuál de las 13.
+    """
+    if not lineas_por_orden or orden_id not in lineas_por_orden:
+        return None
+    permitidas = set(lineas_por_orden[orden_id])
+    return [rel for rel in procesos if getattr(rel, "id", None) in permitidas]
+
+
+def _lineas_ordenadas(rels):
+    """
+    Las pasadas de una OT en orden de trabajo, con POSICIÓN única.
+
+    El solver indexa todo por (orden_id, secuencia). Usar `rel.orden` como secuencia
+    no sirve: no es único —hoy hay 531 filas que comparten paso con otra de la misma
+    OT— y dos filas con el mismo paso se pisaban en los diccionarios del modelo, así
+    que una desaparecía del plan sin decir nada. Se numera por posición (1..N) sobre
+    la lista ya ordenada, que además desempata parejo las repetidas.
+
+    Devuelve [(posicion, rel), ...].
+    """
+    ordenadas = sorted(rels, key=lambda r: ((r.orden or 0), (getattr(r, "id", 0) or 0)))
+    return list(enumerate(ordenadas, start=1))
+
+
+def _marcar_lineas(resultados, linea_por_clave):
+    """
+    Le pega a cada fila del resultado el id de la PASADA que la originó, para que
+    `planificacion.id_orden_trabajo_proceso` pueda apuntar a la línea exacta.
+
+    El solver devuelve la secuencia ORIGINAL (antes de partir en tramos), que es la
+    misma con la que se armó el mapa.
+    """
+    for r in resultados or []:
+        r["id_orden_trabajo_proceso"] = linea_por_clave.get(
+            (r.get("orden_id"), r.get("secuencia"))
+        )
+    return resultados
+
+
 async def planificar(
     repo_orden: OrdenTrabajoRepository,
     repo_operario: OperarioRepository,
@@ -2093,6 +2138,7 @@ async def planificar(
     fecha_hasta: date | None = None,
     forzar_ordenes_ids: list[int] | None = None,
     procesos_por_orden: dict[int, list[int]] | None = None,
+    lineas_por_orden: dict[int, list[int]] | None = None,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
     forzar_set = set(forzar_ordenes_ids or [])
@@ -2147,6 +2193,7 @@ async def planificar(
     cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
     preseleccion_maq = {}  # (orden_id, secuencia) -> id_maquinaria forzada (preselección Metlo)
     preseleccion_op = {}   # (orden_id, secuencia) -> id_operario forzado (elegido al cargar la OT)
+    linea_por_clave = {}   # (orden_id, secuencia) -> orden_trabajo_proceso.id (qué pasada es)
     procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
 
     # -----------------------
@@ -2156,16 +2203,24 @@ async def planificar(
         prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
         # D1: si se eligieron procesos sueltos de esta orden, planificamos solo esos.
-        for rel in _filtrar_procesos_por_orden(orden.procesos, orden.id, procesos_por_orden):
-            cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
+        # `lineas_por_orden` elige PASADAS puntuales; `procesos_por_orden` es la forma
+        # vieja (por proceso) y se mantiene para los clientes que todavía la mandan.
+        _elegidas = _filtrar_lineas_por_orden(orden.procesos, orden.id, lineas_por_orden)
+        if _elegidas is None:
+            _elegidas = _filtrar_procesos_por_orden(orden.procesos, orden.id, procesos_por_orden)
+
+        # `secuencia` es la POSICIÓN en la OT, no `rel.orden`: ver _lineas_ordenadas.
+        for secuencia, rel in _lineas_ordenadas(_elegidas):
+            linea_por_clave[(orden.id, secuencia)] = getattr(rel, "id", None)
+            cant_op_map[(orden.id, secuencia)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
             # Preselección de máquina: si el proceso tiene máquina elegida, se fuerza en el solver.
             _presel_maq = getattr(rel, "id_maquinaria", None)
             if _presel_maq:
-                preseleccion_maq[(orden.id, rel.orden)] = _presel_maq
+                preseleccion_maq[(orden.id, secuencia)] = _presel_maq
             # Preselección de persona: si en la OT se eligió quién lo hace, se fuerza.
             _presel_op = getattr(rel, "id_operario", None)
             if _presel_op:
-                preseleccion_op[(orden.id, rel.orden)] = _presel_op
+                preseleccion_op[(orden.id, secuencia)] = _presel_op
 
             # Duración mínima
             dur_min = rel.tiempo_proceso or 1
@@ -2234,7 +2289,7 @@ async def planificar(
             procesos_para_solver.append((
                 orden.id,               # orden_id
                 rel.proceso.id,         # proc_id
-                rel.orden,              # secuencia
+                secuencia,              # secuencia (posición en la OT, única)
                 orden.fecha_prometida,  # deadline
                 prioridad_desc,         # prioridad
                 dur_min,                # duración
@@ -2284,6 +2339,7 @@ async def planificar(
         preseleccion_op,
     )
 
+    _marcar_lineas(resultados, linea_por_clave)
     planificados, excedentes = _split_resultados(resultados)
 
     # Diagnóstico de lo que traba el plan. El import va acá adentro porque el módulo
@@ -2386,17 +2442,16 @@ async def planificar_pendientes(
 
         procesos_para_solver = []
         cant_op_map = {}  # (orden_id, secuencia) -> operarios requeridos por el proceso
+        linea_por_clave = {}   # (orden_id, secuencia) -> orden_trabajo_proceso.id
         procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
 
         for orden in ordenes:
             prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
-            for rel in orden.procesos:
-                # Saltar procesos finalizados (doble seguridad)
-                if rel.id_estado == 3:
-                    continue
-
-                cant_op_map[(orden.id, rel.orden)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
+            _pendientes = [rel for rel in orden.procesos if rel.id_estado != 3]
+            for secuencia, rel in _lineas_ordenadas(_pendientes):
+                linea_por_clave[(orden.id, secuencia)] = getattr(rel, "id", None)
+                cant_op_map[(orden.id, secuencia)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
                 dur_min = rel.tiempo_proceso or 1
                 nombre_proceso = rel.proceso.nombre.strip() if rel.proceso else ""
                 usa_maquina = proceso_usa_maquina(nombre_proceso)
@@ -2411,7 +2466,7 @@ async def planificar_pendientes(
                 procesos_para_solver.append((
                     orden.id,
                     rel.proceso.id,
-                    rel.orden,
+                    secuencia,
                     orden.fecha_prometida,
                     prioridad_desc,
                     dur_min,
@@ -2446,6 +2501,7 @@ async def planificar_pendientes(
             blocked_dates,
         )
 
+        _marcar_lineas(resultados, linea_por_clave)
         planificados, excedentes = _split_resultados(resultados)
         saved = await repo_planificacion.insertar_planificacion_lote(planificados)
         return {"planificados": saved, "excedentes": excedentes}

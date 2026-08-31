@@ -479,18 +479,42 @@ class OrdenTrabajoRepository:
             raise InfrastructureException("Error al obtener timeline de próximas entregas.") from e
 
 
-    async def update_proceso_status(self, id_orden: int, id_proceso: int, id_estado: int):
+    async def _buscar_linea(self, id_orden: int, id_proceso: int | None, id_otp: int | None):
+        """
+        Resuelve UNA pasada de proceso dentro de la OT.
+
+        `id_otp` (orden_trabajo_proceso.id) es la forma correcta desde que el mismo
+        proceso puede ir varias veces en la misma orden. Se sigue aceptando el par
+        (orden, proceso) porque es lo que mandan los clientes viejos: si hay más de
+        una pasada se toma la del paso más bajo y se avisa, en vez de romper.
+        """
+        if id_otp is not None:
+            query = select(OrdenTrabajoProceso).where(
+                OrdenTrabajoProceso.id == id_otp,
+                OrdenTrabajoProceso.id_orden_trabajo == id_orden,
+            )
+            return (await self.db.execute(query)).scalar_one_or_none()
+
+        query = select(OrdenTrabajoProceso).where(
+            OrdenTrabajoProceso.id_orden_trabajo == id_orden,
+            OrdenTrabajoProceso.id_proceso == id_proceso,
+        ).order_by(OrdenTrabajoProceso.orden, OrdenTrabajoProceso.id)
+        lineas = (await self.db.execute(query)).scalars().all()
+
+        if len(lineas) > 1:
+            logger.warning(
+                f"Repository - La OT {id_orden} tiene {len(lineas)} pasadas del proceso "
+                f"{id_proceso} y se pidió sin id de pasada: se toma la del paso "
+                f"{lineas[0].orden} (id {lineas[0].id}). Mandá id_otp para no adivinar."
+            )
+        return lineas[0] if lineas else None
+
+    async def update_proceso_status(self, id_orden: int, id_proceso: int, id_estado: int, id_otp: int | None = None):
         try:
             logger.info(f"Repository - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso}, ID Estado {id_estado}")
-            
-            # Buscar la relación específica
-            query = select(OrdenTrabajoProceso).where(
-                OrdenTrabajoProceso.id_orden_trabajo == id_orden,
-                OrdenTrabajoProceso.id_proceso == id_proceso
-            )
-            result = await self.db.execute(query)
-            ot_proceso = result.scalar_one_or_none()
-            
+
+            ot_proceso = await self._buscar_linea(id_orden, id_proceso, id_otp)
+
             if not ot_proceso:
                 logger.info("Repository - Relación Orden-Proceso no encontrada.")
                 return False
@@ -521,17 +545,12 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_proceso_status: {e}")
             raise InfrastructureException("Error al actualizar estado del proceso.") from e
 
-    async def update_proceso_observaciones(self, id_orden: int, id_proceso: int, observaciones: str):
+    async def update_proceso_observaciones(self, id_orden: int, id_proceso: int, observaciones: str, id_otp: int | None = None):
         try:
             logger.info(f"Repository - Actualizar observaciones proceso: Orden {id_orden}, Proceso {id_proceso}")
-            
-            query = select(OrdenTrabajoProceso).where(
-                OrdenTrabajoProceso.id_orden_trabajo == id_orden,
-                OrdenTrabajoProceso.id_proceso == id_proceso
-            )
-            result = await self.db.execute(query)
-            ot_proceso = result.scalar_one_or_none()
-            
+
+            ot_proceso = await self._buscar_linea(id_orden, id_proceso, id_otp)
+
             if not ot_proceso:
                 logger.info("Repository - Relación Orden-Proceso no encontrada.")
                 return False
@@ -551,22 +570,36 @@ class OrdenTrabajoRepository:
     async def update_procesos_order(self, id_orden: int, process_orders: list[dict]):
         """
         Actualiza el orden de los procesos para una orden de trabajo.
-        process_orders: lista de dicts {id_proceso: int, orden: int}
+        process_orders: lista de dicts {id_otp?: int, id_proceso: int, orden: int}
+
+        Si viene `id_otp` se mueve ESA pasada. Sin él se resuelve por proceso, que
+        con pasadas repetidas es ambiguo: se van consumiendo de a una en el orden en
+        que llegan, así reordenar una lista completa sigue funcionando.
         """
         try:
             logger.info(f"Repository - Actualizar orden de procesos para Orden {id_orden}")
-            
+
+            query = select(OrdenTrabajoProceso).where(
+                OrdenTrabajoProceso.id_orden_trabajo == id_orden
+            ).order_by(OrdenTrabajoProceso.orden, OrdenTrabajoProceso.id)
+            lineas = (await self.db.execute(query)).scalars().all()
+            por_id = {l.id: l for l in lineas}
+            pendientes_por_proceso = {}
+            for l in lineas:
+                pendientes_por_proceso.setdefault(l.id_proceso, []).append(l)
+
             for item in process_orders:
-                query = select(OrdenTrabajoProceso).where(
-                    OrdenTrabajoProceso.id_orden_trabajo == id_orden,
-                    OrdenTrabajoProceso.id_proceso == item['id_proceso']
-                )
-                result = await self.db.execute(query)
-                ot_proceso = result.scalar_one_or_none()
-                
+                ot_proceso = None
+                _otp = item.get('id_otp')
+                if _otp is not None:
+                    ot_proceso = por_id.get(int(_otp))
+                else:
+                    cola = pendientes_por_proceso.get(item.get('id_proceso'), [])
+                    ot_proceso = cola.pop(0) if cola else None
+
                 if ot_proceso:
                     ot_proceso.orden = item['orden']
-            
+
             await self.db.commit()
             logger.info("Repository - Orden de procesos actualizado correctamente.")
             return True
@@ -722,7 +755,7 @@ class OrdenTrabajoRepository:
             
             # Use bindparam with expanding=True to correctly handle IN clause with list/tuple
             query = text("""
-                SELECT p.orden_id, p.proceso_id, o.nombre, o.apellido
+                SELECT p.orden_id, p.proceso_id, o.nombre, o.apellido, p.id_orden_trabajo_proceso
                 FROM planificacion p
                 JOIN operario o ON p.id_operario = o.id
                 WHERE p.orden_id IN :orden_ids
@@ -748,18 +781,24 @@ class OrdenTrabajoRepository:
             result = await self.db.execute(stmt)
             current_processes = result.scalars().all()
             
-            current_map = {p.id_proceso: p for p in current_processes}
-            
+            # El mismo proceso puede estar varias veces en la OT, así que no se puede
+            # mapear por id_proceso (colapsaría las pasadas en una). Se machea por id
+            # de pasada cuando el cliente lo manda, y si no, de a una por proceso en
+            # el orden en que llegan — que es como venía funcionando cuando no había
+            # repetidos.
+            por_id = {p.id: p for p in current_processes}
+            pendientes_por_proceso = {}
+            for p in sorted(current_processes, key=lambda x: (x.orden or 0, x.id)):
+                pendientes_por_proceso.setdefault(p.id_proceso, []).append(p)
+
             # 2. Procesar la nueva lista
             # new_processes_data es lista de dicts con keys: proceso_id, orden, (opcional: fecha_inicio, fecha_fin)
-            
-            incoming_ids = set()
-            
+
+            conservadas = set()
+
             for index, item in enumerate(new_processes_data):
                 pid = item.get('proceso_id')
                 if not pid: continue
-                
-                incoming_ids.add(pid)
 
                 # Update fields based on new DTO structure (no dates, just minutes)
                 minutes = item.get('tiempo_proceso')
@@ -776,9 +815,18 @@ class OrdenTrabajoRepository:
                 _op_raw = item.get('operario_id')
                 id_operario = int(_op_raw) if (_op_raw not in (None, "", "0")) else None
 
-                if pid in current_map:
+                _otp = item.get('id_otp')
+                if _otp is not None:
+                    existing_proc = por_id.get(int(_otp))
+                    if existing_proc is not None and existing_proc in pendientes_por_proceso.get(pid, []):
+                        pendientes_por_proceso[pid].remove(existing_proc)
+                else:
+                    cola = pendientes_por_proceso.get(pid, [])
+                    existing_proc = cola.pop(0) if cola else None
+
+                if existing_proc is not None:
                     # UPDATE existing
-                    existing_proc = current_map[pid]
+                    conservadas.add(existing_proc.id)
                     existing_proc.orden = index + 1
                     if minutes is not None:
                         existing_proc.tiempo_proceso = minutes
@@ -803,8 +851,8 @@ class OrdenTrabajoRepository:
                     self.db.add(new_proc)
             
             # 3. Eliminar los que ya no están
-            for pid, proc in current_map.items():
-                if pid not in incoming_ids:
+            for proc in current_processes:
+                if proc.id not in conservadas:
                     await self.db.delete(proc)
             
             await self.db.commit()
@@ -858,22 +906,35 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_cantidad_entregada: {e}")
             raise InfrastructureException("Error al actualizar la cantidad entregada.") from e
 
-    async def eliminarProceso(self, id_orden: int, id_proceso: int):
+    async def eliminarProceso(self, id_orden: int, id_proceso: int, id_otp: int | None = None):
         from sqlalchemy import text
         try:
             logger.info(f"Repository - Eliminar proceso {id_proceso} de Orden {id_orden}")
 
+            # Con pasadas repetidas, borrar por (orden, proceso) se llevaría puestas
+            # TODAS las del mismo proceso. Se resuelve la pasada primero y se borra
+            # esa sola.
+            linea = await self._buscar_linea(id_orden, id_proceso, id_otp)
+            if not linea:
+                logger.info("Repository - Relación Orden-Proceso no encontrada.")
+                return False
+
             # Primero limpiamos planificacion si tiene una entrada (puede no tenerla
-            # si es un proceso huérfano nunca planificado).
+            # si es un proceso huérfano nunca planificado). El plan viejo (anterior a
+            # la migración del 28/08) no tiene la pasada cargada: para ese se cae al
+            # par (orden, proceso), que era como se guardaba.
             await self.db.execute(
-                text("DELETE FROM planificacion WHERE orden_id = :oid AND proceso_id = :pid"),
-                {"oid": id_orden, "pid": id_proceso}
+                text("""DELETE FROM planificacion
+                         WHERE id_orden_trabajo_proceso = :otp
+                            OR (id_orden_trabajo_proceso IS NULL
+                                AND orden_id = :oid AND proceso_id = :pid)"""),
+                {"otp": linea.id, "oid": id_orden, "pid": id_proceso}
             )
 
             # Después el registro de orden_trabajo_proceso.
             await self.db.execute(
-                text("DELETE FROM orden_trabajo_proceso WHERE id_orden_trabajo = :oid AND id_proceso = :pid"),
-                {"oid": id_orden, "pid": id_proceso}
+                text("DELETE FROM orden_trabajo_proceso WHERE id = :otp"),
+                {"otp": linea.id}
             )
 
             await self.db.commit()

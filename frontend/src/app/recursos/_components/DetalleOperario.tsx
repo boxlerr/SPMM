@@ -382,7 +382,9 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
       const response = await fetch(`${cleanUrl}/ordenes/${task.orden_id}/procesos/${task.proceso_id}/estado`, {
         method: "PUT",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        body: JSON.stringify({ id_estado: newStatusId }),
+        // La fila del plan sabe a qué PASADA corresponde; sin eso, una OT con el
+        // mismo proceso repetido cambiaría el estado de la primera.
+        body: JSON.stringify({ id_estado: newStatusId, id_otp: (task as any).id_orden_trabajo_proceso }),
       });
 
       if (response.ok) {

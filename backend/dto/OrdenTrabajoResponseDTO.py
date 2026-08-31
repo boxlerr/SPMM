@@ -36,6 +36,10 @@ class EstadoProcesoDTO(BaseModel):
 
 class OrdenTrabajoProcesoDTO(BaseModel):
     # Flattened or selected fields to avoid circular recursion to OrdenTrabajo
+    # id de la PASADA (orden_trabajo_proceso.id). Es lo que hay que mandar para tocar
+    # una línea puntual: el mismo proceso puede estar varias veces en la OT, así que
+    # (orden, proceso) ya no la identifica.
+    id: Optional[int] = None
     orden: Optional[int] = None # Assuming 'orden' means execution order, not the work order ID
     tiempo_proceso: Optional[int] = None
     cant_operarios: Optional[int] = None  # Operarios que requiere el proceso en simultáneo

@@ -40,6 +40,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     fecha_hasta = body.fecha_hasta if body else None
     forzar_ordenes_ids = body.forzar_ordenes_ids if body else None
     procesos_por_orden = body.procesos_por_orden if body else None
+    lineas_por_orden = body.lineas_por_orden if body else None
 
     # Cada intento queda auditado, salga bien o mal. Antes un intento fallado no
     # dejaba rastro en la app: el 15/08 uno murió por memoria y la única evidencia
@@ -64,6 +65,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
             fecha_hasta=fecha_hasta,
             forzar_ordenes_ids=forzar_ordenes_ids,
             procesos_por_orden=procesos_por_orden,
+            lineas_por_orden=lineas_por_orden,
         )
         await auditoria.registrar_intento(
             tipo, ordenes_ids, "ok",

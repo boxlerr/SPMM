@@ -156,14 +156,14 @@ class PlanificacionRepository:
 
         insert_query = text("""
             INSERT INTO planificacion (
-                orden_id, proceso_id, id_operario, id_rango_operario, id_maquinaria,
-                sin_maquinaria, inicio_min, fin_min, duracion_min, prioridad_peso,
+                orden_id, proceso_id, id_orden_trabajo_proceso, id_operario, id_rango_operario,
+                id_maquinaria, sin_maquinaria, inicio_min, fin_min, duracion_min, prioridad_peso,
                 fecha_prometida, sin_asignar, nombre_proceso, rangos_permitidos,
                 id_planificacion_lote, descripcion_lote, creado_en, forzado_fuera_rango
             )
             VALUES (
-                :orden_id, :proceso_id, :id_operario, :id_rango_operario, :id_maquinaria,
-                :sin_maquinaria, :inicio_min, :fin_min, :duracion_min, :prioridad_peso,
+                :orden_id, :proceso_id, :id_orden_trabajo_proceso, :id_operario, :id_rango_operario,
+                :id_maquinaria, :sin_maquinaria, :inicio_min, :fin_min, :duracion_min, :prioridad_peso,
                 :fecha_prometida, :sin_asignar, :nombre_proceso, :rangos_permitidos,
                 :id_planificacion_lote, :descripcion_lote, :creado_en, :forzado_fuera_rango
             )
@@ -174,6 +174,9 @@ class PlanificacionRepository:
                 params = {
                     "orden_id": r["orden_id"],
                     "proceso_id": r["proceso_id"],
+                    # Qué PASADA de la OT es. El mismo proceso puede ir varias veces en
+                    # la orden, así que (orden_id, proceso_id) ya no la identifica.
+                    "id_orden_trabajo_proceso": r.get("id_orden_trabajo_proceso"),
                     "id_operario": r.get("id_operario"),
                     "id_rango_operario": r.get("id_rango_operario"),
                     "id_maquinaria": r.get("id_maquinaria"),

@@ -213,6 +213,9 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 if (orderToEdit.procesos && orderToEdit.procesos.length > 0) {
                     const mappedProcesses: ProcesoRow[] = orderToEdit.procesos.map(p => ({
                         id: Math.random().toString(36).substr(2, 9), // Temp UI ID
+                        // La pasada real, para que al guardar se actualice ESTA fila y
+                        // no otra del mismo proceso (una OT puede repetirlo).
+                        id_otp: (p as any).id,
                         proceso_id: p.proceso.id.toString(),
                         tiempo: p.tiempo_proceso ? p.tiempo_proceso.toString() : "",
                         cant_operarios: p.cant_operarios ? p.cant_operarios.toString() : "1",
@@ -474,6 +477,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 .filter(p => p.incluido && p.proceso_id)
                 .map(p => ({
                     proceso_id: parseInt(p.proceso_id),
+                    id_otp: p.id_otp,
                     tiempo_proceso: parseInt(p.tiempo) || 0,
                     cant_operarios: parseInt(p.cant_operarios) || 1,
                     maquinaria_id: p.maquina_id ? p.maquina_id : null,

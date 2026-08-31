@@ -44,6 +44,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { addWorkMinutes, calculateWorkingMinutes } from "@/lib/gantt-utils";
+import { limitacionDeMaquina } from "@/lib/maquinas";
 import { API_URL } from "@/config";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -56,7 +57,9 @@ interface PlanningListTableProps {
     data: WorkOrder[];
     isLoading: boolean;
     onRowClick: (item: WorkOrder) => void;
-    onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number) => void;
+    // `idOtp` = orden_trabajo_proceso.id: qué PASADA es. El mismo proceso puede estar
+    // varias veces en la OT y cada una tiene su estado.
+    onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number, idOtp?: number) => void;
     onProcessReorder?: (ordenId: number, newOrder: any[]) => void;
     onOperatorChange?: (ordenId: number, procesoId: number, operarioId: number) => void;
     onMachineryChange?: (ordenId: number, procesoId: number, maquinariaId: number) => void; // Added
@@ -785,7 +788,7 @@ function _PlanningListTable({
                                             <div>
                                                 <Select
                                                     defaultValue={proc.estado_proceso?.id?.toString() || "1"}
-                                                    onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val))}
+                                                    onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val), (proc as any).id)}
                                                 >
                                                     <SelectTrigger className={cn(
                                                         "h-7 text-xs w-full border-none shadow-none font-medium px-2",
@@ -864,11 +867,20 @@ function _PlanningListTable({
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
-                                                            {maquinarias.map((m) => (
-                                                                <SelectItem key={m.id} value={m.id.toString()}>
-                                                                    {m.nombre}
-                                                                </SelectItem>
-                                                            ))}
+                                                            {maquinarias.map((m) => {
+                                                                const limitacion = limitacionDeMaquina(m);
+                                                                return (
+                                                                    <SelectItem
+                                                                        key={m.id}
+                                                                        value={m.id.toString()}
+                                                                        detail={limitacion
+                                                                            ? <span className="text-amber-700" title={limitacion}>⚠ {limitacion}</span>
+                                                                            : undefined}
+                                                                    >
+                                                                        {m.nombre}
+                                                                    </SelectItem>
+                                                                );
+                                                            })}
                                                         </SelectContent>
                                                     </Select>
                                                 ) : (

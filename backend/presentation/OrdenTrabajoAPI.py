@@ -123,6 +123,10 @@ from pydantic import BaseModel
 
 class EstadoUpdate(BaseModel):
     id_estado: int
+    # Pasada puntual (orden_trabajo_proceso.id). El mismo proceso puede ir varias
+    # veces en la OT; sin esto el backend tiene que adivinar cuál. Opcional para no
+    # romper a los clientes que todavía no lo mandan.
+    id_otp: int | None = None
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/estado")
 async def actualizar_estado_proceso(
@@ -136,7 +140,7 @@ async def actualizar_estado_proceso(
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/estado")
     event_bus = getattr(request.app.state, "event_bus", None)
     service = OrdenTrabajoService(db, event_bus)
-    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.id_estado, user=current_user)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, body.id_estado, user=current_user, id_otp=body.id_otp)
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/status")
 async def update_process_status(
@@ -152,20 +156,24 @@ async def update_process_status(
     logger.info(f"API - Update Status ID: {new_status_id}")
     event_bus = getattr(request.app.state, "event_bus", None)
     service = OrdenTrabajoService(db, event_bus)
-    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status_id, user=current_user)
+    return await service.actualizarEstadoProceso(id_orden, id_proceso, new_status_id, user=current_user, id_otp=body.get("id_otp"))
 
 class ObservacionesUpdate(BaseModel):
     observaciones: str
+    id_otp: int | None = None  # pasada puntual; ver EstadoUpdate
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
 async def actualizar_observaciones_proceso(id_orden: int, id_proceso: int, body: ObservacionesUpdate, db=Depends(get_db)):
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
     service = OrdenTrabajoService(db)
-    return await service.actualizarObservacionesProceso(id_orden, id_proceso, body.observaciones)
+    return await service.actualizarObservacionesProceso(id_orden, id_proceso, body.observaciones, id_otp=body.id_otp)
     
 class ProcessReorderItem(BaseModel):
     id_proceso: int
     orden: int
+    # Pasada puntual. Sin esto, reordenar una OT con el mismo proceso repetido se
+    # resuelve por posición (de a una por proceso, en el orden en que llegan).
+    id_otp: int | None = None
 
 class ProcessReorderRequest(BaseModel):
     ordenes: List[ProcessReorderItem]
@@ -211,7 +219,10 @@ async def agregar_proceso_orden(id_orden: int, body: AgregarProcesoRequest, db=D
 
 
 @router.delete("/ordenes/{id_orden}/procesos/{id_proceso}")
-async def eliminar_proceso_orden(id_orden: int, id_proceso: int, db=Depends(get_db)):
+async def eliminar_proceso_orden(id_orden: int, id_proceso: int, id_otp: int | None = None, db=Depends(get_db)):
+    """Borra UNA pasada del proceso, no todas las del mismo proceso en la OT.
+
+    `id_otp` (query param) dice cuál. Sin él se borra la del paso más bajo."""
     logger.info(f"API - Inicio DELETE /ordenes/{id_orden}/procesos/{id_proceso}")
     service = OrdenTrabajoService(db)
-    return await service.eliminarProceso(id_orden, id_proceso)
+    return await service.eliminarProceso(id_orden, id_proceso, id_otp=id_otp)

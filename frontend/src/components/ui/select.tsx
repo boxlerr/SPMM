@@ -103,13 +103,23 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  detail,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+}: React.ComponentProps<typeof SelectPrimitive.Item> & {
+  /**
+   * Aclaración chica bajo el nombre de la opción (una limitación, una nota).
+   * Va A PROPÓSITO fuera del `ItemText`: lo que está adentro es lo que el
+   * cuadro repite cuando la opción queda elegida, y ahí solo entra el nombre.
+   */
+  detail?: React.ReactNode
+}) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
         "focus:bg-accent focus:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        // Con aclaración la opción pasa a dos renglones: nombre arriba, nota abajo.
+        detail ? "flex-col items-start gap-0" : "",
         className
       )}
       {...props}
@@ -120,6 +130,18 @@ function SelectItem({
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {/* `div` y no `span`: al último span la clase de arriba le pone `flex` y
+          se llevaría puesto el recorte a dos renglones de una nota larga. */}
+      {detail ? (
+        <div
+          data-slot="select-item-detail"
+          // El ancho tope es lo que hace que una nota larga baje de renglón en vez
+          // de estirar el desplegable a lo ancho de la pantalla.
+          className="text-muted-foreground line-clamp-2 w-full max-w-72 text-xs leading-snug"
+        >
+          {detail}
+        </div>
+      ) : null}
     </SelectPrimitive.Item>
   )
 }

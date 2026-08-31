@@ -36,6 +36,9 @@ export interface GanttTask {
     machineName?: string;
     orden?: number;
     procesoId?: number;
+    /** id de la PASADA (orden_trabajo_proceso.id). El mismo proceso puede ir varias
+     *  veces en una OT, así que `procesoId` solo no identifica la línea. */
+    idOtp?: number;
     isUnplanned?: boolean;
 }
 
@@ -112,6 +115,9 @@ export interface WorkOrder {
     };
     procesos: {
         orden: number;
+        /** id de la PASADA (orden_trabajo_proceso.id). El mismo proceso puede ir
+         *  varias veces en una OT, así que `proceso.id` no identifica la línea. */
+        id?: number;
         tiempo_proceso: number;
         cant_operarios?: number;
         observaciones?: string;
@@ -134,6 +140,9 @@ export interface PlanificacionItem {
     id: number;
     orden_id: number;
     proceso_id: number;
+    /** a qué PASADA de la OT corresponde esta fila del plan (NULL en planes viejos,
+     *  guardados antes de que la pasada existiera). */
+    id_orden_trabajo_proceso?: number | null;
     nombre_proceso: string;
     inicio_min: number;
     fin_min: number;

@@ -9,7 +9,6 @@ from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.NotFoundException import NotFoundException
-from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
 from datetime import datetime
 from sqlalchemy import func, select
@@ -184,11 +183,14 @@ class OrdenTrabajoService:
             # 2. Fetch Planificaciones for these orders safely
             planificaciones = await self.repository.get_planificaciones_by_orden_ids(orden_ids)
             
-            # 3. Build a lookup map: (orden_id, proceso_id) -> operario_nombre
-            # Assuming Planificacion has orden_id, proceso_id, and relationship to operario
-            # 3. Build a lookup map: (orden_id, proceso_id) -> operario_nombre
-            # Result contains rows: (orden_id, proceso_id, nombre, apellido)
+            # 3. Dos mapas para saber quién hace cada línea:
+            #    - por PASADA (orden_trabajo_proceso.id): lo correcto desde que el
+            #      mismo proceso puede ir varias veces en la OT.
+            #    - por (orden_id, proceso_id): plan viejo, guardado antes de que la
+            #      pasada existiera. Se usa sólo como respaldo.
+            # Result contains rows: (orden_id, proceso_id, nombre, apellido, id_otp)
             plan_map = {}
+            plan_map_por_linea = {}
             for row in planificaciones:
                 try:
                     # Robust access using indices since we know the query "SELECT p.orden_id, ... " order
@@ -196,13 +198,17 @@ class OrdenTrabajoService:
                     pid = row[1]
                     nombre = row[2]
                     apellido = row[3]
-                    
+                    id_otp = row[4] if len(row) > 4 else None
+
+                    # Format name to Title Case (e.g. "JUAN PEREZ" -> "Juan Perez")
+                    nombre_fmt = nombre.title() if nombre else ""
+                    apellido_fmt = apellido.title() if apellido else ""
+                    nombre_completo = f"{nombre_fmt} {apellido_fmt}".strip()
+
+                    if id_otp is not None:
+                        plan_map_por_linea[int(id_otp)] = nombre_completo
                     if oid is not None and pid is not None:
-                        key = (int(oid), int(pid))
-                        # Format name to Title Case (e.g. "JUAN PEREZ" -> "Juan Perez")
-                        nombre_fmt = nombre.title() if nombre else ""
-                        apellido_fmt = apellido.title() if apellido else ""
-                        plan_map[key] = f"{nombre_fmt} {apellido_fmt}".strip()
+                        plan_map[(int(oid), int(pid))] = nombre_completo
                 except Exception as e:
                     # Log error but don't break the loop or crash
                     logger.warning(f"Service - Skipping malformed row: {row} - {e}")
@@ -230,13 +236,20 @@ class OrdenTrabajoService:
                             # OrdenTrabajoProcesoDTO usually has nested 'proceso' with id.
                             # Let's check structure: OrdenTrabajoProcesoDTO has 'proceso' nested object.
                             
+                            # Primero por PASADA: con el mismo proceso repetido, la
+                            # clave (orden, proceso) le pondría el mismo operario a
+                            # todas las pasadas.
+                            if proc.id is not None and proc.id in plan_map_por_linea:
+                                proc.operario_nombre = plan_map_por_linea[proc.id]
+                                continue
+
                             pid = proc.proceso.id if proc.proceso else None
                             if pid:
                                 key = (o.id, pid)
                                 # Log first few attempts to verify matching logic
                                 if len(valid_ordenes) == 0 and dto.procesos.index(proc) == 0:
                                      logger.info(f"Service - Buscando clave: {key} en mapa.")
-                                
+
                                 if key in plan_map:
                                     proc.operario_nombre = plan_map[key]
                     
@@ -421,10 +434,13 @@ class OrdenTrabajoService:
             raise ApplicationException("Error al obtener timeline de próximas entregas.") from e
 
 
-    async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, id_estado: int, user: dict | None = None):
+    async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, id_estado: int, user: dict | None = None, id_otp: int | None = None):
         logger.info(f"Service - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso} -> ID Estado {id_estado}")
-        
-        ot_proceso = await self.repository.update_proceso_status(id_orden, id_proceso, id_estado)
+
+        # `id_otp` es la PASADA puntual. El mismo proceso puede estar varias veces en
+        # la OT, así que sin él el repo tiene que adivinar cuál (toma la del paso más
+        # bajo y lo loguea).
+        ot_proceso = await self.repository.update_proceso_status(id_orden, id_proceso, id_estado, id_otp=id_otp)
         
         if not ot_proceso:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
@@ -470,10 +486,10 @@ class OrdenTrabajoService:
             "fin_real": ot_proceso.fin_real
         })
 
-    async def actualizarObservacionesProceso(self, id_orden: int, id_proceso: int, observaciones: str):
+    async def actualizarObservacionesProceso(self, id_orden: int, id_proceso: int, observaciones: str, id_otp: int | None = None):
         logger.info(f"Service - Actualizar observaciones proceso: Orden {id_orden}, Proceso {id_proceso}")
-        
-        ok = await self.repository.update_proceso_observaciones(id_orden, id_proceso, observaciones)
+
+        ok = await self.repository.update_proceso_observaciones(id_orden, id_proceso, observaciones, id_otp=id_otp)
         
         if not ok:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
@@ -557,12 +573,12 @@ class OrdenTrabajoService:
         if not exists:
              raise NotFoundException(f"No se encontró la orden de trabajo con ID {id_orden}")
 
-        # El PK de orden_trabajo_proceso es (id_orden_trabajo, id_proceso), así que
-        # cortamos antes con un mensaje claro en vez de devolver 500 por la violación de PK.
-        ya_existe = any(p.id_proceso == id_proceso for p in (exists.procesos or []))
-        if ya_existe:
-            raise BusinessException(f"Este proceso ya está cargado en la OT.")
-
+        # Antes se cortaba acá si el proceso ya estaba en la OT: la PK era
+        # (id_orden_trabajo, id_proceso) y la segunda pasada reventaba con un 500.
+        # Desde el 28/08/2026 la fila tiene id propio y el mismo proceso PUEDE ir
+        # varias veces — es lo normal en el taller (el legacy carga una fila por
+        # pasada). Si el taller lo repite, se guarda repetido; corregirlo es decisión
+        # de ellos, no nuestra.
         nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria, id_operario)
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
@@ -589,16 +605,21 @@ class OrdenTrabajoService:
         ]
         return ResponseDTO(status=True, data=data)
 
-    async def eliminarProceso(self, id_orden: int, id_proceso: int):
+    async def eliminarProceso(self, id_orden: int, id_proceso: int, id_otp: int | None = None):
         logger.info(f"Service - Eliminar proceso {id_proceso} de Orden {id_orden}")
 
         exists = await self.repository.find_by_id(id_orden)
         if not exists:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id_orden}")
 
-        proceso_en_ot = any(p.id_proceso == id_proceso for p in (exists.procesos or []))
-        if not proceso_en_ot:
+        procesos = exists.procesos or []
+        if id_otp is not None:
+            en_ot = any(p.id == id_otp for p in procesos)
+        else:
+            en_ot = any(p.id_proceso == id_proceso for p in procesos)
+        if not en_ot:
             raise NotFoundException(f"El proceso {id_proceso} no está cargado en la OT {id_orden}.")
 
-        await self.repository.eliminarProceso(id_orden, id_proceso)
+        # Borra UNA pasada, no todas las del mismo proceso.
+        await self.repository.eliminarProceso(id_orden, id_proceso, id_otp=id_otp)
         return ResponseDTO(status=True, data={"message": "Proceso eliminado correctamente"})
