@@ -40,7 +40,27 @@ if PG_URL:
     # que desactivamos el cache de asyncpg: evita el clásico "prepared statement
     # _pgN already exists" si algún día se pasa al puerto 6543 (transaction).
     engine_kwargs["connect_args"] = {"statement_cache_size": 0}
-    logger.info("DB: Postgres (Supabase)")
+
+    # Cuántas conexiones abre ESTA instancia contra el pooler.
+    #
+    # El session pooler de Supabase tiene un tope de clientes para TODO el
+    # proyecto (15 en el plan actual), y el default de SQLAlchemy —5 fijas + 10
+    # de overflow— se lo come entero una sola instancia. Con producción andando,
+    # cualquier segundo backend contra la misma base (uno local, un script, una
+    # revisión nueva conviviendo con la vieja durante un deploy) se lleva:
+    #
+    #     (EMAXCONNSESSION) max clients reached in session mode
+    #                       - max clients are limited to pool_size: 15
+    #
+    # No es un error del código: es la suma de los pools. Se deja configurable
+    # para poder levantar un backend local con una o dos conexiones sin dejar sin
+    # lugar al de producción. Los valores por defecto son los mismos de antes.
+    engine_kwargs["pool_size"] = int(os.getenv("DB_POOL_SIZE", "5"))
+    engine_kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    logger.info(
+        "DB: Postgres (Supabase) — pool %s + %s de overflow",
+        engine_kwargs["pool_size"], engine_kwargs["max_overflow"],
+    )
 else:
     DRIVER = "ODBC Driver 17 for SQL Server"
     DB_SERVER = os.getenv("DB_SERVER")
