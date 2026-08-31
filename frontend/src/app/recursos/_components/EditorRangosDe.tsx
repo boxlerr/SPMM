@@ -207,7 +207,7 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, o
                                 <span>{r.nombre}</span>
                                 <span
                                     className={`flex items-center gap-1 ${r.operarios === 0 ? "text-amber-700" : "text-muted-foreground"}`}
-                                    title={r.operarios === 0 ? "Nadie tiene este rango" : "Operarios con este rango"}
+                                    title={r.operarios === 0 ? "Nadie tiene este rango" : "Recurso humano con este rango"}
                                 >
                                     <Users className="h-3 w-3" />
                                     {r.operarios}

@@ -239,3 +239,69 @@ def test_encender_la_skill_apagada_tiene_boton():
     assert accion["tipo"] == "skill_nativa"
     assert accion["id"] == 30 and accion["habilitado"] is True
     assert {o["id"] for o in accion["objetivos"]} == {45, 46}
+
+
+# --------------------------------------------------------------------------
+# La taxonomía cerrada (Lucas, 28/08/2026)
+#
+# «Tenés recurso máquina, problema de recurso máquina, o problema de recurso
+# humano» — y del humano, «uno: skills, ningún operario tiene ese proceso». Lo que
+# se testea acá no es el texto (ese cambia) sino que TODO aviso entre en una de
+# las cuatro combinaciones: sin eso la pantalla vuelve a tener seis rótulos
+# inventados y la pregunta «¿cuál es la traba acá?» no se puede contestar.
+# --------------------------------------------------------------------------
+
+RECURSOS = {"maquina", "humano"}
+SUBTIPOS = {"rango", "capacidad", "skill"}
+
+
+def test_todo_aviso_dice_de_que_recurso_habla_y_por_que():
+    diags = _diagnosticar(
+        [
+            _proc(12676, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE]),
+            _proc(1, 99, "TEMPLADO", [OFICIAL + 90]),
+            _proc(2, 77, "PULIDO", []),
+        ],
+        nativas_off={30: {45, 46}},
+    )
+    assert diags, "el caso tiene que generar avisos, si no el test no prueba nada"
+    for d in diags:
+        assert d["recurso"] in RECURSOS, (d["tipo"], d.get("recurso"))
+        assert d["subtipo"] in SUBTIPOS, (d["tipo"], d.get("subtipo"))
+        # Recurso humano no tiene "capacidad" y máquina no tiene "skill": son
+        # cuatro combinaciones, no seis.
+        if d["recurso"] == "humano":
+            assert d["subtipo"] != "capacidad", d["tipo"]
+        else:
+            assert d["subtipo"] != "skill", d["tipo"]
+
+
+def test_habilidad_apagada_es_recurso_humano_skill():
+    # El rango lo tienen: lo que falta es la habilidad. Va a Recursos › ficha de la
+    # persona, no a cargar rangos.
+    diags = _diagnosticar(
+        [_proc(12676, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE])],
+        nativas_off={30: {45, 46}},
+    )
+    d = _por_tipo(diags, "proceso_sin_operarios")
+    assert (d["recurso"], d["subtipo"]) == ("humano", "skill")
+
+
+def test_rango_que_no_tiene_nadie_es_recurso_humano_rango():
+    diags = _diagnosticar([_proc(1, 99, "TEMPLADO", [OFICIAL + 90])])
+    d = _por_tipo(diags, "proceso_sin_operarios")
+    assert (d["recurso"], d["subtipo"]) == ("humano", "rango")
+    # "¿Cuál es el rango que tiene? Medio oficial. Debería decir qué tiene la
+    # máquina" — el aviso separa lo que hay de lo que se pide.
+    assert d["pide"]
+
+
+def test_los_avisos_media_llevan_a_la_fila_que_hay_que_tocar():
+    # Los Media no traen botón que aplique nada —qué rangos van lo sabe el taller—,
+    # así que el link es su única salida y tiene que caer en el proceso, no en la
+    # lista de 414.
+    diags = _diagnosticar([_proc(2, 77, "PULIDO", [])])
+    d = _por_tipo(diags, "proceso_sin_rango")
+    assert d["severidad"] == "advertencia"
+    objetivo = d["soluciones"][0]["objetivo"]
+    assert objetivo["tipo"] == "proceso" and objetivo["id"] == 77

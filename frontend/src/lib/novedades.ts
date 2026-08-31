@@ -47,6 +47,45 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "avisos-recurso-maquina-recurso-humano",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Cada aviso empieza diciendo de qué recurso habla",
+        detalle:
+            "Antes el aviso arrancaba por el nombre del proceso y el motivo aparecía a mitad del texto, escrito distinto cada vez: mirando la pantalla no se podía contestar «¿cuál es la traba acá?». Ahora todos empiezan igual y con las mismas cuatro palabras posibles: Recurso máquina · Rango, Recurso máquina · Capacidad, Recurso humano · Rango o Recurso humano · Skill. Al lado se lee qué tiene hoy y qué le piden —«Medio oficial → Oficial»—, que es el resumen del problema en dos palabras. Los rótulos viejos («Sin gente», «Cuello», «Terceros») no decían a qué pantalla ir a arreglarlo.",
+        href: "/operaciones",
+    },
+    {
+        id: "marcar-avisos-como-resueltos",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Podés dar un aviso por resuelto y sacarlo de la lista",
+        detalle:
+            "Los avisos naranjas (Media) no traban nada y se quedan siempre en pantalla, porque son recomendaciones: con un lote grande de OT terminaban tapando las trabas rojas de verdad. Ahora cada aviso tiene un tilde para darlo por resuelto y hay un «Marcar todo listo» arriba: bajan a la tira verde con el nombre de lo que resolviste y la cifra de «Trabas sin resolver» los descuenta. No cambia el plan ni toca ningún dato, y se deshace uno por uno o entero. Ojo: el que manda es el recálculo — si el problema sigue, el aviso vuelve a la lista.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-media-boton-ir-a-arreglarlo",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los avisos naranjas también te llevan a arreglarlos",
+        detalle:
+            "Los avisos que no traen botón de «Aplicar y recalcular» —porque qué rango va lo sabe el taller, no el sistema— ahora tienen «Ir a arreglarlo»: abre Recursos en otra pestaña, parado en la máquina, el proceso o la persona que hay que tocar, sin perder el borrador. Cuando volvés a la pestaña de la planificación, el sistema se fija solo si cambió algo en Recursos y recalcula para mostrarte qué quedó resuelto.",
+        href: "/operaciones",
+    },
+    {
+        id: "recurso-humano-en-todas-las-pantallas",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "General",
+        titulo: "Se dice «recurso humano» en todos lados, no operario ni persona",
+        detalle:
+            "El mismo dato se llamaba Operario en una pantalla, Persona en otra y Cantidad de empleados en una tercera. Ahora es «Recurso humano» y «Cantidad de recurso humano» en todas: en la carga de procesos de la OT, en la lista de planificación, en la vista previa, en el cronograma, en el tablero y en Recursos. Las máquinas, igual: «Recurso maquinaria». Es solo cómo se lee — no cambió ningún dato ni ninguna cuenta.",
+    },
+    {
         id: "un-proceso-varias-veces-en-la-ot",
         fecha: "2026-08-28",
         tipo: "arreglo",

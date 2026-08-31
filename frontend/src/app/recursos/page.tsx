@@ -356,7 +356,7 @@ export default function RecursosPage() {
           className={`flex-1 ${tabActiva === "operarios" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <User className="h-4 w-4 mr-2" />
-          <span>Operarios</span>
+          <span>Recurso humano</span>
         </Button>
         <Button
           variant={tabActiva === "maquinas" ? "default" : "outline"}
@@ -364,7 +364,7 @@ export default function RecursosPage() {
           className={`flex-1 ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Factory className="h-4 w-4 mr-2" />
-          <span>Maquinarias</span>
+          <span>Recurso maquinaria</span>
         </Button>
         <Button
           variant={tabActiva === "procesos" ? "default" : "outline"}
@@ -398,9 +398,9 @@ export default function RecursosPage() {
           <div className="p-4 md:p-6 border-b">
             <div className="flex items-center gap-2">
               <User className="h-5 w-5 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Operarios</h2>
+              <h2 className="text-lg font-semibold">Recurso humano</h2>
             </div>
-            <p className="text-sm text-muted-foreground mt-1">Gestión de personal operativo</p>
+            <p className="text-sm text-muted-foreground mt-1">Gestión del recurso humano</p>
           </div>
 
           <SharedOperatorsList

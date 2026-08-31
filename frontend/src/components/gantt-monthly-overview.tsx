@@ -318,7 +318,7 @@ export function GanttMonthlyOverview({ tasks, resources, viewMode, onTaskClick, 
               style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH }}
             >
               <div className="flex items-center gap-2">
-                {viewMode === "operario" ? "Operarios" : "Máquinas"}
+                {viewMode === "operario" ? "Recurso humano" : "Recurso maquinaria"}
               </div>
             </div>
             {[0, 1, 2, 3].map((week) => (

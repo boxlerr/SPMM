@@ -165,14 +165,14 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                 <div className="flex-1 min-w-[200px]">
                     <div className="flex items-center gap-2 mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                         <User className="h-3 w-3" />
-                        <span>Operario</span>
+                        <span>Recurso humano</span>
                     </div>
                     <Select value={selectedOperator} onValueChange={setSelectedOperator}>
                         <SelectTrigger className="w-full bg-white">
-                            <SelectValue placeholder="Todos los operarios" />
+                            <SelectValue placeholder="Todo el recurso humano" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="all">Todos los operarios</SelectItem>
+                            <SelectItem value="all">Todo el recurso humano</SelectItem>
                             {uniqueOperators.map(op => (
                                 <SelectItem key={op} value={op}>{op}</SelectItem>
                             ))}

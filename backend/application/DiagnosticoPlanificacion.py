@@ -40,6 +40,30 @@ from backend.application.PlanificacionService import (
 BLOQUEANTE = "bloqueante"
 ADVERTENCIA = "advertencia"
 
+# ── La taxonomía cerrada (Lucas, 28/08/2026) ─────────────────────────────────
+#
+# Todo aviso dice primero DE QUÉ RECURSO habla y recién después qué le pasa,
+# siempre con estas cuatro combinaciones y nunca con otras:
+#
+#     Recurso máquina → rango | capacidad
+#     Recurso humano  → rango | skill
+#
+# Salió de que Lucas mirara la pantalla llena de avisos y no pudiera contestar
+# "¿cuál es la traba acá?". El problema no era el texto: era que cada aviso
+# empezaba por el nombre del proceso y el motivo aparecía a mitad del detalle,
+# escrito distinto cada vez ("no hay ninguna máquina cargada", "su máquina no
+# acepta el rango", "hoy no lo puede hacer nadie"). Tres formas de decir dos
+# cosas. Con la categoría adelante la lista se barre sin leerla.
+#
+# No hay una quinta categoría a propósito. Si aparece algo que no entra en las
+# cuatro, se habla con el taller antes de inventarle uno nuevo: el valor de esto
+# es que sea cerrado.
+MAQUINA = "maquina"
+HUMANO = "humano"
+RANGO = "rango"
+CAPACIDAD = "capacidad"
+SKILL = "skill"
+
 # Siglas del taller que NO son palabras: si se las escribe como palabra el proceso
 # deja de reconocerse («soldadura con mig» no lo lee nadie como MIG).
 _SIGLAS = {"MIG", "MAG", "TIG", "CNC", "CNCC", "ELEC", "PU", "OT"}
@@ -554,7 +578,7 @@ def _procesos_que_nadie_puede_hacer(
                 "texto": f"Volvé a encenderle **{d['nombre']}** a **{_listar(quienes_off)}**: "
                          f"ya {_concuerda(quienes_off, 'tiene', 'tienen')} el rango, "
                          "solo está apagado en su ficha.",
-                "donde": "Recursos › Operarios",
+                "donde": "Recursos › Recurso humano",
                 "accion": _accion_encender_skill(proc_id, d["nombre"], apagados, nombre_operario),
             })
         if directo:
@@ -574,12 +598,12 @@ def _procesos_que_nadie_puede_hacer(
         soluciones.append({
             "texto": f"Dale **{_listar_rangos(pedidos)}** a alguien más: con cualquiera de "
                      f"{_concuerda(pedidos, 'ese rango', 'esos rangos')} alcanza.",
-            "donde": "Recursos › Operarios",
+            "donde": "Recursos › Recurso humano",
         })
         soluciones.append({
             "texto": "Cargale la habilidad a mano en la ficha de quien lo vaya a hacer: "
                      "habilita solo a esa persona.",
-            "donde": "Recursos › Operarios",
+            "donde": "Recursos › Recurso humano",
         })
         _como_alternativa(soluciones)
 
@@ -587,6 +611,19 @@ def _procesos_que_nadie_puede_hacer(
             "id": f"nadie-puede-{proc_id}",
             "tipo": "proceso_sin_operarios",
             "severidad": BLOQUEANTE,
+            # Los dos casos se ven iguales en la pantalla y se arreglan en pantallas
+            # distintas: si el rango ya lo tienen y lo que falta es encenderles el
+            # proceso en la ficha, es un problema de HABILIDAD; si no lo tiene nadie,
+            # es de RANGO. Decirlo en el rótulo ahorra abrir la tarjeta para saber
+            # a cuál de las dos hay que ir.
+            "recurso": HUMANO,
+            "subtipo": SKILL if quienes_off else RANGO,
+            # En el caso de la habilidad NO se contrapone contra el rango: el rango
+            # lo tienen. Poner "→ Ayudante o Ingresante" al lado haría creer que
+            # falta cargarlo, que es exactamente el consejo equivocado que este
+            # aviso vino a arreglar.
+            "tiene": "habilidad apagada" if quienes_off else "no lo tiene nadie",
+            "pide": "" if quienes_off else _listar_rangos(pedidos),
             # Todos los títulos arrancan por el SUJETO —el proceso, la máquina, la
             # persona— y siguen con lo que le pasa. Antes cada uno empezaba distinto
             # ("Nadie puede hacer X", "10 jornadas para 3 máquinas", "Hay trabajo
@@ -676,7 +713,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
             soluciones.append({
                 "texto": f"Si **{_listar([maq_nombre[m] for m in sin_habilitar])}** también puede hacer este "
                          f"trabajo, agregale **{rangos_txt}** y el trabajo se reparte entre más máquinas.",
-                "donde": "Recursos › Maquinarias",
+                "donde": "Recursos › Recurso maquinaria",
                 "accion": _accion_maquina(sin_habilitar, maq_nombre, maq_rangos, d["rangos"]),
             })
         soluciones.append({
@@ -728,6 +765,14 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
             "id": "cuello-" + "-".join(str(m) for m in habilitadas),
             "tipo": "cuello_de_maquina",
             "severidad": BLOQUEANTE if afecta_ots else ADVERTENCIA,
+            # Capacidad y no rango: las máquinas aceptan el trabajo, lo que no
+            # alcanza son las horas. Es el aviso que a Lucas le gustó ("me encantó
+            # lo de Media") justamente porque destapa límites del taller que no
+            # están a la vista en ninguna pantalla.
+            "recurso": MAQUINA,
+            "subtipo": CAPACIDAD,
+            "tiene": f"{len(habilitadas)} {_concuerda(habilitadas, 'máquina', 'máquinas')}",
+            "pide": _corto(d["minutos"]),
             "titulo": titulo,
             "detalle": detalle,
             "impacto": {
@@ -872,8 +917,15 @@ def _procesos_sin_maquina_compatible(
         # asigna?". Son dos cruces distintos y hay que nombrarlos por separado.
         n_hacen = len(d["personas"])
 
+        # La taxonomía sale de la CAUSA, no del tipo de aviso: las cuatro causas de
+        # "pidió máquina y no la tuvo" son dos problemas de máquina y uno de gente.
+        recurso, subtipo = MAQUINA, RANGO
+        tiene = pide = ""
+
         if d["causa"] == "sin_maquina":
             severidad = ADVERTENCIA
+            recurso, subtipo = MAQUINA, CAPACIDAD
+            tiene = "ninguna máquina cargada"
             titulo = f"{nombre_proc}: no hay ninguna máquina cargada para este trabajo"
             detalle = (
                 f"{_quien_lo_hace(n_hacen, rangos_proc)} No hay ninguna máquina cargada "
@@ -881,7 +933,7 @@ def _procesos_sin_maquina_compatible(
             )
             soluciones = [{
                 "texto": "Si este trabajo usa una máquina, cargala con los mismos rangos que el proceso.",
-                "donde": "Recursos › Maquinarias",
+                "donde": "Recursos › Recurso maquinaria",
             }, {
                 "texto": "Si va a mano, dejalo así: el aviso no molesta.",
                 "donde": "",
@@ -894,6 +946,8 @@ def _procesos_sin_maquina_compatible(
             # no en Recursos: no hay nada que Lucas pueda cargar para resolverlo. Es
             # aviso, no traba, porque lo más probable es que efectivamente vaya a mano.
             severidad = ADVERTENCIA
+            recurso, subtipo = MAQUINA, CAPACIDAD
+            tiene = "máquina sin identificar"
             titulo = f"{nombre_proc}: no se sabe en qué máquina se hace"
             detalle = (
                 f"{_quien_lo_hace(n_hacen, rangos_proc)} Lo único que no pasa es que quede "
@@ -918,6 +972,12 @@ def _procesos_sin_maquina_compatible(
             rangos_maq = sorted(nombre_rango.get(r, f"#{r}") for r in rangos_maq_ids)
             pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
             pide_proc = _listar_rangos(rangos_proc) or "ningún rango"
+            # Este es el caso del Excel de Lucas: "Alta · Recurso máquina · Rango ·
+            # Medio oficial — el proceso Soldadura MIG requiere rango Oficial y no
+            # tenemos máquina con ese rango". Lo que la máquina tiene va de un lado
+            # y lo que el proceso pide del otro; el aviso no los mezcla nunca.
+            recurso, subtipo = MAQUINA, RANGO
+            tiene, pide = pide_maq, pide_proc
             # Para que alguien tome la máquina hacen falta DOS cruces, y el solver los
             # pide juntos (_agregar_compatibilidad_op_maq):
             #   1) el rango del OPERARIO tiene que estar en la máquina;
@@ -975,7 +1035,7 @@ def _procesos_sin_maquina_compatible(
                 soluciones.append({
                     "texto": f"Dale **{pide_maq}** a quien maneja **{_listar(maqs)}**: es lo "
                              f"único que {_concuerda(maqs, 'la', 'las')} vuelve a poner en juego.",
-                    "donde": "Recursos › Operarios",
+                    "donde": "Recursos › Recurso humano",
                 })
             elif rangos_maq:
                 soluciones.append({
@@ -990,7 +1050,7 @@ def _procesos_sin_maquina_compatible(
                 "texto": f"Al revés: agregale **{pide_proc}** a "
                          + _concuerda(maqs, "la máquina", f"las {len(maqs)} máquinas")
                          + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a {abre_a}.",
-                "donde": "Recursos › Maquinarias",
+                "donde": "Recursos › Recurso maquinaria",
                 "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"]),
             })
             _como_alternativa(soluciones)
@@ -1009,6 +1069,11 @@ def _procesos_sin_maquina_compatible(
                 nombre_rango.get(r, f"#{r}") for m in d["usables"] for r in maq_rangos.get(m, set())
             })
             pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
+            # Acá el que no llega es el RECURSO HUMANO, no la máquina: el trabajo y
+            # la máquina se entienden, y lo que falta es el rango de las personas.
+            recurso, subtipo = HUMANO, RANGO
+            tiene = _listar_rangos(rangos_proc) or "ningún rango"
+            pide = pide_maq
             titulo = (
                 f"{nombre_proc}: los que lo hacen no pueden tomar "
                 + _concuerda(maqs, "la máquina", "las máquinas")
@@ -1033,7 +1098,7 @@ def _procesos_sin_maquina_compatible(
             soluciones = [{
                 "texto": _cerrar(f"Dale **{pide_maq}** a {destino}: con eso "
                                  + _concuerda(quienes, "puede", "pueden") + " tomar la máquina"),
-                "donde": "Recursos › Operarios",
+                "donde": "Recursos › Recurso humano",
             }]
             # Acá la habilidad a mano SÍ destraba —el solver la toma como habilitación en
             # la máquina, ver _agregar_compatibilidad_op_maq— y es el cambio más chico de
@@ -1042,7 +1107,7 @@ def _procesos_sin_maquina_compatible(
             soluciones.append({
                 "texto": "Cargale la habilidad a mano en su ficha: acá sí destraba, y no le "
                          "tocás el rango a nadie más.",
-                "donde": "Recursos › Operarios",
+                "donde": "Recursos › Recurso humano",
             })
             if rangos_proc:
                 soluciones.append({
@@ -1050,7 +1115,7 @@ def _procesos_sin_maquina_compatible(
                              + _concuerda(maqs, "la máquina", "las máquinas")
                              + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a "
                              + _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario) + ".",
-                    "donde": "Recursos › Maquinarias",
+                    "donde": "Recursos › Recurso maquinaria",
                     "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"]),
                 })
             _como_alternativa(soluciones)
@@ -1059,6 +1124,10 @@ def _procesos_sin_maquina_compatible(
             "id": f"maquina-incompatible-{proc_id}",
             "tipo": "maquina_incompatible",
             "severidad": severidad,
+            "recurso": recurso,
+            "subtipo": subtipo,
+            "tiene": tiene,
+            "pide": pide,
             "titulo": titulo,
             "detalle": detalle,
             "impacto": {
@@ -1087,6 +1156,10 @@ def _procesos_sin_rango(procesos):
         "id": f"sin-rango-{proc_id}",
         "tipo": "proceso_sin_rango",
         "severidad": ADVERTENCIA,
+        "recurso": HUMANO,
+        "subtipo": RANGO,
+        "tiene": "ningún rango",
+        "pide": "",
         "titulo": f"{d['nombre']}: se lo puede llevar cualquiera, sepa o no",
         "detalle": "No tiene ningún rango cargado, así que el plan se lo puede dar a "
                    "cualquiera que esté libre. Sale igual, pero nadie está mirando quién "
@@ -1100,6 +1173,11 @@ def _procesos_sin_rango(procesos):
         "soluciones": [{
             "texto": "Cargale los rangos que hacen falta para hacerlo.",
             "donde": "Recursos › Procesos",
+            # Sin botón que lo aplique solo —qué rangos van lo sabe el taller—, pero
+            # el link tiene que caer en ESTE proceso y no en la lista de 414. Antes
+            # eso solo pasaba cuando la solución traía `accion`, así que justo los
+            # avisos Media, que nunca la traen, eran los que te dejaban a pie.
+            "objetivo": {"tipo": "proceso", "id": proc_id, "nombre": d["nombre"]},
         }],
     } for proc_id, d in sin_rango.items()]
 
@@ -1129,6 +1207,14 @@ def _trabajo_tercerizado(procesos):
         "id": "trabajo-tercerizado",
         "tipo": "trabajo_tercerizado",
         "severidad": ADVERTENCIA,
+        # Capacidad que el taller no tiene y sale afuera a propósito. Entra en la
+        # taxonomía igual que los demás —Lucas pidió que TODOS empiecen diciendo de
+        # qué recurso hablan—, pero el detalle sigue aclarando que no hay nada que
+        # corregir: categoría no quiere decir problema.
+        "recurso": MAQUINA,
+        "subtipo": CAPACIDAD,
+        "tiene": "se hace afuera",
+        "pide": "",
         "titulo": f"{_listar_corto(_nombres_terc)} "
                   f"{_concuerda(_nombres_terc, 'sale', 'salen')} del taller",
         "detalle": (
@@ -1144,7 +1230,7 @@ def _trabajo_tercerizado(procesos):
         },
         "soluciones": [{
             "texto": "Si querés que figuren a nombre de quien los gestiona, dale el rango TERCERIZADO.",
-            "donde": "Recursos › Operarios",
+            "donde": "Recursos › Recurso humano",
         }],
     }]
 
@@ -1178,6 +1264,12 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
         "id": "trabajo-en-vacantes",
         "tipo": "puestos_vacantes",
         "severidad": ADVERTENCIA,
+        # El rango está cubierto en el papel y no en la gente: por eso es "rango" y
+        # no "skill". La habilidad no falta, falta quién la tenga.
+        "recurso": HUMANO,
+        "subtipo": RANGO,
+        "tiene": f"{len(por_op)} {_concuerda(por_op, 'puesto sin cubrir', 'puestos sin cubrir')}",
+        "pide": "",
         "titulo": f"{_listar_corto(_nombres_vac)}: ese trabajo no lo va a hacer nadie",
         "detalle": (
             f"El plan le cargó trabajo a {_concuerda(_nombres_vac, 'un puesto', 'puestos')} que "
@@ -1194,6 +1286,12 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
         },
         "soluciones": [{
             "texto": "Marcalos como no disponibles y salen del plan.",
-            "donde": "Recursos › Operarios",
+            "donde": "Recursos › Recurso humano",
+            # Con uno solo el link cae en su ficha; con varios queda en la pestaña,
+            # que es lo mismo que hace `enlaceDe` con las acciones de varios
+            # objetivos: apuntar a uno haría creer que el aviso habla de ese solo.
+            **({"objetivo": {"tipo": "operario", "id": next(iter(por_op)),
+                             "nombre": next(iter(por_op.values()))["nombre"]}}
+               if len(por_op) == 1 else {}),
         }],
     }]

@@ -54,6 +54,10 @@ interface PlanificacionResult {
      *  "Sin asignar", con el desplegable disponible por si igual quieren una. */
     usa_maquina?: boolean;
     secuencia?: number;
+    /** Qué PASADA de la OT es esta fila (orden_trabajo_proceso.id).
+     *  Es lo único que distingue las 13 pasadas de TORNO CNC de la 7497 entre sí,
+     *  y por eso es lo que se tilda al agregar procesos sueltos a mano. */
+    id_orden_trabajo_proceso?: number | null;
     fecha_inicio_estimada?: string;
     fecha_fin_estimada?: string;
     // Enriched fields
@@ -120,6 +124,96 @@ interface PlanningPreviewScreenProps {
     /** OTs excedentes que ya venían forzadas en el borrador. */
     forzarIdsIniciales?: number[];
 }
+
+/**
+ * Hasta qué paso de la OT se puede agregar un proceso suelto a mano.
+ *
+ * Regla de Lucas (28/08): "para poder ir, los procesos manuales tienen que estar
+ * en el proceso uno o dos". El motivo es físico, no informático: el fresado va
+ * después del torneado porque la pieza no está lista para fresar antes. Agregar
+ * el paso 6 sin haber cortado ni preparado el torno no significa nada en el taller.
+ *
+ * Es una limitación de la CARGA MANUAL, no del algoritmo: el solver sigue
+ * planificando la OT entera cuando se la agrega entera, con todos sus pasos.
+ *
+ * Y es a propósito que la salida sea ir a arreglar la OT: cuando el paso 3 debería
+ * ser el 1, lo que está mal es la OT (Lucas mostró la 15670 con los pasos cambiados
+ * y repetidos), y quedaba escondido hasta que alguien lo miraba a ojo.
+ */
+const PASO_MAXIMO_A_MANO = 2;
+
+/**
+ * Las pasadas de una OT en orden de trabajo, cada una con su paso y si se puede
+ * elegir a mano.
+ *
+ * `paso` sale de `orden`, que es lo que se ve en la OT y lo que Lucas señaló en
+ * pantalla. Cuando viene vacío se cae a la posición en la lista: sin eso una OT
+ * con el campo sin cargar no dejaría agregar nada y el aviso sería incomprensible.
+ */
+const pasadasParaAgregar = (procs: any[]) =>
+    [...(procs || [])]
+        .sort((a, b) => (a.orden || 0) - (b.orden || 0) || (a.id || 0) - (b.id || 0))
+        .map((p, i) => {
+            const paso = Number(p.orden) > 0 ? Number(p.orden) : i + 1;
+            return { rel: p, paso, habilitada: paso <= PASO_MAXIMO_A_MANO };
+        });
+
+/** Una tanda de "Agregar OTs": lo que entró al plan de un saque, a mano. */
+type TandaManual = {
+    /** OTs que se agregaron enteras. */
+    ots: number[];
+    /** Pasadas sueltas (orden_trabajo_proceso.id) por OT. */
+    lineas: Record<number, number[]>;
+};
+
+/** Todas las OTs que tocaron estas tandas (enteras o por procesos sueltos). */
+const otsDeTandas = (tandas: TandaManual[]) => {
+    const s = new Set<number>();
+    for (const t of tandas) {
+        t.ots.forEach(id => s.add(id));
+        Object.keys(t.lineas).forEach(id => s.add(Number(id)));
+    }
+    return s;
+};
+
+/** Las pasadas sueltas de estas tandas, juntas y por OT. */
+const lineasDeTandas = (tandas: TandaManual[]) => {
+    const acc: Record<number, number[]> = {};
+    for (const t of tandas) {
+        for (const [oid, ids] of Object.entries(t.lineas)) {
+            acc[Number(oid)] = [...(acc[Number(oid)] || []), ...ids];
+        }
+    }
+    return acc;
+};
+
+/** Las mismas tandas sin rastro de estas OTs. Se usa al quitar una OT del plan. */
+const tandasSinOTs = (tandas: TandaManual[], quitar: Set<number>): TandaManual[] =>
+    tandas
+        .map(t => ({
+            ots: t.ots.filter(id => !quitar.has(id)),
+            lineas: Object.fromEntries(
+                Object.entries(t.lineas).filter(([oid]) => !quitar.has(Number(oid)))
+            ) as Record<number, number[]>,
+        }))
+        .filter(t => t.ots.length > 0 || Object.keys(t.lineas).length > 0);
+
+/**
+ * Con qué clave se guarda un retoque a mano de una fila del plan.
+ *
+ * Lleva la `secuencia` y no sólo (OT, proceso): desde que una OT puede repetir el
+ * mismo proceso (la 7497 tiene TORNO CNC 13 veces), `55-812` es la misma clave
+ * para las 13 pasadas — elegirle la persona a una se la ponía a todas y el
+ * desplegable de las otras doce se movía solo. La secuencia es la posición dentro
+ * de la OT y sí es única.
+ */
+const claveDeEdicion = (item: { orden_id: number; proceso_id: number; secuencia?: number }) =>
+    `${item.orden_id}-${item.proceso_id}-${item.secuencia ?? 0}`;
+
+/** La clave que se usaba antes de que existieran las pasadas repetidas. Sólo para
+ *  leer borradores viejos: lo que se guarda de ahora en más va con `claveDeEdicion`. */
+const claveVieja = (item: { orden_id: number; proceso_id: number }) =>
+    `${item.orden_id}-${item.proceso_id}`;
 
 export function PlanningPreviewScreen({
     isOpen,
@@ -311,8 +405,7 @@ export function PlanningPreviewScreen({
     /** Devuelve true si el proceso "unfit" fue completado a mano por el usuario
      *  (operario + maquinaria + horario). En ese caso lo incluimos en el plan al confirmar. */
     const isUnfitManuallyAssigned = (item: PlanificacionResult): boolean => {
-        const key = `${item.orden_id}-${item.proceso_id}`;
-        const edit = editedResults[key];
+        const edit = editedResults[claveDeEdicion(item)] || editedResults[claveVieja(item)];
         if (!edit) return false;
         return !!edit.id_operario && edit.id_operario > 0
             && !!edit.id_maquinaria && edit.id_maquinaria > 0
@@ -355,7 +448,7 @@ export function PlanningPreviewScreen({
         if (!onRecalculate) return;
         const forcedArr = Array.from(next);
         const mergedIds = buildOrdenIdsForRecalc(forcedArr);
-        onRecalculate(mergedIds, planningRange, forcedArr);
+        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds));
     };
 
     /**
@@ -432,10 +525,7 @@ export function PlanningPreviewScreen({
 
     const handleConfirmWithEdits = () => {
         // Devuelve al padre los resultados combinados (originales + edits del usuario).
-        const finalResults = results.map(item => {
-            const key = `${item.orden_id}-${item.proceso_id}`;
-            return editedResults[key] || item;
-        });
+        const finalResults = results.map(item => getEffectiveItem(item));
         (onConfirm as any)(finalResults);
     };
 
@@ -447,6 +537,51 @@ export function PlanningPreviewScreen({
     const [addPopoverOpen, setAddPopoverOpen] = React.useState(false);
     /** UI: orden expandida en el panel de excedentes para mostrar la explicación. */
     const [expandedExcedenteId, setExpandedExcedenteId] = React.useState<number | null>(null);
+
+    // ---------- Lo que se agregó A MANO al plan ----------
+
+    /**
+     * Cada tanda de "Agregar OTs" queda anotada acá, en orden.
+     *
+     * Son tres cosas que Lucas pidió el 28/08 mirando la pantalla y que necesitan
+     * el mismo dato: "que te aparezca qué cosas agregaste y que puedas volver para
+     * atrás, para que si te equivocaste…". Sin esta anotación el plan que vuelve
+     * del solver es indistinguible del que salió solo: no hay color que poner ni
+     * nada que deshacer.
+     *
+     * Una OT no puede aparecer en dos tandas: apenas entra al plan desaparece de
+     * `addableOrders`, así que cada OT pertenece a lo sumo a una.
+     */
+    const [tandasManuales, setTandasManuales] = React.useState<TandaManual[]>([]);
+
+    // El plan nuevo empieza sin nada agregado a mano. Va sólo con `isOpen` y no con
+    // `results`: un recálculo NO borra lo que se agregó, es justo lo contrario.
+    React.useEffect(() => {
+        if (!isOpen) return;
+        setTandasManuales([]);
+    }, [isOpen]);
+
+    /** OTs que entraron al plan a mano (enteras o por procesos sueltos). */
+    const ordenesAMano = React.useMemo(() => otsDeTandas(tandasManuales), [tandasManuales]);
+
+    /** Pasadas sueltas que entraron a mano, para pintarlas en la OT desplegada. */
+    const lineasAMano = React.useMemo(() => {
+        const s = new Set<number>();
+        for (const t of tandasManuales) {
+            for (const ids of Object.values(t.lineas)) ids.forEach(id => s.add(id));
+        }
+        return s;
+    }, [tandasManuales]);
+
+    /**
+     * El `lineas_por_orden` que hay que mandar en CUALQUIER recálculo.
+     *
+     * Es acumulado a propósito. Antes cada recálculo mandaba sólo las pasadas de
+     * esa tanda —y "Forzar", "Volver a revisar" o quitar una OT no mandaban
+     * ninguna—, así que una OT de la que se habían elegido 2 de 13 pasadas volvía
+     * con las 13 al siguiente recálculo, sin avisar y sin que nadie lo pidiera.
+     */
+    const lineasVigentes = React.useMemo(() => lineasDeTandas(tandasManuales), [tandasManuales]);
 
     // Limpiar selección "para agregar" cuando cambia el set de resultados (ya fueron incluidas).
     React.useEffect(() => {
@@ -523,6 +658,27 @@ export function PlanningPreviewScreen({
         return n;
     }, [pendingAddIds, pendingAddLineas]);
 
+    /**
+     * Las pasadas sueltas que van en un recálculo: las que ya estaban vigentes más
+     * las de la tanda nueva, y sólo de OTs que siguen en el plan.
+     *
+     * Toda llamada a `onRecalculate` tiene que pasar por acá. Mandar `undefined`
+     * significa "planificá las OTs enteras", y ése era el bug: cualquier recálculo
+     * que no fuera el de agregar (forzar, quitar, volver a revisar) le devolvía a
+     * la OT los procesos que nadie había elegido.
+     */
+    const lineasParaEnviar = (ids: number[], extra?: Record<number, number[]>) => {
+        const enPlan = new Set(ids);
+        const acc: Record<number, number[]> = {};
+        for (const [oid, ls] of Object.entries(lineasVigentes)) {
+            if (enPlan.has(Number(oid))) acc[Number(oid)] = [...ls];
+        }
+        for (const [oid, ls] of Object.entries(extra || {})) {
+            if (enPlan.has(Number(oid))) acc[Number(oid)] = [...(acc[Number(oid)] || []), ...ls];
+        }
+        return Object.keys(acc).length > 0 ? acc : undefined;
+    };
+
     /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
     const handleRecalculate = (extraIds: number[] = [], lineasPorOrden?: Record<number, number[]>) => {
         if (!onRecalculate) {
@@ -531,7 +687,7 @@ export function PlanningPreviewScreen({
         }
         const forcedArr = Array.from(forzarOrdenIds);
         const mergedIds = buildOrdenIdsForRecalc(forcedArr, extraIds);
-        onRecalculate(mergedIds, planningRange, forcedArr, lineasPorOrden);
+        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds, lineasPorOrden));
     };
 
     const handleAddSelectedAndRecalculate = () => {
@@ -557,7 +713,58 @@ export function PlanningPreviewScreen({
         setExpandedAddIds(new Set());
         setAddSearchTerm("");
         setAddPopoverOpen(false);
+        // Queda anotado qué entró en esta tanda: es lo que después se pinta distinto
+        // y lo que deshace el botón "Deshacer".
+        setTandasManuales(prev => [...prev, { ots: wholeOts, lineas: lineasPorOrden }]);
         handleRecalculate(extras, Object.keys(lineasPorOrden).length > 0 ? lineasPorOrden : undefined);
+    };
+
+    /**
+     * Vuelve atrás la última tanda agregada a mano.
+     *
+     * "Que puedas volver para atrás, para que si te equivocaste…" (Lucas, 28/08).
+     * Saca del plan las OTs que entraron en esa tanda y recalcula con las que
+     * quedan; lo que ya estaba antes no se toca. Se puede seguir apretando hasta
+     * volver al plan que salió del cálculo original.
+     */
+    const deshacerUltimaTanda = () => {
+        if (!onRecalculate || tandasManuales.length === 0) return;
+        const ultima = tandasManuales[tandasManuales.length - 1];
+        const restantes = tandasManuales.slice(0, -1);
+        const quitar = otsDeTandas([ultima]);
+
+        const planned = Array.from(new Set(results.map(r => r.orden_id)));
+        const stickyIds = Array.from(new Set(stickyExcedentes.map(e => e.orden_id)));
+        const newForzar = Array.from(forzarOrdenIds).filter(id => !quitar.has(id));
+        const mergedIds = Array.from(new Set([
+            ...planned,
+            ...(newForzar.length > 0 ? newForzar : stickyIds),
+        ])).filter(id => !quitar.has(id));
+
+        if (mergedIds.length === 0) {
+            toast.error("Deshacer dejaría el plan vacío. Salí de la vista previa si querés descartarlo.");
+            return;
+        }
+
+        setTandasManuales(restantes);
+        setForzarOrdenIds(new Set(newForzar));
+        setStickyExcedentes(prev => prev.filter(e => !quitar.has(e.orden_id)));
+
+        const lineas = lineasDeTandas(restantes);
+        const enPlan = new Set(mergedIds);
+        const lineasFiltradas = Object.fromEntries(
+            Object.entries(lineas).filter(([oid]) => enPlan.has(Number(oid)))
+        ) as Record<number, number[]>;
+
+        toast.info(`Deshecho: ${quitar.size} OT${quitar.size === 1 ? "" : "s"} fuera del plan`, {
+            description: "Recalculando sin lo último que se agregó a mano.",
+        });
+        onRecalculate(
+            mergedIds,
+            planningRange,
+            newForzar,
+            Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
+        );
     };
 
     /** Saca una OT del plan y recalcula (sin esa OT). Pensado para el botón "x"
@@ -582,7 +789,81 @@ export function PlanningPreviewScreen({
             toast.error("No podés quitar la última OT del plan. Cerrá la vista previa con la X.");
             return;
         }
-        onRecalculate(mergedIds, planningRange, newForzar);
+        // Si la OT había entrado a mano, deja de estar agregada: sale del registro
+        // (y con ella sus pasadas sueltas, que ya no restringen nada).
+        const restantes = tandasSinOTs(tandasManuales, new Set([ordenId]));
+        setTandasManuales(restantes);
+        const lineas = lineasDeTandas(restantes);
+        const enPlan = new Set(mergedIds);
+        const lineasFiltradas = Object.fromEntries(
+            Object.entries(lineas).filter(([oid]) => enPlan.has(Number(oid)))
+        ) as Record<number, number[]>;
+        onRecalculate(
+            mergedIds,
+            planningRange,
+            newForzar,
+            Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
+        );
+    };
+
+    /**
+     * Saca UNA pasada suelta agregada a mano y recalcula.
+     *
+     * Es el caso de la reunión: "se había seleccionado una fresadora de otra OT por
+     * error". Sin esto la única salida era tirar la OT entera y volver a elegir sus
+     * procesos uno por uno. Si era la última pasada de esa OT, la OT se va con ella.
+     */
+    const quitarLineaAMano = (ordenId: number, lineaId: number) => {
+        if (!onRecalculate) {
+            toast.error("Quitar no está disponible en este contexto.");
+            return;
+        }
+        const restantes = tandasManuales
+            .map(t => ({
+                ots: t.ots,
+                lineas: Object.fromEntries(
+                    Object.entries(t.lineas)
+                        .map(([oid, ids]) => [
+                            oid,
+                            Number(oid) === ordenId ? ids.filter(id => id !== lineaId) : ids,
+                        ])
+                        .filter(([, ids]) => (ids as number[]).length > 0)
+                ) as Record<number, number[]>,
+            }))
+            .filter(t => t.ots.length > 0 || Object.keys(t.lineas).length > 0);
+
+        const lineas = lineasDeTandas(restantes);
+        const seQuedaSinProcesos = !lineas[ordenId];
+
+        const planned = Array.from(new Set(results.map(r => r.orden_id)))
+            .filter(id => !(seQuedaSinProcesos && id === ordenId));
+        const newForzar = Array.from(forzarOrdenIds).filter(id => !(seQuedaSinProcesos && id === ordenId));
+        const stickyIds = Array.from(new Set(stickyExcedentes.map(e => e.orden_id)))
+            .filter(id => !(seQuedaSinProcesos && id === ordenId));
+        const mergedIds = Array.from(new Set([
+            ...planned,
+            ...(newForzar.length > 0 ? newForzar : stickyIds),
+        ]));
+
+        if (mergedIds.length === 0) {
+            toast.error("Era el último proceso del plan. Salí de la vista previa si querés descartarlo.");
+            return;
+        }
+
+        setTandasManuales(restantes);
+        setForzarOrdenIds(new Set(newForzar));
+        if (seQuedaSinProcesos) setStickyExcedentes(prev => prev.filter(e => e.orden_id !== ordenId));
+
+        const enPlan = new Set(mergedIds);
+        const lineasFiltradas = Object.fromEntries(
+            Object.entries(lineas).filter(([oid]) => enPlan.has(Number(oid)))
+        ) as Record<number, number[]>;
+        onRecalculate(
+            mergedIds,
+            planningRange,
+            newForzar,
+            Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
+        );
     };
 
     const toggleRow = (ordenId: number) => {
@@ -594,15 +875,23 @@ export function PlanningPreviewScreen({
     };
 
     const getEffectiveItem = (item: PlanificacionResult) => {
-        const key = `${item.orden_id}-${item.proceso_id}`;
-        return editedResults[key] || item;
+        // El fallback a la clave vieja es por los borradores guardados antes de que
+        // la clave llevara la secuencia: sin esto, retomar uno de esos perdía todos
+        // los retoques a mano. En una OT con el proceso repetido el borrador viejo
+        // no distinguía las pasadas, así que ahí devuelve lo que ya devolvía antes.
+        return editedResults[claveDeEdicion(item)] || editedResults[claveVieja(item)] || item;
     };
 
     const handleUpdate = (item: PlanificacionResult, field: keyof PlanificacionResult, value: any) => {
-        const key = `${item.orden_id}-${item.proceso_id}`;
         const currentEffective = getEffectiveItem(item);
         const updated = { ...currentEffective, [field]: value };
-        setEditedResults(prev => ({ ...prev, [key]: updated }));
+        setEditedResults(prev => {
+            const next = { ...prev, [claveDeEdicion(item)]: updated };
+            // Si el retoque venía de un borrador viejo, la clave vieja tiene que
+            // irse: si no, queda tapando a la nueva en el `||` de arriba.
+            delete next[claveVieja(item)];
+            return next;
+        });
     };
 
     const handleDateChange = (item: PlanificacionResult, dateStr: string) => {
@@ -814,10 +1103,19 @@ export function PlanningPreviewScreen({
         if (!open) return;
     };
 
+    /**
+     * Los avisos que alguien dio por resueltos a mano en el panel.
+     *
+     * Vive acá y no adentro del panel porque la cifra "Trabas sin resolver" del
+     * encabezado tiene que contar lo mismo que se ve abajo: marcar cinco y seguir
+     * viendo "5 trabas sin resolver" arriba es peor que no poder marcarlas.
+     */
+    const [avisosMarcados, setAvisosMarcados] = React.useState<Set<string>>(new Set());
+
     /** Lo rojo del plan: lo que quedó sin resolver y hay que ir a arreglar. */
     const trabasSinResolver = React.useMemo(
-        () => diagnosticos.filter(d => d.severidad === "bloqueante").length,
-        [diagnosticos]
+        () => diagnosticos.filter(d => d.severidad === "bloqueante" && !avisosMarcados.has(d.id)).length,
+        [diagnosticos, avisosMarcados]
     );
 
     // Cantidad de OTs distintas en el plan actual (no procesos), útil para mostrar al usuario.
@@ -886,10 +1184,12 @@ export function PlanningPreviewScreen({
         // resuelto. Y hay que respetar los "forzar" que el usuario ya marcó, o la
         // pantalla queda mostrando algo distinto de lo que se va a guardar.
         const forcedArr = Array.from(forzarOrdenIds);
+        const ids = buildOrdenIdsForRecalc(forcedArr);
         onRecalculate(
-            buildOrdenIdsForRecalc(forcedArr),
+            ids,
             { fecha_desde: planningRange.fecha_desde, fecha_hasta: sumarDias(base, 14) },
             forcedArr,
+            lineasParaEnviar(ids),
         );
     };
 
@@ -1215,6 +1515,25 @@ export function PlanningPreviewScreen({
                                     Ampliar 2 semanas
                                 </Button>
                             )}
+                            {/* Deshacer lo último que se agregó a mano. Vive al lado de
+                                "Agregar OTs" porque deshace exactamente eso, y sólo
+                                aparece cuando hay algo que deshacer. */}
+                            {tandasManuales.length > 0 && onRecalculate && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={deshacerUltimaTanda}
+                                    disabled={isCalculating || isConfirming}
+                                    className="h-8 gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
+                                    title="Saca del plan lo último que agregaste a mano y recalcula"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    Deshacer
+                                    <Badge className="ml-1 bg-indigo-100 text-indigo-700 border-0 px-1.5 py-0 text-[10px] tabular-nums">
+                                        {ordenesAMano.size}
+                                    </Badge>
+                                </Button>
+                            )}
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
 
                             {unplannedOrders.length > 0 && onRecalculate && (
@@ -1241,6 +1560,12 @@ export function PlanningPreviewScreen({
                                             </div>
                                             <p className="text-[11px] text-gray-500 mt-1">
                                                 Tildá la OT entera, o expandí (▸) para elegir <strong>procesos sueltos</strong>. Al agregar, el plan se recalcula.
+                                            </p>
+                                            {/* La regla se explica acá y no sólo en el globito del proceso
+                                                gris: si no, el primero que expande una OT ve la mitad de
+                                                los procesos tachados y no sabe por qué. */}
+                                            <p className="text-[11px] text-gray-500 mt-1">
+                                                Sueltos sólo se pueden agregar los de <strong>paso 1 o 2</strong>: un proceso posterior necesita que la pieza haya pasado por los anteriores.
                                             </p>
                                         </div>
                                         <div className="p-2 border-b bg-white">
@@ -1321,21 +1646,50 @@ export function PlanningPreviewScreen({
                                                                         {checked && (
                                                                             <div className="text-[10px] text-blue-600 italic">La OT completa ya está seleccionada.</div>
                                                                         )}
-                                                                        {[...procs].sort((a, b) => (a.orden || 0) - (b.orden || 0) || (a.id || 0) - (b.id || 0)).map((p) => {
+                                                                        {pasadasParaAgregar(procs).map(({ rel: p, paso, habilitada }) => {
                                                                             // Se tilda la PASADA (p.id), no el proceso: la misma OT
                                                                             // puede tener el mismo proceso en varios pasos y cada
                                                                             // uno se elige por separado.
                                                                             const pid = p.id;
                                                                             const psel = selProcs.has(pid);
+                                                                            // Del paso 3 en adelante se ve pero no se tilda: hace falta
+                                                                            // verlo para entender por qué no se puede (y para darse
+                                                                            // cuenta de que el orden de la OT está mal).
+                                                                            const motivo = habilitada
+                                                                                ? undefined
+                                                                                : `Paso ${paso}: la pieza tiene que pasar antes por los pasos previos. A mano sólo se agregan los pasos 1 y 2. Si acá el orden está mal, corregilo en la OT.`;
                                                                             return (
-                                                                                <label key={pid ?? `${p.proceso?.id}-${p.orden}`} className={cn("flex items-center gap-2 px-2 py-1 rounded cursor-pointer", psel ? "bg-blue-100/60" : "hover:bg-gray-100")}>
-                                                                                    <Checkbox checked={psel} onCheckedChange={() => togglePendingLinea(o.id, pid)} />
-                                                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-200 text-gray-600 text-[9px] font-bold shrink-0">{p.orden}</span>
-                                                                                    <span className="truncate flex-1 text-gray-700">{capitalize(p.proceso?.nombre || "")}</span>
+                                                                                <label
+                                                                                    key={pid ?? `${p.proceso?.id}-${p.orden}`}
+                                                                                    title={motivo}
+                                                                                    className={cn(
+                                                                                        "flex items-center gap-2 px-2 py-1 rounded",
+                                                                                        !habilitada && "opacity-50 cursor-not-allowed",
+                                                                                        habilitada && "cursor-pointer",
+                                                                                        habilitada && (psel ? "bg-blue-100/60" : "hover:bg-gray-100")
+                                                                                    )}
+                                                                                >
+                                                                                    <Checkbox
+                                                                                        checked={psel}
+                                                                                        disabled={!habilitada}
+                                                                                        onCheckedChange={() => habilitada && togglePendingLinea(o.id, pid)}
+                                                                                    />
+                                                                                    <span className={cn(
+                                                                                        "inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold shrink-0",
+                                                                                        habilitada ? "bg-gray-200 text-gray-600" : "bg-gray-100 text-gray-400"
+                                                                                    )}>{paso}</span>
+                                                                                    <span className={cn("truncate flex-1", habilitada ? "text-gray-700" : "text-gray-400 line-through")}>
+                                                                                        {capitalize(p.proceso?.nombre || "")}
+                                                                                    </span>
                                                                                     {p.tiempo_proceso != null && <span className="text-[10px] text-gray-400 shrink-0">{p.tiempo_proceso}m</span>}
                                                                                 </label>
                                                                             );
                                                                         })}
+                                                                        {procs.length > 0 && pasadasParaAgregar(procs).every(x => !x.habilitada) && (
+                                                                            <div className="px-2 text-[10px] leading-snug text-amber-700">
+                                                                                Ningún proceso de esta OT arranca en el paso 1 o 2. Revisá el orden en la OT, o agregala entera.
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -1523,6 +1877,9 @@ export function PlanningPreviewScreen({
                                        "Trabas sin resolver" tiene que poder desplegarla. */
                                     colapsado={avisosColapsados}
                                     onColapsadoChange={setAvisosColapsados}
+                                    /* Marcados a mano: los cuenta la cifra de arriba. */
+                                    marcados={avisosMarcados}
+                                    onMarcadosChange={setAvisosMarcados}
                                     /* Aplicado el cambio de rangos, se recalcula el mismo
                                        plan al toque: el aviso desaparece solo si de verdad
                                        se resolvió, y las fechas se actualizan con el dato
@@ -1530,7 +1887,8 @@ export function PlanningPreviewScreen({
                                     onResuelto={() => {
                                         if (!onRecalculate) return;
                                         const forcedArr = Array.from(forzarOrdenIds);
-                                        onRecalculate(buildOrdenIdsForRecalc(forcedArr), planningRange, forcedArr);
+                                        const ids = buildOrdenIdsForRecalc(forcedArr);
+                                        onRecalculate(ids, planningRange, forcedArr, lineasParaEnviar(ids));
                                     }}
                                     /* Mismo recálculo, pero pedido a mano: el caso es
                                        "fui a Recursos, arreglé lo que pedía el aviso y
@@ -1882,6 +2240,9 @@ export function PlanningPreviewScreen({
                                             const ordenId = parseInt(ordenIdStr);
                                             const firstItem = items[0];
                                             const isExpanded = expandedOrderIds.includes(ordenId);
+                                            // Entró a mano en esta vista previa (OT entera o procesos sueltos).
+                                            const esAMano = ordenesAMano.has(ordenId);
+                                            const lineasDeEstaOT = lineasVigentes[ordenId] || [];
 
                                             // Calculate alerts (Lateness)
                                             const effectiveItems = items.map(i => getEffectiveItem(i));
@@ -1929,10 +2290,25 @@ export function PlanningPreviewScreen({
                                             return (
                                                 <React.Fragment key={ordenId}>
                                                     <tr
-                                                        className={`transition-colors cursor-pointer group ${getRowColor(firstItem)}`}
+                                                        data-ot={ordenId}
+                                                        className={cn(
+                                                            "transition-colors cursor-pointer group",
+                                                            getRowColor(firstItem),
+                                                            // El resaltado del salto desde un aviso dura unos segundos:
+                                                            // en una tabla de 40 OTs, llegar a la fila no alcanza si
+                                                            // después hay que adivinar cuál era.
+                                                            otResaltada === ordenId && "ring-2 ring-inset ring-indigo-400"
+                                                        )}
                                                         onClick={() => toggleRow(ordenId)}
                                                     >
-                                                        <td className="px-4 py-3">
+                                                        <td className={cn(
+                                                            "px-4 py-3",
+                                                            // El código de color de lo agregado a mano (Lucas, 28/08).
+                                                            // Va de barrita y no de fondo: el fondo de la fila ya dice
+                                                            // el estado de la OT (entregada, en producción, atrasada) y
+                                                            // pisarlo sería cambiar un dato por otro.
+                                                            esAMano && "border-l-[3px] border-l-indigo-500"
+                                                        )}>
                                                             <button className="p-1 hover:bg-black/10 rounded transition-colors text-inherit opacity-70 hover:opacity-100">
                                                                 {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                                                             </button>
@@ -1940,6 +2316,16 @@ export function PlanningPreviewScreen({
                                                         <td className="px-4 py-3 font-medium text-inherit">
                                                             <div className="flex items-center gap-1.5 flex-wrap">
                                                                 <span>#{firstItem.id_otvieja || ordenId}</span>
+                                                                {esAMano && (
+                                                                    <span
+                                                                        className="text-[9px] uppercase tracking-wider bg-indigo-100 text-indigo-800 border border-indigo-300 px-1.5 py-0.5 rounded-full font-bold"
+                                                                        title={lineasDeEstaOT.length > 0
+                                                                            ? `Agregada a mano en la vista previa: ${lineasDeEstaOT.length} proceso(s) sueltos`
+                                                                            : "Agregada a mano en la vista previa (OT entera)"}
+                                                                    >
+                                                                        A mano
+                                                                    </span>
+                                                                )}
                                                                 {forzarOrdenIds.has(ordenId) && (
                                                                     <span
                                                                         className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded-full font-bold"
@@ -2097,7 +2483,7 @@ export function PlanningPreviewScreen({
                                                                             <div className="contents text-xs font-bold text-gray-500 uppercase bg-gray-100/50">
                                                                                 <div className="px-3 py-1.5 border-b">#</div>
                                                                                 <div className="px-3 py-1.5 border-b">Proceso</div>
-                                                                                <div className="px-3 py-1.5 border-b">Operario</div>
+                                                                                <div className="px-3 py-1.5 border-b">Recurso humano</div>
                                                                                 <div className="px-3 py-1.5 border-b">Maquinaria</div>
                                                                                 <div className="px-3 py-1.5 border-b">Inicio</div>
                                                                             </div>
@@ -2109,7 +2495,7 @@ export function PlanningPreviewScreen({
                                                                                     availableMachines.find((m: any) => m.id === effectiveItem.id_maquinaria)
                                                                                 );
                                                                                 return (
-                                                                                    <div key={`${item.orden_id}-${item.proceso_id}`} className="contents group/row">
+                                                                                    <div key={claveDeEdicion(item)} className="contents group/row">
                                                                                         <div className="px-3 py-1.5 border-b flex items-center text-gray-400 font-mono text-xs">
                                                                                             {idx + 1}
                                                                                         </div>
@@ -2327,7 +2713,7 @@ export function PlanningPreviewScreen({
                                                                                                     "h-7 text-[11px] px-2",
                                                                                                     !effU.id_operario ? "border-red-300 bg-red-50/40" : "border-green-300 bg-green-50/40"
                                                                                                 )}>
-                                                                                                    <SelectValue placeholder="Operario" />
+                                                                                                    <SelectValue placeholder="Recurso humano" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
                                                                                                     <SelectItem value="0" className="text-gray-400 italic">Sin asignar</SelectItem>

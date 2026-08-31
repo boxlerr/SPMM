@@ -1276,7 +1276,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     <div className="space-y-1 mb-1">
                                         <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
                                         <p className="text-sm text-gray-500">
-                                            Elegí proceso, máquina, persona, minutos y cantidad de empleados. Destildá los que esta vez no van (opcional).
+                                            Elegí proceso, máquina, recurso humano, minutos y cuánto recurso humano hace falta. Destildá los que esta vez no van (opcional).
                                         </p>
                                     </div>
 

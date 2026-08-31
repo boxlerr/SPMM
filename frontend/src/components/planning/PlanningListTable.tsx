@@ -698,7 +698,7 @@ function _PlanningListTable({
                     <div>Estado</div>
                     <div className="text-center">Min. Est.</div>
                     <div className="text-center text-blue-700">Min. Real</div>
-                    <div>Operario</div>
+                    <div>Recurso humano</div>
                     <div>Maquinaria</div>
                 </div>
 
@@ -823,7 +823,7 @@ function _PlanningListTable({
 
                                         {/* Operario */}
                                         <div className="flex flex-col md:block w-full md:w-auto">
-                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Operario</span>
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso humano</span>
                                             <div>
                                                 {onOperatorChange && operarios.length > 0 ? (
                                                     <Select

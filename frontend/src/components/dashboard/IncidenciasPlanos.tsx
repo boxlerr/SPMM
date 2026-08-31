@@ -130,7 +130,7 @@ export default function IncidenciasPlanos() {
                         <div className="border rounded-lg overflow-hidden">
                             <table className="w-full text-sm">
                                 <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
-                                    <tr><th className="text-left px-3 py-2">Operario</th><th className="text-center px-3 py-2">Incidencias</th><th className="text-center px-3 py-2">Tiempo</th></tr>
+                                    <tr><th className="text-left px-3 py-2">Recurso humano</th><th className="text-center px-3 py-2">Incidencias</th><th className="text-center px-3 py-2">Tiempo</th></tr>
                                 </thead>
                                 <tbody>
                                     {(data?.por_operario ?? []).map((o, i) => (

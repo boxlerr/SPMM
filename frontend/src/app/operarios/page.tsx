@@ -2,7 +2,7 @@ export default function OperariosPage() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Operarios</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Recurso humano</h1>
         <p className="text-gray-600 mt-2">
           Gestiona los operarios del sistema SPMM
         </p>

@@ -6,7 +6,7 @@
  *
  * Reemplaza la carga por tarjetas / filas sueltas por un listado compacto tipo
  * "manejo de procesos" con las columnas: incluir (tilde) · # (orden) · proceso ·
- * minutos · máquina · cantidad de empleados.
+ * minutos · máquina · cantidad de recurso humano.
  *
  * Es un componente CONTROLADO y presentacional: no hace fetch ni sabe de la OT.
  * El padre le pasa `rows` + `onChange` y los catálogos (`procesos`, `maquinarias`).
@@ -194,8 +194,8 @@ export function ProcesosEditor({
                     <div>Proceso</div>
                     <div className="text-center">Minutos</div>
                     <div>Máquina</div>
-                    <div>Persona</div>
-                    <div className="text-center">Cant. emp.</div>
+                    <div>Recurso humano</div>
+                    <div className="text-center" title="Cantidad de recurso humano que hace falta en simultáneo">Cantidad</div>
                     <div></div>
                 </div>
 
@@ -326,7 +326,7 @@ export function ProcesosEditor({
                                                             {!!row.operario_id && (
                                                                 <Lock
                                                                     className="w-3.5 h-3.5 shrink-0 text-amber-500"
-                                                                    aria-label="Persona forzada (preseleccionada)"
+                                                                    aria-label="Recurso humano forzado (preseleccionado)"
                                                                 />
                                                             )}
                                                         </div>
@@ -340,7 +340,7 @@ export function ProcesosEditor({
                                                                 disabled={disabled}
                                                                 onChange={(e) => update(row.id, { cant_operarios: e.target.value })}
                                                                 placeholder="1"
-                                                                title="Operarios que requiere el proceso en simultáneo"
+                                                                title="Cantidad de recurso humano que requiere el proceso en simultáneo"
                                                                 className="h-8 text-xs text-center bg-white"
                                                             />
                                                         </div>

@@ -572,7 +572,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                     <div>Estado</div>
                                                                                     <div className="text-center">Min. Est.</div>
                                                                                     <div className="text-center">Min. Real</div>
-                                                                                    <div>Operario</div>
+                                                                                    <div>Recurso humano</div>
                                                                                 </div>
                                                                                 {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
                                                                                     <div key={`${order.id}-${proc.proceso.id}`} className={cn(

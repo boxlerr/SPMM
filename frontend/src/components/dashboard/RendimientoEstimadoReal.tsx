@@ -137,7 +137,7 @@ export default function RendimientoEstimadoReal() {
                             <table className="w-full text-sm">
                                 <thead className="bg-gray-50 text-[11px] text-gray-500 uppercase">
                                     <tr>
-                                        <th className="text-left px-3 py-2">{tab === "procesos" ? "Proceso" : "Operario"}</th>
+                                        <th className="text-left px-3 py-2">{tab === "procesos" ? "Proceso" : "Recurso humano"}</th>
                                         <th className="text-center px-3 py-2">#</th>
                                         <th className="text-right px-3 py-2">Estimado</th>
                                         <th className="text-right px-3 py-2">Real</th>

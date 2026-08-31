@@ -776,7 +776,7 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                                         {getInitials(task.resourceName)}
                                                     </div>
                                                     <div className="min-w-0">
-                                                        <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 block leading-none">Operario</span>
+                                                        <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 block leading-none">Recurso humano</span>
                                                         <span className="text-xs text-gray-700 font-medium truncate block">
                                                             {toTitleCase(task.resourceName) || "Sin asignar"}
                                                         </span>

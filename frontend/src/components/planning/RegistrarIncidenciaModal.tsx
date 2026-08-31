@@ -111,7 +111,7 @@ export function RegistrarIncidenciaModal({
                         />
                     </div>
                     <div className="space-y-1.5">
-                        <Label className="text-xs font-medium text-gray-600">Operarios extra que hicieron falta</Label>
+                        <Label className="text-xs font-medium text-gray-600">Recurso humano extra que hizo falta</Label>
                         <Input
                             type="number"
                             min={0}

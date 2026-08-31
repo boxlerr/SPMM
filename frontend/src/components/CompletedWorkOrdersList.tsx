@@ -422,7 +422,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                                             <div>Estado</div>
                                                                             <div className="text-center">Min. Est.</div>
                                                                             <div className="text-center text-blue-700">Min. Real</div>
-                                                                            <div>Operario</div>
+                                                                            <div>Recurso humano</div>
                                                                         </div>
                                                                         {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
                                                                             <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
