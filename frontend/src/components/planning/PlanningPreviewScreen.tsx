@@ -5,7 +5,6 @@ import { limitacionDeMaquina } from "@/lib/maquinas";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
@@ -49,6 +48,10 @@ interface PlanificacionResult {
     sin_maquinaria: boolean;
     /** Lo hace un tercero: va sin operario y sin máquina a propósito. */
     tercerizado?: boolean;
+    /** Operario ADICIONAL del mismo proceso (cant_operarios > 1). Comparte
+     *  (OT, proceso, secuencia) con la fila principal: es otra persona en el
+     *  mismo trabajo, no otro trabajo. */
+    slot_extra?: boolean;
     /** false = proceso manual (embalado, pintura, soldadura...): no usa máquina
      *  y el "sin máquina" NO es un hueco. Se muestra "No necesita" en vez de
      *  "Sin asignar", con el desplegable disponible por si igual quieren una. */
@@ -207,7 +210,7 @@ const tandasSinOTs = (tandas: TandaManual[], quitar: Set<number>): TandaManual[]
  * desplegable de las otras doce se movía solo. La secuencia es la posición dentro
  * de la OT y sí es única.
  */
-const claveDeEdicion = (item: { orden_id: number; proceso_id: number; secuencia?: number }) =>
+const claveBase = (item: { orden_id: number; proceso_id: number; secuencia?: number }) =>
     `${item.orden_id}-${item.proceso_id}-${item.secuencia ?? 0}`;
 
 /** La clave que se usaba antes de que existieran las pasadas repetidas. Sólo para
@@ -874,6 +877,29 @@ export function PlanningPreviewScreen({
         );
     };
 
+    /**
+     * La clave de cada fila del plan, ya desempatada.
+     *
+     * `claveBase` alcanza para casi todo, pero no para los operarios adicionales:
+     * un proceso de dos personas devuelve DOS filas con la misma OT, el mismo
+     * proceso y la misma secuencia, porque son dos personas en el mismo trabajo.
+     * Compartiendo clave, elegirle la persona a una se la ponía también a la otra
+     * y el segundo desplegable se movía solo. Se numeran por aparición.
+     */
+    const clavesPorFila = React.useMemo(() => {
+        const mapa = new Map<PlanificacionResult, string>();
+        const vistas = new Map<string, number>();
+        for (const item of [...results, ...excedentes]) {
+            const base = claveBase(item);
+            const n = vistas.get(base) ?? 0;
+            vistas.set(base, n + 1);
+            mapa.set(item, n === 0 ? base : `${base}#${n}`);
+        }
+        return mapa;
+    }, [results, excedentes]);
+
+    const claveDeEdicion = (item: PlanificacionResult) => clavesPorFila.get(item) ?? claveBase(item);
+
     const getEffectiveItem = (item: PlanificacionResult) => {
         // El fallback a la clave vieja es por los borradores guardados antes de que
         // la clave llevara la secuencia: sin esto, retomar uno de esos perdía todos
@@ -1348,6 +1374,57 @@ export function PlanningPreviewScreen({
     const otsFiltradas = Object.keys(gruposFiltrados).length;
     const procesosFiltrados = Object.values(gruposFiltrados).reduce((a, xs) => a + xs.length, 0);
 
+    // ---------- Ir del aviso a la OT ----------
+
+    /** OT a la que se acaba de saltar, resaltada un rato para no perderla de vista. */
+    const [otResaltada, setOtResaltada] = React.useState<number | null>(null);
+    const resaltadoRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    React.useEffect(() => () => { if (resaltadoRef.current) clearTimeout(resaltadoRef.current); }, []);
+
+    /** El #OT que se ve en la tabla (el del sistema viejo si lo tiene). Los avisos
+     *  hablan en `orden_id` interno y nadie reconoce ese número. */
+    const numeroDeOT = React.useCallback((ordenId: number) => {
+        const fila = results.find(r => r.orden_id === ordenId)
+            ?? stickyExcedentes.find(r => r.orden_id === ordenId);
+        return String(fila?.id_otvieja || ordenId);
+    }, [results, stickyExcedentes]);
+
+    /**
+     * Abre la OT de un aviso: la despliega, la trae a la vista y la resalta.
+     *
+     * "Y vas a buscarla acá… estaría bueno que hagas clic acá" (Lucas, 28/08,
+     * mirando la 15678). El número de la OT estaba en el aviso, en chico, y para
+     * asignarle la persona había que bajar a buscar la fila entre todas las demás.
+     * Desplegada, la asignación se hace en el mismo lugar donde cayó el salto.
+     */
+    const verOT = (ordenId: number) => {
+        if (!groupedResults[ordenId]) {
+            toast.info(`La OT #${numeroDeOT(ordenId)} no está en la tabla del plan.`, {
+                description: "Puede haber quedado fuera del plan o en la lista de excedentes.",
+            });
+            return;
+        }
+        // Con filtros puestos la fila puede no existir en el DOM. Limpiarlos es
+        // preferible a un click que no hace nada: la vuelta atrás es volver a
+        // tildarlos, y el aviso dice cuáles se sacaron.
+        if (filtrosActivos > 0 && !gruposFiltrados[ordenId]) {
+            setFiltroTexto("");
+            setFiltros({ atrasadas: false, forzadas: false, sinOperario: false, sinMaquina: false });
+            toast.info("Se limpiaron los filtros para poder mostrarte la OT.");
+        }
+        setExpandedOrderIds(prev => (prev.includes(ordenId) ? prev : [...prev, ordenId]));
+        setOtResaltada(ordenId);
+        if (resaltadoRef.current) clearTimeout(resaltadoRef.current);
+        resaltadoRef.current = setTimeout(() => setOtResaltada(null), 4000);
+        // Un tick después: la fila recién existe cuando React pintó el desplegado
+        // (y, si había filtros, la tabla entera).
+        setTimeout(() => {
+            document
+                .querySelector(`tr[data-ot="${ordenId}"]`)
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+    };
+
     /**
      * Qué columnas se ven. Trece columnas entran en un monitor de escritorio y en
      * ninguna otra cosa; el que planifica desde una notebook mira siempre las
@@ -1409,7 +1486,15 @@ export function PlanningPreviewScreen({
     const CLAVE_CARGA = "plan_preview_carga_abierta";
     const [cargaAbierta, setCargaAbierta] = React.useState(true);
     React.useEffect(() => {
-        try { if (localStorage.getItem(CLAVE_CARGA) === "0") setCargaAbierta(false); } catch { /* queda abierto */ }
+        try {
+            const guardado = localStorage.getItem(CLAVE_CARGA);
+            if (guardado !== null) { setCargaAbierta(guardado !== "0"); return; }
+            // Sin preferencia guardada, en pantalla angosta arranca PLEGADO: abierto se
+            // lleva 300px mínimos y la tabla (min-w 1600) queda condenada a scrollear de
+            // costado desde el primer segundo. Plegado son 44px y se lee. Apenas lo
+            // abrís o cerrás a mano, esa decisión manda para siempre.
+            if (window.innerWidth < 1280) setCargaAbierta(false);
+        } catch { /* queda abierto */ }
     }, []);
     const alternarCarga = () => setCargaAbierta(v => {
         try { localStorage.setItem(CLAVE_CARGA, v ? "0" : "1"); } catch { /* nada */ }
@@ -1472,9 +1557,13 @@ export function PlanningPreviewScreen({
                         bajada que ya no existe. */}
                     <div className="px-6 py-2 flex items-center justify-between gap-4">
                         <div className="min-w-0 flex-1">
-                            <h1 className="text-[17px] font-bold text-gray-900 flex items-center gap-2 whitespace-nowrap">
+                            {/* `min-w-0 overflow-hidden` en vez de `whitespace-nowrap` a secas:
+                                con el título entero sin poder achicarse, en 1024 empujaba a
+                                los botones de la derecha fuera de la tarjeta. Ahora el que
+                                cede es el texto y "Salir" queda siempre alcanzable. */}
+                            <h1 className="text-[17px] font-bold text-gray-900 flex items-center gap-2 min-w-0 overflow-hidden">
                                 <CalendarClock className="w-4 h-4 text-blue-600 shrink-0" />
-                                Vista previa de planificación
+                                <span className="truncate">Vista previa de planificación</span>
                                 {/* Que se lea que esto TODAVÍA no es el plan: es lo que
                                     distingue esta pantalla de Operaciones, que se le
                                     parece bastante y sí muestra lo ya guardado. */}
@@ -1760,7 +1849,12 @@ export function PlanningPreviewScreen({
                         ninguno. Va sin `px-2 pb-2`: llega a los dos bordes y se apoya en
                         el `border-b` que ya pone PantallaPlanificador. Eso es lo que lo
                         ancla — un riel, no cuatro cosas al aire. */}
-                    <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr_1.3fr] gap-px bg-gray-200 border-t border-gray-200">
+                    {/* Las cinco cifras en una fila sola recién a partir de xl. Abajo de
+                        eso cada celda quedaba en ~130px y los números se leían apretados
+                        contra su rótulo; en dos o tres filas entran holgadas y el riel
+                        sigue siendo un riel (los separadores los sigue dibujando el
+                        `gap-px` sobre el fondo). */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1.3fr] gap-px bg-gray-200 border-t border-gray-200">
                         {/* La fecha primero y la celda más ancha del riel.
 
                             Estaba en un Badge de 11px perdido entre otros tres chips.
@@ -1896,6 +1990,11 @@ export function PlanningPreviewScreen({
                                        del cálculo, así que sin esto el aviso sigue rojo
                                        aunque el problema ya no exista — y con un
                                        borrador retomado puede ser la foto de ayer. */
+                                    /* Del aviso a la fila de la OT, desplegada y resaltada, que es
+                                       donde se le asigna la persona. Antes el número estaba sólo en
+                                       el globito del impacto y había que ir a buscarlo a la tabla. */
+                                    numeroDeOT={numeroDeOT}
+                                    onVerOT={verOT}
                                     onRevisar={onRecalculate ? () => handleRecalculate() : undefined}
                                     revisando={isCalculating}
                                     calculadoEn={calculadoEn}
@@ -2494,9 +2593,13 @@ export function PlanningPreviewScreen({
                                                                                 const limitacionElegida = limitacionDeMaquina(
                                                                                     availableMachines.find((m: any) => m.id === effectiveItem.id_maquinaria)
                                                                                 );
+                                                                                // Esta pasada la eligió alguien a mano (no vino con la OT entera).
+                                                                                const lineaId = item.id_orden_trabajo_proceso ?? null;
+                                                                                const procesoAMano = lineaId != null && lineasAMano.has(lineaId);
                                                                                 return (
-                                                                                    <div key={claveDeEdicion(item)} className="contents group/row">
-                                                                                        <div className="px-3 py-1.5 border-b flex items-center text-gray-400 font-mono text-xs">
+                                                                                    <div key={claveDeEdicion(item)} className={cn("contents group/row", procesoAMano && "[&>div]:bg-indigo-50/60")}>
+                                                                                        <div className="px-3 py-1.5 border-b flex items-center gap-1 text-gray-400 font-mono text-xs">
+                                                                                            {procesoAMano && <span className="w-0.5 self-stretch -ml-3 mr-1 bg-indigo-500 rounded-r" />}
                                                                                             {idx + 1}
                                                                                         </div>
                                                                                         {/* Nombre y minutos en la MISMA línea: apilados sumaban un renglón
@@ -2505,6 +2608,24 @@ export function PlanningPreviewScreen({
                                                                                             <div className="flex items-baseline gap-2 min-w-0">
                                                                                                 <span className="font-medium text-gray-800 truncate" title={effectiveItem.nombre_proceso}>{capitalize(effectiveItem.nombre_proceso)}</span>
                                                                                                 <span className="shrink-0 text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
+                                                                                                {/* Lo agregado a mano se distingue de lo que trajo la OT.
+                                                                                                    La X saca esta pasada sola: sin ella, corregir "elegí
+                                                                                                    la fresadora de otra OT" era tirar la OT entera y
+                                                                                                    volver a tildar sus procesos uno por uno. */}
+                                                                                                {procesoAMano && (
+                                                                                                    <span className="shrink-0 inline-flex items-center gap-1 text-xs text-indigo-700 bg-indigo-100 border border-indigo-200 px-1.5 rounded font-medium">
+                                                                                                        A mano
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={() => quitarLineaAMano(item.orden_id, lineaId!)}
+                                                                                                            disabled={isCalculating || isConfirming || !onRecalculate}
+                                                                                                            className="text-indigo-400 hover:text-red-600 disabled:opacity-40 disabled:hover:text-indigo-400"
+                                                                                                            title="Quitar este proceso del plan y recalcular"
+                                                                                                        >
+                                                                                                            <XIcon className="w-3 h-3" />
+                                                                                                        </button>
+                                                                                                    </span>
+                                                                                                )}
                                                                                                 {/* Tercerizado: sale sin operario y sin máquina a propósito, porque
                                                                                                     lo hace un tercero. Sin esta marca se lee como un hueco por
                                                                                                     falta de rango, que es un problema distinto. */}
@@ -2840,12 +2961,15 @@ export function PlanningPreviewScreen({
                         // `max-h` y no `h`: con alto fijo, cuando la lista de avisos es corta
                         // la fila mide menos que el panel y el panel se desborda por abajo,
                         // pisando el pie. Con max-h se estira hasta donde hay lugar y no más.
-                        // `flex flex-col` para que el ScrollArea de adentro pueda tomar el
-                        // resto y ser el único que scrollea.
+                        // `flex flex-col` para que la lista de adentro pueda tomar el resto
+                        // y ser la única que scrollea.
                         "sticky top-[var(--alto-cabecera)] max-h-[calc(100svh-var(--alto-cabecera)-5rem)] self-start overflow-hidden flex flex-col",
                         !cargaAbierta ? "w-11"
                             : cargaCompleta ? "w-[min(34vw,520px)]"
-                                : "w-[min(24vw,380px)] min-w-[300px]"
+                                // El piso de 300px solo de lg para arriba: en un teléfono de
+                                // 375 el panel se llevaba 301 de los 327 de la fila y la tabla
+                                // del plan quedaba en 26px.
+                                : "w-[min(24vw,380px)] lg:min-w-[300px]"
                     )}>
                         {!cargaAbierta ? (
                             /* El riel plegado no es una franja muerta: sigue diciendo
@@ -2892,7 +3016,15 @@ export function PlanningPreviewScreen({
                                 <ChevronRight className="w-4 h-4" />
                             </button>
                         </div>
-                        <ScrollArea className="flex-1 min-h-0 p-4">
+                        {/* Scroll nativo, tercera vez en este archivo que Radix no sirve acá
+                            (ver los comentarios de las líneas ~1660 y ~1934). El motivo puntual:
+                            el panel se limita con `max-h`, no con `h`. Contra un alto INDEFINIDO
+                            el `h-full` del Viewport de Radix resuelve a `auto`, así que el
+                            Viewport crece con la lista y el `overflow-hidden` del Root la corta
+                            en seco: los operarios de abajo quedaban inalcanzables. Un
+                            `overflow-y-auto` nativo no necesita resolver ningún porcentaje —al
+                            item flex lo clampea el max-height del contenedor— y scrollea. */}
+                        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
                             <div className={cn(cargaCompleta ? "grid grid-cols-2 gap-3" : "space-y-4")}>
                                 {availableOperators
                                     .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden
@@ -2998,7 +3130,7 @@ export function PlanningPreviewScreen({
                                     })
                                 }
                             </div>
-                        </ScrollArea>
+                        </div>
                         {/* "Ver carga completa": ensancha el panel y deja de recortar. Los
                             chips de rangos se cortaban en 4 y las tarjetas de 320px no
                             dejan comparar a dos personas sin scrollear. No manda a otra

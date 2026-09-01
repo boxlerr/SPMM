@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { PantallaPlanificador } from "./PantallaPlanificador"
 import { Button } from "@/components/ui/button"
 import { PlanningListTable } from "./PlanningListTable"
@@ -43,7 +43,6 @@ interface PlanningSelectionScreenProps {
     initialSelectedIds?: number[]
     /** Abre un plan calculado y sin confirmar, sin volver a calcularlo. */
     onAbrirBorrador?: (borrador: BorradorPlan) => void
-    autoSelectAll?: boolean
     availableOperarios?: any[]
 }
 
@@ -56,24 +55,56 @@ export function PlanningSelectionScreen({
     onDataRefresh,
     initialSelectedIds = [],
     onAbrirBorrador,
-    autoSelectAll = true,
     availableOperarios = []
 }: PlanningSelectionScreenProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
+    /** Modo "ver solo las tildadas". Guarda la FOTO de qué había tildado al entrar,
+     *  no la selección viva: si filtrara por lo tildado en vivo, destildar una la
+     *  haría desaparecer del renglón y no habría cómo volver a tildarla. Así se
+     *  revisa la tanda tranquilo y se destilda lo que sobra sin que la lista salte.
+     *  `null` = apagado. */
+    const [soloTildadas, setSoloTildadas] = useState<number[] | null>(null)
+
     // Zoom compartido con el resto de Operaciones.
     const [zoom, setZoom] = usePersistedZoom('plan_zoom', 100)
 
-    // Sync selectedIds when modal opens or initialSelectedIds changes
+    // Con qué arranca la selección al abrir.
+    //
+    // `initialSelectedIds` llega como array NUEVO en cada render del padre
+    // (`isReplanning ? plannedOrdenes.map(...) : []`), así que se compara por
+    // CONTENIDO: con el array en las dependencias, este efecto corría a cada rato y
+    // dejaba la selección en cero en medio de la tildada.
+    //
+    // Y se aplica UNA sola vez por juego de ids, porque "Volver" desde la vista
+    // previa no es abrir de cero: la pantalla queda montada y oculta, así que al
+    // volver `isOpen` pasa de false a true y el efecto corría de nuevo. Mientras
+    // había tildado automático no se notaba —volvía a tildar todo—; sin él, volver
+    // te dejaba la lista en blanco y el botón "Planificar" apagado, con las 20 OT
+    // que habías elegido para re-tildar a mano.
+    const initialIdsKey = initialSelectedIds.join(",")
+    const idsAplicadosRef = useRef<string | null>(null)
     useEffect(() => {
-        if (isOpen) {
-            // Filter out any IDs that are not in the available unplannedOrders
-            const validIds = initialSelectedIds.filter(id =>
-                unplannedOrders.some(order => order.id === id)
-            );
-            setSelectedIds(validIds);
-        }
-    }, [isOpen, initialSelectedIds, unplannedOrders]);
+        if (!isOpen) return
+        if (idsAplicadosRef.current === initialIdsKey) return
+        idsAplicadosRef.current = initialIdsKey
+        // Filter out any IDs that are not in the available unplannedOrders
+        const validIds = initialSelectedIds.filter(id =>
+            unplannedOrders.some(order => order.id === id)
+        );
+        setSelectedIds(validIds);
+        setSoloTildadas(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, initialIdsKey]);
+
+    /** Salir del planificador SÍ es cerrar: la próxima vez se entra en blanco.
+     *  (Distinto de "Volver", que es seguir con la misma tanda.) */
+    const salirDelPlanificador = () => {
+        idsAplicadosRef.current = null
+        setSelectedIds([])
+        setSoloTildadas(null)
+        onClose()
+    }
 
     // Filter states
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState)
@@ -117,6 +148,7 @@ export function PlanningSelectionScreen({
     // maneja la tabla (pinSelectedOnTop) para no reordenar en vivo con cada tilde;
     // acá solo se garantiza que las pre-seleccionadas arranquen arriba.
     const filteredOrders = applyWorkOrderFilters(unplannedOrders, filters)
+        .filter(o => soloTildadas === null || soloTildadas.includes(o.id))
         .sort((a, b) => {
             const isASelected = initialSelectedIds.includes(a.id);
             const isBSelected = initialSelectedIds.includes(b.id);
@@ -131,12 +163,34 @@ export function PlanningSelectionScreen({
             return 0
         })
 
-    // Auto-select filtered orders when filters change
-    useEffect(() => {
-        if (!autoSelectAll) return;
-        const ids = filteredOrders.map(o => o.id)
-        setSelectedIds(ids)
-    }, [filters, dateSort, autoSelectAll])
+    // Acá NO hay tildado automático, y es a propósito (Julián, 31/08: "cuando abro
+    // planificar de base ya están todas seleccionadas, no tiene que pasar eso").
+    // Antes un useEffect hacía `setSelectedIds(lo filtrado)` cada vez que cambiaban
+    // los filtros: abría con las 176 OT tildadas y, peor, cambiar de filtro
+    // reemplazaba la selección —tildabas las urgentes, pasabas a retrasadas y las
+    // urgentes se perdían sin aviso (pedido de Lucas, 28/08)—.
+    //
+    // Al no existir ese efecto, los filtros NUNCA tocan `selectedIds`: la selección
+    // se acumula sola mientras vas filtrando. Para tildar de a tandas está el tilde
+    // de la cabecera de la lista, que suma o saca solo las filas que estás viendo.
+
+    /** Huella de los filtros: cambia sólo cuando se toca un filtro o el orden, y es
+     *  lo que le avisa a la lista que cierre las filas desplegadas. El rango de
+     *  fechas no entra: es el horizonte del plan, no filtra la lista. */
+    const filtrosKey = JSON.stringify(filters) + "|" + dateSort + "|" + (soloTildadas !== null)
+
+    /** "Deseleccionar todas" también apaga el modo de revisión: si no, quedabas
+     *  mirando una lista vacía sin entender por qué no hay ninguna OT. */
+    const deseleccionarTodas = () => {
+        setSelectedIds([])
+        setSoloTildadas(null)
+    }
+
+    /** El badge "N seleccionadas" es el interruptor del modo de revisión: te deja
+     *  ver de un saque qué elegiste sin ir a buscarlo entre 176 renglones. */
+    const alternarSoloTildadas = () => {
+        setSoloTildadas(prev => (prev === null ? [...selectedIds] : null))
+    }
 
     // Calculate estimated workload
     const calculateEstimatedTime = () => {
@@ -242,14 +296,34 @@ export function PlanningSelectionScreen({
                                 <span className="hidden sm:inline">Est:</span> {estimatedTime}
                             </Badge>
                         )}
-                        <Badge variant="outline" className="text-slate-500 font-normal">
+                        {/* El contador es el botón para revisar lo elegido: con 176 renglones,
+                            encontrar las 3 que tildaste era scrollear a ojo (Julián, 31/08).
+                            Encendido, la lista muestra solo esas y el badge dice cómo salir. */}
+                        <button
+                            type="button"
+                            onClick={alternarSoloTildadas}
+                            disabled={selectedIds.length === 0 && soloTildadas === null}
+                            aria-pressed={soloTildadas !== null}
+                            title={soloTildadas !== null
+                                ? "Volver a la lista completa"
+                                : "Ver solo las OT que tildaste"}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                                "disabled:cursor-default disabled:opacity-60",
+                                soloTildadas !== null
+                                    ? "border-blue-300 bg-blue-50 font-medium text-blue-700 hover:bg-blue-100"
+                                    : "border-slate-200 font-normal text-slate-500 enabled:hover:border-slate-300 enabled:hover:bg-slate-50 enabled:hover:text-slate-700"
+                            )}
+                        >
+                            {soloTildadas !== null && <Check className="w-3 h-3 shrink-0" />}
                             {selectedIds.length} seleccionadas
-                        </Badge>
+                            {soloTildadas !== null && <X className="w-3 h-3 shrink-0 opacity-70" />}
+                        </button>
                         {selectedIds.length > 0 && (
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setSelectedIds([])}
+                                onClick={deseleccionarTodas}
                                 className="h-6 px-2 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50"
                             >
                                 Deseleccionar todas
@@ -389,8 +463,8 @@ export function PlanningSelectionScreen({
             }
             pie={
                 <>
-                    <div className="px-6 py-3 flex items-center justify-end gap-2">
-                    <Button variant="outline" onClick={onClose} className="text-gray-600">
+                    <div className="px-6 py-3 flex flex-wrap items-center justify-end gap-2">
+                    <Button variant="outline" onClick={salirDelPlanificador} className="text-gray-600">
                         Salir del planificador
                     </Button>
                     <Button
@@ -495,6 +569,7 @@ export function PlanningSelectionScreen({
                                     hideStatus={true}
                                     highlightedIds={initialSelectedIds}
                                     pinSelectedOnTop
+                                    colapsarFilasKey={filtrosKey}
                                     compacto
                                 />
                             </div>

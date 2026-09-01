@@ -81,6 +81,10 @@ interface PlanningListTableProps {
     /** Modo compacto: sin el margen de arriba y con menos aire entre buscador y tabla.
         Lo usa el planificador, donde la tabla ya vive adentro de una tarjeta. */
     compacto?: boolean;
+    /** Huella de los filtros de afuera. Cada vez que cambia se cierran las filas que
+     *  estaban desplegadas. Sin esto la lista nueva aparece con las bandas abiertas
+     *  de la vuelta anterior y no se entiende qué estás mirando. */
+    colapsarFilasKey?: string;
 }
 
 /** Columnas ordenables de la tabla. TODAS las columnas con dato ordenan; las que
@@ -170,7 +174,8 @@ function _PlanningListTable({
     highlightedIds = [],
     tableZoom = 100,
     pinSelectedOnTop = false,
-    compacto = false
+    compacto = false,
+    colapsarFilasKey
 }: PlanningListTableProps) {
 
     // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
@@ -244,12 +249,27 @@ function _PlanningListTable({
         );
     };
 
+    // Cambiar de filtro cierra lo que hubiera quedado abierto (pedido de Lucas,
+    // 28/08). Antes las filas seguían desplegadas al filtrar y, abriendo una acá y
+    // otra allá, la lista terminaba llena de bandas de OTs que ya no estabas
+    // mirando: "abre una banda, después hace un quilombo, no entienden nada".
+    React.useEffect(() => {
+        if (colapsarFilasKey === undefined) return;
+        setExpandedOrderIds(prev => (prev.length === 0 ? prev : []));
+    }, [colapsarFilasKey]);
+
+    // El tilde de la cabecera trabaja sobre lo VISIBLE: suma las filas de la lista
+    // actual a lo que ya venía tildado, o solo esas saca. Antes reemplazaba la
+    // selección entera, así que tildar acá con un filtro puesto borraba lo elegido
+    // bajo los otros filtros (pedido de Lucas, 28/08: la selección se acumula).
     const handleSelectAll = (checked: boolean) => {
         if (!onSelectionChange) return;
+        const visibles = sortedData.map(item => item.id);
         if (checked) {
-            onSelectionChange(sortedData.map(item => item.id));
+            onSelectionChange(Array.from(new Set([...selectedIds, ...visibles])));
         } else {
-            onSelectionChange([]);
+            const fuera = new Set(visibles);
+            onSelectionChange(selectedIds.filter(id => !fuera.has(id)));
         }
     };
 
@@ -405,6 +425,10 @@ function _PlanningListTable({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchTerm, pinSelectedOnTop]);
     const isRowExpanded = (id: number) => expandedOrderIds.includes(id) || procesoMatchIds.has(id);
+
+    /** Lo tildado, para preguntar por fila sin recorrer el array en cada una: con la
+     *  selección acumulada `selectedIds` puede ser bastante más larga que la lista. */
+    const selectedIdSet = React.useMemo(() => new Set(selectedIds), [selectedIds]);
 
     const sortedData = React.useMemo(() => {
 
@@ -946,7 +970,11 @@ function _PlanningListTable({
             {/* B1 (feedback 06/07): barra flotante de cambios pendientes de operario/máquina.
                 Aparece solo cuando hay reasignaciones sin guardar; el avance y las fechas siguen al toque. */}
             {Object.keys(pendingRes).length > 0 && (
-                <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white border border-amber-300 shadow-lg rounded-full pl-4 pr-2 py-2">
+                /* `bottom-24` y no `bottom-5`: el pie del planificador es sticky y vive
+                   en esa misma banda, así que la barra le caía justo encima y tapaba
+                   "Planificar". Y con `max-w`/`flex-wrap` no se sale de una pantalla
+                   angosta, donde los tres textos más los dos botones no entran. */
+                <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-40 flex flex-wrap justify-center items-center gap-2 max-w-[calc(100vw-2rem)] bg-white border border-amber-300 shadow-lg rounded-full pl-4 pr-2 py-2">
                     <span className="text-xs font-medium text-gray-700">
                         {Object.keys(pendingRes).length} proceso{Object.keys(pendingRes).length === 1 ? "" : "s"} con cambios sin guardar
                     </span>
@@ -990,6 +1018,20 @@ function _PlanningListTable({
                             >
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="flex items-center gap-2">
+                                        {/* La casilla FALTABA en la tarjeta: abajo de `md` no había
+                                            manera de tildar una OT. Mientras el planificador abría
+                                            con todo tildado no se notaba; desde que abre en cero,
+                                            en un teléfono no se podía planificar nada. */}
+                                        {onSelectionChange && (
+                                            <span onClick={(e) => e.stopPropagation()} className="flex items-center">
+                                                <Checkbox
+                                                    className="h-5 w-5"
+                                                    checked={selectedIdSet.has(item.id)}
+                                                    onCheckedChange={(checked) => handleSelectRow(item.id, !!checked)}
+                                                    aria-label={`Elegir la OT ${item.id_otvieja || item.id}`}
+                                                />
+                                            </span>
+                                        )}
                                         <span className="font-bold text-lg text-gray-800">#{item.id_otvieja || item.id}</span>
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
                                     </div>
@@ -1084,7 +1126,7 @@ function _PlanningListTable({
                                         <label className="flex items-center justify-center w-full h-full py-1 cursor-pointer">
                                             <Checkbox
                                                 className="h-5 w-5"
-                                                checked={sortedData.length > 0 && selectedIds.length === sortedData.length}
+                                                checked={sortedData.length > 0 && sortedData.every(item => selectedIdSet.has(item.id))}
                                                 onCheckedChange={(checked) => handleSelectAll(!!checked)}
                                             />
                                         </label>
