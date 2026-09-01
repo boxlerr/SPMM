@@ -21,6 +21,12 @@ class PlanificarRequestDTO(BaseModel):
     # puede ir varias veces en una OT (la 7497 tiene TORNO CNC 13 veces): elegir "el
     # proceso" no dice cuál de las 13. Si viene, manda sobre `procesos_por_orden`.
     lineas_por_orden: Optional[Dict[int, List[int]]] = None
+    # Qué borrador se está confirmando. Al confirmar, ese plan deja de ser un
+    # borrador y hay que sacarlo de "Planes sin confirmar"; con el id se borra ESA
+    # fila y ninguna otra. Opcional a propósito: si no viene (pestaña con el bundle
+    # viejo, o un plan que nunca llegó a guardarse) el backend cae al borrado por
+    # lote exacto. Ver PlanificacionBorradorRepository.borrar_por_ordenes.
+    borrador_id: Optional[int] = None
 
     @model_validator(mode="after")
     def _validar_rango(self):

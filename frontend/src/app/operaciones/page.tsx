@@ -108,7 +108,7 @@ export default function OperacionesPage() {
   // Autoguardado del plan sin confirmar. El navegador escribe en cada cambio (cubre
   // el cierre accidental y el corte de luz); la base va debounceada y es la copia
   // que ve cualquiera desde cualquier máquina. Ver hooks/useBorradorPlan.
-  const { registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo } = useBorradorPlan()
+  const { registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo, idBorradorEnBase } = useBorradorPlan()
   // Lo que devolvió el solver, para poder recomponer el borrador entero cuando lo
   // único que cambió fue una edición hecha dentro de la vista previa.
   const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "guardadoEn"> | null>(null)
@@ -1271,6 +1271,10 @@ export default function OperacionesPage() {
           fecha_desde: planningRange.fecha_desde,
           fecha_hasta: planningRange.fecha_hasta,
           forzar_ordenes_ids: forzarOrdenIds,
+          // Cuál borrador se está confirmando, para que el backend borre ESE y
+          // ninguno más. Sin esto lo adivinaba por el lote de OTs y se llevaba
+          // puestos todos los borradores contenidos en la tanda, propios y ajenos.
+          borrador_id: idBorradorEnBase(),
         }),
       });
 
