@@ -94,6 +94,22 @@ export function useBorradorPlan() {
         setBorradorLocal(null);
     }, [descargar]);
 
+    /**
+     * El id del borrador que el autosave está pisando, o null si todavía no llegó a
+     * la base.
+     *
+     * Lo necesita el confirmar para decirle al backend CUÁL borrador dejó de serlo.
+     * Antes no se lo decía y el backend lo adivinaba borrando todos los borradores
+     * cuyo lote de OTs estuviera contenido en el que se confirmaba: con una tanda de
+     * 176 OTs eso se llevaba puesta casi toda la lista de "Planes sin confirmar",
+     * incluidos los de otros.
+     *
+     * Es una función sobre el ref y no un estado porque `idEnBase` se completa recién
+     * cuando contesta el POST del autosave, y ahí no se vuelve a setear `borradorLocal`:
+     * leerlo del estado devolvería `undefined` justo en el borrador recién creado.
+     */
+    const idBorradorEnBase = useCallback(() => idEnBase.current, []);
+
     /** Un borrador traído de la base pasa a ser el que el autosave sigue pisando. */
     const adoptar = useCallback((b: BorradorPlan) => {
         idEnBase.current = typeof b.id === "number" ? b.id : null;
@@ -120,5 +136,5 @@ export function useBorradorPlan() {
         };
     }, [subir]);
 
-    return { borradorLocal, registrarCambio, guardarYa, olvidar, adoptar };
+    return { borradorLocal, registrarCambio, guardarYa, olvidar, adoptar, idBorradorEnBase };
 }

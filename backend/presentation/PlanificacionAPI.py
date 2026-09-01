@@ -41,6 +41,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
     forzar_ordenes_ids = body.forzar_ordenes_ids if body else None
     procesos_por_orden = body.procesos_por_orden if body else None
     lineas_por_orden = body.lineas_por_orden if body else None
+    borrador_id = body.borrador_id if body else None
 
     # Cada intento queda auditado, salga bien o mal. Antes un intento fallado no
     # dejaba rastro en la app: el 15/08 uno murió por memoria y la única evidencia
@@ -76,7 +77,16 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
         # que ya está planificado y confirmado.
         if not preview_mode and ordenes_ids:
             try:
-                await PlanificacionBorradorRepository(db).borrar_por_ordenes(ordenes_ids)
+                repo_borrador = PlanificacionBorradorRepository(db)
+                # Por id se borra EXACTAMENTE el borrador que se confirmó. Antes
+                # esto era un DELETE por contención y sin filtro de usuario, así que
+                # confirmar un lote grande se llevaba puestos todos los borradores
+                # cuyo lote fuera subconjunto de ese, propios y ajenos. El borrado
+                # por lote exacto queda de respaldo para cuando el id no viene.
+                if borrador_id:
+                    await repo_borrador.borrar(borrador_id)
+                else:
+                    await repo_borrador.borrar_por_ordenes(ordenes_ids)
             except Exception as e:
                 logger.warning(f"No se pudo limpiar el borrador del lote confirmado: {e}")
         return resultados

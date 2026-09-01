@@ -49,6 +49,17 @@ def _a_fecha(valor) -> date | None:
         return None
 
 
+def _ids_normalizados(ordenes_ids) -> str:
+    """El lote de OTs tal como se guarda: ordenado, sin repetidos y en JSON.
+
+    Existe como una sola función porque `borrar_por_ordenes` compara por IGUALDAD
+    contra lo que escribió `guardar`. Si una ordenara y la otra no, en JSONB
+    `[7, 3]` y `[3, 7]` son distintos, y el borrador recién confirmado se quedaría
+    para siempre en la lista de "Planes sin confirmar".
+    """
+    return json.dumps(sorted(set(ordenes_ids or [])))
+
+
 class PlanificacionBorradorRepository:
     def __init__(self, db):
         self.db = db
@@ -113,7 +124,7 @@ class PlanificacionBorradorRepository:
 
         params = {
             "contenido": payload,
-            "ordenes_ids": json.dumps(sorted(set(ordenes_ids or []))),
+            "ordenes_ids": _ids_normalizados(ordenes_ids),
             "cantidad_ots": len(set(ordenes_ids or [])),
             "cantidad_procesos": int(cantidad_procesos or 0),
             "fecha_desde": _a_fecha(fecha_desde),
@@ -227,12 +238,26 @@ class PlanificacionBorradorRepository:
             return False
 
     async def borrar_por_ordenes(self, ordenes_ids: list[int]) -> int:
-        """Borra los borradores cuyo lote quedó contenido en las OTs recién
-        confirmadas: ese plan dejó de ser un borrador, ya es el plan.
+        """Borra el borrador cuyo lote es EXACTAMENTE el que se acaba de confirmar.
 
-        Se compara por contención y no por igualdad porque el usuario puede haber
-        confirmado un lote más grande del que tenía guardado (agregó OTs desde la
-        vista previa antes de confirmar).
+        Es el camino de atrás. El de adelante es `borrar(id)`: el frontend manda el
+        id del borrador que se está confirmando y se borra esa fila y ninguna otra.
+        Esto corre solo cuando ese id no viene —una pestaña con el bundle viejo, o
+        un plan que nunca llegó a guardarse en la base—, y por eso se queda en el
+        caso seguro: mismo lote, mismo borrador.
+
+        Antes comparaba por CONTENCIÓN (`ordenes_ids <@ :ids`) para cubrir que el
+        usuario hubiera agregado OTs desde la vista previa antes de confirmar. El
+        motivo era bueno, el alcance estaba mal: sin filtro de ninguna clase,
+        confirmar un lote de 176 OTs borraba TODOS los borradores cuyo conjunto de
+        OTs fuera un subconjunto de esas 176 —los propios y los ajenos, aunque no
+        tuvieran nada que ver con el plan que se confirmó— y se llevaba puesta casi
+        toda la lista de "Planes sin confirmar". Y como en Postgres el array vacío
+        está contenido en cualquier cosa, un borrador que hubiera quedado con
+        `ordenes_ids` en `[]` lo borraba CUALQUIER confirmación.
+
+        El caso que la contención cubría lo cubre ahora el id, que es exacto y no
+        depende de cómo derivó el lote entre que se guardó y se confirmó.
         """
         if not ordenes_ids:
             return 0
@@ -240,8 +265,8 @@ class PlanificacionBorradorRepository:
         try:
             res = await self.db.execute(text("""
                 DELETE FROM planificacion_borrador
-                 WHERE ordenes_ids <@ CAST(:ids AS JSONB)
-            """), {"ids": json.dumps(sorted(set(ordenes_ids)))})
+                 WHERE ordenes_ids = CAST(:ids AS JSONB)
+            """), {"ids": _ids_normalizados(ordenes_ids)})
             await self.db.commit()
             return res.rowcount or 0
         except Exception as e:

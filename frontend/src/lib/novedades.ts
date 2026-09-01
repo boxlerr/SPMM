@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "confirmar-no-borra-otros-borradores",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Confirmar un plan ya no se lleva puestos los demás planes sin confirmar",
+        detalle:
+            "Al confirmar una tanda grande desaparecía media lista de «Planes sin confirmar». Se borraba todo plan guardado cuyas OT estuvieran dentro de la tanda que estabas confirmando, aunque fuera de otro día, de otra tanda o de otra persona; con 176 OT eso era casi toda la lista. Ahora confirmar saca de ahí únicamente el plan que confirmaste y el resto queda donde estaba. Lo que ya se borró no vuelve, pero en Auditoría ves qué OT tenía cada tanda para volver a calcularla.",
+        href: "/operaciones",
+    },
+    {
         id: "avisos-recurso-maquina-recurso-humano",
         fecha: "2026-08-31",
         tipo: "mejora",
