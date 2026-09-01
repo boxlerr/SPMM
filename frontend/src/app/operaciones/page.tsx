@@ -108,7 +108,7 @@ export default function OperacionesPage() {
   // Autoguardado del plan sin confirmar. El navegador escribe en cada cambio (cubre
   // el cierre accidental y el corte de luz); la base va debounceada y es la copia
   // que ve cualquiera desde cualquier máquina. Ver hooks/useBorradorPlan.
-  const { registrarCambio, guardarYa, olvidar, adoptar } = useBorradorPlan()
+  const { registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo } = useBorradorPlan()
   // Lo que devolvió el solver, para poder recomponer el borrador entero cuando lo
   // único que cambió fue una edición hecha dentro de la vista previa.
   const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "guardadoEn"> | null>(null)
@@ -873,6 +873,12 @@ export default function OperacionesPage() {
     setSelectedOrderIds(ids);
     setPlanningRange(range);
 
+    // Un cálculo nuevo es un borrador NUEVO, no una versión del anterior. Sin esta
+    // línea el autosave seguía estampando el id del borrador viejo y en la base eso
+    // es un UPDATE del contenido: planificar de nuevo pisaba el borrador de antes y
+    // no quedaba rastro de lo pisado (31/08: uno de 8 OT quedó en 1 OT).
+    empezarNuevo();
+
     // Call API for preview
     try {
       setCalculando({ activo: true, ots: ids.length, listo: false });
@@ -1387,7 +1393,6 @@ export default function OperacionesPage() {
             onDataRefresh={fetchData}
             initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
             onAbrirBorrador={handleAbrirBorrador}
-            autoSelectAll={!isReplanning}
             availableOperarios={rawOperarios}
           />
           <PlanningPreviewScreen
@@ -1484,7 +1489,7 @@ export default function OperacionesPage() {
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "operarios" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <User size={18} />
-              Operarios
+              Recurso humano
             </button>
 
             <button

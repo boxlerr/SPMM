@@ -94,6 +94,29 @@ export function useBorradorPlan() {
         setBorradorLocal(null);
     }, [descargar]);
 
+    /**
+     * Arranca un borrador NUEVO: el próximo guardado va a INSERTAR una fila en vez
+     * de pisar la anterior.
+     *
+     * Sin esto, `idEnBase` sobrevivía a todo —incluso a cerrar el navegador, porque
+     * se restaura desde `localStorage` al montar— y el POST estampaba SIEMPRE ese
+     * id, que en la base es un `UPDATE ... SET contenido`. O sea: calcular un plan
+     * nuevo pisaba el borrador anterior con el nuevo contenido y el viejo se perdía
+     * sin dejar rastro. Fue exactamente lo que pasó el 31/08: un borrador de 8 OT
+     * quedó convertido en uno de 1 OT al planificar de nuevo.
+     *
+     * Se llama al EMPEZAR un cálculo nuevo. Los recálculos de la vista previa y las
+     * ediciones a mano NO lo llaman: esos sí tienen que seguir pisando el mismo.
+     */
+    const empezarNuevo = useCallback(() => {
+        // Lo que quedó en el debounce todavía es del borrador VIEJO: se manda CON su
+        // id antes de soltarlo. Si solo se descartara, los últimos retoques a mano
+        // —los de los 3 segundos previos a apretar Planificar— se perderían.
+        const pendiente = descargar();
+        if (pendiente) void subir(pendiente, true);
+        idEnBase.current = null;
+    }, [descargar, subir]);
+
     /** Un borrador traído de la base pasa a ser el que el autosave sigue pisando. */
     const adoptar = useCallback((b: BorradorPlan) => {
         idEnBase.current = typeof b.id === "number" ? b.id : null;
@@ -120,5 +143,5 @@ export function useBorradorPlan() {
         };
     }, [subir]);
 
-    return { borradorLocal, registrarCambio, guardarYa, olvidar, adoptar };
+    return { borradorLocal, registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo };
 }
