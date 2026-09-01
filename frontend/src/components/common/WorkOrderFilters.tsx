@@ -132,14 +132,20 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
                 separadores verticales para agrupar visualmente). Limpiar Filtros queda a la derecha
                 pero pegado al grupo Colores (no flotando con ml-auto que generaba un hueco enorme). */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                {/* Prioridad */}
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Prioridad</span>
-                    <div className="flex bg-slate-200/50 p-0.5 rounded-lg border border-slate-200">
+                {/* Prioridad.
+                    `min-w-0` + `overflow-x-auto` y los botones con `shrink-0` y
+                    `whitespace-nowrap`: los cinco chips miden ~450px y en un teléfono
+                    de 375 se salían del borde SIN scroll —el contenedor de afuera los
+                    recortaba— así que "URGENTE 2" y "NORMAL" no se podían tocar. Ahora
+                    el grupo se arrastra de costado y se llega a todos. En pantalla
+                    ancha no cambia nada: entran de sobra y no aparece ninguna barra. */}
+                <div className="flex items-center gap-2 min-w-0 max-w-full">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest shrink-0">Prioridad</span>
+                    <div className="flex min-w-0 overflow-x-auto overscroll-x-contain bg-slate-200/50 p-0.5 rounded-lg border border-slate-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         <button
                             onClick={() => setFilters(prev => ({ ...prev, priority: [] }))}
                             className={cn(
-                                "px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
+                                "shrink-0 whitespace-nowrap px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
                                 filters.priority.length === 0 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                             )}
                         >
@@ -150,7 +156,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
                                 key={option}
                                 onClick={() => togglePriority(option)}
                                 className={cn(
-                                    "px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
+                                    "shrink-0 whitespace-nowrap px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all",
                                     filters.priority.includes(option) ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                                 )}
                             >
@@ -163,7 +169,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
                 <div className="hidden md:block h-5 w-px bg-slate-300" />
 
                 {/* Toggles compactos en un solo grupo */}
-                <div className="flex items-center gap-3 px-2 py-1 bg-white/60 rounded-lg border border-slate-200/70">
+                <div className="flex flex-wrap items-center gap-3 px-2 py-1 bg-white/60 rounded-lg border border-slate-200/70">
                     {renderToggle("Procesos", filters.showWithProcessesOnly,
                         () => setFilters(prev => ({ ...prev, showWithProcessesOnly: !prev.showWithProcessesOnly })),
                         "bg-green-500")}

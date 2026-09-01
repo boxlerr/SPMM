@@ -309,7 +309,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         <div className="space-y-4 py-4">
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Información Personal</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Nombre *</Label>
                 <Input value={formData.nombre} onChange={(e) => setFormData({ ...formData, nombre: e.target.value })} placeholder="Juan" />
@@ -319,7 +319,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
                 <Input value={formData.apellido} onChange={(e) => setFormData({ ...formData, apellido: e.target.value })} placeholder="Pérez" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>DNI / CUIL / CUIT</Label>
                 <Input value={formData.dni} onChange={(e) => setFormData({ ...formData, dni: e.target.value })} placeholder="20123456789" />
@@ -335,7 +335,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Información Laboral</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Sector</Label>
                 <Select value={formData.sector} onValueChange={(v) => setFormData({ ...formData, sector: v })}>
@@ -418,7 +418,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Información de Contacto</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Teléfono</Label>
                 <Input value={formData.telefono} onChange={(e) => setFormData({ ...formData, telefono: e.target.value })} placeholder="42332492" />
@@ -437,7 +437,7 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">Horario de Trabajo</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Hora de Inicio</Label>
                 <Input type="time" value={formData.hora_inicio} onChange={(e) => setFormData({ ...formData, hora_inicio: e.target.value })} />

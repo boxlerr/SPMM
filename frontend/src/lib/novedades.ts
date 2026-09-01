@@ -47,6 +47,126 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "aviso-llega-con-la-solucion-tildada",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "«Ir a arreglarlo» te deja la solución tildada: solo confirmás",
+        detalle:
+            "Antes el botón te dejaba parado en la fila correcta de Recursos, pero con la lista de rangos vacía: había que acordarse de cuál era y buscarlo entre treinta. Ahora el aviso viaja con la propuesta: llegás y ya está tildada, en celeste, con el botón de guardar encendido — mirás y guardás. Además el aviso ahora DICE cuáles son («Cargale OFICIAL o MEDIO OFICIAL: son los que ya aceptan las máquinas donde se hace»), así que se entiende antes de tocar nada. No se guarda nada solo: si la propuesta no va, la sacás con la cruz.",
+        href: "/operaciones",
+    },
+    {
+        id: "responsive-tablet-y-telefono",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Todo el sistema",
+        titulo: "El sistema se puede usar en tablet y en teléfono",
+        detalle:
+            "En pantallas de menos de 1024 el menú de la izquierda se quedaba fijo y opaco tapando los primeros 256px: en una tablet no se veía ni el título ni la columna de los tildes. Ahora se corre del todo y se abre con el botón, como en el teléfono. De paso: en el planificador ya se puede tildar una OT desde el teléfono (a la tarjeta le faltaba la casilla), los filtros de prioridad se arrastran de costado en vez de cortarse, las cinco pestañas de Recursos se acomodan en varias filas, la barra de «cambios sin guardar» dejó de taparle el botón de planificar, y el panel de carga de operarios arranca plegado cuando la pantalla es angosta para no comerse la tabla.",
+        href: "/operaciones",
+    },
+    {
+        id: "borrador-no-se-pisa",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Planificar de nuevo ya no se come el borrador anterior",
+        detalle:
+            "Cada plan sin confirmar se guarda solo para que lo puedas retomar. El problema era que el sistema seguía escribiendo SIEMPRE sobre el mismo renglón: calculabas un plan nuevo y el borrador de antes quedaba reemplazado por el nuevo, con el nombre y la fecha del viejo. Así un borrador de 8 OT apareció un día con 1 sola. Ahora cada cálculo nuevo deja su propio borrador y los anteriores quedan enteros; retomar uno y recalcularlo sí sigue actualizando ese mismo, que es lo que uno espera. Ojo: lo que ya se pisó no se puede recuperar.",
+        href: "/operaciones",
+    },
+    {
+        id: "planificar-abre-sin-tildar",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Planificar abre sin nada tildado: elegís vos qué entra",
+        detalle:
+            "Antes abrías y ya estaban las 176 OT marcadas, así que planificar de más era un click y elegir de verdad era destildar 170. Ahora arranca en cero. Para tildar de a montones está el casillero de la cabecera de la lista, que suma o saca solo las filas que estás viendo: filtrás urgentes, tildás todas, cambiás a retrasadas, tildás todas, y se van sumando. «Volver» desde la vista previa te devuelve la tanda intacta; salir del planificador sí empieza de nuevo.",
+        href: "/operaciones",
+    },
+    {
+        id: "ver-solo-las-tildadas",
+        fecha: "2026-09-01",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Tocá «N seleccionadas» y ves solo las OT que elegiste",
+        detalle:
+            "Con 176 renglones, encontrar las 3 que tildaste era scrollear a ojo. Ahora el contador es un botón: lo tocás y la lista queda con esas nada más, para repasarlas antes de calcular. Podés destildar ahí mismo sin que la fila desaparezca de golpe, y volvés a la lista completa tocándolo de nuevo.",
+        href: "/operaciones",
+    },
+    {
+        id: "carga-operarios-scrollea",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El panel de carga de operarios volvió a scrollear",
+        detalle:
+            "En la vista previa, la lista de la derecha se cortaba donde terminaba el panel y no había manera de llegar a los operarios de abajo: con el taller entero solo se veían los tres o cuatro primeros. Ahora scrollea normal.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-sin-numerito-ni-barra",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los avisos perdieron el numerito y la barra de color de la izquierda",
+        detalle:
+            "Cada aviso arrastraba dos adornos pegados al borde izquierdo —un número en un círculo gris y una barra de color— que no decían nada y le comían lugar al título, que es lo único que hay que poder leer de un saque. Se fueron los dos. Si era Alta o Media se sigue viendo igual: lo dice con todas las letras el cartelito rojo o ámbar del principio.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-titulos-uniformes",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Todos los avisos se titulan igual: primero de quién habla, después qué le pasa",
+        detalle:
+            "Quedaban dos avisos que arrancaban sin los dos puntos y uno que enumeraba las ocho máquinas en el título y se iba de renglón. Ahora los siete tienen la misma forma —«Soldadura con MIG: su máquina no acepta el rango que pide»— y el nombre del trabajo va escrito como se escribe, con las siglas en mayúscula. Si abrís un borrador viejo vas a ver los textos de cuando se calculó: tocá «Volver a revisar» y salen con el formato nuevo.",
+        href: "/operaciones",
+    },
+    {
+        id: "filtros-suman-seleccion",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Cambiar de filtro ya no te borra las OT que habías elegido",
+        detalle:
+            "En el paso de elegir qué OT entran al plan, cada vez que tocabas un filtro la selección se rehacía con lo que quedaba a la vista: marcabas las urgentes, pasabas a retrasadas y las urgentes se perdían sin avisar —el contador caía de 18 a 6 y los días estimados con él—. Ahora la selección se suma: elegís por urgentes, después por retrasadas, después por cliente, y vas viendo cómo crecen los días acumulados. Lo que destildás a mano queda destildado aunque vuelvas a pasar por su filtro, y el tilde de la cabecera agrega o saca sólo las que estás viendo. Para arrancar de cero está «Deseleccionar todas».",
+        href: "/operaciones",
+    },
+    {
+        id: "filtro-cierra-ot-desplegadas",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Al cambiar de filtro, las OT que dejaste abiertas se cierran",
+        detalle:
+            "En esa misma lista podés desplegar una OT para ver sus procesos. Antes las abiertas quedaban abiertas al filtrar, así que después de mirar tres o cuatro la pantalla aparecía llena de bandas desplegadas de OT que ya no estabas mirando y no se entendía qué tenías adelante. Ahora cada cambio de filtro deja la lista plegada y se lee de un vistazo; la OT que quieras seguir mirando la volvés a abrir con la flecha.",
+        href: "/operaciones",
+    },
+    {
+        id: "vista-previa-procesos-a-mano",
+        fecha: "2026-08-31",
+        tipo: "nuevo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Lo que agregás a mano al plan se ve, se corrige y se puede deshacer",
+        detalle:
+            "En la vista previa, todo lo que sumás con «Agregar OTs» queda marcado en violeta —la OT con el cartelito «A mano» y cada proceso suelto con el suyo— así se distingue de lo que armó el planificador solo. Si te equivocaste, la X del proceso lo saca sin tocar el resto de la OT, y el botón «Deshacer» de arriba devuelve toda la última tanda. Al elegir procesos sueltos ahora sólo se pueden tildar los del paso 1 o 2: un proceso posterior necesita que la pieza haya pasado por los anteriores, y si el orden de la OT está mal, hay que corregirlo en la OT. Antes lo agregado se mezclaba con el resto y la única forma de arrepentirse era tirar la OT entera.",
+        href: "/operaciones",
+    },
+    {
+        id: "avisos-abren-la-ot",
+        fecha: "2026-08-31",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Desde el aviso llegás a la OT de un click",
+        detalle:
+            "Cada aviso muestra el número de las OT que toca y, al tocarlo, la tabla se abre en esa fila con los procesos desplegados y la deja resaltada: ahí mismo le elegís la persona y la máquina. Antes el número estaba en chico y había que bajar a buscar la OT entre todas las demás; si algún filtro la tapaba, ahora se limpian solos y te avisa.",
+        href: "/operaciones",
+    },
+    {
         id: "avisos-recurso-maquina-recurso-humano",
         fecha: "2026-08-31",
         tipo: "mejora",
