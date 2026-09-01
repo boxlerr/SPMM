@@ -110,6 +110,14 @@ export default function RecursosPage() {
   const focoAplicado = useRef(false);
   /** Operario del `?foco=`: se guarda acá y se abre recién cuando la lista cargó. */
   const [operarioAFocalizar, setOperarioAFocalizar] = useState<number | null>(null);
+  /**
+   * Rangos que el aviso propone para la fila del `?foco=` (`?rangos=3,7`).
+   *
+   * Se guardan para pasárselos al editor, que los deja tildados y enciende el botón
+   * de guardar: el que llega desde un aviso ya no tiene que acordarse de cuál era el
+   * rango ni buscarlo entre treinta. No se guarda nada solo.
+   */
+  const [rangosSugeridos, setRangosSugeridos] = useState<number[] | null>(null);
   useEffect(() => {
     if (typeof window === "undefined" || focoAplicado.current) return;
     const params = new URLSearchParams(window.location.search);
@@ -127,12 +135,18 @@ export default function RecursosPage() {
       if (tab === "procesos") setProcesoAbierto(foco);
       if (tab === "maquinas") setMaquinaAbierta(foco);
       if (tab === "operarios") setOperarioAFocalizar(foco);
+
+      const crudos = (params.get("rangos") || "")
+        .split(",")
+        .map((x) => Number(x.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (crudos.length > 0) setRangosSugeridos(crudos);
     }
 
     // El query param se limpia para que un F5 no vuelva a arrastrar el foco de un
     // aviso que quizás ya se resolvió.
     const url = new URL(window.location.href);
-    ["tab", "foco", "q"].forEach((k) => url.searchParams.delete(k));
+    ["tab", "foco", "q", "rangos"].forEach((k) => url.searchParams.delete(k));
     window.history.replaceState({}, "", url.toString());
   }, []);
 
@@ -349,7 +363,11 @@ export default function RecursosPage() {
         </Alert>
       )}
 
-      <div className="mb-4 md:mb-6 flex gap-2">
+      {/* Grilla y no `flex gap-2` con `flex-1`: los Button de shadcn traen
+          `whitespace-nowrap` y no achican, así que "Recurso maquinaria" y los otros
+          cuatro pedían ~820px y abajo de eso la fila se iba de la pantalla. Con
+          grilla el ancho lo pone la columna y los rótulos se acomodan solos. */}
+      <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
         <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
@@ -555,7 +573,8 @@ export default function RecursosPage() {
                               nombre={maquina.nombre}
                               actuales={rangosPorMaquina.get(maquina.id) ?? []}
                               catalogo={catalogoRangos}
-                              onGuardado={() => { setMaquinaAbierta(null); recargarCobertura(); }}
+                              sugeridos={rangosSugeridos ?? undefined}
+                              onGuardado={() => { setMaquinaAbierta(null); setRangosSugeridos(null); recargarCobertura(); }}
                             />
                           </td>
                         </tr>
@@ -810,7 +829,8 @@ export default function RecursosPage() {
                               nombre={proceso.nombre}
                               actuales={cob?.rangos ?? []}
                               catalogo={catalogoRangos}
-                              onGuardado={() => { setProcesoAbierto(null); recargarCobertura(); }}
+                              sugeridos={rangosSugeridos ?? undefined}
+                              onGuardado={() => { setProcesoAbierto(null); setRangosSugeridos(null); recargarCobertura(); }}
                             />
                           </td>
                         </tr>

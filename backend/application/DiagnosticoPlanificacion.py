@@ -15,13 +15,21 @@ porqué largo lo tiene en los comentarios de este archivo, que para eso están.
 Dos reglas de forma, de la revisión del 21/08 ("me marea tanta negrita, y cada
 traba tiene otro orden de palabras" — Julián):
 
-  1. TODOS los títulos empiezan por el SUJETO y siguen con lo que le pasa:
-     «plegado» se hace sin reservar la máquina, FRESADORA CNC es la única máquina
-     para 10 jornadas, VACANTE MEDIO OFICIAL tiene trabajo asignado. Antes cada
-     familia de aviso arrancaba a su manera —"Nadie puede hacer X", "10 jornadas
-     de trabajo para 3 máquinas", "Hay trabajo asignado a…"— y la lista se leía
-     como seis avisos de seis sistemas distintos: no había una columna donde
-     apoyar la vista para comparar uno con el de abajo.
+  1. TODOS los títulos tienen la MISMA forma: «Sujeto: qué le pasa». El sujeto es
+     el nombre del taller escrito como se escribe —el proceso pasa por `_bonito`,
+     la máquina y el puesto van como los guarda el catálogo—, después van dos
+     puntos y una sola cláusula en minúscula. Nunca comillas angulares, y como
+     mucho dos nombres en el sujeto (`_listar_corto`) para que entre en el renglón:
+     "Soldadura con MIG: su máquina no acepta el rango que pide", "FRESADORA CNC:
+     es la única máquina para 10 jornadas de trabajo", "VACANTE MEDIO OFICIAL: ese
+     trabajo no lo va a hacer nadie".
+
+     Antes cada familia arrancaba a su manera —"Nadie puede hacer X", "10 jornadas
+     de trabajo para 3 máquinas", "«plegado» se hace sin reservar la máquina"— y la
+     lista se leía como seis avisos de seis sistemas distintos: no había una columna
+     donde apoyar la vista para comparar uno con el de abajo. Los dos puntos no son
+     decoración: son esa columna. (Julián, 31/08: "me cuesta leer sin mayúsculas,
+     con esas llaves que se usan sin un :".)
 
   2. La negrita marca NOMBRES del taller (máquina, proceso, rango, persona) y
      CIFRAS. Nunca una frase, y nunca el nombre que ya está en el título. Un
@@ -223,7 +231,7 @@ def construir_diagnosticos(
         ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
         ots_con_plano, op_planos, rangos_crudos,
     )
-    diagnosticos += _procesos_sin_rango(procesos)
+    diagnosticos += _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango)
     diagnosticos += _trabajo_tercerizado(procesos)
     diagnosticos += _trabajo_en_puestos_vacantes(resultados, nombre_operario)
 
@@ -738,9 +746,9 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
         n_proc = len(d["procesos"])
         # Sujeto primero, como todos los demás: acá el sujeto es la máquina.
         titulo = (
-            f"{nombres_hab[0]} es la única máquina para {_corto(d['minutos'])} de trabajo"
+            f"{nombres_hab[0]}: es la única máquina para {_corto(d['minutos'])} de trabajo"
             if len(habilitadas) == 1
-            else f"{_listar_corto(nombres_hab)} se reparten {_corto(d['minutos'])} de trabajo"
+            else f"{_listar_corto(nombres_hab)}: se reparten {_corto(d['minutos'])} de trabajo"
         )
         base_txt = (
             f"{_listar(sorted(d['procesos']))} solo "
@@ -926,7 +934,7 @@ def _procesos_sin_maquina_compatible(
             severidad = ADVERTENCIA
             recurso, subtipo = MAQUINA, CAPACIDAD
             tiene = "ninguna máquina cargada"
-            titulo = f"{nombre_proc}: no hay ninguna máquina cargada para este trabajo"
+            titulo = f"{nombre_proc}: no hay ninguna máquina cargada para hacerlo"
             detalle = (
                 f"{_quien_lo_hace(n_hacen, rangos_proc)} No hay ninguna máquina cargada "
                 "que le corresponda, así que va sin reservar ninguna."
@@ -1077,7 +1085,7 @@ def _procesos_sin_maquina_compatible(
             titulo = (
                 f"{nombre_proc}: los que lo hacen no pueden tomar "
                 + _concuerda(maqs, "la máquina", "las máquinas")
-                + f" {_listar(maqs)}"
+                + f" {_listar_corto(maqs)}"
             )
             if quienes:
                 detalle = (
@@ -1140,17 +1148,39 @@ def _procesos_sin_maquina_compatible(
         })
     return salida
 
-def _procesos_sin_rango(procesos):
-    """Un proceso sin rango no significa 'no lo hace nadie' sino lo contrario."""
+def _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango):
+    """Un proceso sin rango no significa 'no lo hace nadie' sino lo contrario.
+
+    Trae ADEMÁS una propuesta de qué rangos cargarle: los que ya aceptan las
+    máquinas donde ese trabajo se hace. No es una invención nuestra —es un dato que
+    el taller ya cargó en Recursos— y por eso se puede proponer sin faltarle el
+    respeto a la decisión de nadie: si el proceso va en la SOLDADORA MIG y esa
+    máquina acepta OFICIAL, pedirle OFICIAL al proceso es lo que ya está pasando de
+    hecho. Sigue SIN botón de aplicar: se propone, la persona mira y guarda.
+
+    Un proceso sin familia de máquina (trabajo de banco) no tiene de dónde sacar la
+    propuesta, y ahí el aviso queda como estaba: el rango lo decide el taller.
+    """
     sin_rango = {}
-    for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, _um, _fam, _sk) in procesos:
+    for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, _um, fam, _sk) in procesos:
         if rangos:
             continue
         d = sin_rango.setdefault(proc_id, {"nombre": _bonito(nombre) or f"#{proc_id}",
-                                           "ots": set(), "minutos": 0, "procesos": 0})
+                                           "ots": set(), "minutos": 0, "procesos": 0,
+                                           "familias": set()})
         d["ots"].add(orden_id)
         d["minutos"] += dur
         d["procesos"] += 1
+        if fam:
+            d["familias"].add(fam)
+
+    # De la familia a los rangos que sus máquinas ya aceptan.
+    for d in sin_rango.values():
+        maquinas = [m for m, f in maq_familia.items() if f in d["familias"]]
+        propuestos = set()
+        for m in maquinas:
+            propuestos |= maq_rangos.get(m, set())
+        d["propuestos"] = sorted(propuestos)
 
     return [{
         "id": f"sin-rango-{proc_id}",
@@ -1171,13 +1201,27 @@ def _procesos_sin_rango(procesos):
             "resumen": _resumen(d["procesos"], d["ots"], d["minutos"]),
         },
         "soluciones": [{
-            "texto": "Cargale los rangos que hacen falta para hacerlo.",
+            # Con propuesta el texto DICE cuáles son: llegar a Recursos y tener que
+            # adivinar entre 30 rangos era la mitad del trabajo ("no estar revisando
+            # y adivinando" — Julián, 1/9).
+            "texto": (
+                "Cargale "
+                + _listar_rangos([nombre_rango.get(r, f"#{r}") for r in d["propuestos"]])
+                + ": son los que ya aceptan las máquinas donde se hace."
+                if d["propuestos"]
+                else "Cargale los rangos que hacen falta para hacerlo."
+            ),
             "donde": "Recursos › Procesos",
-            # Sin botón que lo aplique solo —qué rangos van lo sabe el taller—, pero
-            # el link tiene que caer en ESTE proceso y no en la lista de 414. Antes
-            # eso solo pasaba cuando la solución traía `accion`, así que justo los
-            # avisos Media, que nunca la traen, eran los que te dejaban a pie.
-            "objetivo": {"tipo": "proceso", "id": proc_id, "nombre": d["nombre"]},
+            # Sin botón que lo aplique solo —la última palabra es del taller—, pero
+            # el link cae en ESTE proceso y ya lleva los rangos propuestos tildados:
+            # se abre, se mira y se guarda. Antes te dejaba parado en la fila con la
+            # lista vacía.
+            "objetivo": {
+                "tipo": "proceso",
+                "id": proc_id,
+                "nombre": d["nombre"],
+                "rangos": d["propuestos"],
+            },
         }],
     } for proc_id, d in sin_rango.items()]
 
@@ -1215,7 +1259,7 @@ def _trabajo_tercerizado(procesos):
         "subtipo": CAPACIDAD,
         "tiene": "se hace afuera",
         "pide": "",
-        "titulo": f"{_listar_corto(_nombres_terc)} "
+        "titulo": f"{_listar_corto(_nombres_terc)}: "
                   f"{_concuerda(_nombres_terc, 'sale', 'salen')} del taller",
         "detalle": (
             f"{_concuerda(_nombres_terc, 'Va', 'Van')} sin operario ni máquina a propósito: "

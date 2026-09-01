@@ -153,7 +153,13 @@ export interface DiagnosticoSolucion {
      * siempre porque es una recomendación", Lucas 28/08) eran los que te dejaban
      * buscando la fila a mano entre 414 procesos.
      */
-    objetivo?: { tipo: "proceso" | "maquinaria" | "operario"; id: number; nombre: string } | null;
+    objetivo?: {
+        tipo: "proceso" | "maquinaria" | "operario";
+        id: number;
+        nombre: string;
+        /** Rangos propuestos, para llegar a Recursos con la solución ya tildada. */
+        rangos?: number[];
+    } | null;
 }
 
 export interface Diagnostico {
@@ -216,6 +222,9 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
         if (coincide) {
             params.set("foco", String(objetivo.id));
             if (objetivo.nombre) params.set("q", objetivo.nombre);
+            // Los rangos propuestos viajan en el link para que el editor de Recursos
+            // se abra con ellos ya tildados: llegar y guardar, sin adivinar cuál era.
+            if (objetivo.rangos?.length) params.set("rangos", objetivo.rangos.join(","));
         }
         return `/recursos?${params.toString()}`;
     }
@@ -241,6 +250,10 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
         if (coincide) {
             params.set("foco", String(objetivos[0].id));
             if (objetivos[0].nombre) params.set("q", objetivos[0].nombre);
+            // `rangos` de la acción es el conjunto FINAL (lo que ya tenía más lo
+            // nuevo), justo lo que el editor necesita para quedar listo para guardar.
+            const rangos = objetivos[0].rangos ?? accion.rangos;
+            if (rangos?.length) params.set("rangos", rangos.join(","));
         }
     }
 
@@ -258,6 +271,8 @@ export function DiagnosticosPlan({
     onColapsadoChange,
     marcados: marcadosProp,
     onMarcadosChange,
+    numeroDeOT,
+    onVerOT,
 }: {
     diagnosticos?: Diagnostico[];
     /** Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo. */
@@ -308,6 +323,22 @@ export function DiagnosticosPlan({
      */
     marcados?: Set<string>;
     onMarcadosChange?: (v: Set<string>) => void;
+    /**
+     * El #OT que se ve en la tabla del plan, a partir del `orden_id` interno.
+     *
+     * Los avisos los arma el backend con el id de la base, que no es el número que
+     * el taller conoce ni el que muestra la tabla. Traducirlo lo puede hacer sólo
+     * quien tiene el plan a mano, así que entra por acá. Sin esta función los
+     * números no se muestran: un "#212" que no existe en ningún papel es peor que
+     * nada.
+     */
+    numeroDeOT?: (ordenId: number) => string;
+    /**
+     * Abrir la OT del aviso de un click (Lucas, 28/08: "estaría bueno que hagas
+     * clic acá"). Lo resuelve la pantalla —desplegar la fila, traerla a la vista—
+     * porque es la que tiene la tabla; el aviso sólo sabe a qué OT apunta.
+     */
+    onVerOT?: (ordenId: number) => void;
 }) {
     const todos = diagnosticos ?? [];
 
@@ -587,8 +618,13 @@ export function DiagnosticosPlan({
                         className="shrink-0 h-7 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white/70 px-2.5 text-[12px] font-medium text-gray-700 hover:bg-white hover:text-gray-900 whitespace-nowrap transition-colors"
                         title="Los baja a la tira verde sin tocar el plan ni los datos. Se deshace."
                     >
-                        <ListChecks className="w-3.5 h-3.5" />
-                        Marcar todo listo
+                        <ListChecks className="w-3.5 h-3.5 shrink-0" />
+                        {/* Con el sidebar abierto y una pantalla de 1150px, el tercer
+                            botón del encabezado le come el ancho al resumen y "1 traba
+                            detectada y 7 avisos" se parte en diez renglones. Abajo de
+                            xl queda el ícono solo: la acción sigue estando y el resumen
+                            —que es lo que se lee— se queda con su renglón. */}
+                        <span className="hidden xl:inline">Marcar todo listo</span>
                     </button>
                 )}
 
@@ -648,7 +684,7 @@ export function DiagnosticosPlan({
                     {resueltos.map((d) => (
                         <li
                             key={`resuelto-${d.id}`}
-                            className="flex items-center gap-2 rounded-lg border border-l-[3px] border-emerald-200 border-l-emerald-500 bg-white/70 px-2 py-1"
+                            className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white/70 px-2 py-1"
                         >
                             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
                             <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
@@ -667,7 +703,7 @@ export function DiagnosticosPlan({
                     {aMano.map((d) => (
                         <li
                             key={`marcado-${d.id}`}
-                            className="flex items-center gap-2 rounded-lg border border-l-[3px] border-emerald-200 border-l-emerald-400 bg-white/70 px-2 py-1"
+                            className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white/70 px-2 py-1"
                         >
                             <Check className="w-4 h-4 shrink-0 text-emerald-600" />
                             <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50/70 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
@@ -714,7 +750,7 @@ export function DiagnosticosPlan({
                 adentro, que antes costaba otro click y otros ~70px. */}
             {!colapsado && (
                 <ul className="border-t bg-slate-50/60 p-2 space-y-1">
-                    {visibles.map((d, i) => {
+                    {visibles.map((d) => {
                         const activo = abiertos.has(d.id);
                         const esBloq = d.severidad === "bloqueante";
                         const recurso = recursoDe(d);
@@ -738,16 +774,31 @@ export function DiagnosticosPlan({
                         // Se parte en chips en vez de reescribirlo: mismos datos, sin
                         // inventar campos y sin decir dos veces lo mismo.
                         const impacto = d.impacto.resumen.split("·").map((t) => t.trim()).filter(Boolean);
-                        const otsTexto = d.impacto.ots.length > 0
-                            ? `OTs: ${d.impacto.ots.map((n) => `#${n}`).join(", ")}`
+                        // El aviso habla en ids internos; en pantalla va el número que el
+                        // taller conoce. Si la pantalla no sabe traducirlo (esta tira se usa
+                        // también sin el plan al lado), no se muestran: un número que no
+                        // existe en ningún papel confunde más de lo que ayuda.
+                        const otsDelAviso = numeroDeOT
+                            ? d.impacto.ots.map((n) => ({ id: n, numero: numeroDeOT(n) }))
+                            : [];
+                        const otsTexto = otsDelAviso.length > 0
+                            ? `OTs: ${otsDelAviso.map((o) => `#${o.numero}`).join(", ")}`
                             : undefined;
+                        // Plegada entran dos sin empujar el "dónde"; abierta van todas.
+                        const otsVisibles = activo ? otsDelAviso : otsDelAviso.slice(0, 2);
 
                         return (
                             <li
                                 key={d.id}
+                                /* Sin riel de color ni numerito a la izquierda: eran dos
+                                   adornos por tarjeta que no agregaban nada —"ese detalle que
+                                   tienen a la izquierda son muy molestas", Julián 31/08— y
+                                   empujaban el título, que es lo único que hay que poder leer
+                                   de un vistazo. La severidad no se pierde: ya está dicha con
+                                   todas las letras en el chip Alta/Media, que además es rojo o
+                                   ámbar, así que la lista se sigue barriendo por color. */
                                 className={cn(
-                                    "rounded-lg border border-gray-200 border-l-[3px] bg-white overflow-hidden",
-                                    esBloq ? "border-l-rose-500" : "border-l-amber-400",
+                                    "rounded-lg border border-gray-200 bg-white overflow-hidden",
                                     activo && "shadow-sm"
                                 )}
                             >
@@ -756,7 +807,13 @@ export function DiagnosticosPlan({
                                     3 máquina…"), que es justo lo que tiene que leerse de un vistazo.
                                     Verificado en producción. La columna de la derecha se banca 4fr: le
                                     alcanza para dos líneas de solución y el botón. */}
-                                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
+                                {/* El corte va en 2xl y no en lg: el panel NUNCA tiene el ancho
+                                    del viewport. En un notebook de 1366 con la barra de navegación
+                                    abierta el contenedor real ronda los 700px, así que la columna
+                                    de la solución quedaba en ~250px y partía "Aplicar y recalcular"
+                                    en tres renglones. Una sola columna se lee mejor que dos
+                                    ahogadas. */}
+                                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 2xl:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
                                     {/* ── Qué pasa ──
                                         Es un <button> entero para que el bloque del problema
                                         despliegue el detalle sin apuntarle al chevron. Adentro
@@ -767,9 +824,6 @@ export function DiagnosticosPlan({
                                         onClick={() => toggle(d.id)}
                                         className="flex min-w-0 items-start gap-2 text-left"
                                     >
-                                        <span className="mt-[3px] shrink-0 grid place-items-center w-4 h-4 rounded-full bg-slate-100 text-slate-500 text-[9px] font-bold tabular-nums">
-                                            {i + 1}
-                                        </span>
                                         <span className="min-w-0 flex-1">
                                             {/* Severidad, categoría y título en el mismo renglón: son
                                                 tres cosas cortas y darle una línea a cada una era la
@@ -838,21 +892,26 @@ export function DiagnosticosPlan({
                                                     hay avisos donde no hay dos cosas que comparar. */}
                                                 {d.tiene && (
                                                     <span
-                                                        className="mt-px hidden shrink-0 max-w-[230px] items-center gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 lg:inline-flex"
+                                                        className="mt-px hidden shrink-0 max-w-[260px] items-center gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 lg:inline-flex"
                                                         title={d.pide
                                                             ? `Tiene ${d.tiene} · el proceso pide ${d.pide}`
                                                             : `Tiene ${d.tiene}`}
                                                     >
-                                                        {/* Lo que se pide NO se corta y lo que hay sí: con los dos
-                                                            truncados quedaba «Medio oficial o Operario cali… →
-                                                            Ofi…», que pierde justo la palabra por la que se lee
-                                                            esto. Un rango largo del lado de "tiene" se completa
-                                                            en el detalle, que está al lado. */}
+                                                        {/* Los dos lados se achican, ninguno es intocable.
+                                                            Medido en el plan real: con «pide» fijo, el
+                                                            «OFICIAL» de la izquierda quedaba en 0px de ancho y
+                                                            el chip se leía «→ MEDIO OFICIAL o OPERARIO
+                                                            CALIFICADO», que es justo la mitad que NO contesta
+                                                            la pregunta de Lucas ("¿cuál es el rango que
+                                                            tiene?"). Sin `shrink-0` y con `min-w-0` los dos
+                                                            ceden en proporción a lo que ocupan: el corto queda
+                                                            entero y el largo se recorta. El texto completo
+                                                            está en el tooltip y en el detalle de al lado. */}
                                                         <span className="min-w-0 truncate">{d.tiene}</span>
                                                         {d.pide && (
                                                             <>
                                                                 <span className="shrink-0 text-slate-400" aria-hidden="true">→</span>
-                                                                <span className="shrink-0 font-medium text-slate-700">{d.pide}</span>
+                                                                <span className="min-w-0 truncate font-medium text-slate-700">{d.pide}</span>
                                                             </>
                                                         )}
                                                     </span>
@@ -888,6 +947,29 @@ export function DiagnosticosPlan({
                                                         )}>
                                                             Solución
                                                         </span>
+                                                        {/* La OT, de un click, en el mismo renglón: "y vas a
+                                                            buscarla acá… estaría bueno que hagas clic acá"
+                                                            (Lucas 28/08, sobre la 15678). Va acá y no del lado
+                                                            del problema porque ese bloque entero es un botón
+                                                            que despliega la tarjeta y no se puede anidar nada
+                                                            clickeable adentro. Sin renglón propio: el alto de
+                                                            la tarjeta es lo que se cuida. */}
+                                                        {onVerOT && otsVisibles.map((o) => (
+                                                            <button
+                                                                key={o.id}
+                                                                type="button"
+                                                                onClick={() => onVerOT(o.id)}
+                                                                className="shrink-0 rounded bg-slate-100 px-1.5 text-[10px] font-medium leading-[15px] text-slate-600 tabular-nums hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                                                                title={`Abrir la OT #${o.numero} en la tabla del plan y asignarle ahí la persona`}
+                                                            >
+                                                                #{o.numero}
+                                                            </button>
+                                                        ))}
+                                                        {onVerOT && !activo && otsDelAviso.length > otsVisibles.length && (
+                                                            <span className="shrink-0 text-[10px] leading-[15px] text-gray-400" title={otsTexto}>
+                                                                +{otsDelAviso.length - otsVisibles.length}
+                                                            </span>
+                                                        )}
                                                         {/* El "dónde" vive siempre en el mismo lugar y lleva a
                                                             la pantalla, la pestaña y la fila que hay que tocar.
                                                             Acá arriba no lo puede comer el clamp del texto. */}
@@ -928,7 +1010,7 @@ export function DiagnosticosPlan({
                                         {/* Los botones van en su propia columnita: así quedan
                                             alineados de tarjeta en tarjeta y no empujan el alto con
                                             un renglón más. */}
-                                        <div className="flex shrink-0 items-center gap-1">
+                                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                                             {/* Sin botón que lo aplique solo, la única salida era el
                                                 chip gris del "dónde", que no se lee como acción. Los
                                                 Media son justamente los que nunca traen botón —"los
@@ -941,7 +1023,7 @@ export function DiagnosticosPlan({
                                                     href={link}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="inline-flex h-6 w-[8.5rem] items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-1.5 text-[10.5px] font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                                    className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-[10.5px] font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
                                                     title={`Abre ${sol?.donde} en otra pestaña, ya parado en lo que hay que tocar. Al volver acá se revisa solo.`}
                                                 >
                                                     Ir a arreglarlo
@@ -978,19 +1060,34 @@ export function DiagnosticosPlan({
                                                             : "Aplicar y recalcular"}
                                                 </Button>
                                             )}
-                                            {/* Darlo por resuelto. No aplica nada ni toca ningún dato:
-                                                lo baja a la tira verde de arriba. Es lo que pidió Lucas
-                                                para los Media, que no trababan nada y no se podían
-                                                sacar de la pantalla. */}
-                                            <button
-                                                type="button"
-                                                onClick={() => marcar(d)}
-                                                title="Marcar como resuelto: lo baja a la tira verde. No cambia el plan y se deshace."
-                                                aria-label={`Marcar como resuelto: ${d.titulo}`}
-                                                className="grid h-6 w-6 shrink-0 place-items-center rounded border border-transparent text-gray-400 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
-                                            >
-                                                <Check className="w-3.5 h-3.5" />
-                                            </button>
+                                            {/* Darlo por resuelto, SOLO donde no hay un botón que lo
+                                                arregle de verdad.
+
+                                                Al lado de "Aplicar y recalcular" no tiene sentido y
+                                                confunde (Julián, 31/08): son dos botones verdes pegados
+                                                que hacen cosas opuestas —uno cambia el dato, el otro
+                                                dice "no me lo muestres más"— y el chiquito parecía el
+                                                confirmar del grande. Ahí el aviso se va solo cuando el
+                                                cambio se aplica, así que no hace falta.
+
+                                                Donde SÍ va es en los Media, que no traen botón porque
+                                                qué corregir lo sabe el taller: es la única acción de la
+                                                tarjeta y por eso va con nombre y en verde lleno, no un
+                                                tilde gris que nadie encuentra. Para las Alta con botón,
+                                                el "Marcar como resuelto" sigue estando adentro de la
+                                                tarjeta desplegada. */}
+                                            {!sol?.accion && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => marcar(d)}
+                                                    title="Darlo por resuelto: lo baja a la tira verde de arriba. No cambia el plan ni los datos, y se deshace."
+                                                    aria-label={`Marcar como resuelto: ${d.titulo}`}
+                                                    className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md bg-emerald-600 px-2 text-[10.5px] font-semibold text-white hover:bg-emerald-700 transition-colors"
+                                                >
+                                                    <Check className="w-3.5 h-3.5 shrink-0" />
+                                                    Listo
+                                                </button>
+                                            )}
                                             <button
                                                 type="button"
                                                 aria-expanded={activo}
@@ -1087,10 +1184,29 @@ export function DiagnosticosPlan({
                                                     tarjeta, así que acá es el único lugar donde se ven. */}
                                                 <span className="md:hidden">
                                                     {d.impacto.resumen}
-                                                    {d.impacto.ots.length > 0 ? " — " : ""}
+                                                    {otsDelAviso.length > 0 ? " — " : ""}
                                                 </span>
-                                                {d.impacto.ots.length > 0 && (
-                                                    <>OTs: {d.impacto.ots.map((n) => `#${n}`).join(", ")}</>
+                                                {otsDelAviso.length > 0 && (
+                                                    <>
+                                                        OTs:{" "}
+                                                        {otsDelAviso.map((o, k) => (
+                                                            <span key={o.id}>
+                                                                {k > 0 && ", "}
+                                                                {onVerOT ? (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => onVerOT(o.id)}
+                                                                        className="font-medium text-slate-600 underline decoration-dotted underline-offset-2 hover:text-indigo-700"
+                                                                        title={`Abrir la OT #${o.numero} en la tabla del plan`}
+                                                                    >
+                                                                        #{o.numero}
+                                                                    </button>
+                                                                ) : (
+                                                                    <>#{o.numero}</>
+                                                                )}
+                                                            </span>
+                                                        ))}
+                                                    </>
                                                 )}
                                             </p>
                                             {/* El mismo "dar por resuelto" del tilde de arriba, pero

@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { X, Loader2, Plus, Users, AlertTriangle } from "lucide-react";
+import { X, Loader2, Plus, Users, AlertTriangle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,14 @@ interface Props {
     actuales: RangoRef[];
     /** Catálogo completo de rangos, con cuánta gente tiene cada uno. */
     catalogo: { id: number; nombre: string; operarios: number }[];
+    /**
+     * Rangos que vienen PROPUESTOS desde un aviso del planificador (`?rangos=` en la
+     * URL). Llegan tildados y con el botón de guardar encendido: el que viene de un
+     * aviso no tiene por qué acordarse de cuál era el rango ni buscarlo entre treinta
+     * ("no estar revisando y adivinando" — Julián, 1/9). No se guarda nada solo: la
+     * última palabra sobre los rangos del taller sigue siendo de quien está mirando.
+     */
+    sugeridos?: number[];
     onGuardado: () => void;
 }
 
@@ -55,14 +63,30 @@ const mismos = (a: RangoRef[], b: RangoRef[]) => {
     return sa.every((v, i) => v === sb[i]);
 };
 
-export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, onGuardado }: Props) {
+export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, sugeridos, onGuardado }: Props) {
     const { showToast } = useToast();
     const [seleccion, setSeleccion] = useState<RangoRef[]>(actuales);
     const [guardando, setGuardando] = useState(false);
     const [busqueda, setBusqueda] = useState("");
     const [abriendo, setAbriendo] = useState(false);
 
-    useEffect(() => setSeleccion(actuales), [actuales]);
+    /** Los propuestos que todavía no tenía, resueltos contra el catálogo. Se calcula
+     *  acá y no en el efecto para poder pintarlos distinto abajo. */
+    const propuestos = useMemo(() => {
+        if (!sugeridos?.length) return [] as RangoRef[];
+        const yaTiene = new Set(actuales.map((r) => r.id));
+        return sugeridos
+            .filter((rid) => !yaTiene.has(rid))
+            .map((rid) => catalogo.find((c) => c.id === rid))
+            .filter((c): c is { id: number; nombre: string; operarios: number } => !!c)
+            .map((c) => ({ id: c.id, nombre: c.nombre }));
+    }, [sugeridos, actuales, catalogo]);
+
+    const idsPropuestos = new Set(propuestos.map((r) => r.id));
+
+    // La selección arranca con lo que ya tenía MÁS lo propuesto: así el botón de
+    // guardar aparece solo y alcanza con confirmar.
+    useEffect(() => setSeleccion([...actuales, ...propuestos]), [actuales, propuestos]);
 
     const hayCambios = !mismos(seleccion, actuales);
     const elegidos = new Set(seleccion.map((r) => r.id));
@@ -128,18 +152,33 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, o
                 )}
             </div>
 
+            {propuestos.length > 0 && (
+                <div className="mb-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                    <Sparkles className="h-3.5 w-3.5 shrink-0 mt-[1px]" />
+                    <span>
+                        Ya te dejamos tildado{" "}
+                        <strong>{propuestos.map((r) => r.nombre).join(", ")}</strong>, que es lo que
+                        propone el aviso. Revisalo y tocá <strong>Guardar cambios</strong>; si no
+                        va, sacalo con la cruz.
+                    </span>
+                </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-1.5">
                 {seleccion.map((r) => {
                     const c = catalogo.find((x) => x.id === r.id);
                     const sinGente = (c?.operarios ?? 0) === 0;
+                    const esPropuesto = idsPropuestos.has(r.id);
                     return (
                         <Badge
                             key={r.id}
                             variant="outline"
                             className={
-                                sinGente
-                                    ? "bg-amber-50 text-amber-800 border-amber-200 gap-1 pr-1"
-                                    : "bg-white gap-1 pr-1"
+                                esPropuesto
+                                    ? "bg-blue-50 text-blue-800 border-blue-300 gap-1 pr-1"
+                                    : sinGente
+                                        ? "bg-amber-50 text-amber-800 border-amber-200 gap-1 pr-1"
+                                        : "bg-white gap-1 pr-1"
                             }
                             title={
                                 sinGente
