@@ -343,7 +343,7 @@ def test_habilitar_a_varios_aclara_que_no_se_reparte():
     d = _por_tipo(diags, "maquina_incompatible")
     abrir = _solucion_de_maquina(d)
     assert "**2** personas" in abrir
-    assert "Habilitadas, no repartidas" in abrir
+    assert "el trabajo no se reparte" in abrir
     assert "LEONARDO" in abrir
 
 
@@ -358,8 +358,8 @@ def test_sin_habilidad_principal_cargada_no_inventa_nombre():
 
     diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, nombre_operario)
     abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
-    assert "Habilitadas, no repartidas" in abrir
-    assert "que lo tiene como principal" not in abrir
+    assert "el trabajo no se reparte" in abrir
+    assert "habilidad principal" not in abrir
 
 
 def test_una_sola_persona_no_lleva_la_aclaracion():
@@ -373,7 +373,7 @@ def test_una_sola_persona_no_lleva_la_aclaracion():
 
     diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
     abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
-    assert "Habilitadas, no repartidas" not in abrir
+    assert "el trabajo no se reparte" not in abrir
 
 
 def test_con_dos_principales_los_nombra_a_los_dos_y_no_promete_uno():
@@ -395,7 +395,7 @@ def test_con_dos_principales_los_nombra_a_los_dos_y_no_promete_uno():
     )
     abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
     assert "LEONARDO" in abrir and "MATIAS" in abrir
-    assert "que lo tienen como principal" in abrir, "sujeto plural, verbo plural"
+    assert "que lo tienen cargado como habilidad principal" in abrir, "sujeto plural, verbo plural"
     # Y GUILLERMO, que lo tiene como secundaria, no entra en la frase.
     assert "GUILLERMO" not in abrir
 

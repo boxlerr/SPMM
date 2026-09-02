@@ -441,7 +441,7 @@ export function PlanningSelectionScreen({
                                 size="sm"
                                 onClick={salirDelPlanificador}
                                 className="h-8 gap-1.5 text-gray-500 hover:text-gray-800"
-                                title="Volver a Operaciones. No se pierde nada: la próxima vez el planificador abre en blanco."
+                                title="Volver a Operaciones. Todavía no armaste ningún plan: la próxima vez arrancás de cero."
                             >
                                 <LogOut className="w-3.5 h-3.5" />
                                 Salir

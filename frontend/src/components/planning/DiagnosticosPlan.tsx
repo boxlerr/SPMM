@@ -297,7 +297,8 @@ function ResumenDelCambio({ accion }: { accion: DiagnosticoAccion }) {
         if (o.suma && o.suma.length === 0) {
             return (
                 <>
-                    {que} <strong>{o.nombre}</strong> no le cambia nada: ya lo tiene.
+                    {que} <strong>{o.nombre}</strong> no le cambia nada
+                    {o.tenia?.length ? <>: ya tiene <strong>{o.tenia.join(", ")}</strong>.</> : "."}
                 </>
             );
         }
@@ -312,7 +313,7 @@ function ResumenDelCambio({ accion }: { accion: DiagnosticoAccion }) {
                             : <span className="text-amber-800/70"> (hoy no tiene ninguno)</span>}
                     </>
                 ) : (
-                    <> le cambio los rangos.</>
+                    <> le cambio quién la puede usar. Volvé a calcular el plan para verlo con el detalle.</>
                 )}
             </>
         );
@@ -824,7 +825,7 @@ export function DiagnosticosPlan({
                                             </p>
                                         ) : (
                                             <p className="text-[11.5px] leading-snug text-gray-500">
-                                                Dejó de aparecer al recalcular: se arregló afuera, en Recursos.
+                                                Ya no aparece en este cálculo: o lo arreglaste en Recursos, o la OT salió del plan.
                                             </p>
                                         )}
                                         {linkResuelto && (
@@ -998,7 +999,7 @@ export function DiagnosticosPlan({
                                                        el que abría la pantalla por primera vez tenía que
                                                        deducirlo del color. */
                                                     title={esBloq
-                                                        ? "Alta: sin esto no se puede planificar bien. Falta un dato de Recursos y por eso el trabajo quedó sin persona, o la máquina no queda reservada."
+                                                        ? "Alta: por esto algo del plan salió mal — trabajo sin persona, máquina sin reservar o trabajo que no entró en el período. A veces se arregla cargando un dato en Recursos y a veces es la capacidad real del taller; el aviso te dice cuál de las dos."
                                                         : "Media: recomendación para afinar. El plan sale igual con el aviso o sin él; lo que falta lo sabe el taller."}
                                                 >
                                                     {esBloq ? "Alta" : "Media"}
@@ -1199,7 +1200,7 @@ export function DiagnosticosPlan({
                                                     disabled={hecha || aplicando !== null}
                                                     onClick={() => aplicar(claveSol, sol.accion!)}
                                                     title={confirmando === claveSol
-                                                        ? "Tocá de nuevo para confirmar el cambio"
+                                                        ? "Abajo está el detalle de lo que va a cambiar"
                                                         : "Aplica el cambio en Recursos y recalcula el plan"}
                                                     className={cn(
                                                         "h-6 w-[8.5rem] justify-center gap-1 px-1.5 text-[10.5px] font-semibold shadow-none",
@@ -1218,7 +1219,7 @@ export function DiagnosticosPlan({
                                                     {hecha
                                                         ? "Aplicado"
                                                         : confirmando === claveSol
-                                                            ? "Tocá de nuevo"
+                                                            ? "Mirá abajo qué cambia"
                                                             : "Aplicar y recalcular"}
                                                 </Button>
                                             )}

@@ -51,9 +51,9 @@ export const NOVEDADES: Novedad[] = [
         fecha: "2026-09-01",
         tipo: "arreglo",
         seccion: "Operaciones › Planificación",
-        titulo: "«Se lo abrís a 9 personas» ya no se lee como que el trabajo se reparte entre las 9",
+        titulo: "«Se las abrís a 9 personas» ya no se lee como que el trabajo se reparte entre las 9",
         detalle:
-            "Cuando una solución avisaba que sumarle una categoría a una máquina se la abría a varias personas, parecía que el trabajo iba a caer partido entre todas. No es así: el sistema siempre prefiere a quien lo tiene como habilidad principal. Ahora el aviso lo dice y lo nombra: «Habilitadas, no repartidas: lo va a seguir tomando LEONARDO C., que lo tiene como principal». Si nadie lo tiene cargado como principal, lo dice también en vez de inventar un nombre.",
+            "Cuando una solución avisaba que sumarle un rango a una máquina se la abría a varias personas, parecía que el trabajo iba a caer partido entre todas. No es así: el sistema prefiere a quien lo tiene cargado como habilidad principal. Ahora el aviso lo dice y lo nombra: «Quedan habilitadas, pero el trabajo no se reparte: le cae primero a LEONARDO C., que lo tiene cargado como habilidad principal». Si nadie lo tiene cargado así, el aviso se queda en que el trabajo no se reparte y no inventa un nombre.",
         href: "/operaciones",
     },
     {
@@ -63,7 +63,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones › Planificación",
         titulo: "Antes de aplicar una solución ves exactamente qué va a cambiar",
         detalle:
-            "«Aplicar y recalcular» pedía confirmar sin haber dicho nunca qué tocaba, y daba miedo apretar. Ahora, al tocarlo, se abre un cartel con la lista completa: a qué máquina, qué categoría le agrega y cuál tenía hasta ahora, una línea por cada cosa que toca. Recién ahí aparece «Sí, aplicalo», y al lado «Cancelar». Lo que hace el botón es lo mismo de antes: lo único nuevo es que se ve primero.",
+            "«Aplicar y recalcular» pedía confirmar sin haber dicho nunca qué tocaba, y daba miedo apretar. Ahora, al tocarlo, se abre un cartel con la lista completa: a qué máquina, qué rango le agrega y cuáles tenía hasta ahora, una línea por cada cosa que toca. Recién ahí aparece «Sí, aplicalo», y al lado «Cancelar». Lo que hace el botón es lo mismo de antes: lo único nuevo es que se ve primero.",
         href: "/operaciones",
     },
     {
@@ -123,7 +123,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones › Planificación",
         titulo: "Cuando le agregás trabajo a alguien, ves cuánto le saltaron las horas",
         detalle:
-            "Se le podían sumar seis horas a una persona sin enterarse, porque el total del panel cambiaba en silencio. Ahora, al agregar procesos, el panel de carga se abre solo, resalta a quien más subió y le muestra el antes y el después: «8,9 h → 15,0 h con lo que acabás de agregar». El aviso dura unos segundos y se va.",
+            "Se le podían sumar seis horas a una persona sin enterarse, porque el total del panel cambiaba en silencio. Ahora, al agregar procesos, el panel de carga se abre solo, resalta a quien más subió y le muestra el antes y el después: «8,9 → 15,0 h recién agregadas». El aviso dura unos segundos y se va.",
         href: "/operaciones",
     },
     {
@@ -141,9 +141,9 @@ export const NOVEDADES: Novedad[] = [
         fecha: "2026-09-01",
         tipo: "mejora",
         seccion: "Operaciones › Órdenes de Trabajo",
-        titulo: "Las tres listas de órdenes tienen las mismas columnas y en el mismo orden",
+        titulo: "El Historial se lee igual que las otras dos listas de órdenes",
         detalle:
-            "El Historial mostraba menos columnas que las otras dos y con el Estado al final, así que había que volver a buscar dónde estaba cada dato al cambiar de solapa. Ahora suma Prioridad, Material y F. Prometida, el Estado quedó al lado de Plano, y «Entregado» pasó a llamarse «Entrega» como en el resto. En Planificación la columna «F. Prom.» ahora dice «F. Prometida», igual que en las otras.",
+            "El Historial mostraba menos columnas que las otras dos y con el Estado al final, así que había que volver a buscar dónde estaba cada dato al cambiar de solapa. Ahora suma Prioridad, Material y F. Prometida, el Estado quedó al lado de Plano, y «Entregado» pasó a llamarse «Entrega» como en el resto. Cada lista sigue mostrando las columnas que le sirven —una orden sin planificar no tiene fecha de entrega—, pero las que comparte están con el mismo nombre y en el mismo lugar. En la pantalla de planificar, «F. Prom.» ahora dice «F. Prometida».",
         href: "/operaciones",
     },
     {

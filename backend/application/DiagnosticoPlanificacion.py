@@ -544,12 +544,12 @@ def _no_se_reparte(proc_id, personas, prioridad_skills, nombre_operario) -> str:
         return ""
     principales = _los_que_lo_tienen_como_principal(proc_id, personas, prioridad_skills, nombre_operario)
     if not principales:
-        return " Habilitadas, no repartidas: el trabajo no se parte entre todas."
+        return " Quedan habilitadas, pero el trabajo no se reparte entre todas."
     if len(principales) == 1:
-        return (f" Habilitadas, no repartidas: el trabajo le cae primero a **{principales[0]}**, "
-                f"que lo tiene como principal.")
-    return (f" Habilitadas, no repartidas: el trabajo cae primero en **{_listar(principales)}**, "
-            f"que lo tienen como principal.")
+        return (f" Quedan habilitadas, pero el trabajo no se reparte: le cae primero a "
+                f"**{principales[0]}**, que lo tiene cargado como habilidad principal.")
+    return (f" Quedan habilitadas, pero el trabajo no se reparte: cae primero en "
+            f"**{_listar(principales)}**, que lo tienen cargado como habilidad principal.")
 
 
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):

@@ -1439,13 +1439,18 @@ export default function OperacionesPage() {
                 <CalendarClock className="md:mr-2 h-4 w-4" />
                 <span className="hidden md:inline">Planificar</span>
               </Button>
-              <Button
-                onClick={() => setIsCreateModalOpen(true)}
-                className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg flex-1 md:flex-none w-full sm:w-auto mt-2 sm:mt-0"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                <span>Nueva Orden</span>
-              </Button>
+              {/* En «Órdenes de Trabajo» este botón se esconde: esa pantalla tiene el
+                  suyo adentro, y dos botones rojos con el mismo ícono y la misma acción
+                  a diez centímetros uno del otro se leen como dos cosas distintas. */}
+              {activeTab !== "work_orders" && (
+                <Button
+                  onClick={() => setIsCreateModalOpen(true)}
+                  className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg flex-1 md:flex-none w-full sm:w-auto mt-2 sm:mt-0"
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span>Nueva orden</span>
+                </Button>
+              )}
             </div>
           </div>
 

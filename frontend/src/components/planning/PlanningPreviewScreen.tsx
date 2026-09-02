@@ -586,6 +586,9 @@ export function PlanningPreviewScreen({
      */
     const lineasVigentes = React.useMemo(() => lineasDeTandas(tandasManuales), [tandasManuales]);
 
+    /** Minutos a horas, con la coma que usa todo el resto de la pantalla en español. */
+    const horasEs = (min: number) => (min / 60).toFixed(1).replace(".", ",");
+
     /** Está abierta la lista de lo agregado a mano. */
     const [verAMano, setVerAMano] = React.useState(false);
 
@@ -1804,7 +1807,7 @@ export function PlanningPreviewScreen({
                                                                 : ot.entera ? "OT entera" : `${ot.filas.length} ${ot.filas.length === 1 ? "proceso" : "procesos"}`}
                                                         </span>
                                                         <span className="shrink-0 text-[11px] font-medium text-gray-600 tabular-nums">
-                                                            {(ot.minutos / 60).toFixed(1)} h
+                                                            {horasEs(ot.minutos)} h
                                                         </span>
                                                         <button
                                                             type="button"
@@ -1826,7 +1829,7 @@ export function PlanningPreviewScreen({
                                                                     {f.persona}
                                                                 </span>
                                                                 <span className="shrink-0 text-[11px] text-gray-500 tabular-nums">
-                                                                    {(f.minutos / 60).toFixed(1)} h
+                                                                    {horasEs(f.minutos)} h
                                                                 </span>
                                                                 {!ot.entera && f.lineaId != null && (
                                                                     <button
@@ -3347,10 +3350,10 @@ export function PlanningPreviewScreen({
                                                 {salto && (
                                                     <div className="mb-1.5 flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-800 tabular-nums">
                                                         <ArrowUp className="w-3 h-3 shrink-0" />
-                                                        {(salto.antes / 60).toFixed(1)} h → {(salto.despues / 60).toFixed(1)} h
-                                                        <span className="font-normal text-indigo-600">
-                                                            con el último cambio
+                                                        <span className="min-w-0 truncate">
+                                                            {horasEs(salto.antes)} → {horasEs(salto.despues)} h
                                                         </span>
+                                                        <span className="shrink-0 font-normal text-indigo-600">recién agregadas</span>
                                                     </div>
                                                 )}
                                                 {/* Rangos del operario: chips compactos para ver qué procesos puede hacer. */}
