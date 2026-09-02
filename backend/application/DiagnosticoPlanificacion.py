@@ -261,7 +261,7 @@ def construir_diagnosticos(
         ots_con_plano, op_planos, rangos_crudos, prioridad_skills,
     )
     diagnosticos += _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango)
-    diagnosticos += _trabajo_tercerizado(procesos)
+    diagnosticos += _trabajo_tercerizado(procesos, nombre_rango)
     diagnosticos += _trabajo_en_puestos_vacantes(resultados, nombre_operario)
 
     _avisar_nombres_repetidos(diagnosticos)
@@ -461,6 +461,26 @@ def _personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario) -> set:
     return {o for o in ops if not _es_vacante(nombre_operario.get(o))}
 
 
+def _sale_del_taller(nombre, rangos_ids, nombre_rango) -> bool:
+    """¿Este trabajo se hace afuera?
+
+    Dos formas, y las dos valen: que lo diga el nombre del proceso —la convención vieja
+    del taller, «TRABAJO TERCERIZADO PINTURA»— o que tenga el rango TERCERIZADO, que es
+    como se marca desde el 2/9 y es lo que el taller puede ver y cambiar en Recursos.
+
+    Sin la segunda, marcar un proceso como tercerizado lo empeoraba: dejaba de buscar
+    máquina pero el diagnóstico lo contaba como «hoy no lo puede hacer nadie», porque
+    ese rango no lo tiene ninguna persona real. Le pasó a cilindrado de chapa apenas se
+    cargó la respuesta de Lucas.
+    """
+    if _get_tipo_proceso(nombre or "") == "ADMIN":
+        return True
+    return any(
+        _norm(nombre_rango.get(r, "")) in ("TERCERIZADO", "EXTERNO")
+        for r in (rangos_ids or ())
+    )
+
+
 def _quien_lo_hace(cuantos: int, rangos_proc) -> str:
     """La primera frase: cuánta gente puede HACER el trabajo. Nada de máquinas acá.
 
@@ -637,7 +657,7 @@ def _procesos_que_nadie_puede_hacer(
         if not rangos:
             continue
         # Los tercerizados salen sin nadie a propósito: los cuenta _trabajo_tercerizado.
-        if _get_tipo_proceso(nombre or "") == "ADMIN":
+        if _sale_del_taller(nombre, rangos, nombre_rango):
             continue
         d = por_proceso.setdefault(proc_id, {
             "nombre": _bonito(nombre) or f"#{proc_id}",
@@ -1346,12 +1366,13 @@ def _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango):
     } for proc_id, d in sin_rango.items()]
 
 
-def _trabajo_tercerizado(procesos):
+def _trabajo_tercerizado(procesos, nombre_rango=None):
     """Trabajo de un tercero: va sin operario ni máquina A PROPÓSITO. Se avisa para
     que no se confunda con un hueco de rangos."""
+    nombre_rango = nombre_rango or {}
     tercerizados = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, _rangos, nombre, _um, _fam, _sk) in procesos:
-        if _get_tipo_proceso(nombre or "") != "ADMIN":
+        if not _sale_del_taller(nombre, _rangos, nombre_rango):
             continue
         d = tercerizados.setdefault(proc_id, {"nombre": _bonito(nombre) or f"#{proc_id}",
                                               "ots": set(), "minutos": 0, "procesos": 0})

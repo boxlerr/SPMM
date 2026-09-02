@@ -47,6 +47,36 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "preparacion-y-uso-misma-persona-con-algo-en-el-medio",
+        fecha: "2026-09-02",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "El que prepara la máquina es el que la usa, aunque haya otro trabajo en el medio",
+        detalle:
+            "Preparaba la soldadora uno y soldaba otro, cada uno en una soldadora distinta. En la misma orden el torno salía bien, y la diferencia era que ahí la preparación y el uso iban pegados: si en el medio había otro trabajo —un ensamblado, un punteado— el sistema perdía de vista que eran el mismo par. Ahora los junta aunque estén separados. Si la orden repite el mismo trabajo varias veces, cada preparación se lleva la suya. Y si al cargar la orden elegiste vos quién lo hace, esa elección sigue mandando.",
+        href: "/operaciones",
+    },
+    {
+        id: "aviso-de-ot-sin-material",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Si elegiste órdenes sin material, te avisa y las saca de un click",
+        detalle:
+            "El sistema te frenaba: si tildabas una orden sin material, el botón de planificar no te dejaba avanzar y te mandaba a mirar la columna Material. Sacarlas quedaba para vos, de a una. Ahora aparece arriba un cartel rojo apenas tildás alguna —dice cuántas son y pasando el mouse ves cuáles— y de un click salen todas juntas. Y si igual apretás planificar, el aviso trae el botón «Sacarlas y planificar» y sigue de largo con el resto. Las que tienen el material pedido siguen planificándose como siempre.",
+        href: "/operaciones",
+    },
+    {
+        id: "procesos-tercerizados-por-rango",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Los trabajos que se mandan afuera ya no dependen de cómo se llame el proceso",
+        detalle:
+            "Para que el sistema entendiera que un trabajo se hace afuera, alguien tenía que haber escrito «tercerizado» en el nombre del proceso. Si no, le buscaba una máquina del taller para reservar y no la encontraba nunca. Ahora sale del rango que le pongas en Recursos, que es donde lo podés ver y cambiar. Cilindrado de chapa y repujado en torno ya quedaron así.",
+        href: "/recursos",
+    },
+    {
         id: "aviso-dice-quien-lo-toma-primero",
         fecha: "2026-09-01",
         tipo: "arreglo",

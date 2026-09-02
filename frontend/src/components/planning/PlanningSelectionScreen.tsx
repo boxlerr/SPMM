@@ -192,6 +192,32 @@ export function PlanningSelectionScreen({
         setSoloTildadas(prev => (prev === null ? [...selectedIds] : null))
     }
 
+    /**
+     * Las OT que elegiste y no tienen material.
+     *
+     * Hoy Lucas las saca a mano de a una antes de planificar: se acuerda, filtra por
+     * material, las destilda y vuelve. El filtro ya existía —lo que faltaba era no tener
+     * que acordarse—. Esto no bloquea ni destilda solo: avisa cuántas son y las saca de
+     * un click, que es lo que él venía haciendo con el mouse.
+     *
+     * El criterio es el mismo que usa la columna Material de las tres listas de órdenes:
+     * 'ok' es el único que cuenta como material puesto. Sin dato es sin stock — es lo
+     * que se ve en pantalla y no podíamos decir una cosa acá y otra allá.
+     */
+    const sinMaterial = unplannedOrders.filter(o => {
+        if (!selectedIds.includes(o.id)) return false
+        const estado = o.estado_material || 'sin_datos'
+        // Mismo criterio que el corte de abajo: «pedido» sí se planifica, el material
+        // está encargado. Sin stock y sin datos, no.
+        return estado === 'sin_stock' || estado === 'sin_datos'
+    })
+
+    const sacarLasSinMaterial = () => {
+        const fuera = new Set(sinMaterial.map(o => o.id))
+        setSelectedIds(prev => prev.filter(id => !fuera.has(id)))
+        setSoloTildadas(prev => (prev === null ? null : prev.filter(id => !fuera.has(id))))
+    }
+
     // Calculate estimated workload
     const calculateEstimatedTime = () => {
         if (selectedIds.length === 0) return null
@@ -295,6 +321,20 @@ export function PlanningSelectionScreen({
                                 <Clock className="w-3.5 h-3.5" />
                                 <span className="hidden sm:inline">Est:</span> {estimatedTime}
                             </Badge>
+                        )}
+                        {sinMaterial.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={sacarLasSinMaterial}
+                                title={`Sacar de la selección: ${sinMaterial.map(o => `#${(o as any).id_otvieja || o.id}`).join(", ")}`}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-rose-300 bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-100"
+                            >
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                {sinMaterial.length === 1
+                                    ? "1 sin material"
+                                    : `${sinMaterial.length} sin material`}
+                                <span className="font-normal opacity-80">· sacar</span>
+                            </button>
                         )}
                         {/* El contador es el botón para revisar lo elegido: con 176 renglones,
                             encontrar las 3 que tildaste era scrollear a ojo (Julián, 31/08).
@@ -508,11 +548,38 @@ export function PlanningSelectionScreen({
                             });
 
                             if (noStockOrders.length > 0) {
+                                // Antes esto frenaba y te mandaba a mirar la columna Material:
+                                // el trabajo de sacarlas quedaba para vos, de a una. Ahora el
+                                // aviso trae la salida puesta — avisar, no bloquear.
                                 const orderIds = noStockOrders.map(nro).join(", ");
-                                toast.error(`Las órdenes ${orderIds} no tienen stock disponible. Resuelva el stock antes de planificar.`, {
-                                    duration: 6000,
-                                    description: "Verifique la columna Material en la lista."
-                                });
+                                const restantes = selectedIds.filter(
+                                    id => !noStockOrders.some(o => o.id === id)
+                                );
+                                toast.error(
+                                    noStockOrders.length === 1
+                                        ? `La orden ${orderIds} no tiene material.`
+                                        : `${noStockOrders.length} órdenes no tienen material: ${orderIds}.`,
+                                    {
+                                        duration: 8000,
+                                        description: restantes.length > 0
+                                            ? `Podés sacarlas y planificar las otras ${restantes.length}.`
+                                            : "Son todas las que tildaste, así que no queda nada para planificar.",
+                                        action: restantes.length > 0
+                                            ? {
+                                                label: "Sacarlas y planificar",
+                                                onClick: () => {
+                                                    setSelectedIds(restantes);
+                                                    setSoloTildadas(prev =>
+                                                        prev === null ? null : prev.filter(id => restantes.includes(id)));
+                                                    onPlan(restantes, {
+                                                        fecha_desde: dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : undefined,
+                                                        fecha_hasta: dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : undefined,
+                                                    });
+                                                },
+                                            }
+                                            : undefined,
+                                    }
+                                );
                                 return;
                             }
 

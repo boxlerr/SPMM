@@ -420,3 +420,22 @@ def test_no_nombra_a_quien_el_solver_excluyo_por_el_plano():
     )
     abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
     assert "LEONARDO" not in abrir, "no sabe leer planos: el solver no lo tiene en cuenta"
+
+
+def test_un_proceso_con_rango_tercerizado_no_se_reporta_como_que_nadie_lo_puede_hacer():
+    """Marcar un trabajo como «se manda afuera» no puede empeorar el aviso.
+
+    Cilindrado de chapa se cargó con rango TERCERIZADO el 2/9, según lo que contestó
+    Lucas. Como ese rango no lo tiene ninguna persona real, el diagnóstico lo pasó a
+    contar como «hoy no lo puede hacer nadie»: el sistema decía que faltaba gente para
+    un trabajo que justamente no se hace en el taller."""
+    TERCERIZADO = 13
+    nombre_rango = {**NOMBRE_RANGO, TERCERIZADO: "TERCERIZADO"}
+    diags = construir_diagnosticos(
+        [_proc(15100, 22, "CILINDRADO DE CHAPA", [TERCERIZADO])],
+        OPERARIOS, [], [], nombre_rango, NOMBRE_OPERARIO,
+    )
+    tipos = {d["tipo"] for d in diags}
+    assert "proceso_sin_operarios" not in tipos, "no falta gente: sale del taller"
+    d = _por_tipo(diags, "trabajo_tercerizado")
+    assert "CILINDRADO DE CHAPA".lower() in d["titulo"].lower()
