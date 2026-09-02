@@ -1266,7 +1266,7 @@ function _PlanningListTable({
                                     onClick={() => handleSort('fecha_prometida')}
                                 >
                                     <div className="flex items-center">
-                                        F. Prom.
+                                        F. Prometida
                                         <SortIcon column="fecha_prometida" />
                                     </div>
                                 </th>
@@ -1308,7 +1308,7 @@ function _PlanningListTable({
                         <tbody className="[&_td]:align-middle">
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
-                                    <td colSpan={19} className="px-3 py-8 text-center text-gray-500">
+                                    <td colSpan={hideStatus ? 18 : 19} className="px-3 py-8 text-center text-gray-500">
                                         {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
                                     </td>
                                 </tr>
@@ -1602,7 +1602,7 @@ function _PlanningListTable({
                                         </tr>
                                         {isRowExpanded(item.id) && (
                                             <tr className="bg-gray-50 border-b">
-                                                <td colSpan={19} className="px-4 py-4">
+                                                <td colSpan={hideStatus ? 18 : 19} className="px-4 py-4">
                                                     {renderDetails(item)}
                                                 </td>
                                             </tr>

@@ -426,7 +426,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 <tbody className="[&_td]:align-middle">
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={19} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={18} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : copy.vacioFila}
                                             </td>
                                         </tr>
@@ -552,7 +552,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50/20 border-b">
-                                                        <td colSpan={19} className="px-3 py-3 md:px-6 md:py-4">
+                                                        <td colSpan={18} className="px-3 py-3 md:px-6 md:py-4">
                                                             <div className="flex flex-col gap-4 w-full max-w-[1200px]">
                                                                 {/* Grid layout for meta info - More compact columns */}
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -141,6 +141,17 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
         });
     }, [filteredOrders, sortConfig]);
 
+    /** Mismo criterio que en No Planificadas: el número solo no lo lee nadie. */
+    const getPriorityLabel = (priorityId?: number, descripcion?: string) => {
+        if (descripcion) return descripcion;
+        switch (priorityId) {
+            case 3: return "Crítica";
+            case 2: return "Urgente";
+            case 1: return "Normal";
+            default: return "Normal";
+        }
+    };
+
     const formatDate = (dateStr?: string) => {
         if (!dateStr || dateStr.startsWith('1950')) return "-";
         try {
@@ -309,15 +320,18 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('unidades')}>
                                             <div className="flex items-center justify-center">Cant.<SortIcon column="unidades" /></div>
                                         </th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Prioridad</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Material</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tenía procesos cargados?">Proceso</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tenía plano cargado?">Plano</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Entregado</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Estado</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Entrega</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600">F. Prometida</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('fecha_entrega')}>
                                             <div className="flex items-center">F. Entrega<SortIcon column="fecha_entrega" /></div>
                                         </th>
                                         <th className="px-3 py-3 font-bold text-gray-600">Aprobado x</th>
                                         <th className="px-3 py-3 font-bold text-gray-600">Pedido x</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center">Estado</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Acciones</th>
                                     </tr>
                                 </thead>
@@ -327,7 +341,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                 <tbody className="[&_td]:align-middle">
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
-                                            <td colSpan={18} className="px-4 py-8 text-center text-gray-500">
+                                            <td colSpan={20} className="px-4 py-8 text-center text-gray-500">
                                                 {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes completadas."}
                                             </td>
                                         </tr>
@@ -362,6 +376,26 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                     </td>
                                                     <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
                                                     <td className="px-3 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
+                                                    <td className="px-3 py-3 text-center">
+                                                        <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
+                                                            {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="px-3 py-3 text-center">
+                                                        {order.estado_material === 'sin_stock' ? (
+                                                            <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                                <AlertTriangle className="h-3 w-3" /> Sin Stock
+                                                            </Badge>
+                                                        ) : order.estado_material === 'pedido' ? (
+                                                            <Badge variant="outline" className="bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                                Pedido
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold">
+                                                                <CheckCircle2 className="h-3 w-3" /> OK
+                                                            </Badge>
+                                                        )}
+                                                    </td>
                                                     {/* Proceso: Sí (verde) si tenía procesos cargados. */}
                                                     <td className="px-3 py-3 text-center">
                                                         {(order.procesos && order.procesos.length > 0) ? (
@@ -379,18 +413,19 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                         )}
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
-                                                        <span className="text-xs font-bold text-green-700">
-                                                            {order.cantidad_entregada || 0} / {order.unidades || 0}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-3 font-medium">{formatDate(order.fecha_entrega)}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>{order.aprobado_por || "-"}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>{order.requerido_por || "-"}</td>
-                                                    <td className="px-3 py-3 text-center">
                                                         <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">
                                                             Finalizada
                                                         </Badge>
                                                     </td>
+                                                    <td className="px-3 py-3 text-center">
+                                                        <span className="text-xs font-bold text-green-700">
+                                                            {order.cantidad_entregada || 0} / {order.unidades || 0}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-3 py-3">{formatDate(order.fecha_prometida)}</td>
+                                                    <td className="px-3 py-3 font-medium">{formatDate(order.fecha_entrega)}</td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>{order.aprobado_por || "-"}</td>
+                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>{order.requerido_por || "-"}</td>
                                                     <td className="px-3 py-3">
                                                         <div className="flex items-center justify-center">
                                                             <Button 
@@ -406,7 +441,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                 </tr>
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={18} className="px-4 py-4">
+                                                        <td colSpan={20} className="px-4 py-4">
                                                             <div className="space-y-3">
                                                                 <div className="text-xs text-gray-600">
                                                                     <span className="font-bold text-gray-800">Observaciones: </span>
