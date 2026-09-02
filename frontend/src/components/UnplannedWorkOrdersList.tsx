@@ -16,7 +16,8 @@ import {
     FileText,
     Settings,
     MessageSquare,
-    PlusCircle
+    PlusCircle,
+    ClipboardList
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,9 +37,42 @@ interface UnplannedWorkOrdersListProps {
     onDataChange?: () => void;
     /** Zoom (%) aplicado SOLO a la tabla, no al header ni a los filtros. */
     tableZoom?: number;
+    /** Qué lista es. Cambia SOLO el título, el ícono, el color de acento y el texto
+     *  de "no hay nada": la tabla, los filtros, el orden y las columnas son
+     *  exactamente los mismos en las dos. Pedido de Julián (1/9): la pestaña
+     *  Planificadas tenía un diseño propio (tarjetas plegables) que no se parecía
+     *  en nada al resto de Órdenes de Trabajo. */
+    variante?: "no_planificadas" | "planificadas";
 }
 
-export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100 }: UnplannedWorkOrdersListProps) {
+/** Textos y colores que cambian entre las dos listas. Lo único que cambia. */
+const COPY_VARIANTE = {
+    no_planificadas: {
+        titulo: "Órdenes No Planificadas",
+        bajada: "Estas órdenes requieren configuración de procesos y fechas.",
+        acentoCaja: "bg-orange-50 text-orange-600",
+        acentoOrden: "text-orange-600",
+        badge: "PENDIENTE",
+        badgeClase: "bg-orange-50 text-orange-700 border-orange-100",
+        vacioTitulo: "No hay órdenes pendientes",
+        vacioBajada: "Todas las órdenes de trabajo actuales ya han sido planificadas en el sistema.",
+        vacioFila: "No hay órdenes pendientes.",
+    },
+    planificadas: {
+        titulo: "Órdenes Planificadas",
+        bajada: "Estas órdenes ya tienen procesos y fechas asignadas.",
+        acentoCaja: "bg-red-50 text-red-700",
+        acentoOrden: "text-red-700",
+        badge: "PLANIFICADA",
+        badgeClase: "bg-red-50 text-red-700 border-red-100",
+        vacioTitulo: "No hay órdenes planificadas",
+        vacioBajada: "Todavía no se planificó ninguna orden, o las que había ya se entregaron y pasaron al Historial.",
+        vacioFila: "No hay órdenes planificadas.",
+    },
+} as const;
+
+export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100, variante = "no_planificadas" }: UnplannedWorkOrdersListProps) {
+    const copy = COPY_VARIANTE[variante];
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
@@ -81,7 +115,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
 
     const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
-        return <span className="ml-1 text-orange-600 font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
+        return <span className={cn("ml-1 font-bold", copy.acentoOrden)}>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
     };
 
     // Observa el scroll horizontal y actualiza `showRightFade` (true cuando hay
@@ -211,12 +245,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
             {/* Header & Search */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
                 <div className="flex items-center gap-2">
-                    <div className="p-2 bg-orange-50 rounded-lg text-orange-600">
-                        <AlertCircle className="w-5 h-5" />
+                    <div className={cn("p-2 rounded-lg", copy.acentoCaja)}>
+                        {variante === "planificadas" ? <ClipboardList className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
                     </div>
                     <div>
-                        <h3 className="font-bold text-gray-900">Órdenes No Planificadas</h3>
-                        <p className="text-xs text-gray-500">Estas órdenes requieren configuración de procesos y fechas.</p>
+                        <h3 className="font-bold text-gray-900">{copy.titulo}</h3>
+                        <p className="text-xs text-gray-500">{copy.bajada}</p>
                     </div>
                 </div>
                 <div className="relative w-full md:w-96">
@@ -235,9 +269,9 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">
                     <Clock className="w-12 h-12 text-gray-200 mx-auto mb-3" />
-                    <h4 className="text-lg font-medium text-gray-900 font-bold">No hay órdenes pendientes</h4>
+                    <h4 className="text-lg font-medium text-gray-900 font-bold">{copy.vacioTitulo}</h4>
                     <p className="text-gray-500 max-w-xs mx-auto text-sm">
-                        Todas las órdenes de trabajo actuales ya han sido planificadas en el sistema.
+                        {copy.vacioBajada}
                     </p>
                 </div>
             ) : (
@@ -250,7 +284,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2">
                                             <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
-                                            <Badge className="bg-orange-50 text-orange-700 border-orange-100 text-[9px]">PENDIENTE</Badge>
+                                            <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
                                         </div>
                                         <button className="text-gray-400">
                                             {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -322,7 +356,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                             <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
                                         )}
                                         <div className="flex gap-2 justify-end pt-2">
-                                            <Button variant="ghost" size="sm" className="h-8 text-orange-600 hover:bg-orange-50 gap-1.5" onClick={() => onEdit(order)}>
+                                            <Button variant="ghost" size="sm" className={cn("h-8 gap-1.5 hover:bg-gray-100", copy.acentoOrden)} onClick={() => onEdit(order)}>
                                                 <Edit2 className="w-3.5 h-3.5" /> Editar
                                             </Button>
                                             <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(order.id)}>
@@ -393,7 +427,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
                                             <td colSpan={19} className="px-4 py-8 text-center text-gray-500">
-                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes pendientes."}
+                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : copy.vacioFila}
                                             </td>
                                         </tr>
                                     ) : (
