@@ -2084,9 +2084,24 @@ def _get_tipo_proceso(nombre_proceso: str) -> str:
     keywords_manual = [
         "EMBALAD", "DESARM", "ENSAMBL", "LAVADO", "LIMPIEZA",
         "REBABA", "REBARB", "AMOLAD", "BICELAD", "BISELAD",
-        "ENDEREZ", "PINTU", "ARMADO", "AJUSTE", "CONTROL", "REVISION",
+        "PINTU", "ARMADO", "AJUSTE", "CONTROL", "REVISION",
         "DISENO", "PLANIFICACION", "CUBICACION", "CONSULTAR",
         "SOLICITAR", "TRABAJO DE FORMA", "MANUAL",
+        # Los cuatro de abajo salieron de la planilla de trabas que contestó Lucas
+        # (2/9/2026). Los tenía el sistema como procesos de máquina, así que iban a
+        # buscar una máquina que reservar y no la encontraban nunca:
+        #   PULIDO      → "a mano, con máquina de mano amoladora"
+        #   ENGOMADO    → "a mano, sin máquina"
+        #   DECAPADO    → "a mano, sin máquina"
+        #   PEGADO DE GOMA → "a mano, sin máquina"
+        # Esto cierra de paso el pendiente "cargar en qué máquina se hace el pulido":
+        # no había que cargar ninguna, el dato era que no usa.
+        "PULIDO", "ENGOMAD", "DECAPAD", "PEGADO DE GOMA",
+        # "ENDEREZ" se fue de esta lista en la misma pasada. Enderezar bases va en
+        # prensa o plegadora según Lucas, así que SÍ usa máquina. Además la palabra
+        # solo agarraba la grafía con Z: «ENDEREZADO EN PRENSA» quedaba como manual y
+        # «ENDERESAR DE BASES» —el mismo trabajo, escrito con S— como de máquina.
+        # Dos respuestas opuestas para lo mismo, según cómo lo tipeó el que cargó la OT.
         # Acá estuvo "SOLDA" desde el 06/07 (feedback Metlo): la soldadura caía en
         # PRODUCCION_MAQUINA, buscaba una familia de máquina que no existía y el
         # proceso quedaba sin nadie. El parche era sobre el síntoma —el agujero real

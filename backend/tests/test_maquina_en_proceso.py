@@ -5,6 +5,7 @@ su exposición en el DTO de respuesta y su aceptación en los DTOs de entrada.
 
 Imports adentro de cada test para que una dependencia pesada no rompa la colección.
 """
+from backend.application.PlanificacionService import proceso_usa_maquina
 
 
 def test_modelo_tiene_columna_id_maquinaria():
@@ -82,3 +83,24 @@ async def test_id_maquinaria_persiste_round_trip():
             assert res.scalar_one() == 10
     finally:
         await engine.dispose()
+
+
+# --------------------------------------------------------------------------
+# Lo que contestó Lucas en la planilla de trabas (2/9/2026)
+# --------------------------------------------------------------------------
+
+def test_los_procesos_a_mano_no_buscan_maquina():
+    """Pulido, engomado, decapado y pegado de goma se hacen a mano.
+
+    El sistema los tenía como procesos de máquina, así que salían a buscar una para
+    reservar y no la encontraban nunca. Cerraba el pendiente al revés: no había que
+    cargarles una máquina, el dato era que no usan."""
+    for nombre in ("PULIDO", "PULIDO DE EJE", "ENGOMADO", "DECAPADO", "PEGADO DE GOMA"):
+        assert proceso_usa_maquina(nombre) is False, nombre
+
+
+def test_enderezar_bases_usa_maquina_se_escriba_como_se_escriba():
+    """Va en prensa o plegadora. La palabra clave vieja solo agarraba la grafía con Z,
+    así que el mismo trabajo daba una respuesta u otra según cómo lo tipearon."""
+    for nombre in ("ENDERESAR DE BASES", "ENDEREZADO EN PRENSA", "ENDEREZADO PRENSA"):
+        assert proceso_usa_maquina(nombre) is True, nombre
