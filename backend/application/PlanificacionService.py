@@ -2121,11 +2121,21 @@ def _get_tipo_proceso(nombre_proceso: str) -> str:
     return "PRODUCCION_MAQUINA"
 
 
-def proceso_usa_maquina(nombre_proceso: str) -> bool:
+def proceso_usa_maquina(nombre_proceso: str, es_tercerizado: bool = False) -> bool:
     """
     Devuelve True si el proceso requiere maquinaria (PRODUCCION o SETUP).
     Devuelve False si es MANUAL o ADMIN.
+
+    `es_tercerizado` viene del DATO, no del nombre: hasta ahora un trabajo se
+    reconocía como tercerizado sólo si alguien se había acordado de escribir
+    "TERCERIZADO" en el nombre del proceso. Lucas contestó en la planilla del 2/9 que
+    cilindrado de chapa y repujado en torno se mandan afuera, y esos dos no lo dicen
+    en el nombre: sin esto, el planificador les seguía buscando un torno que reservar.
+    Se marca poniéndoles el rango TERCERIZADO en Recursos, que es donde el taller lo
+    puede ver y cambiar.
     """
+    if es_tercerizado:
+        return False
     tipo = _get_tipo_proceso(nombre_proceso)
     return tipo in ("PRODUCCION_MAQUINA", "SETUP")
 
@@ -2214,6 +2224,12 @@ async def planificar(
     # 🔹 Mapa de PRIORIDAD (proceso_id -> {operario_id: nivel 1|2}). No define quién
     #    puede: eso lo dan las nativas (rango). Solo ordena preferencia.
     mapa_skills = await repo_skill.get_map_por_proceso()
+    # 🔹 Qué rango significa "esto se manda afuera". Se resuelve por nombre y una sola
+    #    vez: el id no está fijo y hardcodearlo es lo que rompe en la próxima migración.
+    ids_rango_tercerizado = {
+        r.id for r in await RangoRepository(db).find_all()
+        if _norm(r.nombre or "") in ("TERCERIZADO", "EXTERNO")
+    }
     # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir de la elegibilidad
     nativas_off = await repo_skill.get_nativas_deshabilitadas()
     # 🔹 Habilidades cargadas a mano (proceso_id -> {operario_id}): suman elegibilidad
@@ -2304,13 +2320,17 @@ async def planificar(
             # contra el nombre crudo de la máquina, así que se baja ahí y no antes.
             nombre_proceso_lower = nombre_proceso.lower()
 
+            # Rangos válidos del proceso. Se leen antes que nada porque de acá sale
+            # también si el trabajo se manda afuera.
+            rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
+
             # Clasificar si usa máquina
-            usa_maquina = proceso_usa_maquina(nombre_proceso)
+            usa_maquina = proceso_usa_maquina(
+                nombre_proceso,
+                es_tercerizado=bool(ids_rango_tercerizado & set(rangos_validos)),
+            )
             #esto funciona
             familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
-            
-            # Rangos válidos del proceso
-            rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
 
             # Si NO usa máquina → solo depende de operario
             if not usa_maquina:
@@ -2480,6 +2500,12 @@ async def planificar_pendientes(
             repo_skill = OperarioProcesoSkillRepository(db)
         
         mapa_skills = await repo_skill.get_map_por_proceso()
+        # 🔹 Qué rango significa "esto se manda afuera". Se resuelve por nombre y una
+        #    sola vez: el id no está fijo y hardcodearlo rompe en la próxima migración.
+        ids_rango_tercerizado = {
+            r.id for r in await RangoRepository(db).find_all()
+            if _norm(r.nombre or "") in ("TERCERIZADO", "EXTERNO")
+        }
         nativas_off = await repo_skill.get_nativas_deshabilitadas()
         skills_manuales = await repo_skill.get_manuales_por_proceso()
 
