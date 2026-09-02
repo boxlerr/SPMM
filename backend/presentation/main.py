@@ -1,7 +1,6 @@
 from fastapi import FastAPI,HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.exceptions import RequestValidationError
 # Routers de presentación
 from backend.presentation.ProcesoAPI import router as proceso_router
 from backend.presentation.OperarioAPI import router as operario_router
@@ -35,23 +34,10 @@ from datetime import datetime
 
 import logging
 
-from backend.commons.exceptions.InfrastructureException import InfrastructureException
-from backend.commons.exceptions.NotFoundException import NotFoundException
-from backend.commons.exceptions.ApplicationException import ApplicationException
-from backend.commons.exceptions.DomainException import DomainException
 from backend.core.security import get_current_user
 
 
-from backend.commons.handlers.exception_handlers import (
-    application_handler,
-    infrastructure_handler,
-    validation_exception_handler,
-    http_exception_handler,
-    not_found_handler,
-    domain_handler,
-    generic_handler,
-    not_found_handler
-)
+from backend.commons.handlers.exception_handlers import registrar_exception_handlers
 
 app = FastAPI(title="SPMM Backend", version="1.0")
 
@@ -123,14 +109,11 @@ app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
 app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)
 app.include_router(rango_router, tags=["rangos"], dependencies=protected_deps)
 
-# Agrega los handler de exepciones globales al contexto de la aplicacion
-app.add_exception_handler(InfrastructureException, infrastructure_handler)
-app.add_exception_handler(ApplicationException, application_handler)
-app.add_exception_handler(DomainException, domain_handler)
-app.add_exception_handler(Exception, generic_handler)
-app.add_exception_handler(RequestValidationError, validation_exception_handler)
-app.add_exception_handler(HTTPException, http_exception_handler)
-app.add_exception_handler(NotFoundException, not_found_handler)
+# Agrega los handler de exepciones globales al contexto de la aplicacion.
+# La lista vive en exception_handlers.py, al lado de los handlers: tenerla acá fue lo
+# que dejó a BusinessException sin registrar y convirtió los avisos de negocio en un
+# "Error de conexión" en pantalla.
+registrar_exception_handlers(app)
 
 
 # 🔹 Logger básico

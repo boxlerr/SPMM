@@ -7,6 +7,7 @@ from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.DomainException import DomainException
 from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
 from backend.commons.exceptions.PlanificacionException import PlanificacionException
 from backend.commons.loggers.logger import logger
 from backend.commons.ResponseDTO import ResponseDTO
@@ -98,6 +99,24 @@ async def business_handler(request: Request, exc: BusinessException):
         ).model_dump()
     )
 
+async def confirmacion_requerida_handler(request: Request, exc: ConfirmacionRequeridaException):
+    """
+    409: no falló nada, falta confirmar.
+
+    Va separado de business_handler (422) justamente para que el front pueda
+    distinguir "esto no se puede" de "esto se puede, pero mirá lo que te llevás":
+    con el 409 muestra el motivo y habilita el botón de eliminar igual.
+    """
+    return JSONResponse(
+        status_code=409,
+        content=ResponseDTO(
+            status=False,
+            data={"requiere_confirmacion": True},
+            errors=[ErrorItemDTO(message=exc.message, campo="global")]
+        ).model_dump()
+    )
+
+
 async def domain_handler(request: Request, exc: DomainException):
     return JSONResponse(
         status_code=400,
@@ -129,3 +148,33 @@ async def generic_handler(request: Request, exc: Exception):
             errors=[ErrorItemDTO(message="Error inesperado", campo="global")]
         ).model_dump()
     )
+
+
+# ---------------------- Registro:
+
+def registrar_exception_handlers(app):
+    """
+    Deja la app con TODOS los handlers de arriba enchufados.
+
+    Antes esta lista vivía suelta en main.py y se desincronizó de este archivo:
+    `business_handler` y `planificacion_handler` estaban escritos acá pero nunca
+    registrados. Una excepción sin handler no la agarra el ExceptionMiddleware, se
+    escapa de la app y la termina atendiendo el ServerErrorMiddleware, que arma el
+    500 POR FUERA del CORSMiddleware. Al navegador le llega una respuesta sin
+    Access-Control-Allow-Origin, la bloquea, y el fetch del front cae en su catch:
+    el usuario lee "Error de conexión" en vez del motivo real —así se veía el
+    "No se puede eliminar «RECTIFICADOR»: 2 operarios lo tienen asignado".
+
+    Por eso el registro vive al lado de los handlers: si se agrega uno nuevo y no se
+    lo suma acá, el test de backend/tests/test_exception_handlers.py lo marca.
+    """
+    app.add_exception_handler(InfrastructureException, infrastructure_handler)
+    app.add_exception_handler(ApplicationException, application_handler)
+    app.add_exception_handler(PlanificacionException, planificacion_handler)
+    app.add_exception_handler(DomainException, domain_handler)
+    app.add_exception_handler(BusinessException, business_handler)
+    app.add_exception_handler(ConfirmacionRequeridaException, confirmacion_requerida_handler)
+    app.add_exception_handler(NotFoundException, not_found_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, generic_handler)

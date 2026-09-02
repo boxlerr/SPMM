@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { X, Loader2, AlertTriangle, Layers, Factory } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { parseApiError } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import { API_URL } from "@/config";
 import AgregarHabilidad, { ProcesoItem } from "./AgregarHabilidad";
@@ -167,11 +168,8 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
             const respuestas = await Promise.all(peticiones);
             const fallo = respuestas.find((r) => !r.ok);
             if (fallo) {
-                const err = await fallo.json().catch(() => ({}));
-                showToast(
-                    err?.errorDescription || err?.detail || "No se pudo guardar el rango.",
-                    "error"
-                );
+                const motivo = parseApiError(await fallo.text().catch(() => ""));
+                showToast(motivo || "No se pudo guardar el rango.", "error");
                 // Se recarga igual: si una de las dos pasó, el estado local quedó a medias.
                 await cargar();
                 return;

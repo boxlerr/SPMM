@@ -132,7 +132,12 @@ async def modificar_rango(id: int, rango_dto: RangoRequestDTO, db=Depends(get_db
 
 
 @router.delete("/rangos/{id}")
-async def eliminar_rango(id: int, db=Depends(get_db)):
-    logger.info(f"API - Inicio DELETE /rangos/{id}")
+async def eliminar_rango(id: int, forzar: bool = False, db=Depends(get_db)):
+    """
+    Borra el rango. Si lo tiene algún operario, sin `forzar` responde 409 con el
+    motivo (quiénes son y qué pierden) en vez de borrar; con `forzar=true` lo borra
+    y se lo saca a esa gente.
+    """
+    logger.info(f"API - Inicio DELETE /rangos/{id} (forzar={forzar})")
     service = RangoService(db)
-    return await service.eliminarRango(id)
+    return await service.eliminarRango(id, forzar=forzar)

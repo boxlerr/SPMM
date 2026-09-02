@@ -47,6 +47,36 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "ordenes-de-trabajo-abre-primero",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "Operaciones abre en Órdenes de Trabajo, con las que faltan planificar adelante",
+        detalle:
+            "Entrar a Operaciones te dejaba en Planificación y había que ir hasta la última solapa para ver las órdenes. Ahora «Órdenes de Trabajo» es la primera y es la que abre, y adentro «No Planificadas» pasó a estar primera: lo que todavía hay que resolver se ve al entrar, sin un clic de por medio.",
+        href: "/operaciones",
+    },
+    {
+        id: "planificadas-misma-tabla",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "«Planificadas» se ve y se filtra igual que «No Planificadas», y el número de arriba es el de verdad",
+        detalle:
+            "«Planificadas» era una pantalla aparte, de tarjetas que se abrían y cerraban, sin los filtros de cliente, sector, material, entrega ni fecha que tiene el resto. Y no cerraba: arriba decía «Planificadas (0)» y abajo aparecían 24 órdenes. Eran órdenes ya entregadas, que seguían colgadas de una planificación vieja. Ahora es la misma tabla, con las mismas columnas, los mismos filtros y el mismo buscador que «No Planificadas», el número de la solapa es el de la lista que ves, y una orden entregada desaparece de ahí y pasa al Historial. Cada orden está en una sola solapa.",
+        href: "/operaciones",
+    },
+    {
+        id: "borrar-rango-dice-el-motivo",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Recursos › Rangos",
+        titulo: "Borrar un rango te dice qué se pierde y te deja decidir",
+        detalle:
+            "Al eliminar un rango salía «Error de conexión», como si se hubiera caído internet, y no había forma de seguir. No era un error: el sistema se estaba negando porque hay gente que tiene ese rango puesto. Ahora te lo dice y te deja resolverlo en el momento: «RECTIFICADOR lo tienen 2 operarios: Leonardo Argañaraz, Vacante Rectificador A Cubrir. Si lo eliminás pierden los 19 procesos que este rango habilita y quedan sin esa categoría». Si lo leés y aun así querés borrarlo, el botón dice «Eliminar igual» y lo borra. Las habilidades cargadas a mano en cada ficha no se tocan, y a quien le quede otro rango, ese pasa a ser su categoría. De paso, el resto de los avisos de Recursos también se leen: si un nombre falta o está repetido, lo ves en vez de un error de conexión.",
+        href: "/recursos",
+    },
+    {
         id: "confirmar-no-borra-otros-borradores",
         fecha: "2026-09-01",
         tipo: "arreglo",

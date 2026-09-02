@@ -16,7 +16,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { Pencil, Trash2, Plus, RefreshCw, ChevronRight } from "lucide-react";
+import { parseApiError } from "@/lib/utils";
+import { Pencil, Trash2, Plus, RefreshCw, ChevronRight, AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +96,10 @@ export default function CatalogoSimple({
   const [saving, setSaving] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
+  // Lo que el backend contesta cuando el borrado se lleva algo por delante ("2
+  // operarios lo tienen: ... si lo eliminás pierden..."). Mientras esto tenga texto,
+  // el cartel muestra el motivo y el botón pasa a "Eliminar igual".
+  const [motivoBorrado, setMotivoBorrado] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const [expandido, setExpandido] = useState<number | null>(null);
@@ -151,10 +156,8 @@ export default function CatalogoSimple({
         body: JSON.stringify({ nombre: valor }),
       });
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        const msg =
-          errJson?.errorDescription || errJson?.detail || `Error al guardar el ${singular.toLowerCase()}.`;
-        showToast(msg, "error");
+        const motivo = parseApiError(await res.text().catch(() => ""));
+        showToast(motivo || `Error al guardar el ${singular.toLowerCase()}.`, "error");
         return;
       }
       showToast(
@@ -172,25 +175,45 @@ export default function CatalogoSimple({
     }
   };
 
+  const cerrarConfirmacion = () => {
+    setConfirmDelete(null);
+    setMotivoBorrado(null);
+  };
+
+  /**
+   * Borra en dos pasos: la primera pasada pregunta, la segunda ejecuta.
+   *
+   * Si el backend contesta 409 no falló nada — está diciendo qué se lleva puesto el
+   * borrado. Ese motivo va al cartel y el mismo botón, ahora "Eliminar igual",
+   * repite el pedido con `forzar`. Antes esto se comía el motivo y mostraba un error
+   * seco, así que el usuario no tenía ni con qué decidir ni cómo seguir.
+   */
   const eliminar = async () => {
     if (!confirmDelete) return;
+    const forzar = motivoBorrado !== null;
     setDeleting(true);
     try {
-      const res = await fetch(`${cleanUrl}/${resource}/${confirmDelete.id}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
+      const res = await fetch(
+        `${cleanUrl}/${resource}/${confirmDelete.id}${forzar ? "?forzar=true" : ""}`,
+        { method: "DELETE", headers: getAuthHeaders() }
+      );
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        const msg =
-          errJson?.errorDescription ||
-          errJson?.detail ||
-          `No se puede eliminar (puede estar en uso).`;
-        showToast(msg, "error");
+        const motivo = parseApiError(await res.text().catch(() => ""));
+        if (res.status === 409) {
+          setMotivoBorrado(
+            motivo || `Algo está usando este ${singular.toLowerCase()}.`
+          );
+          return;
+        }
+        showToast(motivo || `No se puede eliminar (puede estar en uso).`, "error");
         return;
       }
-      showToast(`${singular} eliminado correctamente.`, "success");
-      setConfirmDelete(null);
+      // El backend cuenta qué pasó con lo que se llevó puesto ("2 operarios quedaron
+      // sin esa categoría"): lo que se confirmó tiene que verse hecho.
+      const body = await res.json().catch(() => ({}));
+      const aviso = typeof body?.data?.aviso === "string" ? ` ${body.data.aviso}` : "";
+      showToast(`${singular} eliminado correctamente.${aviso}`, "success");
+      cerrarConfirmacion();
       await fetchItems();
     } catch {
       showToast(`Error de conexión al eliminar el ${singular.toLowerCase()}.`, "error");
@@ -310,7 +333,10 @@ export default function CatalogoSimple({
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setConfirmDelete(item)}
+                            onClick={() => {
+                              setMotivoBorrado(null);
+                              setConfirmDelete(item);
+                            }}
                             className="h-8 w-8 text-destructive hover:text-destructive"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -393,26 +419,30 @@ export default function CatalogoSimple({
       </Dialog>
 
       {/* Dialog Confirmar Eliminación */}
-      <Dialog open={!!confirmDelete} onOpenChange={(open) => !open && setConfirmDelete(null)}>
+      <Dialog open={!!confirmDelete} onOpenChange={(open) => !open && cerrarConfirmacion()}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirmar eliminación</DialogTitle>
+            <DialogTitle>
+              {motivoBorrado ? "¿Eliminar igual?" : "Confirmar eliminación"}
+            </DialogTitle>
             <DialogDescription>
               ¿Eliminar el {singular.toLowerCase()} <strong>{confirmDelete?.nombre}</strong>?
-              {" "}Si está siendo usado por otra parte del sistema, la eliminación puede fallar.
+              {motivoBorrado ? null : " Esta acción no se puede deshacer."}
             </DialogDescription>
           </DialogHeader>
+          {motivoBorrado && (
+            <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>{motivoBorrado}</p>
+            </div>
+          )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmDelete(null)}
-              disabled={deleting}
-            >
+            <Button variant="outline" onClick={cerrarConfirmacion} disabled={deleting}>
               Cancelar
             </Button>
             <Button variant="destructive" onClick={eliminar} disabled={deleting}>
               {deleting ? <Spinner className="h-4 w-4 mr-2" /> : null}
-              Eliminar
+              {motivoBorrado ? "Eliminar igual" : "Eliminar"}
             </Button>
           </DialogFooter>
         </DialogContent>

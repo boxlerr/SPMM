@@ -1,4 +1,4 @@
-from sqlalchemy import select, text, delete as sa_delete
+from sqlalchemy import select, text, update, delete as sa_delete
 from backend.domain.Rango import Rango
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -418,7 +418,20 @@ class RangoRepository:
             logger.error(f"Repository - Error real en update Rango: {e}")
             raise InfrastructureException("Error al actualizar el Rango.") from e
 
-    async def delete(self, id: int):
+    async def delete(self, id: int, desasignar_operarios: bool = False):
+        """
+        Borra el rango. Con `desasignar_operarios`, además se lo saca a la gente
+        que lo tiene.
+
+        `operario_rango` no lleva cascade a propósito (ver Rango.py): que borrar un
+        rango le vacíe la categoría a alguien no puede ser un efecto colateral. Pero
+        cuando el usuario ya lo confirmó, la baja se hace acá y en la MISMA
+        transacción que el borrado, para que no quede gente sin rango si el delete
+        de abajo falla.
+        """
+        from backend.domain.Operario import Operario
+        from backend.domain.OperarioRango import OperarioRango
+
         try:
             logger.info(f"Repository - Eliminar rango ID {id}.")
             result = await self.db.execute(select(Rango).where(Rango.id == id))
@@ -427,6 +440,35 @@ class RangoRepository:
             if not rango:
                 logger.info(f"Repository - Rango {id} no encontrado para eliminar.")
                 return False
+
+            if desasignar_operarios:
+                ids_operarios = (await self.db.execute(
+                    select(OperarioRango.id_operario).where(OperarioRango.id_rango == id)
+                )).scalars().all()
+                await self.db.execute(
+                    sa_delete(OperarioRango).where(OperarioRango.id_rango == id)
+                )
+
+                # `operario.categoria` es el nombre del rango principal copiado como
+                # texto (así lo escribe la ficha del operario). Al que le queda
+                # apuntando al rango borrado se le pone otro de los que todavía tiene
+                # —el primero por nombre— y si no le queda ninguno, queda vacía: es
+                # exactamente lo que se le avisó que iba a pasar.
+                for id_operario in ids_operarios:
+                    restantes = (await self.db.execute(
+                        select(Rango.nombre)
+                        .join(OperarioRango, OperarioRango.id_rango == Rango.id)
+                        .where(OperarioRango.id_operario == id_operario)
+                        .order_by(Rango.nombre)
+                    )).scalars().all()
+                    await self.db.execute(
+                        update(Operario)
+                        .where(Operario.id == id_operario, Operario.categoria == rango.nombre)
+                        .values(categoria=restantes[0] if restantes else "")
+                    )
+                logger.info(
+                    f"Repository - Rango {id} desasignado de {len(ids_operarios)} operario(s)."
+                )
 
             await self.db.delete(rango)
             await self.db.commit()

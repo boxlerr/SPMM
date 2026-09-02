@@ -18,7 +18,9 @@ class Rango(Base):
     #
     # `operarios_rango` NO lleva cascade a propósito: que borrar un rango le saque la
     # categoría a la gente en silencio sería peor que no poder borrarlo. El service
-    # corta antes con un mensaje que dice a cuántos alcanza.
+    # frena la primera pasada y devuelve a quiénes alcanza y qué pierden; recién
+    # cuando el usuario lo confirma, el repositorio baja esas filas a mano y en la
+    # misma transacción que el borrado.
     procesos = relationship(
         "RangoProceso",
         back_populates="rango",

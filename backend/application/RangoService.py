@@ -6,6 +6,7 @@ from backend.dto.RangoRequestDTO import RangoRequestDTO
 from backend.infrastructure.RangoRepository import RangoRepository
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -206,15 +207,56 @@ class RangoService:
 
         return ResponseDTO(status=True, data=jsonable_encoder(rango_actualizado))
 
-    async def eliminarRango(self, id: int):
+    @staticmethod
+    def _motivo_del_borrado(nombre_rango: str, detalle: dict) -> str:
+        """
+        Qué se lleva puesto el borrado, escrito para leerse en un cartel.
+
+        Nombra a la gente y no solo cuánta: "2 operarios" no alcanza para decidir,
+        lo que decide es ver que uno de los dos es Leonardo. Se cortan en 5 para que
+        el cartel siga siendo un cartel.
+        """
+        operarios = detalle["operarios"]
+        cantidad = len(operarios)
+        nombres = [f"{o['nombre']} {o['apellido']}".strip() for o in operarios]
+        listados = ", ".join(nombres[:5])
+        if cantidad > 5:
+            listados += f" y {cantidad - 5} más"
+
+        # Singular/plural a mano: el cartel lo lee el encargado, no un programador.
+        tiene = "lo tiene" if cantidad == 1 else "lo tienen"
+        pierde = "pierde" if cantidad == 1 else "pierden"
+        queda = "queda" if cantidad == 1 else "quedan"
+        ficha = "su ficha" if cantidad == 1 else "cada ficha"
+
+        procesos = len(detalle["procesos"])
+        que_pierde = (
+            f"{pierde} los {procesos} procesos que este rango habilita y {queda} sin esa categoría"
+            if procesos > 1
+            else f"{pierde} el proceso que este rango habilita y {queda} sin esa categoría"
+            if procesos == 1
+            else f"{queda} sin esa categoría"
+        )
+
+        return (
+            f"«{nombre_rango}» {tiene} {cantidad} operario{'' if cantidad == 1 else 's'}: "
+            f"{listados}. Si lo eliminás {que_pierde}. "
+            f"Las habilidades cargadas a mano en {ficha} no se tocan."
+        )
+
+    async def eliminarRango(self, id: int, forzar: bool = False):
         """
         Borra el rango junto con los procesos y maquinarias que tenía asignados.
 
-        Si algún operario lo tiene, corta antes: borrarlo dejaría gente sin categoría
-        y sin ninguna habilidad nativa, que es un destrozo silencioso. Mejor obligar a
-        reasignarlos primero y decir cuántos son.
+        Si algún operario lo tiene, la PRIMERA pasada no borra nada: devuelve el
+        motivo —quiénes son y qué pierden— para que la pantalla lo muestre. La
+        segunda, con `forzar`, borra y se lo saca a esa gente.
+
+        Antes esto cortaba y obligaba a reasignar a mano uno por uno. El pedido fue
+        al revés: que diga qué se pierde y deje decidir. Lo que sigue sin poder pasar
+        es que pase en silencio, que era lo único importante.
         """
-        logger.info(f"Service - Eliminar rango ID: {id}")
+        logger.info(f"Service - Eliminar rango ID: {id} (forzar={forzar})")
 
         rango = await self.repository.find_by_id(id)
         if not rango:
@@ -222,14 +264,22 @@ class RangoService:
 
         detalle = await self.repository.find_detalle(id)
         en_uso = detalle["operarios_count"]
-        if en_uso:
-            raise BusinessException(
-                f"No se puede eliminar «{rango.nombre}»: {en_uso} operario"
-                f"{'' if en_uso == 1 else 's'} lo tiene"
-                f"{'' if en_uso == 1 else 'n'} asignado. Cambiales el rango primero."
+
+        if en_uso and not forzar:
+            raise ConfirmacionRequeridaException(
+                self._motivo_del_borrado(rango.nombre, detalle)
             )
 
-        ok = await self.repository.delete(id)
+        ok = await self.repository.delete(id, desasignar_operarios=bool(en_uso))
         if not ok:
             raise NotFoundException(f"No se encontró el rango con ID {id}")
-        return ResponseDTO(status=True, data={"deleted": id})
+
+        data = {"deleted": id}
+        if en_uso:
+            # La pantalla lo pega al "eliminado correctamente": lo que se confirmó
+            # tiene que verse hecho, no darse por hecho.
+            data["aviso"] = (
+                f"{en_uso} operario{'' if en_uso == 1 else 's'} "
+                f"{'quedó' if en_uso == 1 else 'quedaron'} sin esa categoría."
+            )
+        return ResponseDTO(status=True, data=data)

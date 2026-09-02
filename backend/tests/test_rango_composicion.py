@@ -15,9 +15,11 @@ from sqlalchemy import select
 
 from backend.application.RangoService import RangoService
 from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.domain.Maquinaria import Maquinaria
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
+from backend.domain.Rango import Rango
 from backend.domain.RangoMaquinaria import RangoMaquinaria
 from backend.domain.RangoProceso import RangoProceso
 from backend.tests.conftest import seed_basico
@@ -26,6 +28,14 @@ from backend.tests.conftest import seed_basico
 async def _ids_procesos(session, id_rango):
     res = await session.execute(
         select(RangoProceso.id_proceso).where(RangoProceso.id_rango == id_rango)
+    )
+    return sorted(res.scalars().all())
+
+
+async def _ids_operarios(session, id_rango):
+    from backend.domain.OperarioRango import OperarioRango
+    res = await session.execute(
+        select(OperarioRango.id_operario).where(OperarioRango.id_rango == id_rango)
     )
     return sorted(res.scalars().all())
 
@@ -298,18 +308,90 @@ async def test_borrar_un_rango_con_maquinarias_se_lleva_sus_filas(session):
 
 
 @pytest.mark.asyncio
-async def test_no_se_puede_borrar_un_rango_que_alguien_tiene(session):
+async def test_borrar_un_rango_que_alguien_tiene_pide_confirmacion(session):
     # seed_basico deja al operario 1 con el rango 7.
     await seed_basico(session)
     service = RangoService(session)
 
-    with pytest.raises(BusinessException) as exc:
+    with pytest.raises(ConfirmacionRequeridaException) as exc:
         await service.eliminarRango(7)
 
-    # El mensaje tiene que decir cuántos son, si no el usuario no sabe qué reasignar.
-    assert "1 operario" in str(exc.value)
-    # Y no puede haber borrado nada.
+    # El motivo tiene que decir QUIÉN y QUÉ pierde: con "1 operario" a secas el
+    # usuario no tiene con qué decidir si confirma o no.
+    motivo = str(exc.value)
+    assert "Juan Perez" in motivo
+    assert "1 operario" in motivo
+    assert "2 procesos" in motivo
+    # Y la pasada sin confirmar no puede haber tocado nada.
     assert await _ids_procesos(session, 7) == [100, 101]
+    assert await _ids_operarios(session, 7) == [1]
+
+
+@pytest.mark.asyncio
+async def test_confirmado_borra_el_rango_y_se_lo_saca_a_la_gente(session):
+    await seed_basico(session)
+    service = RangoService(session)
+
+    resp = await service.eliminarRango(7, forzar=True)
+
+    assert resp.data["deleted"] == 7
+    # El aviso vuelve para que la pantalla muestre lo que efectivamente pasó.
+    assert "1 operario" in resp.data["aviso"]
+    assert await _ids_operarios(session, 7) == []
+    assert await _ids_procesos(session, 7) == []
+    assert (await session.execute(select(Rango).where(Rango.id == 7))).scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_al_borrar_forzado_la_categoria_del_operario_queda_vacia(session):
+    """
+    `operario.categoria` es el nombre del rango principal copiado como texto. Si el
+    rango se va y la categoría queda con el nombre de algo que no existe, el operario
+    aparece con una categoría fantasma en su ficha.
+    """
+    await seed_basico(session)
+    from backend.domain.Operario import Operario
+    operario = (await session.execute(select(Operario).where(Operario.id == 1))).scalar_one()
+    operario.categoria = "Tornero"
+    await session.commit()
+
+    await RangoService(session).eliminarRango(7, forzar=True)
+
+    operario = (await session.execute(select(Operario).where(Operario.id == 1))).scalar_one()
+    assert operario.categoria == ""
+
+
+@pytest.mark.asyncio
+async def test_al_borrar_forzado_la_categoria_pasa_al_rango_que_le_queda(session):
+    """Si todavía tiene otro rango, ese pasa a ser su categoría: no se queda en blanco."""
+    await seed_basico(session)
+    from backend.domain.Operario import Operario
+    from backend.domain.OperarioRango import OperarioRango
+    from backend.domain.Rango import Rango as _Rango
+
+    session.add_all([_Rango(id=8, nombre="Soldador"), OperarioRango(id_operario=1, id_rango=8)])
+    operario = (await session.execute(select(Operario).where(Operario.id == 1))).scalar_one()
+    operario.categoria = "Tornero"
+    await session.commit()
+
+    await RangoService(session).eliminarRango(7, forzar=True)
+
+    operario = (await session.execute(select(Operario).where(Operario.id == 1))).scalar_one()
+    assert operario.categoria == "Soldador"
+
+
+@pytest.mark.asyncio
+async def test_un_rango_que_no_tiene_a_nadie_se_borra_sin_preguntar(session):
+    """El "¿estás seguro?" es por la gente que pierde algo. Sin gente, no hay pregunta."""
+    await seed_basico(session)
+    from backend.domain.OperarioRango import OperarioRango
+    from sqlalchemy import delete as sa_delete
+    await session.execute(sa_delete(OperarioRango).where(OperarioRango.id_rango == 7))
+    await session.commit()
+
+    resp = await RangoService(session).eliminarRango(7)
+
+    assert resp.data == {"deleted": 7}
 
 
 @pytest.mark.asyncio
