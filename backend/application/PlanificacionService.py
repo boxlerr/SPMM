@@ -634,6 +634,15 @@ def _crear_variables_y_dominios(
         # asignar y el diagnóstico lo muestra: preferimos eso a que lo agarre otro sin
         # que nadie se entere de que la elección se ignoró.
         _presel_op = (preseleccion_op or {}).get((orden_id, secuencia))
+        # Los acompañantes se eligen del conjunto SIN forzar: la elección de la carga es
+        # sobre quién hace el trabajo, no sobre con quién. Si los slots extra heredaran
+        # el dominio de un solo valor, los dos serían la misma persona y
+        # `_agregar_distintos_operarios` exige que sean reales y distintos —
+        # `AddBoolOr([eq.Not(), a_dummy])` queda insatisfacible— y el modelo COMPLETO
+        # sale INFEASIBLE: no es que esa OT queda sin asignar, es que no sale ningún
+        # plan y el diagnóstico tampoco puede explicar por qué. Basta una sola fila con
+        # persona elegida y cantidad de recurso humano 2.
+        operarios_para_acompanantes = operarios_validos[:]
         if _presel_op and _presel_op in REAL_OP_IDS:
             operarios_validos = [_presel_op]
             logger.info(
@@ -651,13 +660,14 @@ def _crear_variables_y_dominios(
         operario_vars[(orden_id, secuencia)] = op_var
 
         # Slots extra de operario si el proceso requiere más de 1 persona.
-        # Mismo dominio que el principal (incluye DUMMY para casos sin gente suficiente).
+        # Mismo dominio que el principal ANTES de la preselección (incluye DUMMY para
+        # casos sin gente suficiente): ver el comentario de arriba.
         k_ops = int(cant_op_map.get((orden_id, secuencia), 1) or 1)
         if k_ops > 1:
             extras = []
             for j in range(1, k_ops):
                 ev = model.NewIntVarFromDomain(
-                    cp_model.Domain.FromValues(operarios_validos),
+                    cp_model.Domain.FromValues(operarios_para_acompanantes),
                     f"op_{orden_id}_{secuencia}_x{j}"
                 )
                 extras.append(ev)

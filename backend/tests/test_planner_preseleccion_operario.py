@@ -14,9 +14,14 @@ OT, y tiene que ganarle al filtro para servir de algo.
 from ortools.sat.python import cp_model
 
 import backend.application.PlanificacionService as ps
-from backend.application.PlanificacionService import _crear_variables_y_dominios
+from backend.application.PlanificacionService import (
+    _agregar_distintos_operarios,
+    _crear_variables_y_dominios,
+)
 
 OP_DOMAIN_IDX = 13  # posición de op_domain_vals en el tuple de retorno
+OP_VARS_IDX = 3     # operario_vars
+OP_EXTRA_IDX = 16   # op_extra_vars
 DUMMY_OP_ID = 999999
 OFICIAL, MEDIO = 1, 2
 # (id_operario, id_rango)
@@ -59,3 +64,37 @@ def test_preseleccion_le_gana_al_filtro_por_rango():
     # cosas que el rango no dice.
     dom = _crear({(1, 1): 11})[OP_DOMAIN_IDX][(1, 1)]
     assert dom == [11]
+
+
+def test_persona_elegida_con_dos_operarios_no_tumba_el_modelo():
+    """Una sola fila con persona elegida y cantidad de recurso humano 2 dejaba el modelo
+    COMPLETO en INFEASIBLE.
+
+    Los slots extra heredaban el dominio de un solo valor, así que los dos quedaban en
+    la misma persona, y `_agregar_distintos_operarios` exige que sean reales y distintos
+    (`AddBoolOr([eq.Not(), a_dummy])`). No es «esa OT sale sin asignar»: no salía ningún
+    plan, y el diagnóstico tampoco podía explicar por qué. La elección de la carga es
+    sobre quién hace el trabajo, no sobre con quién, así que el acompañante se elige del
+    conjunto sin forzar.
+    """
+    ps.H = 100000
+    model = cp_model.CpModel()
+    procesos_norm = [(1, 100, 1, None, 5, 60, [OFICIAL], "ENSAMBLAJE", False, "", {})]
+    salida = _crear_variables_y_dominios(
+        model, procesos_norm, OPERARIOS, [], set(), set(),
+        nativas_off={},
+        cant_op_map={(1, 1): 2},
+        preseleccion_op={(1, 1): 10},
+    )
+    dominios = salida[OP_DOMAIN_IDX]
+    assert dominios[(1, 1)] == [10], "el principal sigue forzado en la persona elegida"
+
+    # Y el modelo tiene que resolver: antes salía INFEASIBLE.
+    operario_vars = salida[OP_VARS_IDX]
+    op_extra_vars = salida[OP_EXTRA_IDX]
+    assert op_extra_vars.get((1, 1)), "el proceso pide dos personas: tiene que haber un slot extra"
+    _agregar_distintos_operarios(model, operario_vars, op_extra_vars, DUMMY_OP_ID)
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.Value(operario_vars[(1, 1)]) == 10
+    assert solver.Value(op_extra_vars[(1, 1)][0]) != 10, "el acompañante tiene que ser otro"
