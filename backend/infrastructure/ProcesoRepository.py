@@ -1,5 +1,5 @@
 
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 from backend.domain.Proceso import Proceso
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 
@@ -81,3 +81,54 @@ class ProcesoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error real en delete: {e}")
             raise InfrastructureException("Error al eliminar el Proceso.") from e
+
+    # ── En qué máquinas se hace cada proceso ────────────────────────────────────
+    #
+    # Vacío no es "no usa máquina": es "todavía no lo cargaron". El planificador lo
+    # distingue y sigue deduciendo por nombre cuando no hay filas. Ver la migración
+    # 2026-09-02_maquina_en_proceso_catalogo.sql.
+
+    async def set_maquinarias_de_proceso(self, id_proceso: int, ids_maquinaria: list[int]):
+        """Reemplaza la lista de máquinas donde se hace un proceso."""
+        try:
+            from backend.domain.ProcesoMaquinaria import ProcesoMaquinaria
+
+            logger.info(
+                f"Repository - Set maquinarias del proceso {id_proceso}: "
+                f"{len(ids_maquinaria)} máquinas."
+            )
+            await self.db.execute(
+                sa_delete(ProcesoMaquinaria).where(ProcesoMaquinaria.id_proceso == id_proceso)
+            )
+            for id_maquinaria in dict.fromkeys(ids_maquinaria):
+                self.db.add(ProcesoMaquinaria(id_proceso=id_proceso, id_maquinaria=id_maquinaria))
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en set_maquinarias_de_proceso: {e}")
+            raise InfrastructureException(
+                "Error al actualizar las máquinas del proceso."
+            ) from e
+
+    async def find_maquinarias_por_proceso(self) -> dict[int, list[int]]:
+        """{proceso_id: [maquinaria_id]} de TODOS los procesos que tengan el dato.
+
+        Una sola consulta: el planificador la pide una vez por corrida y necesita el
+        mapa entero, no proceso por proceso.
+        """
+        try:
+            from backend.domain.ProcesoMaquinaria import ProcesoMaquinaria
+
+            result = await self.db.execute(
+                select(ProcesoMaquinaria.id_proceso, ProcesoMaquinaria.id_maquinaria)
+            )
+            mapa: dict[int, list[int]] = {}
+            for id_proceso, id_maquinaria in result.all():
+                mapa.setdefault(id_proceso, []).append(id_maquinaria)
+            return mapa
+        except Exception as e:
+            logger.error(f"Repository - Error en find_maquinarias_por_proceso: {e}")
+            raise InfrastructureException(
+                "Error al leer las máquinas de los procesos."
+            ) from e

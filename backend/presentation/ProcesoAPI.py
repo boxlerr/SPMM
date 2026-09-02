@@ -41,6 +41,19 @@ async def modificar_proceso(id: int, proceso_dto: ProcesoRequestDTO, db=Depends(
     service = ProcesoService(db)
     return await service.modificarProceso(id, proceso_dto)
 
+# 🔹 En qué máquinas se hace este proceso
+@router.put("/procesos/{id}/maquinarias")
+async def modificar_maquinarias_de_proceso(id: int, body: dict, db=Depends(get_db)):
+    """Reemplaza la lista de máquinas donde se hace el proceso.
+
+    Body: {"maquinarias": [1, 2, 3]}. Lista vacía es válida y significa «no cargado»:
+    ahí el planificador vuelve a deducir la máquina del nombre del proceso.
+    """
+    logger.info(f"API - Inicio PUT /procesos/{id}/maquinarias")
+    service = ProcesoService(db)
+    return await service.modificarMaquinariasDeProceso(id, body.get("maquinarias") or [])
+
+
 # 🔹 Eliminar proceso
 @router.delete("/procesos/{id}")
 async def eliminar_proceso(id: int, db=Depends(get_db)):

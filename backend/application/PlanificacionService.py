@@ -470,6 +470,7 @@ def _crear_variables_y_dominios(
     ots_con_plano=None,
     skills_manuales=None,
     preseleccion_op=None,
+    maquinas_por_proceso=None,
 ):
     """
     Crea variables de inicio/fin/intervalos, dominios de operarios/maquinarias
@@ -495,6 +496,8 @@ def _crear_variables_y_dominios(
     cant_op_map = cant_op_map or {}
 
     nativas_off = nativas_off or {}
+    # {proceso_id: [maquinaria_id]} cargado en Recursos. Vacío = deducir por nombre.
+    maquinas_por_proceso = maquinas_por_proceso or {}
     op_planos = op_planos or {}
     ots_con_plano = ots_con_plano or set()
     skills_manuales = skills_manuales or {}
@@ -737,8 +740,17 @@ def _crear_variables_y_dominios(
 
         elif tipo_proc == "PRODUCCION_MAQUINA":
             # Lógica PRODUCCION
-            # 1. Filtrar por familia requerida
-            if familia_req:
+            # 1. Las máquinas del catálogo, si alguien las cargó.
+            #
+            # Es el dato que Lucas contesta en Recursos › Procesos («en qué máquina se
+            # hace esto»), y le gana a la deducción por nombre: la deducción es lo que
+            # hacíamos cuando no teníamos el dato. Vacío = no cargado, y ahí sigue todo
+            # como antes. Se cruza con las máquinas reales por si alguna se dio de baja
+            # después de haberla elegido.
+            del_catalogo = [m for m in (maquinas_por_proceso.get(proc_id) or []) if m in REAL_MAQ_IDS]
+            if del_catalogo:
+                candidates = del_catalogo
+            elif familia_req:
                 candidates = [m for m in REAL_MAQ_IDS if maq_to_familia.get(m) == familia_req]
             else:
                 # Sin familia no se sabe QUÉ máquina pide el proceso. Antes el dominio
@@ -999,8 +1011,68 @@ def _setup_de_esta_produccion(proc_setup, proc_prod) -> bool:
     return bool(fam_setup) and fam_setup == fam_prod
 
 
+def _pares_setup_produccion(procesos_norm, partes=None):
+    """Qué preparación va con qué producción, en cada OT. UN solo lugar que lo decide.
+
+    Devuelve [(claves_setup, claves_produccion)], donde cada elemento es la lista de
+    claves (orden_id, secuencia) de los TRAMOS de esa línea: un proceso de más de 210
+    minutos se parte, y los tramos son de la misma línea aunque tengan secuencias
+    distintas. Emparejar por tramo hacía que el segundo tramo de la primera preparación
+    se llevara la segunda producción, y por la continuidad de partes eso terminaba
+    pasándole la persona y la máquina del torno equivocado.
+
+    Se recorre la OT en orden guardando las preparaciones sin pareja por familia, y cada
+    producción se lleva la más vieja. Uno a uno: una OT puede repetir la misma familia
+    (la 7497 tiene torno CNC 13 veces) y aparear todas contra todas ataría trabajos que
+    no tienen nada que ver.
+
+    Existe porque hasta el 2/9 esto se decidía en DOS lugares —acá y en el paso de
+    herencia de rangos— y quedaron emparejando distinto: la coordinación juntaba pares
+    no vecinos y la herencia seguía mirando solo al de al lado. El resultado era peor que
+    el bug original: en la OT 15708 la preparación se quedaba con sus rangos, los
+    dominios no se cruzaban y los DOS salían sin nadie.
+    """
+    por_clave = {(p[0], p[2]): p for p in procesos_norm}
+
+    if partes:
+        lineas = []
+        for info in partes.values():
+            claves = [k for k in info["claves"] if k in por_clave]
+            if claves:
+                lineas.append(claves)
+    else:
+        lineas = [[(p[0], p[2])] for p in procesos_norm]
+
+    por_ot = {}
+    for claves in lineas:
+        por_ot.setdefault(claves[0][0], []).append(claves)
+
+    pares = []
+    for lineas_ot in por_ot.values():
+        lineas_ot.sort(key=lambda cl: por_clave[cl[0]][2])
+        pendientes = {}
+        for claves in lineas_ot:
+            rep = por_clave[claves[0]]
+            if not rep[8]:            # no usa máquina: ni preparación ni producción
+                continue
+            familia = familia_requerida_from_proceso(rep[7] or "")
+            if not familia:
+                continue
+            tipo = _get_tipo_proceso(rep[7])
+            if tipo == "SETUP":
+                pendientes.setdefault(familia, []).append(claves)
+            elif tipo == "PRODUCCION_MAQUINA" and pendientes.get(familia):
+                claves_setup = pendientes[familia].pop(0)
+                # Se confirma con la misma función de siempre: que haya UN lugar que
+                # decida si dos procesos están relacionados.
+                if _setup_de_esta_produccion(por_clave[claves_setup[0]], rep):
+                    pares.append((claves_setup, claves))
+    return pares
+
+
 def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None,
-                                    op_domain_vals=None, *, dummy_op_id):
+                                    op_domain_vals=None, *, dummy_op_id,
+                                    partes=None, maq_domain_vals=None):
     """
     Fuerza a que procesos coordinados (ej: Programacion + Produccion)
     usen la misma máquina y, si se pasa `operario_vars`, el MISMO operario
@@ -1037,70 +1109,56 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_var
         """
         dominio = op_domain_vals.get(clave, ())
         return len(dominio) == 1 and dominio[0] != dummy_op_id
-    # Agrupar por OT
-    ord_ids = set(p[0] for p in procesos_norm)
-    for oid in ord_ids:
-        # Procesos de esta OT ordenados por secuencia
-        p_order = sorted([p for p in procesos_norm if p[0] == oid], key=lambda x: x[2])
+    por_clave = {(p[0], p[2]): p for p in procesos_norm}
+    maq_domain_vals = maq_domain_vals or {}
 
-        # ── Emparejar cada preparación con SU producción, aunque no sean vecinas.
+    for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+        # Representantes: el ÚLTIMO tramo de la preparación y el PRIMERO de la
+        # producción, que son los que se tocan en el tiempo. Al resto de los tramos los
+        # arrastra _agregar_continuidad_partes.
+        clave_a, clave_s = claves_setup[-1], claves_prod[0]
+        act, sig = por_clave[clave_a], por_clave[clave_s]
+        oid, seq_a, name_a = act[0], act[2], act[7]
+        seq_s, name_s = sig[2], sig[7]
+
+        # La misma máquina: es lo que evita que la preparación reserve una soldadora y
+        # la soldadura use otra.
         #
-        # Antes esto era `for i in range(len(p_order) - 1)` comparando cada proceso con
-        # el siguiente, y cualquier cosa en el medio partía el par. Caso real de la OT
-        # 15708, que Lucas marcó como error mirando la pantalla el 28/08:
-        #     Preparación de soldadora MIG → Ensamblaje, punteado y escuadrado → Soldadura con MIG
-        # El del medio es manual y no usa máquina, así que el par preparación/soldadura
-        # nunca se evaluaba: prepara uno la soldadora y suelda otro, en otra máquina. En
-        # la MISMA OT el torno salía bien, porque ahí sí eran consecutivos.
-        #
-        # Se recorre en orden guardando las preparaciones sin pareja por familia, y cada
-        # producción se lleva la MÁS VIEJA que le corresponde. El uno a uno importa: una
-        # OT puede repetir la misma familia (la 7497 tiene torno CNC 13 veces) y aparear
-        # todas contra todas ataría trabajos que no tienen nada que ver.
-        pendientes = {}
-        pares = []
-        for proc in p_order:
-            if not proc[8]:            # no usa máquina: no puede ser ni preparación ni producción
-                continue
-            familia = familia_requerida_from_proceso(proc[7] or "")
-            if not familia:
-                continue
-            tipo = _get_tipo_proceso(proc[7])
-            if tipo == "SETUP":
-                pendientes.setdefault(familia, []).append(proc)
-            elif tipo == "PRODUCCION_MAQUINA" and pendientes.get(familia):
-                pares.append((pendientes[familia].pop(0), proc))
-
-        for act, sig in pares:
-            # (orden_id, proc_id, secuencia, fecha_prometida, peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria, familia_req, op_skill)
-            seq_a, name_a = act[2], act[7]
-            seq_s, name_s = sig[2], sig[7]
-
-            # La misma máquina: es lo que evita que la preparación reserve una soldadora
-            # y la soldadura use otra.
-            model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
+        # Salvo que las dos tengan máquina elegida a mano y sean distintas. Ahí los
+        # dominios quedan en un valor cada uno y sin dummy, así que la igualdad es
+        # insatisfacible y se lleva puesto el modelo COMPLETO: no sale ningún plan y el
+        # diagnóstico tampoco puede explicar por qué. Es un dato deliberado de quien
+        # cargó la OT — se avisa y se sigue, no se rompe todo.
+        dom_a = set(maq_domain_vals.get(clave_a, ()) or ())
+        dom_s = set(maq_domain_vals.get(clave_s, ()) or ())
+        if dom_a and dom_s and not (dom_a & dom_s):
+            logger.warning(
+                f"COORDINACIÓN: Seq {seq_a} ({name_a}) y Seq {seq_s} ({name_s}) de la OT "
+                f"{oid} tienen máquinas elegidas a mano que no se cruzan: no se atan."
+            )
+        else:
+            model.Add(maq_vars[clave_a] == maq_vars[clave_s])
             logger.info(
                 f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y "
                 f"Seq {seq_s} ({name_s}) en OT {oid}"
             )
 
-            # A2 (feedback 06/07): preparación y producción deben ser el MISMO operario.
-            # La preparación va antes en la secuencia (fin_setup <= inicio_prod), así que
-            # no hay solape temporal y la igualdad es factible aunque tengan procesos en el
-            # medio. OJO: si el setup no tiene operario apto y cae en DUMMY, arrastra la
-            # producción a DUMMY también (queda visible como "sin asignar", que es el
-            # comportamiento esperado).
-            if operario_vars is None:
-                continue
-            if (_persona_elegida_a_mano((oid, seq_a))
-                    or _persona_elegida_a_mano((oid, seq_s))):
-                logger.info(
-                    f"COORDINACIÓN: Seq {seq_a} y Seq {seq_s} de la OT {oid} NO se atan al "
-                    f"mismo operario: hay una persona elegida a mano en la carga de la OT"
-                )
-                continue
-            model.Add(operario_vars[(oid, seq_a)] == operario_vars[(oid, seq_s)])
-            logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
+        # A2 (feedback 06/07): preparación y producción deben ser el MISMO operario.
+        # La preparación va antes en la secuencia (fin_setup <= inicio_prod), así que no
+        # hay solape temporal y la igualdad es factible aunque tengan procesos en el
+        # medio. OJO: si el setup no tiene operario apto y cae en DUMMY, arrastra la
+        # producción a DUMMY también (queda visible como "sin asignar", que es el
+        # comportamiento esperado).
+        if operario_vars is None:
+            continue
+        if _persona_elegida_a_mano(clave_a) or _persona_elegida_a_mano(clave_s):
+            logger.info(
+                f"COORDINACIÓN: Seq {seq_a} y Seq {seq_s} de la OT {oid} NO se atan al "
+                f"mismo operario: hay una persona elegida a mano en la carga de la OT"
+            )
+            continue
+        model.Add(operario_vars[clave_a] == operario_vars[clave_s])
+        logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
 
 
 def _agregar_compatibilidad_op_maq(
@@ -1705,7 +1763,7 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None):
     model = cp_model.CpModel()
 
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
@@ -1788,16 +1846,24 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # "PREPARACION DE SOLDADORA MIG" (rangos MEDIO OFICIAL / OPERARIO CALIFICADO) estaba
     # seguida de "TORNO T2", así que heredaba el rango OFICIAL del torno y la preparación
     # de la soldadora se la terminaba llevando el tornero.
+    #
+    # Usa el MISMO emparejamiento que la coordinación de más abajo. Antes acá había un
+    # bucle propio que solo miraba vecinos, así que los dos lugares decidían distinto: la
+    # coordinación ataba la preparación con su producción aunque hubiera un proceso
+    # manual en el medio, pero la herencia no llegaba y la preparación se quedaba con sus
+    # propios rangos. En la OT 15708 los dominios dejaban de cruzarse y los dos salían
+    # SIN NADIE — peor que el bug que veníamos a arreglar.
     procesos_norm_list = [list(p) for p in procesos_norm]
-    for oid in set(p[0] for p in procesos_norm):
-        idxs = sorted([i for i, p in enumerate(procesos_norm) if p[0] == oid], key=lambda i: procesos_norm[i][2])
-        for j in range(len(idxs)-1):
-            idx_a = idxs[j]
-            idx_s = idxs[j+1]
-            if _setup_de_esta_produccion(procesos_norm[idx_a], procesos_norm[idx_s]):
-                # Heredar familia (idx 9) y rangos (idx 6)
-                procesos_norm_list[idx_a][9] = procesos_norm[idx_s][9]
-                procesos_norm_list[idx_a][6] = procesos_norm[idx_s][6]
+    idx_por_clave = {(p[0], p[2]): i for i, p in enumerate(procesos_norm)}
+    for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+        prod = procesos_norm[idx_por_clave[claves_prod[0]]]
+        # A TODOS los tramos de la preparación, no solo al que toca la producción: si se
+        # hereda en uno solo, `_agregar_continuidad_partes` termina intersectando dos
+        # dominios distintos y la línea entera se queda sin candidatos.
+        for clave in claves_setup:
+            i = idx_por_clave[clave]
+            procesos_norm_list[i][9] = prod[9]   # familia
+            procesos_norm_list[i][6] = prod[6]   # rangos
     procesos_norm = [tuple(p) for p in procesos_norm_list]
 
     # H se usa en helpers (lo hago global dentro de esta función)
@@ -1837,6 +1903,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         ots_con_plano,
         skills_manuales,
         preseleccion_op,
+        maquinas_por_proceso,
     )
 
     # ---- Restricciones ----
@@ -1852,7 +1919,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
 
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales)
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals,
-                                    dummy_op_id=DUMMY_OP_ID)
+                                    dummy_op_id=DUMMY_OP_ID, partes=partes,
+                                    maq_domain_vals=maq_domain_vals)
     _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----
     # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar
@@ -2253,6 +2321,9 @@ async def planificar(
         r.id for r in await RangoRepository(db).find_all()
         if _norm(r.nombre or "") in ("TERCERIZADO", "EXTERNO")
     }
+    # 🔹 En qué máquinas se hace cada proceso, si alguien lo cargó en Recursos. Vacío
+    #    para un proceso = no cargado: se sigue deduciendo del nombre, como antes.
+    maquinas_por_proceso = await ProcesoRepository(db).find_maquinarias_por_proceso()
     # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir de la elegibilidad
     nativas_off = await repo_skill.get_nativas_deshabilitadas()
     # 🔹 Habilidades cargadas a mano (proceso_id -> {operario_id}): suman elegibilidad
@@ -2444,6 +2515,7 @@ async def planificar(
         calendarios,
         blocked_dates,
         preseleccion_op,
+        maquinas_por_proceso,
     )
 
     _marcar_lineas(resultados, linea_por_clave)
@@ -2529,6 +2601,10 @@ async def planificar_pendientes(
             r.id for r in await RangoRepository(db).find_all()
             if _norm(r.nombre or "") in ("TERCERIZADO", "EXTERNO")
         }
+        # 🔹 Igual que en planificar(): los dos entry points arman su lista por separado
+        #    y si el dato se carga en uno solo, el mismo proceso se planifica distinto
+        #    según por dónde entró.
+        maquinas_por_proceso = await ProcesoRepository(db).find_maquinarias_por_proceso()
         nativas_off = await repo_skill.get_nativas_deshabilitadas()
         skills_manuales = await repo_skill.get_manuales_por_proceso()
 
@@ -2617,6 +2693,7 @@ async def planificar_pendientes(
             skills_manuales,
             calendarios,
             blocked_dates,
+            maquinas_por_proceso=maquinas_por_proceso,
         )
 
         _marcar_lineas(resultados, linea_por_clave)

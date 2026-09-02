@@ -15,5 +15,8 @@ class Proceso(Base):
 
     # 🔹 Relaciones
     rangos = relationship("RangoProceso", back_populates="proceso")
+    # En qué máquinas se hace. Vacío = no cargado: el planificador lo deduce del nombre.
+    maquinarias = relationship("ProcesoMaquinaria", back_populates="proceso",
+                               cascade="all, delete-orphan")
     ordenes_trabajo_proceso = relationship("OrdenTrabajoProceso", back_populates="proceso")
     operarios_skill = relationship("OperarioProcesoSkill", back_populates="proceso", cascade="all, delete-orphan")

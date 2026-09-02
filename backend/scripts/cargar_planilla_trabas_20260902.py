@@ -7,9 +7,11 @@ planificación, Lucas completó de una las 45 preguntas y acá se vuelcan.
 Cada cambio dice de qué respuesta sale. Corre con `--aplicar`; sin eso solo muestra
 qué haría, que es como conviene mirarlo la primera vez.
 
-Lo que NO está acá, porque la respuesta pide algo que el modelo no tiene todavía:
-  · «Oficial solo rectificadora tangencial» → limitación por máquina.
-  · «Tubo oxígeno» para oxicorte → no existe como maquinaria.
+Lo que NO está acá:
+  · «Tubo oxígeno» para oxicorte → no existe como maquinaria en el taller.
+  · «Soldadura 2» → él mismo lo rotuló «(eliminar)».
+  · «Preparación dispositivo: puede ser para cualquier máquina» y «fabricación de
+    dispositivo: hay que especificar en la OT» → sin restricción que cargar.
   · Los siete cuellos de capacidad → contestó «hay que verlo en la planificación».
 """
 import argparse, asyncio, os, re, sys
@@ -27,6 +29,9 @@ URL = re.sub(r"\?.*$", "", URL or "")
 
 # ── Rangos y gente, por id. Los ids se verifican contra la base antes de escribir.
 TERCERIZADO, OFICIAL, OFICIAL_PLEGADOR, OPERARIO_CALIF, MEDIO_OFICIAL = 13, 6, 9, 10, 4
+TORNOS_CONVENCIONALES = [1, 2, 3, 4, 18, 19]   # TORNO 1..4, TORNO 5, TORNO 6 CINDELMET
+PRENSAS_Y_PLEGADORA = [21, 22, 15]             # PRENSA 1, PRENSA 2, PLEGADORA
+RECTIFICADORA_TANGENCIAL = 27
 LEONARDO_A, GUILLERMO_C, NAHUEL_B, JORGE_L = 29, 31, 49, 50
 
 # ── (proceso_id, [rangos que quedan], por qué)
@@ -43,6 +48,19 @@ RANGOS_DE_PROCESO = [
           "especializados, porque en la reunión del 1/9 insistió en que la especialidad se respeta."),
     (92,  [MEDIO_OFICIAL, OPERARIO_CALIF, OFICIAL],
           "P6: «preparación de agujereadora: de operario calificado para arriba», igual que avellanado"),
+]
+
+# ── (proceso_id, [maquinaria_id], por qué). En qué máquinas se hace, como dato.
+#    Antes esto no se podía cargar: el planificador deducía la máquina del NOMBRE del
+#    proceso, así que estas cuatro respuestas de Lucas no tenían dónde ir.
+MAQUINAS_DE_PROCESO = [
+    (128, TORNOS_CONVENCIONALES,
+     "P31: «reparación de rosca → tornos convencionales». Los CNC quedan afuera a propósito."),
+    (49, PRENSAS_Y_PLEGADORA, "P34: «enderezar de bases → prensas/plegadora»"),
+    (121, [RECTIFICADORA_TANGENCIAL],
+     "P1: «rectificadora → Oficial, solo rectificadora tangencial». El rango ya estaba "
+     "bien; lo que faltaba era poder decir en qué máquina."),
+    (101, [RECTIFICADORA_TANGENCIAL], "P3: idem para la preparación de rectificadora"),
 ]
 
 # ── (operario_id, rango_id, por qué)
@@ -90,6 +108,7 @@ async def main(aplicar: bool):
     async with eng.begin() as c:
         nombre_p = {r[0]: r[1] for r in (await c.execute(sa.text("select id, nombre from proceso"))).all()}
         nombre_r = {r[0]: r[1] for r in (await c.execute(sa.text("select id, nombre from rango"))).all()}
+        nombre_m = {r[0]: r[1] for r in (await c.execute(sa.text("select id, nombre from maquinaria"))).all()}
         nombre_o = {r[0]: f"{r[1]} {r[2]}".strip()
                     for r in (await c.execute(sa.text("select id, nombre, apellido from operario"))).all()}
 
@@ -108,6 +127,24 @@ async def main(aplicar: bool):
                 for r in rangos:
                     await c.execute(sa.text(
                         "insert into rango_proceso (id_rango, id_proceso) values (:r, :p)"), {"r": r, "p": proc})
+
+        for proc, maquinas, motivo in MAQUINAS_DE_PROCESO:
+            if proc not in nombre_p:
+                cambios.append(("⚠️  NO EXISTE", f"proceso {proc}", motivo)); continue
+            antes = [r[0] for r in (await c.execute(
+                sa.text("select id_maquinaria from proceso_maquinaria where id_proceso=:p"),
+                {"p": proc})).all()]
+            if sorted(antes) == sorted(maquinas):
+                cambios.append(("=  ya estaba", f"{nombre_p[proc]} · máquinas", motivo)); continue
+            cambios.append(("→  máquinas", f"{nombre_p[proc]}: "
+                            f"{', '.join(nombre_m.get(m, str(m)) for m in antes) or '—'}"
+                            f"  ⇒  {', '.join(nombre_m.get(m, str(m)) for m in maquinas)}", motivo))
+            if aplicar:
+                await c.execute(sa.text("delete from proceso_maquinaria where id_proceso=:p"), {"p": proc})
+                for m in maquinas:
+                    await c.execute(sa.text(
+                        "insert into proceso_maquinaria (id_proceso, id_maquinaria) values (:p, :m)"),
+                        {"p": proc, "m": m})
 
         for op, rango, motivo in RANGOS_DE_OPERARIO:
             ya = (await c.execute(sa.text(

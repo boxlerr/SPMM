@@ -20,4 +20,5 @@ from backend.domain.Sector import Sector
 from backend.domain.Usuario import Usuario
 from backend.domain.Notificacion import Notificacion
 from backend.domain.RangoMaquinaria import RangoMaquinaria
+from backend.domain.ProcesoMaquinaria import ProcesoMaquinaria
 

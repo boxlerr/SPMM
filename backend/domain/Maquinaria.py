@@ -30,6 +30,13 @@ class Maquinaria(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    # Qué procesos se hacen en esta máquina (el lado espejo de proceso.maquinarias).
+    procesos = relationship(
+        "ProcesoMaquinaria",
+        back_populates="maquinaria",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     def __repr__(self) -> str:
         return f"<Maquinaria id={self.id} nombre={self.nombre!r}>"
       

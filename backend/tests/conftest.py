@@ -22,6 +22,7 @@ from backend.domain.Proceso import Proceso
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 from backend.domain.Maquinaria import Maquinaria
 from backend.domain.RangoMaquinaria import RangoMaquinaria
+from backend.domain.ProcesoMaquinaria import ProcesoMaquinaria
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).

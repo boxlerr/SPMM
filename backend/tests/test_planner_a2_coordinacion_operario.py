@@ -221,3 +221,70 @@ def test_una_produccion_sin_su_preparacion_no_se_ata_a_otra_familia():
     solver = cp_model.CpSolver()
     assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE), \
         "no comparten familia: no hay por qué atarlos"
+
+
+# --------------------------------------------------------------------------
+# Los tres agujeros que dejó el arreglo del emparejamiento no vecino (2/9)
+# --------------------------------------------------------------------------
+
+def test_los_dos_lugares_emparejan_igual():
+    """El emparejamiento se decide en UN solo lugar.
+
+    Hasta el 2/9 se decidía en dos: la coordinación juntaba pares no vecinos y el paso
+    de herencia de rangos seguía mirando solo al de al lado. Con la forma de la OT 15708
+    la herencia no llegaba, la preparación se quedaba con sus rangos y los dos salían
+    sin nadie — peor que el bug original."""
+    from backend.application.PlanificacionService import _pares_setup_produccion
+    oid = 15708
+    procesos_norm = [
+        (oid, 100, 1, None, 5, 30, [4], "PREPARACION DE SOLDADORA MIG", True, "SOLDADORA_MIG", {}),
+        (oid, 101, 2, None, 5, 45, [], "ENSAMBLAJE, PUNTEADO Y ESCUADRADO", False, None, {}),
+        (oid, 102, 3, None, 5, 90, [6], "SOLDADURA CON MIG", True, "SOLDADORA_MIG", {}),
+    ]
+    pares = _pares_setup_produccion(procesos_norm)
+    assert pares == [([(oid, 1)], [(oid, 3)])], "el proceso del medio no corta el par"
+
+
+def test_una_preparacion_partida_en_tramos_no_se_lleva_otra_produccion():
+    """Un proceso de más de 210 minutos se parte en tramos, y el emparejamiento tiene
+    que seguir siendo por LÍNEA. Emparejando por tramo, el segundo tramo de la primera
+    preparación se llevaba la segunda producción, y por la continuidad de partes el
+    segundo torno terminaba con la persona y la máquina del otro."""
+    from backend.application.PlanificacionService import (
+        _pares_setup_produccion, _partir_procesos_largos,
+    )
+    oid = 7497
+    procesos = [
+        (oid, 1, 1, None, 5, 400, [], "PREPARACION DE TORNO", True, "TORNO", {}),
+        (oid, 2, 2, None, 5, 100, [], "TORNO T1", True, "TORNO", {}),
+        (oid, 3, 3, None, 5, 60, [], "PREPARACION DE TORNO", True, "TORNO", {}),
+        (oid, 4, 4, None, 5, 100, [], "TORNO T2", True, "TORNO", {}),
+    ]
+    norm, _co, _pm, _po, partes = _partir_procesos_largos(procesos, {}, {}, {})
+    assert len(norm) > len(procesos), "la preparación de 400 min tiene que haberse partido"
+
+    pares = _pares_setup_produccion(norm, partes)
+    assert len(pares) == 2
+    # La preparación larga (secuencia original 1) va con TORNO T1 (la 2), no con T2.
+    (setup1, prod1), (setup2, prod2) = pares
+    assert len(setup1) > 1, "la primera preparación está partida en tramos"
+    assert all(k[1] // 1000 == 1 or k[1] < 1000 for k in setup1)
+    assert prod1 != prod2
+
+
+def test_dos_maquinas_elegidas_a_mano_no_dejan_al_taller_sin_plan():
+    """Si la preparación y la producción tienen máquinas distintas elegidas a mano, los
+    dominios quedan en un valor cada uno y sin dummy: igualarlos es insatisfacible y se
+    lleva puesto el modelo COMPLETO. Es un dato deliberado de quien cargó la OT — se
+    avisa y se sigue."""
+    model, procesos_norm, operario_vars, maq_vars, (op_prep, op_sold, maq_prep, maq_sold) = \
+        _ot_con_proceso_en_el_medio()
+    # Cada uno forzado a una máquina distinta, como deja la preselección.
+    maq_domain_vals = {(15708, 1): [20], (15708, 3): [21]}
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    dummy_op_id=999999, maq_domain_vals=maq_domain_vals)
+    model.Add(maq_prep == 20)
+    model.Add(maq_sold == 21)
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE), \
+        "el plan tiene que salir igual; la elección a mano manda"

@@ -1,3 +1,4 @@
+from sqlalchemy import select
 from backend.domain.Proceso import Proceso
 from backend.dto.ProcesoRequestDTO import ProcesoRequestDTO
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
@@ -91,6 +92,35 @@ class ProcesoService:
             raise NotFoundException(f"No se encontró el proceso con ID {id}")
 
         return ResponseDTO(status=True, data=jsonable_encoder(proceso_actualizado))
+
+    async def modificarMaquinariasDeProceso(self, id: int, ids_maquinaria: list[int]):
+        """En qué máquinas se hace este proceso.
+
+        Reemplaza la lista entera, igual que los rangos: es lo que el editor manda al
+        guardar. Lista vacía es una respuesta válida y significa «todavía no lo
+        cargaron»; el planificador ahí sigue deduciéndolo del nombre, como hasta ahora.
+        """
+        try:
+            from backend.domain.Maquinaria import Maquinaria
+
+            existentes = (await self.repository.db.execute(
+                select(Maquinaria.id).where(Maquinaria.id.in_(ids_maquinaria or []))
+            )).scalars().all() if ids_maquinaria else []
+            faltantes = set(ids_maquinaria or []) - set(existentes)
+            if faltantes:
+                raise NotFoundException(
+                    f"No existe la maquinaria {', '.join(str(x) for x in sorted(faltantes))}."
+                )
+
+            await self.repository.set_maquinarias_de_proceso(id, ids_maquinaria or [])
+            return ResponseDTO(status=True, data={"id_proceso": id, "maquinarias": ids_maquinaria or []})
+        except (BusinessException, NotFoundException):
+            raise
+        except InfrastructureException as e:
+            logger.error(f"Service - Error al actualizar las máquinas del proceso: {e}")
+            raise ApplicationException(
+                "No se pudieron actualizar las máquinas del proceso."
+            ) from e
 
     async def eliminarProceso(self, id: int):
         logger.info(f"Service - Eliminar proceso ID: {id}")
