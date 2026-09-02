@@ -94,6 +94,14 @@ interface ProcesosEditorProps {
      * para poder dejarlo elegido en la fila.
      */
     onCrearProceso?: (nombre: string) => Promise<ProcesoCatalogoItem | null>;
+    /**
+     * Borrar un proceso del catálogo desde el mismo desplegable.
+     *
+     * Julián, 2/9: «hay cosas mal escritas o chanchuyos». El catálogo se llenó de
+     * variantes de tipeo que el sistema viejo daba de alta solas, y el momento en que
+     * uno las ve es justo cuando busca el proceso bueno y aparece la basura al lado.
+     */
+    onEliminarProceso?: (id: string, nombre: string) => void | Promise<void>;
 }
 
 const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,180px)_minmax(0,180px)_90px_40px] gap-2 items-center";
@@ -118,6 +126,7 @@ export function ProcesosEditor({
     onTraerHistorial,
     historialLoading = false,
     onCrearProceso,
+    onEliminarProceso,
 }: ProcesosEditorProps) {
     const [creando, setCreando] = useState<string | null>(null);
     const procesoOptions = procesos.map((p) => ({ value: p.id.toString(), label: p.nombre }));
@@ -335,6 +344,7 @@ export function ProcesosEditor({
                                                                     }
                                                                 } : undefined}
                                                                 createLabel="Crear proceso"
+                                                                onDelete={onEliminarProceso}
                                                             />
                                                         </div>
 

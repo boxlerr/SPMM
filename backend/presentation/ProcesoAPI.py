@@ -56,9 +56,14 @@ async def modificar_maquinarias_de_proceso(id: int, body: dict, db=Depends(get_d
 
 # 🔹 Eliminar proceso
 @router.delete("/procesos/{id}")
-async def eliminar_proceso(id: int, db=Depends(get_db)):
-    logger.info(f"API - Inicio DELETE /procesos/{id}")
+async def eliminar_proceso(id: int, forzar: bool = False, db=Depends(get_db)):
+    """Borra un proceso del catálogo.
+
+    Si está en alguna OT, sin `forzar` responde 409 con el motivo (en cuáles está y
+    qué se pierde) en vez de borrar; con `forzar=true` lo borra y se lleva esas filas.
+    """
+    logger.info(f"API - Inicio DELETE /procesos/{id} (forzar={forzar})")
     service = ProcesoService(db)
-    return await service.eliminarProceso(id)
+    return await service.eliminarProceso(id, forzar=forzar)
 
 app.include_router(router)

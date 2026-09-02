@@ -23,6 +23,18 @@ from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 from backend.domain.Maquinaria import Maquinaria
 from backend.domain.RangoMaquinaria import RangoMaquinaria
 from backend.domain.ProcesoMaquinaria import ProcesoMaquinaria
+# Las OT y sus procesos: borrar un proceso del catálogo tiene que poder decir en qué
+# órdenes está, y eso se consulta contra estas dos tablas.
+from backend.domain.OrdenTrabajo import OrdenTrabajo
+from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+# Las que cuelgan de esas dos por FK. Con `PRAGMA foreign_keys=ON` el harness las exige
+# al insertar, aunque el test no las use.
+from backend.domain.EstadoProceso import EstadoProceso
+from backend.domain.IncidenciaProceso import IncidenciaProceso
+from backend.domain.Prioridad import Prioridad
+from backend.domain.Sector import Sector
+from backend.domain.Articulo import Articulo
+from backend.domain.Cliente import Cliente
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -35,6 +47,16 @@ TEST_TABLES = [
     OperarioProcesoSkill.__table__,
     Maquinaria.__table__,
     RangoMaquinaria.__table__,
+    ProcesoMaquinaria.__table__,
+    # Borrar un proceso del catálogo tiene que poder decir en qué órdenes está.
+    OrdenTrabajo.__table__,
+    OrdenTrabajoProceso.__table__,
+    EstadoProceso.__table__,
+    IncidenciaProceso.__table__,
+    Prioridad.__table__,
+    Sector.__table__,
+    Articulo.__table__,
+    Cliente.__table__,
 ]
 
 

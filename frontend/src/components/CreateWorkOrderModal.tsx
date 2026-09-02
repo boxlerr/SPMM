@@ -397,6 +397,56 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         }
     };
 
+    /**
+     * Borrar un proceso del catálogo desde el desplegable de la OT.
+     *
+     * Julián, 2/9: «hay cosas mal escritas o chanchuyos». Son las variantes de tipeo
+     * que el sistema viejo daba de alta como procesos nuevos.
+     *
+     * Dos pasos: la primera pasada pregunta y la segunda ejecuta. Si el proceso está
+     * en alguna OT el backend contesta 409 con cuáles son y qué se pierde — acá no se
+     * pierde una categoría, se pierde trabajo cargado en órdenes reales, así que el
+     * cartel lo dice con todas las letras antes de dejar seguir.
+     */
+    const handleEliminarProceso = async (id: string, nombre: string) => {
+        const borrar = async (forzar: boolean) => {
+            const res = await fetch(`${API_URL}/procesos/${id}${forzar ? "?forzar=true" : ""}`, {
+                method: "DELETE",
+                headers: getAuthHeaders(),
+            });
+            return res;
+        };
+        try {
+            let res = await borrar(false);
+            if (res.status === 409) {
+                const motivo = parseApiError(await res.text().catch(() => ""));
+                const seguir = window.confirm(
+                    `${motivo || `«${nombre}» está en uso.`}\n\n¿Lo eliminás igual?`
+                );
+                if (!seguir) return;
+                res = await borrar(true);
+            }
+            if (!res.ok) {
+                toast.error(parseApiError(await res.text().catch(() => "")) || "No se pudo eliminar el proceso");
+                return;
+            }
+            const body = await res.json().catch(() => ({}));
+            const afectadas = body?.data?.ordenes_afectadas ?? 0;
+            setProcesosOptions((prev) => prev.filter((o: any) => String(o.id) !== String(id)));
+            // Y las filas de ESTA orden que lo tenían elegido quedan sin proceso, no
+            // apuntando a uno que ya no existe.
+            setProcesses((prev) => prev.map((r) => (r.proceso_id === String(id) ? { ...r, proceso_id: "" } : r)));
+            toast.success(`Proceso «${nombre}» eliminado`, {
+                description: afectadas > 0
+                    ? `Se fue de ${afectadas} ${afectadas === 1 ? "orden" : "órdenes"}. Las que estaban planificadas hay que volver a planificarlas.`
+                    : "No estaba en ninguna orden.",
+                duration: 7000,
+            });
+        } catch {
+            toast.error("No se pudo eliminar el proceso");
+        }
+    };
+
     const validateForm = () => {
         // Antes las OT importadas se validaban distinto —solo la fecha prometida—
         // porque el resto estaba bloqueado. Ya no: se validan como cualquier otra.
@@ -1383,6 +1433,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
                                         historialLoading={historialLoading}
                                         onCrearProceso={handleCrearProceso}
+                                        onEliminarProceso={handleEliminarProceso}
                                     />
                                 </TabsContent>
                             </Tabs>

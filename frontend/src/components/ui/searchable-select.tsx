@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
-import { ChevronDown, Check, Search, X } from "lucide-react";
+import { ChevronDown, Check, Search, X, Trash2 } from "lucide-react";
 
 interface SearchableSelectProps {
     options: { value: string; label: string }[];
@@ -22,6 +22,17 @@ interface SearchableSelectProps {
     onCreate?: (nombre: string) => void | Promise<void>;
     /** El verbo del botón de crear. Por defecto, "Crear". */
     createLabel?: string;
+    /**
+     * Borrar una opción del catálogo desde acá.
+     *
+     * Es para la basura: el catálogo de procesos tiene variantes de tipeo que el
+     * sistema viejo daba de alta como procesos nuevos («PLEGADORA0»,
+     * «TORNO T1 trBAJO 3 dias 24h»). Encontrarlas es fácil justo cuando estás
+     * buscando el proceso bueno y aparece el chanchullo al lado; irse hasta Recursos
+     * a borrarlo, no. El tacho sale al pasar el mouse y nunca es lo primero que se
+     * toca: el click en la fila sigue eligiendo.
+     */
+    onDelete?: (value: string, label: string) => void | Promise<void>;
 }
 
 interface MenuPosition {
@@ -51,6 +62,7 @@ export function SearchableSelect({
     disabled = false,
     onCreate,
     createLabel = "Crear",
+    onDelete,
 }: SearchableSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState("");
@@ -232,15 +244,33 @@ export function SearchableSelect({
                                 <div
                                     key={opt.value}
                                     className={cn(
-                                        "px-3 py-2 text-sm rounded-md cursor-pointer flex items-center justify-between transition-colors mb-0.5",
+                                        "group/opt px-3 py-2 text-sm rounded-md cursor-pointer flex items-center justify-between gap-2 transition-colors mb-0.5",
                                         value === opt.value
                                             ? "bg-blue-50 text-blue-700 font-medium"
                                             : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                                     )}
                                     onClick={() => handleSelect(opt.value)}
                                 >
-                                    {opt.label}
-                                    {value === opt.value && <Check className="w-4 h-4 text-blue-600" />}
+                                    <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                                    <span className="flex shrink-0 items-center gap-1">
+                                        {value === opt.value && <Check className="w-4 h-4 text-blue-600" />}
+                                        {onDelete && (
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    // Sin esto, borrar también elegiría la opción.
+                                                    e.stopPropagation();
+                                                    setIsOpen(false);
+                                                    void onDelete(opt.value, opt.label);
+                                                }}
+                                                title={`Eliminar «${opt.label}» del catálogo`}
+                                                aria-label={`Eliminar ${opt.label} del catálogo`}
+                                                className="rounded p-1 text-gray-300 opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 group-hover/opt:opacity-100"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </span>
                                 </div>
                             ))
                         )}

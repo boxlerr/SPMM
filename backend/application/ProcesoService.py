@@ -9,6 +9,7 @@ from backend.commons.exceptions.InfrastructureException import InfrastructureExc
 from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
+from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
 
 
 
@@ -122,14 +123,88 @@ class ProcesoService:
                 "No se pudieron actualizar las máquinas del proceso."
             ) from e
 
-    async def eliminarProceso(self, id: int):
-        logger.info(f"Service - Eliminar proceso ID: {id}")
-        ok = await self.repository.delete(id)
+    @staticmethod
+    def _motivo_del_borrado(nombre: str, ots: list, rangos: int, maquinas: int) -> str:
+        """Qué se lleva puesto borrar un proceso, escrito para leerse en un cartel.
 
-        #   Posibles errores:
-        # - Proceso inexistente → NotFoundException
-        # - Error SQL / constraint → InfrastructureException (repo)
-        if not ok:
+        Se nombran las OT por su número VISIBLE y no por el id interno: el que decide
+        va a ir a mirarlas, y el id interno no figura en ningún papel del taller.
+        """
+        cuantas = len(ots)
+        listadas = ", ".join(f"#{o}" for o in ots[:5])
+        if cuantas > 5:
+            listadas += f" y {cuantas - 5} más"
+
+        partes = [
+            f"«{nombre}» está en {cuantas} "
+            f"{'orden' if cuantas == 1 else 'órdenes'}: {listadas}. "
+            f"Si lo eliminás, ese paso se va de "
+            f"{'esa orden' if cuantas == 1 else 'esas órdenes'} y el trabajo que tenga "
+            f"cargado se pierde."
+        ]
+        extras = []
+        if rangos:
+            extras.append(f"{rangos} {'categoría' if rangos == 1 else 'categorías'}")
+        if maquinas:
+            extras.append(f"{maquinas} {'máquina' if maquinas == 1 else 'máquinas'}")
+        if extras:
+            partes.append(f"También se borra lo que tenía cargado en Recursos: {' y '.join(extras)}.")
+        return " ".join(partes)
+
+    async def eliminarProceso(self, id: int, forzar: bool = False):
+        """Borra un proceso del catálogo.
+
+        Existe porque el catálogo tiene basura: variantes de tipeo que el sync del
+        sistema viejo daba de alta como procesos nuevos («AGUJEREADo y ROSCADO»,
+        «TORNO T1 trBAJO 3 dias 24h», «PLEGADORA0»). Nacen sin categoría y sin máquina,
+        así que el planificador se los puede dar a cualquiera.
+
+        Si el proceso está en alguna OT, la primera pasada NO borra: contesta 409 con
+        quiénes son y qué se pierde. Con `forzar` sí, y se lleva las filas de esas OT.
+        Avisar, no bloquear — pero avisando de verdad, porque acá se pierde trabajo
+        cargado, no solo una categoría.
+        """
+        from sqlalchemy import text as _text
+
+        logger.info(f"Service - Eliminar proceso ID: {id} (forzar={forzar})")
+        db = self.repository.db
+
+        proceso = await self.repository.find_by_id(id)
+        if not proceso:
             raise NotFoundException(f"No se encontró el proceso con ID {id}")
 
-        return ResponseDTO(status=True, data={"deleted": id})
+        ots = [r[0] for r in (await db.execute(_text("""
+            SELECT DISTINCT COALESCE(ot.id_otvieja, ot.id)
+            FROM orden_trabajo_proceso otp
+            JOIN orden_trabajo ot ON ot.id = otp.id_orden_trabajo
+            WHERE otp.id_proceso = :p
+            ORDER BY 1
+        """), {"p": id})).all()]
+        rangos = (await db.execute(_text(
+            "SELECT COUNT(*) FROM rango_proceso WHERE id_proceso = :p"), {"p": id})).scalar() or 0
+        maquinas = (await db.execute(_text(
+            "SELECT COUNT(*) FROM proceso_maquinaria WHERE id_proceso = :p"), {"p": id})).scalar() or 0
+
+        if ots and not forzar:
+            raise ConfirmacionRequeridaException(
+                self._motivo_del_borrado(proceso.nombre or f"#{id}", ots, rangos, maquinas)
+            )
+
+        try:
+            # A mano y en la misma transacción: estas dos FK son NO ACTION, así que sin
+            # esto el borrado revienta con un error de constraint que en pantalla se ve
+            # como "error de conexión" y no dice nada.
+            await db.execute(_text("DELETE FROM orden_trabajo_proceso WHERE id_proceso = :p"), {"p": id})
+            await db.execute(_text("DELETE FROM rango_proceso WHERE id_proceso = :p"), {"p": id})
+            await db.execute(_text("DELETE FROM incidencia_proceso WHERE id_proceso = :p"), {"p": id})
+            await db.execute(_text("DELETE FROM proceso WHERE id = :p"), {"p": id})
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Service - Error al eliminar el proceso {id}: {e}")
+            raise ApplicationException("No se pudo eliminar el proceso.") from e
+
+        return ResponseDTO(status=True, data={
+            "deleted": id,
+            "ordenes_afectadas": len(ots),
+        })

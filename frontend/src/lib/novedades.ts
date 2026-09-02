@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "borrar-proceso-del-catalogo",
+        fecha: "2026-09-02",
+        tipo: "nuevo",
+        seccion: "Operaciones › Nueva OT",
+        titulo: "Podés borrar del catálogo los procesos mal escritos, desde el mismo desplegable",
+        detalle:
+            "El catálogo se llenó de basura que el sistema viejo daba de alta sola: «PLEGADORA0», «AGUJEREADo y ROSCADO», «TORNO T1 trBAJO 3 dias 24h». Ahora, buscando el proceso, cada uno de la lista tiene un tacho al pasar el mouse. Si no lo usa ninguna orden, se borra y listo. Si está en alguna, te dice en cuáles y te avisa que ese paso se va de esas órdenes y se pierde el trabajo que tenga cargado — y ahí decidís. Las órdenes que estaban planificadas hay que volver a planificarlas.",
+        href: "/operaciones",
+    },
+    {
         id: "las-ot-se-crean-todas-aca",
         fecha: "2026-09-02",
         tipo: "nuevo",
