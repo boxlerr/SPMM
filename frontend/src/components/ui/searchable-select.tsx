@@ -12,6 +12,16 @@ interface SearchableSelectProps {
     placeholder?: string;
     className?: string;
     disabled?: boolean;
+    /**
+     * Dar de alta lo que se está buscando, cuando no está en la lista.
+     *
+     * Sin esto, no encontrar algo es un callejón: hay que salir de donde estás, ir al
+     * catálogo, crearlo y volver a empezar lo que estabas haciendo. Si viene, cuando la
+     * búsqueda no da resultados aparece un «Crear "lo que escribiste"».
+     */
+    onCreate?: (nombre: string) => void | Promise<void>;
+    /** El verbo del botón de crear. Por defecto, "Crear". */
+    createLabel?: string;
 }
 
 interface MenuPosition {
@@ -38,7 +48,9 @@ export function SearchableSelect({
     onValueChange,
     placeholder = "Seleccionar...",
     className,
-    disabled = false
+    disabled = false,
+    onCreate,
+    createLabel = "Crear",
 }: SearchableSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState("");
@@ -178,16 +190,43 @@ export function SearchableSelect({
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter' && filteredOptions.length > 0) {
-                                    e.preventDefault();
+                                if (e.key !== 'Enter') return;
+                                e.preventDefault();
+                                if (filteredOptions.length > 0) {
                                     handleSelect(filteredOptions[0].value);
+                                } else if (onCreate && search.trim()) {
+                                    // Sin resultados, Enter crea lo que escribiste: es lo que
+                                    // uno hace igual después de tipear el nombre entero.
+                                    const nombre = search.trim();
+                                    setSearch("");
+                                    setIsOpen(false);
+                                    void onCreate(nombre);
                                 }
                             }}
                         />
                     </div>
                     <div className="overflow-y-auto flex-1 p-1">
                         {filteredOptions.length === 0 ? (
-                            <div className="p-4 text-sm text-gray-400 text-center italic">No se encontraron resultados</div>
+                            onCreate && search.trim() ? (
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        const nombre = search.trim();
+                                        setSearch("");
+                                        setIsOpen(false);
+                                        await onCreate(nombre);
+                                    }}
+                                    className="w-full rounded-md px-3 py-2.5 text-left text-sm text-blue-700 hover:bg-blue-50 transition-colors"
+                                >
+                                    <span className="font-semibold">{createLabel}</span>{" "}
+                                    <span className="text-gray-600">«{search.trim()}»</span>
+                                    <span className="block text-[11px] text-gray-400 mt-0.5">
+                                        Queda guardado y se puede usar en cualquier otra orden.
+                                    </span>
+                                </button>
+                            ) : (
+                                <div className="p-4 text-sm text-gray-400 text-center italic">No se encontraron resultados</div>
+                            )
                         ) : (
                             filteredOptions.map((opt) => (
                                 <div

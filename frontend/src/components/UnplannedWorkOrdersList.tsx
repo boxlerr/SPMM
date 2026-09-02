@@ -645,22 +645,19 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                 </div>
                                                                             </>
                                                                         ) : (
-                                                                            <div className="p-4 flex items-center justify-between bg-white">
-                                                                                <div className="flex items-center gap-3">
-                                                                                    <div className="bg-blue-50 p-2 rounded-full">
-                                                                                        <PlusCircle className="w-4 h-4 text-blue-500" />
-                                                                                    </div>
-                                                                                    <div className="flex flex-col">
-                                                                                        <span className="text-xs font-bold text-gray-700">Sin procesos configurados</span>
-                                                                                        <span className="text-[10px] text-gray-400">Agregue los pasos para iniciar la producción.</span>
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div className="w-auto">
-                                                                                    <AddProcessRow 
-                                                                                        orderId={order.id} 
-                                                                                        onProcessAdded={() => onDataChange && onDataChange()} 
+                                                                            /* El cartel de "sin procesos" ocupaba media pantalla para
+                                                                               decir que no hay nada — y lo que hace falta ahí es cargar,
+                                                                               no leer. Queda un renglón: el aviso al costado y el botón
+                                                                               al lado, con el mismo alto que una fila de proceso. */
+                                                                            <div className="flex items-center gap-3 bg-white px-3 py-1.5">
+                                                                                <PlusCircle className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                                                                                <span className="text-[11px] text-gray-500">Todavía no tiene procesos.</span>
+                                                                                <div className="ml-auto">
+                                                                                    <AddProcessRow
+                                                                                        orderId={order.id}
+                                                                                        onProcessAdded={() => onDataChange && onDataChange()}
                                                                                         isCentered={false}
-                                                                                        label="Configurar ahora"
+                                                                                        label="Agregar proceso"
                                                                                     />
                                                                                 </div>
                                                                             </div>

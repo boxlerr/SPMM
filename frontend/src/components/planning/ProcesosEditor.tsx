@@ -27,7 +27,7 @@
  *    lo fuerza, y pisa el filtro por rango: es una decisión de quien carga la OT.
  */
 
-import React from "react";
+import React, { useState } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +84,16 @@ interface ProcesosEditorProps {
     /** callback del botón "Traer historial" (opcional; si no viene, no se muestra) */
     onTraerHistorial?: () => void;
     historialLoading?: boolean;
+    /**
+     * Dar de alta un proceso que no está en el catálogo, sin salir de acá.
+     *
+     * Hasta ahora, si el trabajo que hay que cargar no existía como proceso había que
+     * salir de la OT, ir a Recursos, crearlo y volver a empezar. Y desde el 2/9 el
+     * catálogo ya no se llena solo desde el sistema viejo: si no se puede crear acá,
+     * no se puede crear en el momento en que hace falta. Devuelve el proceso creado
+     * para poder dejarlo elegido en la fila.
+     */
+    onCrearProceso?: (nombre: string) => Promise<ProcesoCatalogoItem | null>;
 }
 
 const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,180px)_minmax(0,180px)_90px_40px] gap-2 items-center";
@@ -107,7 +117,9 @@ export function ProcesosEditor({
     disabled = false,
     onTraerHistorial,
     historialLoading = false,
+    onCrearProceso,
 }: ProcesosEditorProps) {
+    const [creando, setCreando] = useState<string | null>(null);
     const procesoOptions = procesos.map((p) => ({ value: p.id.toString(), label: p.nombre }));
     const operarioOptions = [
         { value: "", label: "Sin asignar" },
@@ -305,14 +317,24 @@ export function ProcesosEditor({
                                                             </span>
                                                         </div>
 
-                                                        {/* Proceso */}
+                                                        {/* Proceso. Si lo que buscás no está, se crea desde acá. */}
                                                         <div className="min-w-0">
                                                             <SearchableSelect
                                                                 options={procesoOptions}
                                                                 value={row.proceso_id}
                                                                 onValueChange={(v) => update(row.id, { proceso_id: v })}
                                                                 placeholder="Seleccionar proceso..."
-                                                                disabled={disabled}
+                                                                disabled={disabled || creando === row.id}
+                                                                onCreate={onCrearProceso ? async (nombre) => {
+                                                                    setCreando(row.id);
+                                                                    try {
+                                                                        const creado = await onCrearProceso(nombre);
+                                                                        if (creado) update(row.id, { proceso_id: String(creado.id) });
+                                                                    } finally {
+                                                                        setCreando(null);
+                                                                    }
+                                                                } : undefined}
+                                                                createLabel="Crear proceso"
                                                             />
                                                         </div>
 

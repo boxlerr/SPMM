@@ -47,6 +47,36 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "las-ot-se-crean-todas-aca",
+        fecha: "2026-09-02",
+        tipo: "nuevo",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "Las órdenes ya no vienen del sistema viejo: se crean todas acá",
+        detalle:
+            "Cada cinco minutos el sistema traía las órdenes del sistema viejo y le devolvía a cada una lo que decía allá: fechas, cantidades, prioridad, sector. Por eso una orden importada tenía casi todo bloqueado — si te dejaba corregirla, la corrección se perdía sola al rato. Se hizo la última migración y se apagó: ahora las órdenes son de acá. Podés editar cualquiera, agregarle procesos, cambiarle lo que haga falta, y no se pisa más.",
+        href: "/operaciones",
+    },
+    {
+        id: "crear-proceso-desde-la-ot",
+        fecha: "2026-09-02",
+        tipo: "nuevo",
+        seccion: "Operaciones › Nueva OT",
+        titulo: "Si el proceso no está en la lista, lo creás ahí mismo",
+        detalle:
+            "Cuando el trabajo que había que cargar no existía como proceso, había que salir de la orden, ir a Recursos, crearlo y volver a empezar la carga. Ahora escribís el nombre en el buscador del proceso y, si no aparece, te ofrece crearlo: queda guardado y se puede usar en cualquier otra orden. Ojo que nace sin categoría ni máquina, así que conviene completarlo en Recursos para que el planificador lo sepa ubicar — el aviso te lo recuerda al crearlo.",
+        href: "/operaciones",
+    },
+    {
+        id: "hoja-de-taller-con-renglones-por-dia",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "La hoja impresa tiene fecha y tres renglones por proceso",
+        detalle:
+            "Un trabajo de siete horas no se hace en un día, y la hoja tenía un solo renglón por proceso: terminabas escribiendo dos fechas apretadas en la misma celda. Ahora cada proceso trae tres renglones con columna de Fecha, para anotar día por día. Además la hoja se rediseñó para que se pueda llenar con birome y sobreviva a una fotocopia: encabezados oscuros, casilleros más altos, el logo arriba y firmas al pie.",
+        href: "/operaciones",
+    },
+    {
         id: "toda-la-ot-la-hace-una-persona",
         fecha: "2026-09-02",
         tipo: "mejora",

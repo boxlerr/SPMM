@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
+import { parseApiError } from "@/lib/utils";
 import { ProcesosEditor, ProcesoRow } from "@/components/planning/ProcesosEditor";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -356,17 +357,49 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         setMateriasPrimas(materiasPrimas.filter(p => p.id !== id));
     };
 
-    const validateForm = () => {
-        // OTs sincronizadas desde legacy: solo validamos fecha_prometida, lo demás está bloqueado.
-        const legacyOT = !!orderToEdit?.id_otvieja;
-        if (legacyOT) {
-            if (!generalData.fecha_prometida) {
-                toast.error("La fecha prometida es obligatoria");
-                setActiveTab("general");
-                return false;
+    /**
+     * Crear un proceso que no está en el catálogo, sin salir de la OT.
+     *
+     * Antes había que salir, ir a Recursos, crearlo y volver a empezar la carga. Y
+     * desde que el catálogo dejó de llenarse solo desde el sistema viejo (2/9), si no
+     * se puede crear acá no se puede crear en el momento en que hace falta.
+     *
+     * Nace sin rango y sin máquina, como cualquier proceso nuevo: eso significa que el
+     * planificador se lo puede dar a cualquiera y no le reserva máquina. Se avisa al
+     * crearlo y el aviso dice dónde se completa, que es lo que evita que ese proceso
+     * quede siendo una traba silenciosa en la próxima planificación.
+     */
+    const handleCrearProceso = async (nombre: string) => {
+        const limpio = nombre.trim().toUpperCase();
+        if (!limpio) return null;
+        try {
+            const res = await fetch(`${API_URL}/procesos`, {
+                method: "POST",
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ nombre: limpio, descripcion: "" }),
+            });
+            if (!res.ok) {
+                toast.error(parseApiError(await res.text().catch(() => "")) || "No se pudo crear el proceso");
+                return null;
             }
-            return true;
+            const body = await res.json();
+            const creado = body?.data ?? body;
+            const item = { id: Number(creado.id), nombre: creado.nombre ?? limpio };
+            setProcesosOptions((prev) => [...prev, item as Option]);
+            toast.success(`Proceso «${item.nombre}» creado`, {
+                description: "Queda sin categoría ni máquina: completalo en Recursos › Procesos para que el plan lo pueda ubicar.",
+                duration: 7000,
+            });
+            return item;
+        } catch {
+            toast.error("No se pudo crear el proceso");
+            return null;
         }
+    };
+
+    const validateForm = () => {
+        // Antes las OT importadas se validaban distinto —solo la fecha prometida—
+        // porque el resto estaba bloqueado. Ya no: se validan como cualquier otra.
 
         if (!generalData.cliente_id || !generalData.descripcion || !generalData.prioridad_id || !generalData.articulo_id) {
             toast.error("Por favor completa los campos obligatorios en la pestaña General");
@@ -403,7 +436,20 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     }
 
     // OT proveniente del sistema legacy: solo se puede editar fecha_prometida.
-    const isLegacyOT = !!orderToEdit?.id_otvieja;
+    /**
+     * Las OT importadas ya no están bloqueadas.
+     *
+     * Tenían casi todo el formulario deshabilitado por una razón concreta: el sync
+     * traía las OT del sistema viejo cada 5 minutos y le devolvía a cada una lo que
+     * decía el legacy, así que cualquier corrección hecha acá se perdía sola y sin
+     * aviso. Dejar editar habría sido peor que no dejar.
+     *
+     * Desde el 2/9 ese sync está apagado —SPMM es el dueño de las órdenes y de los
+     * procesos, se crean todas acá—, así que no queda nada que las pise y se editan
+     * como cualquier otra. Se deja la constante en false en vez de sacar los cuarenta
+     * `disabled` de una: el día que aparezca otra fuente que pise datos, se prende acá.
+     */
+    const isLegacyOT = false;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -668,8 +714,27 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         const procs = processes.filter(p => p.incluido && p.proceso_id);
         // Hoja de procesos (operario): datos planificados + columnas en blanco para
         // la carga real a mano (empleado, horarios, total, obs).
+        // Cada proceso lleva TRES renglones de carga, no uno.
+        //
+        // Lucas, 2/9: «que tengan varios casilleros renglones porque si eran 2 días y al
+        // final fueron 3 que pueda escribir». Un trabajo de 400 minutos no se hace en un
+        // día, y con un solo renglón el operario terminaba escribiendo dos fechas
+        // apretadas en la misma celda o anotando en el margen. El primer renglón lleva
+        // el proceso y lo planificado; los otros dos son la continuación, con la fecha
+        // adelante para que se lea como un parte de trabajo.
+        const RENGLONES_POR_PROCESO = 3;
+        const continuacion = () =>
+            `<tr class="cont"><td class="c"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td>` +
+            `<td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`;
         const procRows = procs.length
-            ? procs.map((p, i) => `<tr><td class="c">${i + 1}</td><td>${esc(procName(p.proceso_id))}</td><td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td><td class="c">${esc(p.tiempo || 0)}</td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`).join("")
+            ? procs.map((p, i) => {
+                const cabeza = `<tr class="proc"><td class="c">${i + 1}</td>` +
+                    `<td>${esc(procName(p.proceso_id))}</td>` +
+                    `<td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td>` +
+                    `<td class="c">${esc(p.tiempo || 0)}</td>` +
+                    `<td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`;
+                return cabeza + continuacion().repeat(RENGLONES_POR_PROCESO - 1);
+            }).join("")
             : `<tr><td colspan="9" class="c" style="color:#999">Sin procesos cargados</td></tr>`;
 
         // Hoja de materias primas (pañol): datos + columna "Retirado" para tildar a mano.
@@ -682,27 +747,55 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         const logoUrl = `${window.location.origin}/longchamps_logo.png`;
         const encabezado = (titulo: string, subtitulo: string) => `
 <div class="head">
-  <img class="logo" src="${logoUrl}" alt="Longchamps" onerror="this.style.display='none'">
+  <img class="logo" src="${logoUrl}" alt="Metalúrgica Longchamps"
+       onerror="this.outerHTML='<div class=\\'marca\\'>ML</div>'">
   <div class="head-c"><div class="empresa">Metalúrgica Longchamps</div><div class="doc">${esc(titulo)}</div></div>
   <div class="head-r"><div class="otn">OT N° ${esc(otNum)}</div><div class="fecha">${esc(subtitulo)}</div></div>
 </div>`;
         const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>OT ${esc(otNum)}</title>
 <style>
-*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#222;margin:0;font-size:12px}
-.page{padding:14mm 12mm}.page.break{page-break-after:always}
-.head{display:flex;align-items:center;gap:14px;border-bottom:3px solid #1e3a5f;padding-bottom:8px;margin-bottom:12px}
-.logo{height:48px;width:auto}.head-c{flex:1}.empresa{font-size:12px;color:#1e3a5f;font-weight:bold;letter-spacing:.5px}
-.doc{font-size:20px;font-weight:bold;color:#111}.head-r{text-align:right}.otn{font-size:16px;font-weight:bold}.fecha{font-size:10px;color:#666}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 24px;margin-bottom:10px}
-.cell{border-bottom:1px solid #eee;padding:4px 0;display:flex;justify-content:space-between;gap:12px}
-.cell .k{color:#888;text-transform:uppercase;font-size:10px;letter-spacing:.5px}.cell .v{font-weight:bold;text-align:right}
-h2{font-size:13px;margin:16px 0 6px;border-bottom:2px solid #333;padding-bottom:3px}
-table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #bbb;padding:5px 7px;text-align:left;vertical-align:top}
-th{background:#eef2f7;text-transform:uppercase;font-size:9px}
-td.c,th.c{text-align:center}td.fill{height:30px;background:#fff}
-.notas{white-space:pre-wrap;border:1px solid #ccc;padding:8px;border-radius:4px;color:#333;margin-top:4px;min-height:44px}
-.pie{margin-top:10px;font-size:9px;color:#999;text-align:center}
-@media print{.page{padding:8mm 10mm}}
+/* Hoja de taller: se imprime, se llena con birome y se ensucia. Por eso líneas
+   marcadas, casilleros altos y nada de gris claro, que en una fotocopia desaparece. */
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;font-size:12px}
+.page{padding:12mm 11mm}.page.break{page-break-after:always}
+
+.head{display:flex;align-items:center;gap:16px;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:14px}
+.logo{height:58px;width:auto}
+.marca{display:flex;align-items:center;justify-content:center;height:58px;width:58px;border:3px solid #1e3a5f;
+  border-radius:6px;font-size:22px;font-weight:bold;color:#1e3a5f;letter-spacing:-1px}
+.head-c{flex:1}
+.empresa{font-size:13px;color:#1e3a5f;font-weight:bold;letter-spacing:1px;text-transform:uppercase}
+.doc{font-size:21px;font-weight:bold;color:#111;line-height:1.15}
+.head-r{text-align:right}
+.otn{font-size:22px;font-weight:bold;letter-spacing:-.5px}
+.fecha{font-size:10px;color:#666;margin-top:2px}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;margin-bottom:12px}
+.cell{border-bottom:1px solid #d9d9d9;padding:5px 0;display:flex;justify-content:space-between;gap:12px}
+.cell .k{color:#666;text-transform:uppercase;font-size:9.5px;letter-spacing:.6px;white-space:nowrap}
+.cell .v{font-weight:bold;text-align:right}
+
+h2{font-size:12px;margin:16px 0 6px;border-bottom:2px solid #1e3a5f;padding-bottom:3px;
+  text-transform:uppercase;letter-spacing:.8px;color:#1e3a5f}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}
+th{background:#1e3a5f;color:#fff;text-transform:uppercase;font-size:8.5px;letter-spacing:.4px;padding:6px 7px}
+td.c,th.c{text-align:center}
+td.fill{height:26px;background:#fff}
+
+/* El primer renglón de cada proceso lleva el nombre; los de abajo son la continuación
+   para los días siguientes. La línea gruesa arriba separa un proceso del otro. */
+tr.proc td{border-top:2px solid #1e3a5f;font-weight:bold}
+tr.cont td{border-top:1px solid #ddd}
+tr.cont td:first-child{border-top:1px solid #ddd}
+
+.ayuda{font-size:9px;color:#666;margin:4px 0 0;font-style:italic}
+.notas{white-space:pre-wrap;border:1px solid #999;padding:8px;color:#111;margin-top:4px;min-height:52px}
+.firmas{display:flex;gap:28px;margin-top:16px}
+.firma{flex:1;border-top:1px solid #111;padding-top:4px;font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+.pie{margin-top:12px;font-size:9px;color:#888;text-align:center;border-top:1px solid #ddd;padding-top:6px}
+@media print{.page{padding:8mm 9mm}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style></head><body>
 
 <div class="page break">
@@ -718,11 +811,17 @@ ${encabezado("Orden de Trabajo — Procesos", `Impreso ${esc(hoy)}`)}
 <div class="cell"><span class="k">F. Prometida</span><span class="v">${fmt(generalData.fecha_prometida)}</span></div>
 </div>
 <h2>Procesos (planificado + carga real)</h2>
-<table><thead><tr><th class="c">#</th><th>Proceso</th><th>Máquina</th><th class="c">Min. plan.</th><th>Empleado</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th><th>Obs.</th></tr></thead><tbody>${procRows}</tbody></table>
+<table class="procesos"><thead><tr><th class="c">#</th><th>Proceso</th><th>Máquina</th><th class="c">Min. plan.</th><th class="c">Fecha</th><th>Empleado</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th></tr></thead><tbody>${procRows}</tbody></table>
+<p class="ayuda">Un renglón por día. Si el trabajo lleva más de tres, seguí en la Nota de taller.</p>
 <h2>Nota de taller</h2>
 <div class="notas">${esc(detailsData.observaciones || "")}</div>
 ${generalData.descripcion ? `<h2>Descripción</h2><div class="notas">${esc(generalData.descripcion)}</div>` : ""}
-<div class="pie">Hoja de PROCESOS — para el operario</div>
+<div class="firmas">
+  <div class="firma">Firma del operario</div>
+  <div class="firma">Control / Calidad</div>
+  <div class="firma">Fecha de cierre</div>
+</div>
+<div class="pie">Hoja de PROCESOS — para el operario · Metalúrgica Longchamps</div>
 </div>
 
 <div class="page">
@@ -794,12 +893,6 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                     </DialogHeader>
 
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-                        {isLegacyOT && (
-                            <div className="mx-6 mt-3 px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg flex items-center gap-2 text-xs text-amber-800">
-                                <span className="text-amber-600 text-sm leading-none">⚠️</span>
-                                <span><b className="text-amber-900">OT del sistema viejo:</b> solo se puede modificar la <b>fecha prometida</b>; el resto se actualiza automáticamente desde la base original.</span>
-                            </div>
-                        )}
                         <div className="flex-1 overflow-y-auto px-6 py-4 relative">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                                 <TabsList className="grid w-full grid-cols-3 mb-4 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
@@ -1289,6 +1382,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         disabled={isLegacyOT}
                                         onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
                                         historialLoading={historialLoading}
+                                        onCrearProceso={handleCrearProceso}
                                     />
                                 </TabsContent>
                             </Tabs>

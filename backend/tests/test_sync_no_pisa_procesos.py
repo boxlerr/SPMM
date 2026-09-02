@@ -141,9 +141,30 @@ async def test_run_sync_no_ejecuta_la_ruta_de_procesos():
 
 
 async def test_run_sync_sigue_sincronizando_el_resto():
+    """Lo que el sync TODAVÍA trae del sistema viejo.
+
+    Clientes, artículos, piezas y la materia prima de las OT que ya están importadas.
+    Nada de eso se pisa con lo que se carga en SPMM."""
     sql = await _correr_sync_capturando()
-    assert "INSERT INTO orden_trabajo (" in sql        # cabecera de OT
-    assert "INSERT INTO proceso (" in sql              # catálogo de procesos
     assert "INSERT INTO orden_trabajo_pieza (" in sql  # materia prima
     assert "INSERT INTO cliente (" in sql
     assert "INSERT INTO articulo (" in sql
+    assert "INSERT INTO pieza (" in sql
+
+
+async def test_run_sync_ya_no_trae_ordenes_ni_procesos():
+    """Desde el 2/9 las OT se crean todas en SPMM.
+
+    Antes el sync hacía un UPSERT por `id_otvieja` cada 5 minutos y le devolvía a cada
+    OT lo que decía el legacy —fechas, cantidades, prioridad, sector—, así que lo que
+    se corregía acá se perdía solo y sin aviso. Y el catálogo de procesos daba de alta
+    un proceso nuevo por cada variante de tipeo del sistema viejo, sin rango ni máquina.
+
+    Este test es el que impide que vuelva sin querer: si alguien reactiva cualquiera de
+    las dos rutas, falla acá y no en la cara del taller dos semanas después."""
+    sql = await _correr_sync_capturando()
+    assert "INSERT INTO orden_trabajo (" not in sql, "las OT ya no se traen del legacy"
+    assert "INSERT INTO proceso (" not in sql, "el catálogo de procesos se carga en SPMM"
+    # Y tampoco el bloque de zombies, que daba por finalizada toda OT que el legacy no
+    # listara como pendiente.
+    assert "SET finalizadototal" not in sql

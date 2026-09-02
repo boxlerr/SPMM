@@ -329,65 +329,35 @@ async def run_sync():
             logger.info(f"  -> artículos: {n} nuevos, {u} actualizados")
             await session.commit()
 
-            # 3. Órdenes de trabajo. Las FKs las resolvemos acá (antes lo hacía el
-            #    JOIN cross-database, que ya no es posible).
-            fecha_desde = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-01")
-            logger.info(f"Sincronizando Ordenes de Trabajo desde {fecha_desde}...")
-            crudas = await _leer(Q_OTS, {"fecha_desde": fecha_desde})
+            # 3 y 4. Órdenes de trabajo y zombies — DESACTIVADO 2026-09-02.
+            #
+            #    Decisión de Julián: «no vamos a traerlas más, vamos a crearlas todas
+            #    desde acá». Desde el cutover de julio SPMM ya era el dueño de los
+            #    procesos (ver más abajo); ahora también lo es de las OT.
+            #
+            #    Lo que hacía y por qué molestaba: un UPSERT por `id_otvieja` sobre las
+            #    OT de los últimos 60 días, que cada 5 minutos le devolvía a la OT lo
+            #    que decía el legacy —fechas, cantidades, prioridad, sector— y pisaba lo
+            #    que se hubiera corregido acá. Y el bloque de zombies daba por finalizada
+            #    toda OT que el legacy no listara como pendiente, así que una OT creada
+            #    en SPMM (sin `id_otvieja`) se salvaba de casualidad, por el
+            #    `id_otvieja IS NOT NULL` de esos dos UPDATE.
+            #
+            #    Antes de apagarlo se corrió la última migración
+            #    (`remigrar_procesos_legacy --abiertas --aplicar`, 2/9): 183 OT miradas,
+            #    17 filas ajustadas y 25 pasadas insertadas.
+            #
+            #    Las consultas Q_OTS y Q_PENDIENTES quedan en el archivo a propósito: si
+            #    alguna vez hay que traer una OT puntual, el SQL está y probado.
+            logger.info("Sync de OTs DESACTIVADO — SPMM dueño de las órdenes (2026-09-02).")
 
-            m_prio = await _mapa(session, "prioridad", "descripcion")
-            m_sect = await _mapa(session, "sector", "nombre")
-            m_art = await _mapa(session, "articulo", "cod_articulo")
-            m_cli = await _mapa(session, "cliente", "id_viejo")
-            def_prio = m_prio.get(_clave("SIN PRIORIDAD"))
-            def_sect = m_sect.get(_clave("SIN SECTOR"))
-            def_art = m_art.get(_clave("NO-DEF"))
-
-            ots = []
-            for r in crudas:
-                f = {k: v for k, v in r.items() if not k.startswith("_")}
-                f["id_prioridad"] = m_prio.get(_clave(r["_prioridad"]), def_prio)
-                f["id_sector"] = m_sect.get(_clave(r["_sector"]), def_sect)
-                f["id_articulo"] = m_art.get(_clave(r["_cod_articulo"]), def_art)
-                f["id_cliente"] = m_cli.get(_clave(r["_cliente_viejo"]))
-                ots.append(f)
-
-            n, u = await _upsert(session, "orden_trabajo", ots, ["id_otvieja"],
-                                 ["id_otvieja"] + COLS_OT)
-            logger.info(f"  -> OTs: {n} nuevas, {u} actualizadas")
-            await session.commit()
-
-            # 4. Zombies. Antes eran dos UPDATE con JOIN cross-database; ahora se
-            #    trae del legacy la lista de "pendientes" y se compara contra ella.
-            pendientes = [r["idot"] for r in await _leer(Q_PENDIENTES)]
-            logger.info(f"Pendientes según legacy: {len(pendientes)}")
-
-            react = await session.execute(
-                text("UPDATE orden_trabajo SET finalizadototal = 0 "
-                     "WHERE id_otvieja IS NOT NULL AND COALESCE(finalizadototal, 0) = 1 "
-                     "AND id_otvieja = ANY(:pend)"), {"pend": pendientes})
-            logger.info(f"  -> Reactivadas: {react.rowcount}")
-
-            zomb = await session.execute(
-                text("UPDATE orden_trabajo SET finalizadototal = 1 "
-                     "WHERE id_otvieja IS NOT NULL AND COALESCE(finalizadototal, 0) = 0 "
-                     "AND NOT (id_otvieja = ANY(:pend))"), {"pend": pendientes})
-            logger.info(f"  -> Marcadas como finalizadas: {zomb.rowcount}")
-            await session.commit()
-
-            # 5. Catálogo de procesos (sólo inserta los que faltan).
-            #    Los nombres se normalizan (ver _nombre_proceso): vienen de texto libre
-            #    del legacy y cada variante de tipeo crea un proceso nuevo, que nace sin
-            #    rango y por lo tanto asignable a cualquiera.
-            logger.info("Actualizando catálogo de procesos...")
-            nombres = []
-            for r in await _leer(Q_PROCESOS):
-                nombre = _nombre_proceso(r["nombre"] or "")
-                if nombre:
-                    nombres.append({**r, "nombre": nombre})
-            n, _ = await _upsert(session, "proceso", nombres, ["nombre"], ["nombre"])
-            logger.info(f"  -> procesos nuevos: {n}")
-            await session.commit()
+            # 5. Catálogo de procesos — DESACTIVADO 2026-09-02, junto con las OT.
+            #    Traía los nombres de proceso del legacy y daba de alta los que faltaban.
+            #    Cada variante de tipeo creaba un proceso nuevo, que nacía sin rango y
+            #    sin máquina, o sea asignable a cualquiera y sin reservar nada: de ahí
+            #    salen los «AGUJEREADo y ROSCADO» y los «TORNO T1 trBAJO 3 dias 24h» que
+            #    ensucian el catálogo. Los procesos se crean en SPMM.
+            logger.info("Sync del catálogo de procesos DESACTIVADO — se crean en SPMM (2026-09-02).")
 
             # 6. Procesos por OT — DESACTIVADO 2026-07-06 (cutover Metlo).
             #    Acuerdo reunión 2-jul-2026 (Lucas): desde el lunes los procesos se
