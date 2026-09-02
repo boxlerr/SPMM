@@ -47,6 +47,106 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "aviso-dice-quien-lo-toma-primero",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "«Se lo abrís a 9 personas» ya no se lee como que el trabajo se reparte entre las 9",
+        detalle:
+            "Cuando una solución avisaba que sumarle una categoría a una máquina se la abría a varias personas, parecía que el trabajo iba a caer partido entre todas. No es así: el sistema siempre prefiere a quien lo tiene como habilidad principal. Ahora el aviso lo dice y lo nombra: «Habilitadas, no repartidas: lo va a seguir tomando LEONARDO C., que lo tiene como principal». Si nadie lo tiene cargado como principal, lo dice también en vez de inventar un nombre.",
+        href: "/operaciones",
+    },
+    {
+        id: "ver-que-cambia-antes-de-aplicar",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Antes de aplicar una solución ves exactamente qué va a cambiar",
+        detalle:
+            "«Aplicar y recalcular» pedía confirmar sin haber dicho nunca qué tocaba, y daba miedo apretar. Ahora, al tocarlo, se abre un cartel con la lista completa: a qué máquina, qué categoría le agrega y cuál tenía hasta ahora, una línea por cada cosa que toca. Recién ahí aparece «Sí, aplicalo», y al lado «Cancelar». Lo que hace el botón es lo mismo de antes: lo único nuevo es que se ve primero.",
+        href: "/operaciones",
+    },
+    {
+        id: "aviso-resuelto-se-puede-abrir",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Un aviso resuelto se puede volver a abrir para ver qué era y qué se cambió",
+        detalle:
+            "Al resolver un aviso bajaba a la tira verde tachado y ahí moría: no se podía clickear ni saber qué se había hecho. Ahora se abre como cualquier otro y muestra qué pasaba, cuál de las soluciones se aplicó y un botón para ir a Recursos a ver cómo quedó. Si desapareció porque lo arreglaste en Recursos por tu cuenta, también lo dice.",
+        href: "/operaciones",
+    },
+    {
+        id: "preparacion-y-uso-respetan-a-quien-elegiste",
+        fecha: "2026-09-01",
+        tipo: "arreglo",
+        seccion: "Operaciones › Planificación",
+        titulo: "Si elegiste a alguien para un proceso, el plan ya no se lo cambia",
+        detalle:
+            "La preparación de una máquina y el trabajo que la usa los hace la misma persona, y esa regla sigue igual. Lo que faltaba era la excepción: el torno CNC lo puede preparar uno y ejecutarlo un operario calificado. Ahora, si al cargar el proceso en la OT elegiste a alguien, esa elección manda y el sistema no la pisa para emparejarla con la preparación. La máquina se sigue reservando para las dos.",
+        href: "/operaciones",
+    },
+    {
+        id: "salida-del-planificador-arriba",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "«Salir» está arriba en los dos pasos del planificador",
+        detalle:
+            "En la pantalla de elegir OT la salida estaba abajo del todo y en la vista previa arriba, así que había que buscarla en cada paso. Ahora está arriba a la derecha en las dos, en el mismo lugar.",
+        href: "/operaciones",
+    },
+    {
+        id: "nueva-orden-en-ordenes-de-trabajo",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "«Nueva orden» está dentro de Órdenes de Trabajo",
+        detalle:
+            "Para cargar una OT había que usar el botón de la barra de arriba, que se va con el scroll y se lee como parte del planificador. Ahora hay un «Nueva orden» adentro de la pantalla de Órdenes de Trabajo, visible en las tres solapas y también cuando la lista está vacía. Abre la misma pantalla de carga de siempre.",
+        href: "/operaciones",
+    },
+    {
+        id: "ver-lo-que-agregaste-a-mano",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Podés ver la lista de todo lo que agregaste a mano al plan",
+        detalle:
+            "Después de sumar varias cosas al borrador no había forma de repasar qué habías puesto sin recorrer la tabla entera. Ahora el número de al lado de «Deshacer» es un botón: se abre la lista de lo agregado, de lo último a lo primero, con la OT, el cliente, cada proceso, a quién le quedó y cuántas horas suma. Desde ahí mismo podés sacar una OT o un proceso suelto.",
+        href: "/operaciones",
+    },
+    {
+        id: "salto-de-carga-a-la-vista",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Cuando le agregás trabajo a alguien, ves cuánto le saltaron las horas",
+        detalle:
+            "Se le podían sumar seis horas a una persona sin enterarse, porque el total del panel cambiaba en silencio. Ahora, al agregar procesos, el panel de carga se abre solo, resalta a quien más subió y le muestra el antes y el después: «8,9 h → 15,0 h con lo que acabás de agregar». El aviso dura unos segundos y se va.",
+        href: "/operaciones",
+    },
+    {
+        id: "criterio-de-alta-y-media-escrito",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Planificación",
+        titulo: "Alta y Media dicen qué significan",
+        detalle:
+            "Pasando el mouse por el chip de cada aviso ahora dice el criterio completo: Alta es que sin ese dato el trabajo queda sin persona o la máquina no queda reservada; Media es una recomendación para afinar, el plan sale igual. Es lo mismo que ya hacía el sistema, pero hasta ahora había que deducirlo del color.",
+        href: "/operaciones",
+    },
+    {
+        id: "mismas-columnas-en-todas-las-tablas",
+        fecha: "2026-09-01",
+        tipo: "mejora",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "Las tres listas de órdenes tienen las mismas columnas y en el mismo orden",
+        detalle:
+            "El Historial mostraba menos columnas que las otras dos y con el Estado al final, así que había que volver a buscar dónde estaba cada dato al cambiar de solapa. Ahora suma Prioridad, Material y F. Prometida, el Estado quedó al lado de Plano, y «Entregado» pasó a llamarse «Entrega» como en el resto. En Planificación la columna «F. Prom.» ahora dice «F. Prometida», igual que en las otras.",
+        href: "/operaciones",
+    },
+    {
         id: "ordenes-de-trabajo-abre-primero",
         fecha: "2026-09-01",
         tipo: "mejora",
