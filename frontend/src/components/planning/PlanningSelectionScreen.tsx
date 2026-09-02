@@ -20,7 +20,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, Search, X } from "lucide-react"
+import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { BorradoresPlan } from "./BorradoresPlan"
@@ -431,6 +431,21 @@ export function PlanningSelectionScreen({
                             {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
                             {/* Zoom control: afecta a la tabla de selección. */}
                             <ZoomControl value={zoom} onChange={setZoom} />
+                            {/* La salida, arriba y en el mismo lugar que en la vista previa.
+                                Estaba sola en el pie y Lucas no la encontraba: buscaba la
+                                vuelta arriba, que es donde está en el paso siguiente. Dos
+                                pantallas del mismo flujo no pueden tener la salida en
+                                extremos opuestos. */}
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={salirDelPlanificador}
+                                className="h-8 gap-1.5 text-gray-500 hover:text-gray-800"
+                                title="Volver a Operaciones. No se pierde nada: la próxima vez el planificador abre en blanco."
+                            >
+                                <LogOut className="w-3.5 h-3.5" />
+                                Salir
+                            </Button>
                         </div>
                     </div>
 
@@ -464,9 +479,6 @@ export function PlanningSelectionScreen({
             pie={
                 <>
                     <div className="px-6 py-3 flex flex-wrap items-center justify-end gap-2">
-                    <Button variant="outline" onClick={salirDelPlanificador} className="text-gray-600">
-                        Salir del planificador
-                    </Button>
                     <Button
                         onClick={() => {
                             const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id));

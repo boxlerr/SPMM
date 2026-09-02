@@ -9,7 +9,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, LogOut, Users,
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -586,6 +586,9 @@ export function PlanningPreviewScreen({
      */
     const lineasVigentes = React.useMemo(() => lineasDeTandas(tandasManuales), [tandasManuales]);
 
+    /** Está abierta la lista de lo agregado a mano. */
+    const [verAMano, setVerAMano] = React.useState(false);
+
     // Limpiar selección "para agregar" cuando cambia el set de resultados (ya fueron incluidas).
     React.useEffect(() => {
         setPendingAddIds(new Set());
@@ -1000,6 +1003,56 @@ export function PlanningPreviewScreen({
         }
         return groups;
     }, [results]);
+
+    /**
+     * Qué se agregó a mano, en una lista que se puede leer.
+     *
+     * Lucas, 28/08, después de agregar seis cosas seguidas: *"ya no sé qué pusimos…
+     * ni me acuerdo qué agregué"*. El violeta te dice cuál es a mano cuando lo tenés
+     * delante, pero no te deja repasar el conjunto sin recorrer la tabla entera.
+     *
+     * De la más nueva a la más vieja, que es el orden en el que uno se acuerda. Una OT
+     * "entera" no tiene pasadas elegidas; si las tiene, se listan sólo esas.
+     */
+    const detalleAMano = React.useMemo(() => {
+        const salida: {
+            ordenId: number; numeroOT: number; cliente: string;
+            entera: boolean; minutos: number;
+            filas: { lineaId: number | null; proceso: string; persona: string; minutos: number }[];
+        }[] = [];
+        const vistas = new Set<number>();
+        for (const t of [...tandasManuales].reverse()) {
+            for (const ordenId of [...t.ots, ...Object.keys(t.lineas).map(Number)]) {
+                if (vistas.has(ordenId)) continue;
+                vistas.add(ordenId);
+                const delPlan = groupedResults[ordenId] || [];
+                const elegidas = lineasVigentes[ordenId] || [];
+                const filas = (elegidas.length > 0
+                    ? delPlan.filter(r => r.id_orden_trabajo_proceso != null
+                        && elegidas.includes(r.id_orden_trabajo_proceso))
+                    : delPlan
+                ).map(r => {
+                    const efectivo = getEffectiveItem(r);
+                    return {
+                        lineaId: r.id_orden_trabajo_proceso ?? null,
+                        proceso: r.nombre_proceso,
+                        persona: efectivo.operario_nombre || "Sin asignar",
+                        minutos: r.duracion_min || 0,
+                    };
+                });
+                salida.push({
+                    ordenId,
+                    numeroOT: delPlan[0]?.id_otvieja ?? ordenId,
+                    cliente: delPlan[0]?.cliente || "",
+                    entera: elegidas.length === 0,
+                    minutos: filas.reduce((s, f) => s + f.minutos, 0),
+                    filas,
+                });
+            }
+        }
+        return salida;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tandasManuales, groupedResults, lineasVigentes, editedResults]);
 
     // Placeholder for conflicts if missing (can be refined later)
     const conflicts = { details: [] as any[] };
@@ -1501,16 +1554,69 @@ export function PlanningPreviewScreen({
         return !v;
     });
 
+    /**
+     * Minutos que le quedan a cada persona si se confirma este plan.
+     *
+     * Una sola cuenta para las tres cosas que la necesitan —el contador de pasados,
+     * el orden del panel y la barra de cada tarjeta—, que antes la hacían por
+     * separado y podían no coincidir.
+     */
+    const minutosPorOperario = React.useMemo(() => {
+        const suma: Record<number, number> = {};
+        for (const op of availableOperators) suma[op.id] = operatorLoads[op.id] || 0;
+        for (const r of results) {
+            const efectivo = getEffectiveItem(r);
+            const id = efectivo.id_operario;
+            if (id == null) continue;
+            suma[id] = (suma[id] ?? 0) + (r.duracion_min || 0);
+        }
+        return suma;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [availableOperators, operatorLoads, results, editedResults]);
+
     /** Cuántos operarios quedan pasados de las 44h si se confirma este plan.
      *  Es lo que hace que plegar el panel resuma en vez de esconder: el riel lo
      *  sigue mostrando en rojo. */
-    const sobrecargados = React.useMemo(() => availableOperators.filter(op => {
-        const propio = results
-            .map(r => getEffectiveItem(r))
-            .filter(r => r.id_operario === op.id)
-            .reduce((s, r) => s + (r.duracion_min || 0), 0);
-        return ((operatorLoads[op.id] || 0) + propio) / 60 > 44;
-    }).length, [availableOperators, operatorLoads, results, editedResults]);
+    const sobrecargados = React.useMemo(
+        () => availableOperators.filter(op => (minutosPorOperario[op.id] || 0) / 60 > 44).length,
+        [availableOperators, minutosPorOperario]
+    );
+
+    /**
+     * A quién le saltó la carga con lo último que se agregó, y cuánto.
+     *
+     * Lucas agregó procesos y Pablo pasó de 8,9 a 15 horas; se enteró de casualidad
+     * porque venía anotando las horas en un papel (28/08). El panel siempre mostró el
+     * total, pero un número que cambia de 8,9 a 15 mientras mirás otra parte de la
+     * pantalla no se ve. Esto le pone el "antes → después" al lado del nombre y lo
+     * deja seis segundos, que es lo que dura la pregunta "¿a quién se lo puse?".
+     *
+     * Se queda con el mayor aumento: si una tanda toca a cinco personas, la que
+     * importa es la que más subió.
+     */
+    const [saltoCarga, setSaltoCarga] = React.useState<{ opId: number; antes: number; despues: number } | null>(null);
+    const cargaPreviaRef = React.useRef<Record<number, number> | null>(null);
+    React.useEffect(() => {
+        const previa = cargaPreviaRef.current;
+        cargaPreviaRef.current = minutosPorOperario;
+        // La primera pasada solo saca la foto: sin un "antes" no hay salto que contar.
+        if (!previa) return;
+        let mayor: { opId: number; antes: number; despues: number } | null = null;
+        for (const [id, min] of Object.entries(minutosPorOperario)) {
+            const antes = previa[Number(id)] ?? 0;
+            const sube = min - antes;
+            if (sube > 0 && (!mayor || sube > mayor.despues - mayor.antes)) {
+                mayor = { opId: Number(id), antes, despues: min };
+            }
+        }
+        if (!mayor) return;
+        setSaltoCarga(mayor);
+        // Si el panel está plegado no se ve nada, así que se abre solo: el aviso
+        // pierde todo el sentido si hay que ir a buscarlo.
+        setCargaAbierta(true);
+        const t = setTimeout(() => setSaltoCarga(null), 6000);
+        return () => clearTimeout(t);
+    }, [minutosPorOperario]);
 
     /**
      * La tira de avisos arranca PLEGADA — pero sólo si el plan no tiene trabas.
@@ -1607,6 +1713,98 @@ export function PlanningPreviewScreen({
                             {/* Deshacer lo último que se agregó a mano. Vive al lado de
                                 "Agregar OTs" porque deshace exactamente eso, y sólo
                                 aparece cuando hay algo que deshacer. */}
+                            {/* El contador se separó de "Deshacer" porque mentía: contaba
+                                TODAS las OT agregadas a mano y el botón deshace sólo la
+                                última tanda. Ahora el número es su propio botón y abre la
+                                lista de lo agregado — "ya no sé qué pusimos", Lucas 28/08. */}
+                            {tandasManuales.length > 0 && onRecalculate && (
+                                <Popover open={verAMano} onOpenChange={setVerAMano}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
+                                            title="Ver todo lo que agregaste a mano a este plan"
+                                        >
+                                            <ListChecks className="w-3.5 h-3.5" />
+                                            {ordenesAMano.size} a mano
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[min(480px,calc(100vw-2rem))] p-0" align="end">
+                                        <div className="p-3 border-b bg-slate-50">
+                                            <div className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                                                <ListChecks className="w-4 h-4 text-indigo-600" />
+                                                Lo que agregaste a mano
+                                            </div>
+                                            <p className="text-[11px] text-gray-500 mt-1">
+                                                De lo último a lo primero. El resto del plan lo armó el sistema.
+                                            </p>
+                                        </div>
+                                        <div className="max-h-[340px] overflow-y-auto p-2 space-y-2">
+                                            {detalleAMano.map((ot) => (
+                                                <div key={ot.ordenId} className="rounded-lg border border-indigo-100 bg-white">
+                                                    <div className="flex items-center gap-2 border-b border-indigo-50 px-2 py-1.5">
+                                                        <span className="font-semibold text-[12px] text-gray-800 tabular-nums">
+                                                            OT #{ot.numeroOT}
+                                                        </span>
+                                                        <span className="min-w-0 flex-1 truncate text-[11px] text-gray-500">
+                                                            {ot.cliente}
+                                                        </span>
+                                                        <span className={cn(
+                                                            "shrink-0 rounded px-1.5 text-[10px] font-semibold leading-[16px]",
+                                                            ot.filas.length === 0
+                                                                ? "bg-amber-50 text-amber-800"
+                                                                : "bg-indigo-50 text-indigo-700"
+                                                        )}>
+                                                            {ot.filas.length === 0
+                                                                ? "no entró en el plan"
+                                                                : ot.entera ? "OT entera" : `${ot.filas.length} ${ot.filas.length === 1 ? "proceso" : "procesos"}`}
+                                                        </span>
+                                                        <span className="shrink-0 text-[11px] font-medium text-gray-600 tabular-nums">
+                                                            {(ot.minutos / 60).toFixed(1)} h
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setVerAMano(false); handleRemoveOrderAndRecalculate(ot.ordenId); }}
+                                                            disabled={isCalculating || isConfirming}
+                                                            className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600 transition-colors disabled:opacity-40"
+                                                            title="Sacar esta OT del plan y recalcular"
+                                                        >
+                                                            <XIcon className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </div>
+                                                    <ul className="divide-y divide-gray-50">
+                                                        {ot.filas.map((f, i) => (
+                                                            <li key={`${ot.ordenId}-${f.lineaId ?? i}`} className="flex items-center gap-2 px-2 py-1">
+                                                                <span className="min-w-0 flex-1 truncate text-[11.5px] text-gray-700">
+                                                                    {f.proceso}
+                                                                </span>
+                                                                <span className="shrink-0 truncate max-w-[120px] text-[11px] text-gray-500">
+                                                                    {f.persona}
+                                                                </span>
+                                                                <span className="shrink-0 text-[11px] text-gray-500 tabular-nums">
+                                                                    {(f.minutos / 60).toFixed(1)} h
+                                                                </span>
+                                                                {!ot.entera && f.lineaId != null && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => quitarLineaAMano(ot.ordenId, f.lineaId!)}
+                                                                        disabled={isCalculating || isConfirming}
+                                                                        className="shrink-0 rounded p-0.5 text-gray-300 hover:bg-rose-50 hover:text-rose-600 transition-colors disabled:opacity-40"
+                                                                        title="Sacar sólo este proceso y recalcular"
+                                                                    >
+                                                                        <XIcon className="w-3 h-3" />
+                                                                    </button>
+                                                                )}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            )}
                             {tandasManuales.length > 0 && onRecalculate && (
                                 <Button
                                     variant="outline"
@@ -1618,9 +1816,6 @@ export function PlanningPreviewScreen({
                                 >
                                     <RotateCcw className="w-3.5 h-3.5" />
                                     Deshacer
-                                    <Badge className="ml-1 bg-indigo-100 text-indigo-700 border-0 px-1.5 py-0 text-[10px] tabular-nums">
-                                        {ordenesAMano.size}
-                                    </Badge>
                                 </Button>
                             )}
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
@@ -3030,20 +3225,19 @@ export function PlanningPreviewScreen({
                                     .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden
                                     .sort((a, b) => {
                                         // Sort by Total Load DESC
-                                        const loadA = (operatorLoads[a.id] || 0) + results.map(r => getEffectiveItem(r)).filter(r => r.id_operario === a.id).reduce((sum, r) => sum + (r.duracion_min || 0), 0);
-                                        const loadB = (operatorLoads[b.id] || 0) + results.map(r => getEffectiveItem(r)).filter(r => r.id_operario === b.id).reduce((sum, r) => sum + (r.duracion_min || 0), 0);
+                                        const loadA = minutosPorOperario[a.id] || 0;
+                                        const loadB = minutosPorOperario[b.id] || 0;
                                         return loadB - loadA;
                                     })
                                     .map(op => {
-                                        // Calculate Load
-                                        const currentLoadMin = operatorLoads[op.id] || 0;
-                                        const sessionLoadMin = results
-                                            .map(r => getEffectiveItem(r))
-                                            .filter(r => r.id_operario === op.id)
-                                            .reduce((sum, r) => sum + (r.duracion_min || 0), 0);
-
-                                        const totalLoadMin = currentLoadMin + sessionLoadMin;
+                                        // La misma cuenta que usan el contador de pasados y el
+                                        // orden del panel: `minutosPorOperario`.
+                                        const totalLoadMin = minutosPorOperario[op.id] || 0;
                                         const totalLoadHours = (totalLoadMin / 60);
+                                        // Lo que suma ESTE plan sobre lo que ya tenía cargado.
+                                        const sessionLoadMin = totalLoadMin - (operatorLoads[op.id] || 0);
+                                        // El salto de las últimas horas agregadas, si le tocó a esta persona.
+                                        const salto = saltoCarga?.opId === op.id ? saltoCarga : null;
 
                                         // Assuming 44h weekly capacity
                                         const maxCapacityHours = 44;
@@ -3063,7 +3257,12 @@ export function PlanningPreviewScreen({
                                             ? `${op.hora_inicio.slice(0, 5)} – ${op.hora_fin.slice(0, 5)}`
                                             : null;
                                         return (
-                                            <div key={op.id} className="bg-white p-3 rounded-lg border shadow-sm">
+                                            <div key={op.id} className={cn(
+                                                "bg-white p-3 rounded-lg border shadow-sm transition-colors",
+                                                // A quien le acaba de saltar la carga se lo marca por unos
+                                                // segundos: es la persona que hay que mirar ahora.
+                                                salto && "border-indigo-400 ring-2 ring-indigo-200"
+                                            )}>
                                                 <div className="flex justify-between items-start mb-1.5 gap-2">
                                                     <div className="min-w-0 flex-1">
                                                         <div className="text-sm font-medium text-gray-800 truncate">{nombrePersona(op.nombre, op.apellido)}</div>
@@ -3100,6 +3299,17 @@ export function PlanningPreviewScreen({
                                                         <span className="text-blue-600 font-medium">+{Math.round(sessionLoadMin / 60 * 10) / 10}h nuevas</span>
                                                     )}
                                                 </div>
+                                                {/* El "antes → después" de lo último que se agregó. Dura unos
+                                                    segundos y se va: es un aviso, no un dato más de la tarjeta. */}
+                                                {salto && (
+                                                    <div className="mb-1.5 flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-800 tabular-nums">
+                                                        <ArrowUp className="w-3 h-3 shrink-0" />
+                                                        {(salto.antes / 60).toFixed(1)} h → {(salto.despues / 60).toFixed(1)} h
+                                                        <span className="font-normal text-indigo-600">
+                                                            con el último cambio
+                                                        </span>
+                                                    </div>
+                                                )}
                                                 {/* Rangos del operario: chips compactos para ver qué procesos puede hacer. */}
                                                 {rangosNombres.length > 0 && (
                                                     <div className="flex flex-wrap gap-1 pt-1 border-t border-gray-100">

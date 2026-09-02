@@ -7,6 +7,8 @@ import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { toast } from "sonner";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import { API_URL } from "@/config";
 import { isOrderCompleted } from "@/lib/utils";
 
@@ -134,7 +136,22 @@ export default function WorkOrdersListWrapper({
                             Historial ({completedOrders.length})
                         </TabsTrigger>
                     </TabsList>
-                    <ZoomControl value={zoom} onChange={setZoom} />
+                    <div className="flex items-center gap-2">
+                        <ZoomControl value={zoom} onChange={setZoom} />
+                        {/* Dar de alta una OT es lo que hace Carolina, y no entra nunca a
+                            planificar: el botón tiene que estar en ESTA pantalla, no en la
+                            cabecera de Operaciones, que se va con el scroll y se lee como
+                            parte del planificador. Acá se ve en las tres solapas y también
+                            cuando la lista está vacía. Abre el mismo modal que el de arriba,
+                            en modo alta (`orderToEdit` en null). */}
+                        <Button
+                            onClick={() => { setOrderToEdit(null); setIsEditModalOpen(true); }}
+                            className="h-8 gap-1.5 bg-red-700 px-3 text-xs font-semibold text-white hover:bg-red-800"
+                        >
+                            <Plus className="w-3.5 h-3.5" />
+                            Nueva orden
+                        </Button>
+                    </div>
                 </div>
 
                 <TabsContent value="no_planificadas" className="mt-0">
