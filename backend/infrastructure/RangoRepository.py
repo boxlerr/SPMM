@@ -178,6 +178,18 @@ class RangoRepository:
                     text("SELECT id_proceso, id_rango FROM rango_proceso"))).all():
                 rangos_de_proceso.setdefault(id_proceso, []).append(id_rango)
 
+            # En qué máquinas se hace cada proceso, si alguien lo cargó. Vacío no es
+            # "va a mano": es "todavía no lo cargaron", y ahí el planificador lo sigue
+            # deduciendo del nombre. La pantalla necesita poder mostrar la diferencia.
+            maquinas_de_proceso = {}
+            for id_proceso, id_maquinaria in (await self.db.execute(
+                    text("SELECT id_proceso, id_maquinaria FROM proceso_maquinaria"))).all():
+                maquinas_de_proceso.setdefault(id_proceso, []).append(id_maquinaria)
+            nombre_maquina = {
+                m_id: m_nombre for m_id, m_nombre in (await self.db.execute(
+                    text("SELECT id, nombre FROM maquinaria"))).all()
+            }
+
             return {
                 "procesos": [
                     {
@@ -187,6 +199,11 @@ class RangoRepository:
                             {"id": rid, "nombre": nombre_rango.get(rid, f"#{rid}")}
                             for rid in sorted(rangos_de_proceso.get(p.id, []),
                                               key=lambda x: nombre_rango.get(x, ""))
+                        ],
+                        "maquinas": [
+                            {"id": mid, "nombre": nombre_maquina.get(mid, f"#{mid}")}
+                            for mid in sorted(maquinas_de_proceso.get(p.id, []),
+                                              key=lambda x: nombre_maquina.get(x, ""))
                         ],
                         "habilitados": p.habilitados,
                         "por_habilidad_manual": p.por_habilidad_manual,

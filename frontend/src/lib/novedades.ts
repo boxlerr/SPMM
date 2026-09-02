@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "elegir-en-que-maquina-se-hace-el-proceso",
+        fecha: "2026-09-02",
+        tipo: "nuevo",
+        seccion: "Recursos › Procesos",
+        titulo: "Ahora elegís en qué máquina se hace cada proceso",
+        detalle:
+            "El sistema adivinaba la máquina por el nombre del proceso. Con «Torno T1» acertaba, pero «reparación de rosca» no dice torno en ningún lado, así que se planificaba sin reservar ninguno y otra orden podía llevarse el mismo torno a la misma hora. Ahora, desplegando un proceso en Recursos, elegís las máquinas donde se hace: el planificador reserva una de esas. Si no cargás ninguna, sigue funcionando como hasta ahora. Ya quedaron cargadas las que contestaste en la planilla: reparación de rosca en los seis tornos convencionales, enderezar de bases en las prensas y la plegadora, y la rectificadora solo en la tangencial.",
+        href: "/recursos",
+    },
+    {
         id: "preparacion-y-uso-misma-persona-con-algo-en-el-medio",
         fecha: "2026-09-02",
         tipo: "arreglo",

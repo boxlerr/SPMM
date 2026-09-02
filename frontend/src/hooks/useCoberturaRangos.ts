@@ -32,6 +32,8 @@ export interface ProcesoCobertura {
     id: number;
     nombre: string;
     rangos: RangoRef[];
+    /** En qué máquinas se hace, si alguien lo cargó. Vacío = se deduce del nombre. */
+    maquinas?: RangoRef[];
     /** Cuántos operarios DISPONIBLES pueden hacerlo (por rango o habilidad manual). */
     habilitados: number;
     por_habilidad_manual: number;

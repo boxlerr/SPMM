@@ -25,6 +25,7 @@ import { API_URL } from "@/config"
 import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList";
 import { useCoberturaRangos, problemaDelProceso } from "@/hooks/useCoberturaRangos";
 import EditorRangosDe from "./_components/EditorRangosDe";
+import EditorMaquinasDe from "./_components/EditorMaquinasDe";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -831,6 +832,17 @@ export default function RecursosPage() {
                               catalogo={catalogoRangos}
                               sugeridos={rangosSugeridos ?? undefined}
                               onGuardado={() => { setProcesoAbierto(null); setRangosSugeridos(null); recargarCobertura(); }}
+                            />
+                            {/* Quién puede hacerlo y en qué máquina son las dos mitades
+                                de la misma pregunta: hacen falta las dos para que el
+                                planificador pueda reservar. Van juntas, en la misma
+                                fila desplegada. */}
+                            <EditorMaquinasDe
+                              id={proceso.id}
+                              nombre={proceso.nombre}
+                              actuales={cob?.maquinas ?? []}
+                              catalogo={maquinas}
+                              onGuardado={() => { setProcesoAbierto(null); recargarCobertura(); }}
                             />
                           </td>
                         </tr>
