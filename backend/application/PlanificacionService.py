@@ -989,14 +989,44 @@ def _setup_de_esta_produccion(proc_setup, proc_prod) -> bool:
     return bool(fam_setup) and fam_setup == fam_prod
 
 
-def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None):
+def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None,
+                                    op_domain_vals=None, dummy_op_id=None):
     """
     Fuerza a que procesos coordinados (ej: Programacion + Produccion)
     usen la misma máquina y, si se pasa `operario_vars`, el MISMO operario
     (el que prepara la máquina es el que la usa). Ver A2 (feedback 06/07).
 
     Solo para pares realmente relacionados: ver _setup_de_esta_produccion.
+
+    LA EXCEPCIÓN (Lucas, 28/08): si al cargar el proceso en la OT se eligió a alguien
+    a mano, esa persona manda y el par NO se ata. El caso que dio es real: el torno CNC
+    lo puede preparar uno y ejecutarlo un operario calificado. Sin esta guarda las dos
+    reglas se pelean —la preselección deja el dominio en una sola persona y la igualdad
+    pide que las dos variables valgan lo mismo—, así que o el modelo sale INFEASIBLE o,
+    peor, la igualdad arrastra la elección de quien cargó la OT a un proceso donde nadie
+    la pidió. La máquina se sigue igualando: esa parte no la discutió nadie y es la que
+    evita que la preparación reserve una soldadora y la soldadura use otra.
     """
+    op_domain_vals = op_domain_vals or {}
+
+    def _persona_elegida_a_mano(clave):
+        """¿El dominio de operario de esta línea quedó fijado en UNA PERSONA REAL?
+
+        Se mira el DOMINIO y no el diccionario de preselección a propósito: si la
+        preselección apunta a alguien que no está entre los operarios reales,
+        `_crear_variables_y_dominios` la ignora y la línea sigue libre. Mirar el
+        diccionario nos haría saltear la igualdad por una elección que el solver
+        nunca aplicó.
+
+        Y por eso hace falta descartar el DUMMY: el dominio también queda en un solo
+        valor cuando NADIE puede hacer el proceso, y ahí ese valor es el dummy. Ese
+        caso tiene que seguir arrastrando a la producción a "sin asignar", que es el
+        comportamiento buscado desde el A2 — si no, la preparación queda sin nadie y
+        la producción sale con una persona, que es justo el dibujo que Lucas marcó
+        como error en la OT 15708.
+        """
+        dominio = op_domain_vals.get(clave, ())
+        return len(dominio) == 1 and dominio[0] != dummy_op_id
     # Agrupar por OT
     ord_ids = set(p[0] for p in procesos_norm)
     for oid in ord_ids:
@@ -1028,8 +1058,16 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_var
                 # apto y cae en DUMMY, arrastra la producción a DUMMY también (queda visible
                 # como "sin asignar", que es el comportamiento esperado).
                 if operario_vars is not None:
-                    model.Add(operario_vars[(oid, seq_a)] == operario_vars[(oid, seq_s)])
-                    logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
+                    a_mano = (_persona_elegida_a_mano((oid, seq_a))
+                              or _persona_elegida_a_mano((oid, seq_s)))
+                    if a_mano:
+                        logger.info(
+                            f"COORDINACIÓN: Seq {seq_a} y Seq {seq_s} de la OT {oid} NO se atan al "
+                            f"mismo operario: hay una persona elegida a mano en la carga de la OT"
+                        )
+                    else:
+                        model.Add(operario_vars[(oid, seq_a)] == operario_vars[(oid, seq_s)])
+                        logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
 
 
 def _agregar_compatibilidad_op_maq(
@@ -1780,7 +1818,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         op_to_rangos.setdefault(_op_id, set()).add(_r_id)
 
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales)
-    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals, DUMMY_OP_ID)
     _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----
     # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar
@@ -2369,6 +2407,11 @@ async def planificar(
             # dato equivocado: "preparacion de fresadora está cargado con MEDIO
             # OFICIAL" cuando el solver había filtrado por OFICIAL CNC.
             rangos_efectivos=rangos_efectivos,
+            # El mismo mapa con el que el solver prefiere la habilidad principal
+            # (PENAL_SKILL1=0 vs PENAL_SKILL2=2000). Va al diagnóstico para que una
+            # solución que habilita a nueve pueda decir quién la va a tomar: sin esto,
+            # "se las abrís a 9 personas" se lee como reparto parejo (Lucas, 28/08).
+            prioridad_skills=mapa_skills,
         )
 
         # Las OTs de los diagnósticos salen con su número VISIBLE (id_otvieja), que

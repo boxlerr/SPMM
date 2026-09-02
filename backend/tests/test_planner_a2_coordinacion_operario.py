@@ -62,3 +62,87 @@ def test_a2_sin_operario_vars_no_fuerza_operario():
     assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE)
     assert solver.Value(op_setup) == 11
     assert solver.Value(op_prod) == 10
+
+
+# --------------------------------------------------------------------------
+# La excepción: persona elegida a mano al cargar la OT (Lucas, 28/08)
+# --------------------------------------------------------------------------
+
+def test_persona_elegida_a_mano_rompe_la_igualdad_de_operario():
+    """El torno CNC lo puede preparar uno y ejecutarlo un operario calificado.
+
+    Si al cargar el proceso en la OT se eligió a alguien, esa elección manda y el par
+    no se ata. Sin la guarda, la igualdad y el dominio de un solo valor se pelean: el
+    modelo sale INFEASIBLE o la elección se le contagia al otro proceso."""
+    model, procesos_norm, operario_vars, maq_vars, (op_setup, op_prod, maq_setup, maq_prod) = _armar_modelo()
+
+    # En la producción se eligió al 10 a mano: su dominio quedó en una sola persona.
+    op_domain_vals = {(1, 1): [10, 11, 999999], (1, 2): [10]}
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    op_domain_vals, 999999)
+
+    model.Add(op_setup == 11)
+    model.Add(op_prod == 10)
+
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.Value(op_setup) == 11
+    assert solver.Value(op_prod) == 10
+    # La máquina SÍ se sigue igualando: eso no lo discutió nadie.
+    assert solver.Value(maq_setup) == solver.Value(maq_prod)
+
+
+def test_sin_eleccion_a_mano_la_regla_de_oro_sigue_valiendo():
+    """La guarda no puede convertirse en una puerta abierta: sin elección, se ata."""
+    model, procesos_norm, operario_vars, maq_vars, (op_setup, op_prod, _ms, _mp) = _armar_modelo()
+
+    # Los dos con dominio de dos personas: nadie eligió nada a mano.
+    op_domain_vals = {(1, 1): [10, 11, 999999], (1, 2): [10, 11, 999999]}
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    op_domain_vals, 999999)
+
+    model.Add(op_setup == 11)
+    model.Add(op_prod == 10)
+
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) == cp_model.INFEASIBLE
+
+
+def test_preseleccion_que_el_solver_ignoro_no_saltea_la_regla():
+    """Si la persona elegida no existe entre los operarios reales, el dominio queda
+    entero y la igualdad tiene que seguir valiendo: mirar el dominio y no el
+    diccionario de preselección es lo que evita saltear la regla por una elección
+    que el solver descartó."""
+    model, procesos_norm, operario_vars, maq_vars, (op_setup, op_prod, _ms, _mp) = _armar_modelo()
+
+    op_domain_vals = {(1, 1): [10, 11, 999999], (1, 2): [10, 11, 999999]}
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    op_domain_vals, 999999)
+
+    model.Add(op_setup == 11)
+    model.Add(op_prod == 10)
+
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) == cp_model.INFEASIBLE
+
+
+def test_dominio_de_un_solo_valor_por_dummy_no_saltea_la_regla():
+    """Cuando NADIE puede hacer el proceso, el dominio también queda en un solo valor
+    —el dummy—, y ese caso tiene que seguir arrastrando a la producción a «sin
+    asignar». Si la guarda mirara solo el largo del dominio, la preparación quedaría
+    sin nadie y la producción saldría con una persona: el dibujo exacto que Lucas
+    marcó como error."""
+    model, procesos_norm, operario_vars, maq_vars, (op_setup, op_prod, _ms, _mp) = _armar_modelo()
+
+    DUMMY = 999999
+    # El setup no lo puede hacer nadie: su dominio es [DUMMY]. (En el modelo de prueba
+    # las variables van de 10 a 11, así que alcanza con declarar el dominio.)
+    op_domain_vals = {(1, 1): [DUMMY], (1, 2): [10, 11, DUMMY]}
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    op_domain_vals, DUMMY)
+
+    model.Add(op_setup == 11)
+    model.Add(op_prod == 10)
+
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) == cp_model.INFEASIBLE, "la igualdad tiene que seguir puesta"
