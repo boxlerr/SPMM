@@ -128,3 +128,96 @@ def test_dominio_de_un_solo_valor_por_dummy_no_saltea_la_regla():
 
     solver = cp_model.CpSolver()
     assert solver.Solve(model) == cp_model.INFEASIBLE, "la igualdad tiene que seguir puesta"
+
+
+# --------------------------------------------------------------------------
+# La regla de oro con un proceso en el medio (OT 15708, Lucas 28/08)
+# --------------------------------------------------------------------------
+
+def _ot_con_proceso_en_el_medio():
+    """Preparación de soldadora MIG → Ensamblaje (manual) → Soldadura con MIG.
+
+    Es la OT 15708 tal como salió en la pantalla que Lucas marcó como error: preparó la
+    soldadora uno y soldó otro, en otra máquina. En la MISMA OT el torno salía bien
+    porque ahí la preparación y el uso eran consecutivos."""
+    model = cp_model.CpModel()
+    oid = 15708
+
+    op_prep = model.NewIntVar(10, 11, "op_prep")
+    op_medio = model.NewIntVar(10, 11, "op_medio")
+    op_sold = model.NewIntVar(10, 11, "op_sold")
+    operario_vars = {(oid, 1): op_prep, (oid, 2): op_medio, (oid, 3): op_sold}
+
+    maq_prep = model.NewIntVar(20, 21, "maq_prep")
+    maq_sold = model.NewIntVar(20, 21, "maq_sold")
+    maq_vars = {(oid, 1): maq_prep, (oid, 3): maq_sold}
+
+    procesos_norm = [
+        (oid, 100, 1, None, 5, 30, [], "PREPARACION DE SOLDADORA MIG", True, None, {}),
+        # El del medio es manual: no usa máquina. Es el que partía el par.
+        (oid, 101, 2, None, 5, 45, [], "ENSAMBLAJE, PUNTEADO Y ESCUADRADO", False, None, {}),
+        (oid, 102, 3, None, 5, 90, [], "SOLDADURA CON MIG", True, None, {}),
+    ]
+    return model, procesos_norm, operario_vars, maq_vars, (op_prep, op_sold, maq_prep, maq_sold)
+
+
+def test_un_proceso_manual_en_el_medio_ya_no_rompe_la_regla():
+    model, procesos_norm, operario_vars, maq_vars, (op_prep, op_sold, maq_prep, maq_sold) = \
+        _ot_con_proceso_en_el_medio()
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    dummy_op_id=999999)
+    model.Add(op_prep == 11)
+    model.Add(maq_prep == 21)
+
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.Value(op_sold) == 11, "el que prepara la soldadora es el que suelda"
+    assert solver.Value(maq_sold) == 21, "y usa la misma soldadora que preparó"
+
+
+def test_la_ot_que_repite_familia_empareja_uno_a_uno():
+    """Una OT puede repetir la misma familia (la 7497 tiene torno CNC 13 veces). Cada
+    preparación se lleva UNA producción, la primera que le toca: aparear todas contra
+    todas ataría trabajos que no tienen nada que ver."""
+    model = cp_model.CpModel()
+    oid = 7497
+    ops = {s: model.NewIntVar(10, 12, f"op{s}") for s in (1, 2, 3, 4)}
+    maqs = {s: model.NewIntVar(20, 22, f"maq{s}") for s in (1, 2, 3, 4)}
+    operario_vars = {(oid, s): v for s, v in ops.items()}
+    maq_vars = {(oid, s): v for s, v in maqs.items()}
+    procesos_norm = [
+        (oid, 1, 1, None, 5, 10, [], "PREPARACION DE TORNO", True, None, {}),
+        (oid, 2, 2, None, 5, 10, [], "PREPARACION DE TORNO", True, None, {}),
+        (oid, 3, 3, None, 5, 10, [], "TORNO T1", True, None, {}),
+        (oid, 4, 4, None, 5, 10, [], "TORNO T2", True, None, {}),
+    ]
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    dummy_op_id=999999)
+    # 1ª preparación con 1ª producción, 2ª con 2ª. Los dos pares pueden ir por separado.
+    model.Add(ops[1] == 10)
+    model.Add(ops[2] == 11)
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    assert solver.Value(ops[3]) == 10
+    assert solver.Value(ops[4]) == 11
+
+
+def test_una_produccion_sin_su_preparacion_no_se_ata_a_otra_familia():
+    """Preparar el torno no ata la soldadura: son familias distintas."""
+    model = cp_model.CpModel()
+    oid = 1
+    op_prep = model.NewIntVar(10, 11, "op_prep")
+    op_sold = model.NewIntVar(10, 11, "op_sold")
+    operario_vars = {(oid, 1): op_prep, (oid, 2): op_sold}
+    maq_vars = {(oid, 1): model.NewIntVar(20, 21, "m1"), (oid, 2): model.NewIntVar(20, 21, "m2")}
+    procesos_norm = [
+        (oid, 1, 1, None, 5, 10, [], "PREPARACION DE TORNO", True, None, {}),
+        (oid, 2, 2, None, 5, 10, [], "SOLDADURA CON MIG", True, None, {}),
+    ]
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
+                                    dummy_op_id=999999)
+    model.Add(op_prep == 11)
+    model.Add(op_sold == 10)
+    solver = cp_model.CpSolver()
+    assert solver.Solve(model) in (cp_model.OPTIMAL, cp_model.FEASIBLE), \
+        "no comparten familia: no hay por qué atarlos"

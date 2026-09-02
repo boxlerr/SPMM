@@ -1042,42 +1042,65 @@ def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_var
     for oid in ord_ids:
         # Procesos de esta OT ordenados por secuencia
         p_order = sorted([p for p in procesos_norm if p[0] == oid], key=lambda x: x[2])
-        
-        for i in range(len(p_order) - 1):
-            act = p_order[i]
-            sig = p_order[i+1]
-            
+
+        # ── Emparejar cada preparación con SU producción, aunque no sean vecinas.
+        #
+        # Antes esto era `for i in range(len(p_order) - 1)` comparando cada proceso con
+        # el siguiente, y cualquier cosa en el medio partía el par. Caso real de la OT
+        # 15708, que Lucas marcó como error mirando la pantalla el 28/08:
+        #     Preparación de soldadora MIG → Ensamblaje, punteado y escuadrado → Soldadura con MIG
+        # El del medio es manual y no usa máquina, así que el par preparación/soldadura
+        # nunca se evaluaba: prepara uno la soldadora y suelda otro, en otra máquina. En
+        # la MISMA OT el torno salía bien, porque ahí sí eran consecutivos.
+        #
+        # Se recorre en orden guardando las preparaciones sin pareja por familia, y cada
+        # producción se lleva la MÁS VIEJA que le corresponde. El uno a uno importa: una
+        # OT puede repetir la misma familia (la 7497 tiene torno CNC 13 veces) y aparear
+        # todas contra todas ataría trabajos que no tienen nada que ver.
+        pendientes = {}
+        pares = []
+        for proc in p_order:
+            if not proc[8]:            # no usa máquina: no puede ser ni preparación ni producción
+                continue
+            familia = familia_requerida_from_proceso(proc[7] or "")
+            if not familia:
+                continue
+            tipo = _get_tipo_proceso(proc[7])
+            if tipo == "SETUP":
+                pendientes.setdefault(familia, []).append(proc)
+            elif tipo == "PRODUCCION_MAQUINA" and pendientes.get(familia):
+                pares.append((pendientes[familia].pop(0), proc))
+
+        for act, sig in pares:
             # (orden_id, proc_id, secuencia, fecha_prometida, peso_prioridad, dur, rangos_proc, nombre_proceso,usa_maquinaria, familia_req, op_skill)
-            seq_a  = act[2]
-            name_a = act[7]
-            usa_m_a= act[8]
-            
-            seq_s  = sig[2]
-            name_s = sig[7]
-            usa_m_s= sig[8]
-            
-            # Si el actual es la preparación del siguiente (misma familia de máquina)
-            # Y ambos están marcados para usar máquina
-            if _setup_de_esta_produccion(act, sig) and usa_m_a and usa_m_s:
-                # Forzamos igualdad de la variable de máquina
-                model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
-                logger.info(f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y Seq {seq_s} ({name_s}) en OT {oid}")
-                # A2 (feedback 06/07): preparación y producción deben ser el MISMO operario.
-                # Son consecutivos en la secuencia (fin_setup <= inicio_prod), así que no hay
-                # solape temporal y la igualdad es factible. OJO: si el setup no tiene operario
-                # apto y cae en DUMMY, arrastra la producción a DUMMY también (queda visible
-                # como "sin asignar", que es el comportamiento esperado).
-                if operario_vars is not None:
-                    a_mano = (_persona_elegida_a_mano((oid, seq_a))
-                              or _persona_elegida_a_mano((oid, seq_s)))
-                    if a_mano:
-                        logger.info(
-                            f"COORDINACIÓN: Seq {seq_a} y Seq {seq_s} de la OT {oid} NO se atan al "
-                            f"mismo operario: hay una persona elegida a mano en la carga de la OT"
-                        )
-                    else:
-                        model.Add(operario_vars[(oid, seq_a)] == operario_vars[(oid, seq_s)])
-                        logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
+            seq_a, name_a = act[2], act[7]
+            seq_s, name_s = sig[2], sig[7]
+
+            # La misma máquina: es lo que evita que la preparación reserve una soldadora
+            # y la soldadura use otra.
+            model.Add(maq_vars[(oid, seq_a)] == maq_vars[(oid, seq_s)])
+            logger.info(
+                f"COORDINACIÓN: Vinculando máquinas de Seq {seq_a} ({name_a}) y "
+                f"Seq {seq_s} ({name_s}) en OT {oid}"
+            )
+
+            # A2 (feedback 06/07): preparación y producción deben ser el MISMO operario.
+            # La preparación va antes en la secuencia (fin_setup <= inicio_prod), así que
+            # no hay solape temporal y la igualdad es factible aunque tengan procesos en el
+            # medio. OJO: si el setup no tiene operario apto y cae en DUMMY, arrastra la
+            # producción a DUMMY también (queda visible como "sin asignar", que es el
+            # comportamiento esperado).
+            if operario_vars is None:
+                continue
+            if (_persona_elegida_a_mano((oid, seq_a))
+                    or _persona_elegida_a_mano((oid, seq_s))):
+                logger.info(
+                    f"COORDINACIÓN: Seq {seq_a} y Seq {seq_s} de la OT {oid} NO se atan al "
+                    f"mismo operario: hay una persona elegida a mano en la carga de la OT"
+                )
+                continue
+            model.Add(operario_vars[(oid, seq_a)] == operario_vars[(oid, seq_s)])
+            logger.info(f"COORDINACIÓN: Vinculando operario de Seq {seq_a} y Seq {seq_s} en OT {oid}")
 
 
 def _agregar_compatibilidad_op_maq(
