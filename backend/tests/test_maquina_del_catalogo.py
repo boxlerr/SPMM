@@ -74,3 +74,17 @@ def test_una_maquina_dada_de_baja_no_rompe_el_dominio():
     de dejar el proceso sin ninguna candidata."""
     dom = _dominio_de_maquina("TORNO T1", {500: [999999]})
     assert TORNO_1 in dom, "la máquina cargada no existe: vale la deducción por nombre"
+
+
+def test_la_ruta_quien_puede_no_la_come_la_parametrica():
+    """`/procesos/quien-puede` tiene que estar registrada ANTES de `/procesos/{id}`.
+
+    FastAPI matchea en orden de registro: con la paramétrica primero, «quien-puede» se
+    intenta parsear como entero y la respuesta es «no es un entero válido». Salió en
+    producción, no en los tests, porque la ruta andaba en local (donde se probó suelta)
+    y sólo fallaba con el router entero armado."""
+    from backend.presentation.main import app
+
+    rutas = [r.path for r in app.routes if getattr(r, "path", "").startswith("/procesos")]
+    assert "/procesos/quien-puede" in rutas
+    assert rutas.index("/procesos/quien-puede") < rutas.index("/procesos/{id}")

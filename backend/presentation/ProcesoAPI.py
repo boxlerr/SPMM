@@ -31,17 +31,9 @@ async def listar_procesos(db=Depends(get_db)):
     return await service.listarProcesos()
 
 # 🔹 Obtener proceso por ID
-@router.get("/procesos/{id}")
-async def obtener_proceso(id: int, db=Depends(get_db)):
-    service = ProcesoService(db)
-    return await service.obtenerProcesoPorId(id)
-
-# 🔹 Modificar proceso
-@router.put("/procesos/{id}")
-async def modificar_proceso(id: int, proceso_dto: ProcesoRequestDTO, db=Depends(get_db)):
-    service = ProcesoService(db)
-    return await service.modificarProceso(id, proceso_dto)
-
+# OJO con el orden: esta va ANTES de /procesos/{id}.
+# FastAPI matchea en orden de registro, así que si la paramétrica se declara
+# primero se come "quien-puede" y contesta "no es un entero válido".
 # 🔹 Quién puede hacer cada proceso
 @router.get("/procesos/quien-puede")
 async def quien_puede_hacer_cada_proceso(db=Depends(get_db)):
@@ -87,6 +79,17 @@ async def quien_puede_hacer_cada_proceso(db=Depends(get_db)):
 
     return ResponseDTO(status=True, data={str(k): sorted(v) for k, v in puede.items()})
 
+
+@router.get("/procesos/{id}")
+async def obtener_proceso(id: int, db=Depends(get_db)):
+    service = ProcesoService(db)
+    return await service.obtenerProcesoPorId(id)
+
+# 🔹 Modificar proceso
+@router.put("/procesos/{id}")
+async def modificar_proceso(id: int, proceso_dto: ProcesoRequestDTO, db=Depends(get_db)):
+    service = ProcesoService(db)
+    return await service.modificarProceso(id, proceso_dto)
 
 # 🔹 En qué máquinas se hace este proceso
 @router.put("/procesos/{id}/maquinarias")
