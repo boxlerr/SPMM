@@ -305,3 +305,72 @@ def test_los_avisos_media_llevan_a_la_fila_que_hay_que_tocar():
     assert d["severidad"] == "advertencia"
     objetivo = d["soluciones"][0]["objetivo"]
     assert objetivo["tipo"] == "proceso" and objetivo["id"] == 77
+
+
+# --------------------------------------------------------------------------
+# «Se las abrís a 9 personas» no es «se reparte entre las 9»
+# --------------------------------------------------------------------------
+
+def _solucion_de_maquina(d):
+    """La solución que le agrega el rango A LA MÁQUINA — la del "se las abrís a N".
+
+    Se busca por la acción y no por el texto: la otra solución del mismo aviso dice
+    "no se la abrís a nadie nuevo" y un contains ingenuo la agarra a ella.
+    """
+    return next(s["texto"] for s in d["soluciones"]
+                if s.get("accion") and s["accion"]["tipo"] == "maquinaria")
+
+
+def test_habilitar_a_varios_aclara_que_no_se_reparte():
+    """Lucas leyó "se las abrís a 9 personas" como que el sistema iba a repartir el
+    trabajo parejo entre las nueve, y le pareció mal (28/08). El motor ya prefiere la
+    habilidad principal —PENAL_SKILL1=0 contra PENAL_SKILL2=2000—; el que estaba mal
+    escrito era el aviso. Ahora el aviso nombra a quien lo va a tomar."""
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    nombre_operario = {**NOMBRE_OPERARIO, 32: "LEONARDO CONDORI"}
+    # GUILLERMO y LEONARDO tienen OFICIAL: agregarle OFICIAL a la máquina abre a los dos.
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR), (32, OFICIAL)]
+    proc = (15279, 87, 2, None, 5, 240, [OFICIAL], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos(
+        [proc], operarios, maqs, res, nombre_rango, nombre_operario,
+        # LEONARDO lo tiene como principal (nivel 1); GUILLERMO como secundaria.
+        prioridad_skills={87: {32: (1, 0), 31: (2, 0)}},
+    )
+    d = _por_tipo(diags, "maquina_incompatible")
+    abrir = _solucion_de_maquina(d)
+    assert "**2** personas" in abrir
+    assert "Habilitadas, no repartidas" in abrir
+    assert "LEONARDO" in abrir
+
+
+def test_sin_habilidad_principal_cargada_no_inventa_nombre():
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    nombre_operario = {**NOMBRE_OPERARIO, 32: "LEONARDO CONDORI"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR), (32, OFICIAL)]
+    proc = (15279, 87, 2, None, 5, 240, [OFICIAL], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, nombre_operario)
+    abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
+    assert "Habilitadas, no repartidas" in abrir
+    assert "que lo tiene como principal" not in abrir
+
+
+def test_una_sola_persona_no_lleva_la_aclaracion():
+    """Con uno solo la aclaración sobra: no hay entre quiénes repartir."""
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR)]
+    proc = (15279, 87, 2, None, 5, 240, [OFICIAL], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
+    abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
+    assert "Habilitadas, no repartidas" not in abrir

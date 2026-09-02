@@ -45,6 +45,30 @@ from backend.application.PlanificacionService import (
     _norm,
 )
 
+# ── El criterio de severidad (Lucas, 28/08/2026) ─────────────────────────────
+#
+# Lucas lo aprobó tal cual está y pidió no tocarlo, así que queda escrito acá, al
+# lado de las constantes, y no en un documento aparte que nadie abre:
+#
+#     Alta  = sin esto no puedo planificar.
+#     Media = recomendación para afinar.
+#
+# La traducción honesta a lo que el código hace de verdad, que NO es idéntica y es
+# lo que se necesita saber para clasificar un aviso nuevo:
+#
+#     BLOQUEANTE (Alta)  → algo del plan salió mal por falta de un dato que está en
+#                          Recursos: el proceso quedó sin persona, o se hace pero la
+#                          máquina no queda reservada y otra OT puede tomarla a la
+#                          misma hora. Cargando ese dato, el plan cambia.
+#     ADVERTENCIA (Media) → el plan sale igual que si el aviso no existiera. O no hay
+#                          nada que corregir (un tercerizado, un trabajo manual), o lo
+#                          que falta lo sabe el taller y no el planificador.
+#
+# Ojo con la palabra: el planificador SIEMPRE devuelve un plan y nada impide
+# confirmarlo. "Bloqueante" no frena la pantalla, frena el trabajo en el taller.
+#
+# En pantalla estos dos valores se leen «Alta» y «Media» — los nombres de acá no
+# aparecen nunca en la interfaz (ver el chip en DiagnosticosPlan.tsx).
 BLOQUEANTE = "bloqueante"
 ADVERTENCIA = "advertencia"
 
@@ -180,12 +204,17 @@ def construir_diagnosticos(
     ots_con_plano=None,
     op_planos=None,
     rangos_efectivos=None,
+    prioridad_skills=None,
 ):
     """
     procesos      : tuplas que se le pasan al solver
     operarios     : [(id_operario, id_rango)] — solo los disponibles
     maquinarias   : [(id, {rangos}, nombre, cod_maquina)]
     resultados    : lista de dicts que devolvió el solver
+    prioridad_skills : proceso_id -> {operario_id: (nivel, orden)}. El MISMO mapa que
+                    usa el solver para preferir la habilidad principal. No define quién
+                    puede: solo sirve para poder decir en el aviso quién va a tomar el
+                    trabajo cuando una solución habilita a varios.
     """
     skills_manuales = skills_manuales or {}
     nativas_off = nativas_off or {}
@@ -229,7 +258,7 @@ def construir_diagnosticos(
     diagnosticos += _procesos_sin_maquina_compatible(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
         ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
-        ots_con_plano, op_planos, rangos_crudos,
+        ots_con_plano, op_planos, rangos_crudos, prioridad_skills,
     )
     diagnosticos += _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango)
     diagnosticos += _trabajo_tercerizado(procesos)
@@ -327,7 +356,25 @@ def _cerrar(texto: str) -> str:
 
 
 
-def _accion_proceso(proc_id, nombre_proc, rangos_finales):
+def _cambio(rangos_finales, rangos_actuales, nombre_rango):
+    """Qué se le agrega y qué tenía, en nombres, para poder mostrarlo ANTES de aplicar.
+
+    `rangos` viaja como conjunto FINAL porque el endpoint reemplaza, y un conjunto
+    final no se puede leer: "OFICIAL, MEDIO OFICIAL, OPERARIO CALIFICADO" no dice si
+    agrega uno o tres. Lo que hay que poder ver antes de apretar es la DIFERENCIA
+    —"le agrego OFICIAL"—, que es el pedido de Lucas del 28/08: *"te da miedo apretar"*.
+
+    Se calcula acá y no en pantalla: los ids de rango no significan nada del otro lado.
+    """
+    if not nombre_rango:
+        return {}
+    actuales = set(rangos_actuales or ())
+    finales = set(rangos_finales or ())
+    nombres = lambda ids: [nombre_rango.get(r, f"#{r}") for r in sorted(ids)]
+    return {"suma": nombres(finales - actuales), "tenia": nombres(actuales)}
+
+
+def _accion_proceso(proc_id, nombre_proc, rangos_finales, nombre_rango=None, rangos_actuales=None):
     """Cargarle rangos a un proceso, listo para que el botón lo aplique solo.
 
     El endpoint es un REEMPLAZO, así que va el conjunto FINAL —los que ya tenía
@@ -339,10 +386,16 @@ def _accion_proceso(proc_id, nombre_proc, rangos_finales):
         "id": proc_id,
         "nombre": nombre_proc,
         "rangos": sorted(rangos_finales),
+        "objetivos": [{
+            "id": proc_id,
+            "nombre": nombre_proc,
+            "rangos": sorted(rangos_finales),
+            **_cambio(rangos_finales, rangos_actuales, nombre_rango),
+        }],
     }
 
 
-def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar):
+def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar, nombre_rango=None):
     """Cargarle rangos a las máquinas candidatas.
 
     Antes, con más de una máquina no se ofrecía botón: tocar un parque entero de un
@@ -367,6 +420,10 @@ def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar):
                 "id": m,
                 "nombre": maq_nombre[m],
                 "rangos": sorted(set(maq_rangos.get(m, set())) | set(rangos_a_sumar)),
+                # Qué le cambia a ESTA máquina. No todas parten de lo mismo: una puede
+                # sumar dos rangos y la de al lado ninguno.
+                **_cambio(set(maq_rangos.get(m, set())) | set(rangos_a_sumar),
+                          maq_rangos.get(m, set()), nombre_rango),
             }
             for m in maquinas
         ],
@@ -433,6 +490,52 @@ def _cuantas_personas(rangos_ids, ops_por_rango, nombre_operario) -> str:
     if n == 0:
         return "nadie"
     return f"**{n}** {_concuerda(n, 'persona', 'personas')}"
+
+
+def _quien_lo_toma_primero(proc_id, personas, prioridad_skills, nombre_operario) -> str:
+    """De la gente que queda habilitada, quién va a agarrar el trabajo primero.
+
+    Habilitar no es repartir. El solver penaliza el nivel 2 (`PENAL_SKILL2 = 2000`) y
+    deja el nivel 1 en cero, así que entre nueve habilitados el trabajo cae en el que
+    lo tiene como habilidad principal, no parejo entre todos.
+
+    Lucas leyó "se las abrís a 9 personas" como que el sistema iba a repartir entre las
+    nueve y le pareció mal (28/08): *"que los habilite está bien, ahora que los pondere
+    a los nueve por igual está mal"*. El motor ya hacía lo correcto — el que estaba mal
+    escrito era el aviso. Devolver el nombre es lo que cierra la discusión: no le pedimos
+    que nos crea, le decimos quién lo va a tomar.
+
+    Devuelve "" si no hay nadie con la habilidad principal cargada, y ahí el aviso dice
+    la versión corta ("no se reparte parejo") en vez de inventar un nombre.
+    """
+    if not prioridad_skills or not personas:
+        return ""
+    del_proceso = prioridad_skills.get(proc_id) or {}
+    principales = []
+    for op in personas:
+        entrada = del_proceso.get(op)
+        # El mapa emite (nivel, orden); antes emitía el nivel pelado. Se banca los dos.
+        nivel = entrada[0] if isinstance(entrada, (tuple, list)) else entrada
+        if nivel == 1:
+            principales.append(op)
+    if not principales:
+        return ""
+    return _listar(sorted(_primer_nombre(nombre_operario.get(o, f"#{o}")) for o in principales))
+
+
+def _no_se_reparte(proc_id, rangos_ids, ops_por_rango, prioridad_skills, nombre_operario) -> str:
+    """La aclaración que va pegada a "se las abrís a N personas".
+
+    Una sola frase, y solo cuando hay más de uno: con una persona sola la aclaración
+    sobra y el aviso ya es largo.
+    """
+    personas = _personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario)
+    if len(personas) < 2:
+        return ""
+    principal = _quien_lo_toma_primero(proc_id, personas, prioridad_skills, nombre_operario)
+    if principal:
+        return f" Habilitadas, no repartidas: lo va a seguir tomando **{principal}**, que lo tiene como principal."
+    return " Habilitadas, no repartidas: el trabajo no se parte entre todas."
 
 
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
@@ -722,7 +825,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
                 "texto": f"Si **{_listar([maq_nombre[m] for m in sin_habilitar])}** también puede hacer este "
                          f"trabajo, agregale **{rangos_txt}** y el trabajo se reparte entre más máquinas.",
                 "donde": "Recursos › Recurso maquinaria",
-                "accion": _accion_maquina(sin_habilitar, maq_nombre, maq_rangos, d["rangos"]),
+                "accion": _accion_maquina(sin_habilitar, maq_nombre, maq_rangos, d["rangos"], nombre_rango),
             })
         soluciones.append({
             "texto": "O planificá menos OTs juntas: con menos trabajo en la misma máquina, las fechas se acercan.",
@@ -797,7 +900,7 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
 def _procesos_sin_maquina_compatible(
     procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
     ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
-    ots_con_plano=None, op_planos=None, rangos_crudos=None,
+    ots_con_plano=None, op_planos=None, rangos_crudos=None, prioridad_skills=None,
 ):
     """El proceso pidió máquina y no la consiguió. Acá se explica por qué.
 
@@ -1051,15 +1154,18 @@ def _procesos_sin_maquina_compatible(
                              + _concuerda(maqs, "la máquina ya acepta", "las máquinas ya aceptan")
                              + ", así que no se la abrís a nadie nuevo.",
                     "donde": "Recursos › Procesos",
-                    "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids),
+                    "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids,
+                                              nombre_rango, d["crudos"]),
                 })
             abre_a = _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario)
             soluciones.append({
                 "texto": f"Al revés: agregale **{pide_proc}** a "
                          + _concuerda(maqs, "la máquina", f"las {len(maqs)} máquinas")
-                         + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a {abre_a}.",
+                         + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a {abre_a}."
+                         + _no_se_reparte(proc_id, d["rangos"], ops_por_rango,
+                                          prioridad_skills, nombre_operario),
                 "donde": "Recursos › Recurso maquinaria",
-                "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"]),
+                "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"], nombre_rango),
             })
             _como_alternativa(soluciones)
             # Va DESPUÉS del "O ", y sin "O ", porque no es una opción: es el atajo que
@@ -1122,9 +1228,11 @@ def _procesos_sin_maquina_compatible(
                     "texto": f"Agregale **{_listar_rangos(rangos_proc)}** a "
                              + _concuerda(maqs, "la máquina", "las máquinas")
                              + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a "
-                             + _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario) + ".",
+                             + _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario) + "."
+                             + _no_se_reparte(proc_id, d["rangos"], ops_por_rango,
+                                              prioridad_skills, nombre_operario),
                     "donde": "Recursos › Recurso maquinaria",
-                    "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"]),
+                    "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"], nombre_rango),
                 })
             _como_alternativa(soluciones)
 

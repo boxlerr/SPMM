@@ -136,8 +136,14 @@ export interface DiagnosticoAccion {
     rangos?: number[];
     /** Para skill_nativa: a qué estado se lleva la habilidad. */
     habilitado?: boolean;
-    /** Cada cosa a tocar. Para skill_nativa son operarios; si no, procesos o máquinas. */
-    objetivos?: { id: number; nombre: string; rangos?: number[] }[];
+    /**
+     * Cada cosa a tocar. Para skill_nativa son operarios; si no, procesos o máquinas.
+     *
+     * `suma` y `tenia` vienen con los NOMBRES de los rangos, no con ids: son lo que se
+     * muestra antes de aplicar. `rangos` es el conjunto final que se manda al endpoint
+     * (reemplaza), y un conjunto final no se puede leer — no dice si agrega uno o tres.
+     */
+    objetivos?: { id: number; nombre: string; rangos?: number[]; suma?: string[]; tenia?: string[] }[];
 }
 
 export interface DiagnosticoSolucion {
@@ -258,6 +264,78 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
     }
 
     return `/recursos?${params.toString()}`;
+}
+
+/**
+ * Qué toca la solución, dicho ANTES de aplicarla.
+ *
+ * Lucas, 28/08: *"te da miedo apretar"*. El botón decía "Aplicar y recalcular" y no
+ * había forma de saber qué iba a cambiar hasta después de que cambiara. Esto lo dice
+ * con nombre y apellido: qué máquina, qué le agrega y qué tenía hasta ahora.
+ *
+ * Los nombres de los rangos los manda el backend en `suma` / `tenia`: acá los ids no
+ * significan nada, y traducirlos en pantalla obligaría a pedir la tabla de rangos solo
+ * para armar un cartel. Si el backend es viejo y no los manda, se muestra igual la
+ * lista de lo que se toca — que ya es más de lo que había antes.
+ */
+function ResumenDelCambio({ accion }: { accion: DiagnosticoAccion }) {
+    const objetivos = accion.objetivos?.length
+        ? accion.objetivos
+        : [{ id: accion.id, nombre: accion.nombre, rangos: accion.rangos, suma: undefined, tenia: undefined }];
+
+    const linea = (o: { nombre: string; suma?: string[]; tenia?: string[] }) => {
+        if (accion.tipo === "skill_nativa") {
+            return (
+                <>
+                    A <strong>{o.nombre}</strong>{" "}
+                    {accion.habilitado === false ? "le apago" : "le vuelvo a encender"}{" "}
+                    <strong>{accion.nombre}</strong> en su ficha.
+                </>
+            );
+        }
+        const que = accion.tipo === "proceso" ? "Al proceso" : "A";
+        if (o.suma && o.suma.length === 0) {
+            return (
+                <>
+                    {que} <strong>{o.nombre}</strong> no le cambia nada: ya lo tiene.
+                </>
+            );
+        }
+        return (
+            <>
+                {que} <strong>{o.nombre}</strong>
+                {o.suma?.length ? (
+                    <>
+                        {" "}le agrego <strong>{o.suma.join(" y ")}</strong>
+                        {o.tenia?.length
+                            ? <span className="text-amber-800/70"> (hoy tiene {o.tenia.join(", ")})</span>
+                            : <span className="text-amber-800/70"> (hoy no tiene ninguno)</span>}
+                    </>
+                ) : (
+                    <> le cambio los rangos.</>
+                )}
+            </>
+        );
+    };
+
+    return (
+        <div className="border-t border-amber-200 bg-amber-50/70 px-3 py-2">
+            <p className="text-[10.5px] font-bold uppercase tracking-wide text-amber-900">
+                Esto es lo que va a cambiar
+            </p>
+            <ul className="mt-1 space-y-0.5">
+                {objetivos.map((o) => (
+                    <li key={`${accion.tipo}-${o.id}`} className="text-[11.5px] leading-snug text-amber-950">
+                        · {linea(o)}
+                    </li>
+                ))}
+            </ul>
+            <p className="mt-1 text-[10.5px] text-amber-800/80">
+                Se guarda en Recursos y el plan se calcula de nuevo. Se puede volver a cambiar
+                desde Recursos cuando quieras.
+            </p>
+        </div>
+    );
 }
 
 export function DiagnosticosPlan({
@@ -681,20 +759,79 @@ export function DiagnosticosPlan({
                 que algo se arregló, no algo para leer. */}
             {!colapsado && (resueltos.length > 0 || aMano.length > 0) && (
                 <ul className="border-t bg-emerald-50/40 p-2 space-y-1">
-                    {resueltos.map((d) => (
-                        <li
-                            key={`resuelto-${d.id}`}
-                            className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white/70 px-2 py-1"
-                        >
-                            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                            <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
-                                Resuelto
-                            </span>
-                            <span className="flex-1 min-w-0 truncate text-[13px] leading-tight text-gray-500 line-through decoration-emerald-600/40">
-                                {d.titulo}
-                            </span>
-                        </li>
-                    ))}
+                    {/* Un aviso resuelto se sigue pudiendo abrir.
+                        Antes esta fila era texto muerto: aplicabas la solución, el aviso
+                        bajaba acá tachado y no había forma de volver a tocarlo para ver
+                        qué era ni qué se había cambiado (Lucas, 28/08 00:37:44). Ahora
+                        despliega el problema original, cuál de las soluciones se aplicó y
+                        el link a Recursos para ir a mirarlo o dejarlo como estaba. */}
+                    {resueltos.map((d) => {
+                        const clave = `resuelto-${d.id}`;
+                        const abierta = abiertos.has(clave);
+                        const iAplicada = d.soluciones.findIndex((_, i) => aplicadas.has(`${d.id}-${i}`));
+                        const solAplicada = iAplicada >= 0 ? d.soluciones[iAplicada] : null;
+                        const linkResuelto = solAplicada
+                            ? enlaceDe(solAplicada.donde, solAplicada.accion, solAplicada.objetivo)
+                            : null;
+                        return (
+                            <li
+                                key={clave}
+                                className="rounded-lg border border-emerald-200 bg-white/70 overflow-hidden"
+                            >
+                                <button
+                                    type="button"
+                                    aria-expanded={abierta}
+                                    onClick={() => toggle(clave)}
+                                    className="flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-emerald-50/60 transition-colors"
+                                >
+                                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                                    <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
+                                        Resuelto
+                                    </span>
+                                    <span className={cn(
+                                        "flex-1 min-w-0 text-[13px] leading-tight text-gray-500 decoration-emerald-600/40",
+                                        abierta ? "line-clamp-none" : "truncate line-through"
+                                    )}>
+                                        {d.titulo}
+                                    </span>
+                                    <ChevronDown className={cn(
+                                        "w-3.5 h-3.5 shrink-0 text-emerald-700/50 transition-transform",
+                                        abierta && "rotate-180"
+                                    )} />
+                                </button>
+                                {abierta && (
+                                    <div className="border-t border-emerald-100 bg-white/60 px-3 py-2 space-y-1.5">
+                                        <p className="text-[11.5px] leading-snug text-gray-600">
+                                            <span className="font-semibold text-gray-700">Qué pasaba: </span>
+                                            {conNegritas(d.detalle)}
+                                        </p>
+                                        {solAplicada ? (
+                                            <p className="text-[11.5px] leading-snug text-gray-600">
+                                                <span className="font-semibold text-emerald-700">Se aplicó: </span>
+                                                {conNegritas(solAplicada.texto)}
+                                            </p>
+                                        ) : (
+                                            <p className="text-[11.5px] leading-snug text-gray-500">
+                                                Dejó de aparecer al recalcular: se arregló afuera, en Recursos.
+                                            </p>
+                                        )}
+                                        {linkResuelto && (
+                                            <a
+                                                href={linkResuelto}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-white px-1.5 py-0.5 text-[10.5px] font-semibold text-emerald-800 hover:bg-emerald-50 transition-colors"
+                                                title={`Abrir ${solAplicada?.donde} para revisar cómo quedó`}
+                                            >
+                                                Ver cómo quedó
+                                                <ArrowUpRight className="w-3 h-3" />
+                                            </a>
+                                        )}
+                                    </div>
+                                )}
+                            </li>
+                        );
+                    })}
 
                     {/* Los marcados a mano van en la misma tira pero NO dicen
                         "Resuelto": dicen quién lo dio por resuelto. La diferencia
@@ -767,6 +904,14 @@ export function DiagnosticosPlan({
                         // los dos lados marca el mismo botón.
                         const claveSol = `${d.id}-${iSol}`;
                         const hecha = aplicadas.has(claveSol);
+                        // La solución de ESTA tarjeta que está esperando confirmación, si
+                        // hay alguna. La clave es `${d.id}-${i}` y el id del aviso trae
+                        // guiones ("maquina-incompatible-101"), así que se parte por el
+                        // ÚLTIMO, no por el primero.
+                        const iArmada = confirmando && confirmando.slice(0, confirmando.lastIndexOf("-")) === d.id
+                            ? Number(confirmando.slice(confirmando.lastIndexOf("-") + 1))
+                            : -1;
+                        const armada = iArmada >= 0 ? d.soluciones[iArmada] : null;
                         const link = sol ? enlaceDe(sol.donde, sol.accion, sol.objetivo) : null;
                         const otras = d.soluciones.length - 1;
 
@@ -834,9 +979,15 @@ export function DiagnosticosPlan({
                                                         "shrink-0 w-[38px] text-center rounded px-1 text-[9px] font-bold uppercase leading-[15px] tracking-wide",
                                                         esBloq ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"
                                                     )}
+                                                    /* El criterio, con las palabras de Lucas (28/08) y no
+                                                       con las nuestras: "alta = sin esto no puedo
+                                                       planificar, media = recomendación". Estaba
+                                                       acordado y aplicado, pero en ningún lado escrito:
+                                                       el que abría la pantalla por primera vez tenía que
+                                                       deducirlo del color. */
                                                     title={esBloq
-                                                        ? "Traba: quedó sin resolver en el plan"
-                                                        : "Aviso: el plan sale igual"}
+                                                        ? "Alta: sin esto no se puede planificar bien. Falta un dato de Recursos y por eso el trabajo quedó sin persona, o la máquina no queda reservada."
+                                                        : "Media: recomendación para afinar. El plan sale igual con el aviso o sin él; lo que falta lo sabe el taller."}
                                                 >
                                                     {esBloq ? "Alta" : "Media"}
                                                 </span>
@@ -1223,6 +1374,41 @@ export function DiagnosticosPlan({
                                             </button>
                                         </div>
                                     </div>
+                                )}
+
+                                {/* El paso de confirmación, con el cambio escrito.
+                                    Antes el botón armado solo decía "Tocá de nuevo": pedía
+                                    confirmar sin haber dicho nunca qué. Vale para el botón
+                                    plegado y para los de la lista desplegada — sale de
+                                    `confirmando`, que es el mismo estado para los dos.
+
+                                    `onMouseDown` con preventDefault en los botones: el botón
+                                    de arriba limpia `confirmando` en su onBlur, así que sin
+                                    esto el panel se desmontaba antes de que el click llegara. */}
+                                {armada?.accion && (
+                                    <>
+                                        <ResumenDelCambio accion={armada.accion} />
+                                        <div className="flex flex-wrap items-center justify-end gap-2 bg-amber-50/70 px-3 pb-2">
+                                            <button
+                                                type="button"
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                onClick={() => setConfirmando(null)}
+                                                className="rounded px-2 py-1 text-[11px] font-medium text-amber-900/70 hover:bg-amber-100 hover:text-amber-900 transition-colors"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <Button
+                                                size="sm"
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                onClick={() => aplicar(confirmando!, armada.accion!)}
+                                                disabled={aplicando !== null}
+                                                className="h-6 gap-1 bg-emerald-600 px-2 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                                            >
+                                                {aplicando !== null && <Loader2 className="w-3 h-3 animate-spin" />}
+                                                Sí, aplicalo
+                                            </Button>
+                                        </div>
+                                    </>
                                 )}
                             </li>
                         );
