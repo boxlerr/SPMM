@@ -47,6 +47,36 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "primer-ingreso-cambiar-contrasena",
+        fecha: "2026-09-02",
+        tipo: "nuevo",
+        seccion: "General",
+        titulo: "La primera vez que entrás, elegís tu propia contraseña",
+        detalle:
+            "A quien recién le dan de alta le pasan la contraseña por chat, así que hasta que la cambie está escrita en algún lado. Ahora, la primera vez que entra, el sistema le pide una suya antes de dejarlo pasar — una sola vez. Y en Configuración › Mi cuenta cualquiera la puede cambiar cuando quiera: el sistema tenía cómo hacerlo pero no había pantalla, así que en los hechos nadie podía.",
+        href: "/configuracion?tab=mi-cuenta",
+    },
+    {
+        id: "quien-puede-hacer-cada-trabajo",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones › Nueva OT",
+        titulo: "Al elegir quién hace un proceso, ves quién puede y quién no",
+        detalle:
+            "El desplegable mostraba a todos por igual, así que se podía asignar a alguien que no tiene ese trabajo habilitado y el problema recién aparecía al planificar. Ahora los que pueden hacerlo van primero, y los que no quedan abajo con un «no lo tiene habilitado» al lado. No bloquea nada: si el que sabe no está, lo elegís igual — el sistema avisa, no decide.",
+        href: "/operaciones",
+    },
+    {
+        id: "hoja-de-taller-columna-dia",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "La hoja impresa trae columna «Día», así no hay que cargar el proceso dos veces",
+        detalle:
+            "Cuando un trabajo llevaba dos días, se cargaba el proceso dos veces en la orden para tener dos renglones donde anotar. Eso rompía el orden de los pasos y el planificador veía dos trabajos donde hay uno. Ahora cada proceso sale impreso con tres renglones numerados Día 1, 2 y 3, cada uno con su fecha, hora de inicio y de fin: se carga una sola vez y se anota día por día.",
+        href: "/operaciones",
+    },
+    {
         id: "borrar-proceso-del-catalogo",
         fecha: "2026-09-02",
         tipo: "nuevo",

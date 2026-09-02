@@ -25,6 +25,10 @@ class Usuario(Base):
     apellido = Column(String(100), nullable=False)
     rol = Column(String(20), nullable=False, default="admin")
     activo = Column(Boolean, nullable=False, default=True)
+    # Lo obliga a poner una contraseña suya la primera vez que entra. Se prende al dar
+    # de alta a alguien (la contraseña inicial se la pasa otra persona, así que hasta
+    # que la cambie está escrita en un chat) y se apaga sola en cuanto la cambia.
+    debe_cambiar_password = Column(Boolean, nullable=False, default=False)
     reset_token = Column(String(255), nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
     fecha_creacion = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -43,6 +47,7 @@ class Usuario(Base):
             "apellido": self.apellido,
             "rol": self.rol,
             "activo": self.activo,
+            "debe_cambiar_password": bool(self.debe_cambiar_password),
             "fecha_creacion": self.fecha_creacion.isoformat() if self.fecha_creacion else None,
             "fecha_actualizacion": self.fecha_actualizacion.isoformat() if self.fecha_actualizacion else None,
             "ultimo_login": self.ultimo_login.isoformat() if self.ultimo_login else None,

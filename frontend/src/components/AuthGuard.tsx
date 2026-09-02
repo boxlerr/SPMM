@@ -3,13 +3,14 @@
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import PrimerIngreso from '@/components/usuarios/PrimerIngreso';
 
 interface AuthGuardProps {
   children: React.ReactNode;
 }
 
 export default function AuthGuard({ children }: AuthGuardProps) {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user, refreshUser } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -46,6 +47,16 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   // (se redirigirá en el useEffect)
   if (isAuthenticated && pathname === '/login') {
     return null;
+  }
+
+  // Primera vez que entra: no ve el sistema hasta poner una contraseña suya.
+  //
+  // La inicial se la pasó otra persona por chat, así que hasta que la cambie está
+  // escrita en algún lado. Va acá y no en una página aparte a propósito: desde una
+  // ruta se puede volver atrás o escribir otra en la barra; desde acá, no hay sistema
+  // hasta que la cambie.
+  if (isAuthenticated && user?.debe_cambiar_password) {
+    return <PrimerIngreso onListo={refreshUser} />;
   }
 
   return <>{children}</>;

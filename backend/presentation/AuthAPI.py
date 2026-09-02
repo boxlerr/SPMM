@@ -374,6 +374,10 @@ async def crear_usuario(
             apellido=usuario_dto.apellido,
             rol=usuario_dto.rol,
             activo=usuario_dto.activo,
+            # La contraseña inicial la elige quien da de alta y se la pasa por chat, así
+            # que hasta que el dueño de la cuenta ponga una suya está escrita en algún
+            # lado. La primera vez que entre, el sistema no lo deja seguir sin cambiarla.
+            debe_cambiar_password=True,
             creado_por=current_user['id_usuario']
         )
         

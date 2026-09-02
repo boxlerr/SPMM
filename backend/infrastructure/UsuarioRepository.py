@@ -107,6 +107,8 @@ class UsuarioRepository:
                 .where(Usuario.id_usuario == id_usuario)
                 .values(
                     password_hash=password_hash,
+                    # Eligió una suya: ya no hay nada que forzar.
+                    debe_cambiar_password=False,
                     reset_token=None,
                     reset_token_expiry=None,
                     fecha_actualizacion=datetime.utcnow(),

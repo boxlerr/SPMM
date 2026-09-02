@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UsuariosTable from '@/components/usuarios/UsuariosTable';
+import CambiarPassword from '@/components/usuarios/CambiarPassword';
 import { formatNotificationMessage } from '@/lib/utils';
 import { API_URL } from '@/config';
 
@@ -35,7 +36,7 @@ export default function ConfiguracionPage() {
   // Leer el parámetro 'tab' de la URL al cargar
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl && ['usuarios', 'notificaciones', 'sistema'].includes(tabFromUrl)) {
+    if (tabFromUrl && ['usuarios', 'mi-cuenta', 'notificaciones', 'sistema'].includes(tabFromUrl)) {
       setActiveTab(tabFromUrl);
     }
   }, [searchParams]);
@@ -55,6 +56,13 @@ export default function ConfiguracionPage() {
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
+      )
+    },
+    {
+      id: 'mi-cuenta',
+      label: 'Mi cuenta',
+      icon: (
+        <User className="w-5 h-5" />
       )
     },
     {
@@ -291,6 +299,19 @@ export default function ConfiguracionPage() {
             )}
           </div>
         );
+      case 'mi-cuenta':
+        return (
+          <div className="p-6">
+            <div className="mb-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-1">Mi cuenta</h3>
+              <p className="text-sm text-gray-500">
+                {user ? `Entraste como ${user.nombre ?? ''} ${user.apellido ?? ''} (${user.username ?? ''}).` : 'Tu usuario.'}
+              </p>
+            </div>
+            <CambiarPassword />
+          </div>
+        );
+
       case 'sistema':
         const systemInfo = {
           version: '1.0.0',

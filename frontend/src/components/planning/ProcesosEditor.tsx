@@ -102,6 +102,16 @@ interface ProcesosEditorProps {
      * uno las ve es justo cuando busca el proceso bueno y aparece la basura al lado.
      */
     onEliminarProceso?: (id: string, nombre: string) => void | Promise<void>;
+    /**
+     * {proceso_id: [operario_id]} — quién puede hacer cada trabajo.
+     *
+     * Con el mismo criterio que usa el planificador: rango del operario × rangos del
+     * proceso, más las habilidades a mano, menos las apagadas. Sirve para mostrar en
+     * gris a quien no puede, NO para bloquearlo: elegirlo igual es una decisión válida
+     * —si alguien se lesiona, el trabajo lo hace otro— y el sistema no es quién para
+     * decir que no. Sin este dato, todos se ven normales, como hasta ahora.
+     */
+    quienPuede?: Record<string, number[]>;
 }
 
 const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,180px)_minmax(0,180px)_90px_40px] gap-2 items-center";
@@ -127,6 +137,7 @@ export function ProcesosEditor({
     historialLoading = false,
     onCrearProceso,
     onEliminarProceso,
+    quienPuede,
 }: ProcesosEditorProps) {
     const [creando, setCreando] = useState<string | null>(null);
     const procesoOptions = procesos.map((p) => ({ value: p.id.toString(), label: p.nombre }));
@@ -162,6 +173,27 @@ export function ProcesosEditor({
         const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
         onChange(next);
+    };
+
+    /**
+     * Las personas, marcando las que no pueden hacer ESE trabajo.
+     *
+     * No se sacan de la lista: se ordenan primero las que pueden y a las otras se les
+     * agrega el motivo al lado. Sacarlas sería el sistema decidiendo por el encargado,
+     * y hay días en que el que sabe no está.
+     */
+    const opcionesDePersonaPara = (procesoId: string) => {
+        const habilitados = procesoId ? quienPuede?.[procesoId] : undefined;
+        if (!habilitados) return operarioOptions;
+        const puede = new Set(habilitados);
+        const conMarca = operarios.map((o) => ({
+            value: o.id.toString(),
+            label: [o.nombre, o.apellido].filter(Boolean).join(" ").trim()
+                + (puede.has(o.id) ? "" : "  · no lo tiene habilitado"),
+            _puede: puede.has(o.id),
+        }));
+        conMarca.sort((a, b) => Number(b._puede) - Number(a._puede) || a.label.localeCompare(b.label));
+        return [{ value: "", label: "Sin asignar" }, ...conMarca.map(({ _puede, ...o }) => o)];
     };
 
     const incluidos = rows.filter((r) => r.incluido).length;
@@ -384,7 +416,7 @@ export function ProcesosEditor({
                                                         <div className="min-w-0 flex items-center gap-1">
                                                             <div className="min-w-0 flex-1">
                                                                 <SearchableSelect
-                                                                    options={operarioOptions}
+                                                                    options={opcionesDePersonaPara(row.proceso_id)}
                                                                     value={row.operario_id}
                                                                     onValueChange={(v) => update(row.id, { operario_id: v })}
                                                                     placeholder="Sin asignar"

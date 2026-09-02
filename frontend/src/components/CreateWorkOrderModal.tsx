@@ -146,6 +146,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     // Data options
     const [prioridades, setPrioridades] = useState<Option[]>([]);
     const [procesosOptions, setProcesosOptions] = useState<Option[]>([]);
+    /** {proceso_id: [operario_id]} — quién puede hacer cada trabajo. Ver el endpoint. */
+    const [quienPuede, setQuienPuede] = useState<Record<string, number[]> | undefined>(undefined);
     const [articulos, setArticulos] = useState<Articulo[]>([]);
     const [clientes, setClientes] = useState<Option[]>([]); // New state
     const [operarios, setOperarios] = useState<{ id: number, nombre: string, apellido: string }[]>([]);
@@ -301,6 +303,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 const data = await procesosRes.json();
                 setProcesosOptions(Array.isArray(data) ? data : (data.data || []));
             }
+            // Quién puede hacer cada trabajo. Va aparte y sin bloquear: si falla, los
+            // desplegables se ven como siempre en vez de quedarse sin personas.
+            fetch(`${API_URL}/procesos/quien-puede`, { headers: getAuthHeaders() })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => { if (d?.data) setQuienPuede(d.data); })
+                .catch(() => { /* se sigue sin la marca */ });
             if (operariosRes.ok) {
                 const data = await operariosRes.json();
                 setOperarios(Array.isArray(data) ? data : (data.data || []));
@@ -772,20 +780,31 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         // apretadas en la misma celda o anotando en el margen. El primer renglón lleva
         // el proceso y lo planificado; los otros dos son la continuación, con la fecha
         // adelante para que se lea como un parte de trabajo.
+        // La columna DÍA es lo que reemplaza a duplicar el proceso.
+        //
+        // Lucas, 2/9: cuando un trabajo lleva dos días, el taller cargaba el proceso dos
+        // veces en la OT para tener dos renglones donde anotar — y eso le rompía el orden
+        // de los pasos y confundía al planificador, que veía dos trabajos donde hay uno.
+        // Su propia solución, textual: «poner a lo sumo día uno o día dos, que lo divida».
+        // Los renglones vienen numerados: el operario sólo escribe la fecha y las horas.
         const RENGLONES_POR_PROCESO = 3;
-        const continuacion = () =>
-            `<tr class="cont"><td class="c"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td>` +
-            `<td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`;
+        const renglon = (dia: number, p?: any, i?: number) => {
+            const esPrimero = dia === 1;
+            const izq = esPrimero
+                ? `<td class="c">${(i ?? 0) + 1}</td>` +
+                  `<td>${esc(procName(p.proceso_id))}</td>` +
+                  `<td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td>` +
+                  `<td class="c">${esc(p.tiempo || 0)}</td>`
+                : `<td class="c"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td>`;
+            return `<tr class="${esPrimero ? "proc" : "cont"}">${izq}` +
+                `<td class="c dia">${dia}</td><td class="fill"></td>` +
+                `<td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`;
+        };
         const procRows = procs.length
-            ? procs.map((p, i) => {
-                const cabeza = `<tr class="proc"><td class="c">${i + 1}</td>` +
-                    `<td>${esc(procName(p.proceso_id))}</td>` +
-                    `<td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td>` +
-                    `<td class="c">${esc(p.tiempo || 0)}</td>` +
-                    `<td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td></tr>`;
-                return cabeza + continuacion().repeat(RENGLONES_POR_PROCESO - 1);
-            }).join("")
-            : `<tr><td colspan="9" class="c" style="color:#999">Sin procesos cargados</td></tr>`;
+            ? procs.map((p, i) =>
+                Array.from({ length: RENGLONES_POR_PROCESO }, (_, k) => renglon(k + 1, p, i)).join("")
+              ).join("")
+            : `<tr><td colspan="10" class="c" style="color:#999">Sin procesos cargados</td></tr>`;
 
         // Hoja de materias primas (pañol): datos + columna "Retirado" para tildar a mano.
         const mpRows = materiasPrimas.length
@@ -833,6 +852,7 @@ th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}
 th{background:#1e3a5f;color:#fff;text-transform:uppercase;font-size:8.5px;letter-spacing:.4px;padding:6px 7px}
 td.c,th.c{text-align:center}
 td.fill{height:26px;background:#fff}
+td.dia{background:#f4f6f9;font-weight:bold;color:#1e3a5f;width:26px}
 
 /* El primer renglón de cada proceso lleva el nombre; los de abajo son la continuación
    para los días siguientes. La línea gruesa arriba separa un proceso del otro. */
@@ -861,8 +881,8 @@ ${encabezado("Orden de Trabajo — Procesos", `Impreso ${esc(hoy)}`)}
 <div class="cell"><span class="k">F. Prometida</span><span class="v">${fmt(generalData.fecha_prometida)}</span></div>
 </div>
 <h2>Procesos (planificado + carga real)</h2>
-<table class="procesos"><thead><tr><th class="c">#</th><th>Proceso</th><th>Máquina</th><th class="c">Min. plan.</th><th class="c">Fecha</th><th>Empleado</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th></tr></thead><tbody>${procRows}</tbody></table>
-<p class="ayuda">Un renglón por día. Si el trabajo lleva más de tres, seguí en la Nota de taller.</p>
+<table class="procesos"><thead><tr><th class="c">#</th><th>Proceso</th><th>Máquina</th><th class="c">Min. plan.</th><th class="c">Día</th><th class="c">Fecha</th><th>Empleado</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th></tr></thead><tbody>${procRows}</tbody></table>
+<p class="ayuda">Cada proceso trae tres renglones, uno por día: no hace falta cargarlo dos veces en el sistema. Si lleva más de tres días, seguí en la Nota de taller.</p>
 <h2>Nota de taller</h2>
 <div class="notas">${esc(detailsData.observaciones || "")}</div>
 ${generalData.descripcion ? `<h2>Descripción</h2><div class="notas">${esc(generalData.descripcion)}</div>` : ""}
@@ -1434,6 +1454,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         historialLoading={historialLoading}
                                         onCrearProceso={handleCrearProceso}
                                         onEliminarProceso={handleEliminarProceso}
+                                        quienPuede={quienPuede}
                                     />
                                 </TabsContent>
                             </Tabs>

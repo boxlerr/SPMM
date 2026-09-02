@@ -13,6 +13,8 @@ interface User {
   apellido: string;
   rol: string;
   activo: boolean;
+  /** Entró con una contraseña que le pasaron: no ve el sistema hasta cambiarla. */
+  debe_cambiar_password?: boolean;
 }
 
 interface AuthContextType {
@@ -24,6 +26,8 @@ interface AuthContextType {
   loading: boolean;
   /** Mantenida por compatibilidad pero ya no abre popup — sólo limpia y redirige. */
   notifySessionExpired: () => void;
+  /** Vuelve a leer el usuario guardado. Se usa al salir del primer ingreso. */
+  refreshUser: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -257,6 +261,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+
+   * Relee el usuario de localStorage.
+
+   *
+
+   * Lo usa la pantalla de primer ingreso: cambia la contraseña, se apaga el flag en
+
+   * el guardado y con esto el guard deja pasar sin tener que volver a loguearse.
+
+   */
+
+  const refreshUser = () => {
+
+    try {
+
+      const guardado = localStorage.getItem('user');
+
+      if (guardado) setUser(JSON.parse(guardado));
+
+    } catch { /* si no se puede leer, queda como estaba */ }
+
+  };
+
+
   const logout = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
@@ -279,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!token && !!user,
         loading,
         notifySessionExpired,
+        refreshUser,
       }}
     >
       {children}
