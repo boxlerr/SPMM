@@ -145,6 +145,25 @@ export function ProcesosEditor({
 
     const incluidos = rows.filter((r) => r.incluido).length;
 
+    /**
+     * Que toda la OT la haga una sola persona.
+     *
+     * Lucas: «tornea, hace la camisa y suelda el rodillo. No es lo ideal pero pasa».
+     * El planificador nunca lo prohibió —nada impide que la misma persona haga todos
+     * los procesos de una orden, mientras no se le pisen los horarios—, pero pedirlo
+     * era elegir a la misma persona fila por fila. Esto lo copia a todas las tildadas
+     * de un gesto; después se puede sacar de una fila suelta, como siempre.
+     */
+    const asignarATodos = (idOperario: string) => {
+        onChange(rows.map((r) => (r.incluido ? { ...r, operario_id: idOperario } : r)));
+    };
+    const yaSonTodosLaMisma = (() => {
+        const activos = rows.filter((r) => r.incluido);
+        if (activos.length < 2) return "";
+        const primera = activos[0].operario_id;
+        return primera && activos.every((r) => r.operario_id === primera) ? primera : "";
+    })();
+
     return (
         <div className="flex flex-col gap-3">
             {/* Barra de acciones */}
@@ -157,6 +176,23 @@ export function ProcesosEditor({
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* Sale sólo con dos procesos o más: con uno la pregunta no existe. */}
+                    {incluidos > 1 && operarios.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-gray-500 whitespace-nowrap">La hace</span>
+                            <SearchableSelect
+                                value={yaSonTodosLaMisma}
+                                onValueChange={asignarATodos}
+                                options={[
+                                    { value: "", label: "La reparte el planificador" },
+                                    ...operarioOptions.filter((o) => o.value !== ""),
+                                ]}
+                                placeholder="una sola persona…"
+                                disabled={disabled}
+                                className="h-8 w-[190px] text-xs"
+                            />
+                        </div>
+                    )}
                     {onTraerHistorial && (
                         <Button
                             type="button"

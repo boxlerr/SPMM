@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "toda-la-ot-la-hace-una-persona",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones › Nueva OT",
+        titulo: "Podés decir que toda la orden la haga una sola persona",
+        detalle:
+            "Pasa que uno tornea, hace la camisa y suelda el rodillo. El sistema siempre lo permitió, pero pedirlo era elegir a la misma persona proceso por proceso. Ahora arriba de la lista de procesos hay un «La hace»: elegís a alguien y queda en todos los procesos tildados de una. Si después querés sacarlo de uno solo, lo cambiás en esa fila como siempre. Y «La reparte el planificador» los deja a todos libres de nuevo.",
+        href: "/operaciones",
+    },
+    {
         id: "elegir-en-que-maquina-se-hace-el-proceso",
         fecha: "2026-09-02",
         tipo: "nuevo",
