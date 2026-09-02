@@ -36,7 +36,7 @@ def _armar_modelo():
 def test_a2_setup_y_produccion_mismo_operario():
     model, procesos_norm, operario_vars, maq_vars, (op_setup, op_prod, maq_setup, maq_prod) = _armar_modelo()
 
-    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars)
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, dummy_op_id=999999)
 
     # Fijamos el operario y la máquina del SETUP; la producción debe seguirlos.
     model.Add(op_setup == 11)
@@ -52,7 +52,7 @@ def test_a2_sin_operario_vars_no_fuerza_operario():
     """Sin pasar operario_vars, la coordinación NO debe igualar operarios (backward compatible)."""
     model, procesos_norm, _operario_vars, maq_vars, (op_setup, op_prod, _maq_setup, _maq_prod) = _armar_modelo()
 
-    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars)  # sin operario_vars
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, dummy_op_id=999999)  # sin operario_vars
 
     # Pedimos operarios distintos: debe ser factible porque no hay igualdad forzada.
     model.Add(op_setup == 11)
@@ -79,7 +79,7 @@ def test_persona_elegida_a_mano_rompe_la_igualdad_de_operario():
     # En la producción se eligió al 10 a mano: su dominio quedó en una sola persona.
     op_domain_vals = {(1, 1): [10, 11, 999999], (1, 2): [10]}
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
-                                    op_domain_vals, 999999)
+                                    op_domain_vals, dummy_op_id=999999)
 
     model.Add(op_setup == 11)
     model.Add(op_prod == 10)
@@ -99,25 +99,7 @@ def test_sin_eleccion_a_mano_la_regla_de_oro_sigue_valiendo():
     # Los dos con dominio de dos personas: nadie eligió nada a mano.
     op_domain_vals = {(1, 1): [10, 11, 999999], (1, 2): [10, 11, 999999]}
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
-                                    op_domain_vals, 999999)
-
-    model.Add(op_setup == 11)
-    model.Add(op_prod == 10)
-
-    solver = cp_model.CpSolver()
-    assert solver.Solve(model) == cp_model.INFEASIBLE
-
-
-def test_preseleccion_que_el_solver_ignoro_no_saltea_la_regla():
-    """Si la persona elegida no existe entre los operarios reales, el dominio queda
-    entero y la igualdad tiene que seguir valiendo: mirar el dominio y no el
-    diccionario de preselección es lo que evita saltear la regla por una elección
-    que el solver descartó."""
-    model, procesos_norm, operario_vars, maq_vars, (op_setup, op_prod, _ms, _mp) = _armar_modelo()
-
-    op_domain_vals = {(1, 1): [10, 11, 999999], (1, 2): [10, 11, 999999]}
-    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
-                                    op_domain_vals, 999999)
+                                    op_domain_vals, dummy_op_id=999999)
 
     model.Add(op_setup == 11)
     model.Add(op_prod == 10)
@@ -139,7 +121,7 @@ def test_dominio_de_un_solo_valor_por_dummy_no_saltea_la_regla():
     # las variables van de 10 a 11, así que alcanza con declarar el dominio.)
     op_domain_vals = {(1, 1): [DUMMY], (1, 2): [10, 11, DUMMY]}
     _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars,
-                                    op_domain_vals, DUMMY)
+                                    op_domain_vals, dummy_op_id=DUMMY)
 
     model.Add(op_setup == 11)
     model.Add(op_prod == 10)

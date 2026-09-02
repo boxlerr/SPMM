@@ -1026,6 +1026,7 @@ export function PlanningPreviewScreen({
                 if (vistas.has(ordenId)) continue;
                 vistas.add(ordenId);
                 const delPlan = groupedResults[ordenId] || [];
+                const deLaLista = unplannedOrders.find(o => o.id === ordenId) as any;
                 const elegidas = lineasVigentes[ordenId] || [];
                 const filas = (elegidas.length > 0
                     ? delPlan.filter(r => r.id_orden_trabajo_proceso != null
@@ -1042,8 +1043,15 @@ export function PlanningPreviewScreen({
                 });
                 salida.push({
                     ordenId,
-                    numeroOT: delPlan[0]?.id_otvieja ?? ordenId,
-                    cliente: delPlan[0]?.cliente || "",
+                    // Si la OT quedó afuera del plan no está en `groupedResults`, así que
+                    // el número visible y el cliente salen de la lista de OT de la
+                    // pantalla. Sin esto se dibujaba el id interno de la base, que no
+                    // figura en ningún papel del taller — y la misma OT aparecía con dos
+                    // números distintos entre este popover y el panel de excedentes.
+                    numeroOT: delPlan[0]?.id_otvieja ?? deLaLista?.id_otvieja ?? ordenId,
+                    cliente: delPlan[0]?.cliente
+                        || (typeof deLaLista?.cliente === "object" ? deLaLista?.cliente?.nombre : deLaLista?.cliente)
+                        || "",
                     entera: elegidas.length === 0,
                     minutos: filas.reduce((s, f) => s + f.minutos, 0),
                     filas,
@@ -1052,7 +1060,7 @@ export function PlanningPreviewScreen({
         }
         return salida;
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tandasManuales, groupedResults, lineasVigentes, editedResults]);
+    }, [tandasManuales, groupedResults, lineasVigentes, editedResults, unplannedOrders]);
 
     // Placeholder for conflicts if missing (can be refined later)
     const conflicts = { details: [] as any[] };
@@ -1583,27 +1591,49 @@ export function PlanningPreviewScreen({
     );
 
     /**
-     * A quién le saltó la carga con lo último que se agregó, y cuánto.
+     * A quién le saltó la carga con lo último que se agregó a mano, y cuánto.
      *
      * Lucas agregó procesos y Pablo pasó de 8,9 a 15 horas; se enteró de casualidad
      * porque venía anotando las horas en un papel (28/08). El panel siempre mostró el
      * total, pero un número que cambia de 8,9 a 15 mientras mirás otra parte de la
-     * pantalla no se ve. Esto le pone el "antes → después" al lado del nombre y lo
-     * deja seis segundos, que es lo que dura la pregunta "¿a quién se lo puse?".
+     * pantalla no se ve. Esto le pone el "antes → después" al lado del nombre.
      *
-     * Se queda con el mayor aumento: si una tanda toca a cinco personas, la que
-     * importa es la que más subió.
+     * Se arma con una espera y no comparando cada cambio de carga contra el anterior:
+     * `minutosPorOperario` se mueve por muchas razones que no son agregar nada —al
+     * entrar (todos pasan de 0 a su carga real), al retomar un borrador, al recalcular
+     * por "Forzar" o "Volver a revisar", al cambiarle el operario a una fila—, y contra
+     * el anterior todas esas salían como "salto", con carteles del tipo
+     * "0,0 h → 31,4 h con lo que acabás de agregar" sin que nadie hubiera agregado nada.
+     *
+     * Entonces: cuando entra una tanda nueva se guarda la foto de ese momento y se queda
+     * esperando; el primer recálculo que llega después es el que se compara. Cualquier
+     * otro movimiento no dispara nada.
      */
     const [saltoCarga, setSaltoCarga] = React.useState<{ opId: number; antes: number; despues: number } | null>(null);
-    const cargaPreviaRef = React.useRef<Record<number, number> | null>(null);
+    /** La foto de antes de la tanda, y cuántas tandas había cuando se sacó. */
+    const esperandoSalto = React.useRef<{ antes: Record<number, number>; tandas: number } | null>(null);
+    const tandasPreviasRef = React.useRef(0);
+
     React.useEffect(() => {
-        const previa = cargaPreviaRef.current;
-        cargaPreviaRef.current = minutosPorOperario;
-        // La primera pasada solo saca la foto: sin un "antes" no hay salto que contar.
-        if (!previa) return;
+        // Sólo agregar cuenta. Quitar (deshacer, sacar una OT) baja la carga y no
+        // tiene salto que mostrar.
+        if (tandasManuales.length > tandasPreviasRef.current) {
+            esperandoSalto.current = { antes: minutosPorOperario, tandas: tandasManuales.length };
+        }
+        tandasPreviasRef.current = tandasManuales.length;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tandasManuales]);
+
+    React.useEffect(() => {
+        const espera = esperandoSalto.current;
+        if (!espera || espera.antes === minutosPorOperario) return;
+        esperandoSalto.current = null;
+
+        // El mayor aumento: si una tanda toca a cinco personas, la que importa es la
+        // que más subió.
         let mayor: { opId: number; antes: number; despues: number } | null = null;
         for (const [id, min] of Object.entries(minutosPorOperario)) {
-            const antes = previa[Number(id)] ?? 0;
+            const antes = espera.antes[Number(id)] ?? 0;
             const sube = min - antes;
             if (sube > 0 && (!mayor || sube > mayor.despues - mayor.antes)) {
                 mayor = { opId: Number(id), antes, despues: min };
@@ -1611,12 +1641,25 @@ export function PlanningPreviewScreen({
         }
         if (!mayor) return;
         setSaltoCarga(mayor);
-        // Si el panel está plegado no se ve nada, así que se abre solo: el aviso
-        // pierde todo el sentido si hay que ir a buscarlo.
+        // Si el panel está plegado no se ve nada, así que se abre solo. No se toca la
+        // preferencia guardada: al volver a entrar queda como el usuario lo dejó.
         setCargaAbierta(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [minutosPorOperario]);
+
+    /**
+     * El cartel dura unos segundos y se va.
+     *
+     * Va en su propio efecto, colgado de `saltoCarga` y no del cálculo: si el timeout
+     * se arma adentro del efecto de arriba, cualquier recálculo que llegue dentro de
+     * esos segundos ejecuta la limpieza, mata el timer y sale sin volver a armarlo — y
+     * el cartel se queda pegado mostrando un antes/después que ya no es cierto.
+     */
+    React.useEffect(() => {
+        if (!saltoCarga) return;
         const t = setTimeout(() => setSaltoCarga(null), 6000);
         return () => clearTimeout(t);
-    }, [minutosPorOperario]);
+    }, [saltoCarga]);
 
     /**
      * La tira de avisos arranca PLEGADA — pero sólo si el plan no tiene trabas.
@@ -1775,7 +1818,7 @@ export function PlanningPreviewScreen({
                                                     </div>
                                                     <ul className="divide-y divide-gray-50">
                                                         {ot.filas.map((f, i) => (
-                                                            <li key={`${ot.ordenId}-${f.lineaId ?? i}`} className="flex items-center gap-2 px-2 py-1">
+                                                            <li key={`${ot.ordenId}-${i}-${f.lineaId ?? "x"}`} className="flex items-center gap-2 px-2 py-1">
                                                                 <span className="min-w-0 flex-1 truncate text-[11.5px] text-gray-700">
                                                                     {f.proceso}
                                                                 </span>

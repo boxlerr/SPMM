@@ -492,50 +492,64 @@ def _cuantas_personas(rangos_ids, ops_por_rango, nombre_operario) -> str:
     return f"**{n}** {_concuerda(n, 'persona', 'personas')}"
 
 
-def _quien_lo_toma_primero(proc_id, personas, prioridad_skills, nombre_operario) -> str:
-    """De la gente que queda habilitada, quién va a agarrar el trabajo primero.
+def _los_que_lo_tienen_como_principal(proc_id, personas, prioridad_skills, nombre_operario):
+    """De la gente que puede hacer el trabajo, quiénes lo tienen como habilidad principal.
 
     Habilitar no es repartir. El solver penaliza el nivel 2 (`PENAL_SKILL2 = 2000`) y
-    deja el nivel 1 en cero, así que entre nueve habilitados el trabajo cae en el que
-    lo tiene como habilidad principal, no parejo entre todos.
+    deja el nivel 1 en cero, así que entre nueve habilitados el trabajo cae en los que lo
+    tienen como principal, no parejo entre todos. Lucas, 28/08: *"que los habilite está
+    bien, ahora que los pondere a los nueve por igual está mal"*.
 
-    Lucas leyó "se las abrís a 9 personas" como que el sistema iba a repartir entre las
-    nueve y le pareció mal (28/08): *"que los habilite está bien, ahora que los pondere
-    a los nueve por igual está mal"*. El motor ya hacía lo correcto — el que estaba mal
-    escrito era el aviso. Devolver el nombre es lo que cierra la discusión: no le pedimos
-    que nos crea, le decimos quién lo va a tomar.
+    Devuelve el GRUPO, no una persona. El mapa trae también un `orden` para desempatar
+    entre dos de nivel 1, pero ese desempate está topeado a 1500 y es fino a propósito
+    (`_penal_prioridad`): contra 200 puntos por minuto de atraso no decide nada, y en un
+    taller sobrevendido el que está libre gana siempre. Nombrar a uno solo sería prometer
+    algo que el motor no sostiene, y quedaría desmentido la primera vez que el plan
+    muestre al otro.
 
-    Devuelve "" si no hay nadie con la habilidad principal cargada, y ahí el aviso dice
-    la versión corta ("no se reparte parejo") en vez de inventar un nombre.
+    Vacía si nadie de esa gente lo tiene como principal: ahí el aviso dice la versión
+    corta en vez de inventar un nombre.
     """
     if not prioridad_skills or not personas:
-        return ""
+        return []
     del_proceso = prioridad_skills.get(proc_id) or {}
     principales = []
     for op in personas:
         entrada = del_proceso.get(op)
+        if entrada is None:
+            continue
         # El mapa emite (nivel, orden); antes emitía el nivel pelado. Se banca los dos.
         nivel = entrada[0] if isinstance(entrada, (tuple, list)) else entrada
         if nivel == 1:
             principales.append(op)
-    if not principales:
-        return ""
-    return _listar(sorted(_primer_nombre(nombre_operario.get(o, f"#{o}")) for o in principales))
+    return sorted(_primer_nombre(nombre_operario.get(op, f"#{op}")) for op in principales)
 
 
-def _no_se_reparte(proc_id, rangos_ids, ops_por_rango, prioridad_skills, nombre_operario) -> str:
+def _no_se_reparte(proc_id, personas, prioridad_skills, nombre_operario) -> str:
     """La aclaración que va pegada a "se las abrís a N personas".
 
-    Una sola frase, y solo cuando hay más de uno: con una persona sola la aclaración
-    sobra y el aviso ya es largo.
+    `personas` tiene que ser la gente que REALMENTE puede hacer el proceso —la que el
+    diagnóstico ya filtró por rango, habilidades a mano, habilidades apagadas y planos—,
+    no la que comparte el rango. Recalcularla por rango acá hacía que el aviso se
+    contradijera solo: el detalle decía "lo tiene 1 persona" y dos oraciones después
+    nombraba a otro, que el solver ni siquiera tenía en el dominio.
+
+    Dice "cae primero en" y no "lo va a tomar": el motor los prefiere, no los garantiza
+    —si el principal está cargado hasta las orejas, el trabajo se va igual al de nivel 2
+    antes que atrasarse—. Prometer un nombre sería quedar desmentido en el primer plan.
+
+    Con una sola persona no se dice nada: no hay entre quiénes repartir.
     """
-    personas = _personas_con_rangos(rangos_ids, ops_por_rango, nombre_operario)
     if len(personas) < 2:
         return ""
-    principal = _quien_lo_toma_primero(proc_id, personas, prioridad_skills, nombre_operario)
-    if principal:
-        return f" Habilitadas, no repartidas: lo va a seguir tomando **{principal}**, que lo tiene como principal."
-    return " Habilitadas, no repartidas: el trabajo no se parte entre todas."
+    principales = _los_que_lo_tienen_como_principal(proc_id, personas, prioridad_skills, nombre_operario)
+    if not principales:
+        return " Habilitadas, no repartidas: el trabajo no se parte entre todas."
+    if len(principales) == 1:
+        return (f" Habilitadas, no repartidas: el trabajo le cae primero a **{principales[0]}**, "
+                f"que lo tiene como principal.")
+    return (f" Habilitadas, no repartidas: el trabajo cae primero en **{_listar(principales)}**, "
+            f"que lo tienen como principal.")
 
 
 def _cuenta_personas(rangos_ids, ops_por_rango, nombre_operario):
@@ -1162,8 +1176,7 @@ def _procesos_sin_maquina_compatible(
                 "texto": f"Al revés: agregale **{pide_proc}** a "
                          + _concuerda(maqs, "la máquina", f"las {len(maqs)} máquinas")
                          + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a {abre_a}."
-                         + _no_se_reparte(proc_id, d["rangos"], ops_por_rango,
-                                          prioridad_skills, nombre_operario),
+                         + _no_se_reparte(proc_id, d["personas"], prioridad_skills, nombre_operario),
                 "donde": "Recursos › Recurso maquinaria",
                 "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"], nombre_rango),
             })
@@ -1229,8 +1242,7 @@ def _procesos_sin_maquina_compatible(
                              + _concuerda(maqs, "la máquina", "las máquinas")
                              + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a "
                              + _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario) + "."
-                             + _no_se_reparte(proc_id, d["rangos"], ops_por_rango,
-                                              prioridad_skills, nombre_operario),
+                             + _no_se_reparte(proc_id, d["personas"], prioridad_skills, nombre_operario),
                     "donde": "Recursos › Recurso maquinaria",
                     "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"], nombre_rango),
                 })

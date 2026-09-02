@@ -390,9 +390,13 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                             <Badge variant="outline" className="bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200 gap-1 pl-1.5 shadow-none font-semibold">
                                                                 Pedido
                                                             </Badge>
-                                                        ) : (
+                                                        ) : order.estado_material === 'ok' ? (
                                                             <Badge variant="outline" className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold">
                                                                 <CheckCircle2 className="h-3 w-3" /> OK
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold" title="No hay datos de materiales cargados">
+                                                                <AlertTriangle className="h-3 w-3" /> Sin Stock
                                                             </Badge>
                                                         )}
                                                     </td>

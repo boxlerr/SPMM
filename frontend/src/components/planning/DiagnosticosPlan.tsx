@@ -511,6 +511,18 @@ export function DiagnosticosPlan({
      * el botón no adivina: el texto del aviso dice exactamente qué se va a cambiar
      * y a cuánta gente alcanza, y recién ahí se aplica.
      */
+    /**
+     * La confirmación no sobrevive a un recálculo.
+     *
+     * Antes la limpiaba el `onBlur` del botón, pero eso hacía imposible llegar al panel
+     * con el teclado: al tabular hacia "Sí, aplicalo" el blur lo desmontaba. Ahora el
+     * panel tiene su propio "Cancelar" y lo que hay que cubrir es el otro caso: que la
+     * lista se renueve y el aviso que estabas por confirmar ya no exista.
+     */
+    useEffect(() => {
+        setConfirmando(null);
+    }, [diagnosticos]);
+
     const aplicar = async (clave: string, accion: DiagnosticoAccion) => {
         if (confirmando !== clave) {
             setConfirmando(clave);
@@ -1186,7 +1198,6 @@ export function DiagnosticosPlan({
                                                     size="sm"
                                                     disabled={hecha || aplicando !== null}
                                                     onClick={() => aplicar(claveSol, sol.accion!)}
-                                                    onBlur={() => confirmando === claveSol && setConfirmando(null)}
                                                     title={confirmando === claveSol
                                                         ? "Tocá de nuevo para confirmar el cambio"
                                                         : "Aplica el cambio en Recursos y recalcula el plan"}
@@ -1300,7 +1311,6 @@ export function DiagnosticosPlan({
                                                                             variant={hechaEsta ? "ghost" : "outline"}
                                                                             disabled={hechaEsta || aplicando !== null}
                                                                             onClick={() => aplicar(clave, s.accion!)}
-                                                                            onBlur={() => confirmando === clave && setConfirmando(null)}
                                                                             className={cn(
                                                                                 "h-5 px-1.5 text-[10px] gap-1 align-baseline",
                                                                                 hechaEsta

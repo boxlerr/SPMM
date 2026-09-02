@@ -990,7 +990,7 @@ def _setup_de_esta_produccion(proc_setup, proc_prod) -> bool:
 
 
 def _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars=None,
-                                    op_domain_vals=None, dummy_op_id=None):
+                                    op_domain_vals=None, *, dummy_op_id):
     """
     Fuerza a que procesos coordinados (ej: Programacion + Produccion)
     usen la misma máquina y, si se pasa `operario_vars`, el MISMO operario
@@ -1818,7 +1818,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         op_to_rangos.setdefault(_op_id, set()).add(_r_id)
 
     _agregar_compatibilidad_op_maq(model,procesos_norm,operario_vars,maq_vars,op_domain_vals,maq_domain_vals,op_to_rango,maq_to_rangos,maq_to_familia,DUMMY_OP_ID,DUMMY_MAQ_ID,op_to_rangos,skills_manuales)
-    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals, DUMMY_OP_ID)
+    _agregar_coordinacion_maq_setup(model, procesos_norm, maq_vars, operario_vars, op_domain_vals,
+                                    dummy_op_id=DUMMY_OP_ID)
     _agregar_continuidad_partes(model, partes, operario_vars, maq_vars, op_extra_vars)
     # ---- Crear ventanas semanales ----
     # ¿Trabaja alguien los sábados? Si no, el día no aporta capacidad y hay que contar

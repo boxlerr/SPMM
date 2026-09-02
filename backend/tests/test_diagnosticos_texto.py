@@ -374,3 +374,49 @@ def test_una_sola_persona_no_lleva_la_aclaracion():
     diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
     abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
     assert "Habilitadas, no repartidas" not in abrir
+
+
+def test_con_dos_principales_los_nombra_a_los_dos_y_no_promete_uno():
+    """El mapa trae un `orden` para desempatar entre dos de nivel 1, pero ese desempate
+    está topeado a 1500 y vale menos que un minuto de atraso (200 por minuto): si el
+    primero está cargado, el trabajo se va igual al otro. Nombrar a uno solo sería
+    prometer algo que el motor no sostiene."""
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    nombre_operario = {**NOMBRE_OPERARIO, 32: "LEONARDO CONDORI", 33: "MATIAS VERA"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR), (32, OFICIAL), (33, OFICIAL)]
+    proc = (15279, 87, 2, None, 5, 240, [OFICIAL], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos(
+        [proc], operarios, maqs, res, nombre_rango, nombre_operario,
+        prioridad_skills={87: {32: (1, 0), 33: (1, 3), 31: (2, 0)}},
+    )
+    abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
+    assert "LEONARDO" in abrir and "MATIAS" in abrir
+    assert "que lo tienen como principal" in abrir, "sujeto plural, verbo plural"
+    # Y GUILLERMO, que lo tiene como secundaria, no entra en la frase.
+    assert "GUILLERMO" not in abrir
+
+
+def test_no_nombra_a_quien_el_solver_excluyo_por_el_plano():
+    """La OT tiene plano y LEONARDO no sabe leerlo: el solver ni lo considera.
+    El aviso se contradecía solo — el detalle decía «lo tiene 1 persona» y la solución
+    nombraba a otro que no estaba en el dominio."""
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    nombre_operario = {**NOMBRE_OPERARIO, 32: "LEONARDO CONDORI"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR), (31, OFICIAL), (32, OFICIAL)]
+    proc = (15279, 87, 2, None, 5, 240, [OFICIAL], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos(
+        [proc], operarios, maqs, res, nombre_rango, nombre_operario,
+        prioridad_skills={87: {32: (1, 0), 31: (2, 0)}},
+        ots_con_plano={15279},
+        op_planos={31: True, 32: False},
+    )
+    abrir = _solucion_de_maquina(_por_tipo(diags, "maquina_incompatible"))
+    assert "LEONARDO" not in abrir, "no sabe leer planos: el solver no lo tiene en cuenta"
