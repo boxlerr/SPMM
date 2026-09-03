@@ -67,6 +67,16 @@ export const NOVEDADES: Novedad[] = [
         href: "/operaciones",
     },
     {
+        id: "operaciones-pantalla-completa",
+        fecha: "2026-09-02",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Operaciones usa toda la pantalla: se ven más órdenes de un vistazo",
+        detalle:
+            "La sección estaba metida adentro de dos recuadros, uno arriba del otro, con mucho aire alrededor: entraban seis órdenes antes de tener que scrollear. Ahora la lista arranca casi arriba de todo y se ven la mitad más, las columnas ganaron ancho de los dos lados, y el título con las solapas quedan fijos mientras bajás — no perdés de vista en qué solapa estás ni el botón de Planificar.",
+        href: "/operaciones",
+    },
+    {
         id: "primer-ingreso-cambiar-contrasena",
         fecha: "2026-09-02",
         tipo: "nuevo",

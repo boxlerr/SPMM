@@ -168,9 +168,9 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
     };
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-3">
             {/* Header & Search */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                     <div className="p-2 bg-green-50 rounded-lg text-green-600">
                         <CheckCircle2 className="w-5 h-5" />
@@ -191,7 +191,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                 </div>
             </div>
 
-            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} />
+            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} compacto />
 
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">
@@ -294,7 +294,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                     </div>
 
                     {/* Desktop Table View. El `zoom` aplica SOLO acá (no al header ni a los filtros). */}
-                    <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
+                    <Card className="hidden md:block overflow-hidden border border-gray-200 shadow-sm bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
                         <div ref={scrollContainerRef} className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
                             <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">

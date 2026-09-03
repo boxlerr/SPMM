@@ -124,7 +124,7 @@ export default function WorkOrdersListWrapper({
             <Tabs defaultValue="no_planificadas" className="w-full">
                 {/* Cabecera: tabs + ZoomControl alineado a la derecha. El zoom aplica a las
                     tres listas, que ahora son la misma tabla. */}
-                <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+                <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
                     <TabsList className="bg-gray-100 p-1 rounded-xl w-fit">
                         <TabsTrigger value="no_planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm">
                             No Planificadas ({unplannedOrders.length})

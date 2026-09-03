@@ -1346,12 +1346,11 @@ export default function OperacionesPage() {
 
 
   return (
-    <div className={"min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
-      {/* Header normal (no sticky)
-          Antes: el header era full-width (border-b shadow-sm) y el card de abajo
-          estaba centrado con padding lateral, lo que los hacía verse desalineados.
-          Ahora ambos son cards con los MISMOS paddings laterales que el body container,
-          así sus bordes y contenidos quedan perfectamente alineados verticalmente. */}
+    <div className={"flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
+      {/* La raíz no pone ni alto ni fondo: los pone la pantalla de adentro, que
+          arranca justo del alto de la ventana. El `min-h-screen` que había acá
+          sumaba los 24px de arriba y abajo del layout y hacía scrollear el
+          documento medio centímetro de gusto. */}
       {planificadorAbierto ? (
         /* Planificar dejó de ser un modal flotando arriba de Operaciones: es una
            pantalla, con la barra lateral de la app a la izquierda y un flujo de dos
@@ -1407,21 +1406,46 @@ export default function OperacionesPage() {
         </div>
       ) : (
       <>
-      <div className="flex-shrink-0 w-full px-2 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6">
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-br from-[#DC143C] to-[#B8112E] rounded-xl shadow-lg shrink-0">
-                  <Activity className="h-5 w-5 md:h-7 md:w-7 text-white" />
-                </div>
-                Operaciones
-              </h1>
-              <p className="text-gray-500 mt-1 text-sm md:text-base">Gestiona la planificación de las órdenes de trabajo</p>
+      {/* Una sola pantalla, no un card adentro de otro card adentro del padding
+          del layout. Julián, 2/09: "que deje de estar encerrado en modales la
+          sección y ocupe bien todo el espacio de la página".
+
+          Lo que había eran tres marcos anidados —el `p-6` de LayoutWrapper, un
+          `lg:px-8` propio y el `p-6` de cada card— que se comían 80px de cada
+          lado antes de la primera columna de la tabla, más una cabecera de 230px
+          de alto: entraban seis filas de 179. Es la misma queja del 26/08 sobre
+          el planificador ("aprovechar mejor el espacio de la derecha y la
+          izquierda") y se resuelve igual: el padding lo pone el layout y nadie
+          más.
+
+          El marco es el de PantallaPlanificador: `min-h` y no `h`, así la página
+          sigue scrolleando de una sola manera —nada de scroll adentro de scroll,
+          que es lo que incomodaba— y lo que tiene que quedar a la vista se
+          resuelve con `sticky`. `svh` y no `vh` por la barra de Safari en iOS. */}
+      <div className="min-h-[calc(100svh-3rem)] w-full flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm">
+        {/* Cabecera fija: título, acciones y solapas quedan a la vista mientras
+            corren las OTs por abajo. z-30 para pasarle por encima a los
+            encabezados de las tablas, que están en z-10/z-20. */}
+        <div className="sticky top-0 z-30 bg-white rounded-t-xl border-b border-gray-200">
+          {/* `pr-16`: la campana de notificaciones es `fixed` arriba a la derecha
+              (Topbar) y ahora la cabecera vive ahí también. Sin ese hueco reservado
+              se le sienta encima al botón «Planificar». */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pl-3 sm:pl-4 pr-16 pt-3 pb-2">
+            {/* Título en una línea con la bajada al lado y no debajo: es la misma
+                pantalla todos los días, no hace falta que se anuncie con 4xl. */}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-1.5 bg-gradient-to-br from-[#DC143C] to-[#B8112E] rounded-lg shadow-md shrink-0">
+                <Activity className="h-5 w-5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl lg:text-2xl font-bold text-gray-900 leading-tight">Operaciones</h1>
+                <p className="text-gray-500 text-xs truncate">Gestiona la planificación de las órdenes de trabajo</p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2 w-full md:w-auto">
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => setIsAvailabilityModalOpen(true)}
                 className="bg-white hover:bg-gray-50 text-gray-700 border-gray-300 shadow-sm flex-1 md:flex-none"
                 title="Configurar feriados y días no laborales"
@@ -1430,6 +1454,7 @@ export default function OperacionesPage() {
                 <span className="hidden md:inline">Disponibilidad</span>
               </Button>
               <Button
+                size="sm"
                 onClick={() => {
                   setIsReplanning(false);
                   setIsSelectionModalOpen(true);
@@ -1444,8 +1469,9 @@ export default function OperacionesPage() {
                   a diez centímetros uno del otro se leen como dos cosas distintas. */}
               {activeTab !== "work_orders" && (
                 <Button
+                  size="sm"
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg flex-1 md:flex-none w-full sm:w-auto mt-2 sm:mt-0"
+                  className="bg-red-700 hover:bg-red-800 text-white shadow-md transition-all hover:shadow-lg flex-1 md:flex-none"
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   <span>Nueva orden</span>
@@ -1454,8 +1480,9 @@ export default function OperacionesPage() {
             </div>
           </div>
 
-          {/* Tabs Navigation */}
-          <div className="flex overflow-x-auto pb-1 items-center gap-1 mt-6 border-b border-gray-200 scrollbar-hide">
+          {/* Tabs Navigation. `-mb-px` para que el subrayado rojo de la solapa
+              activa pise el borde de la cabecera en vez de dibujar dos líneas. */}
+          <div className="flex overflow-x-auto items-center gap-1 px-2 sm:px-3 -mb-px scrollbar-hide">
             <button
               onClick={() => setActiveTab("work_orders")}
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
@@ -1496,26 +1523,12 @@ export default function OperacionesPage() {
 
           </div>
         </div>
-      </div>
 
-      <div className="flex-1 flex overflow-visible w-full">
-        {/* Padding-top reducido (pt-4) porque ahora el header también es un card con
-            su propio margin inferior implícito. Antes era py-8 que generaba un gap
-            excesivo entre el header full-width y el card del body. */}
-        {/* Padding unificado entre `work_orders` y `lista_planificacion` para que las
-            tablas internas (PlanningListTable / UnplannedWorkOrdersList / CompletedWorkOrdersList)
-            tengan exactamente el mismo ancho útil y los anchos de columna se vean iguales. */}
-        <div className={`flex-1 transition-all w-full duration-300 flex flex-col ${activeTab === 'gantt' ? 'w-full px-2 py-4' : 'w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 pt-4 pb-4 sm:pb-8'}`}>
-          {/* Para `lista_planificacion` quitamos el padding del card (`p-0`) para que
-              la barra de sub-tabs (Planificadas | Semanal | ...) ocupe el ancho COMPLETO
-              y toque los bordes superior e izquierdo del card. El padding interno lo
-              maneja cada TabsContent abajo. */}
-          {/* `work_orders` usa el mismo padding interno (p-6 / p-0) que `lista_planificacion`
-              para que las tablas hijas tengan el mismo ancho exacto y las columnas se
-              alineen entre Planificación, No Planificadas e Historial. */}
-          <div className={`bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'p-6' : activeTab === 'lista_planificacion' ? 'p-0 overflow-hidden' : 'p-6'}`}>
-            {/* Redundant header removed */}
-
+        {/* El contenido apoya directo sobre la pantalla, sin card propio.
+            `lista_planificacion` va sin padding para que su barra de sub-solapas
+            toque los bordes; en `work_orders` el margen lateral es mínimo porque
+            cada píxel de aire es ancho de columna que la tabla pierde. */}
+        <div className={`flex-1 min-w-0 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'px-3 pt-3 pb-6' : activeTab === 'lista_planificacion' ? 'p-0 overflow-hidden' : 'px-4 py-4 sm:px-5'}`}>
             {activeTab === "operarios" && (
               <div className="w-full">
                 <div className="flex items-center gap-2 mb-4">
@@ -2198,8 +2211,6 @@ export default function OperacionesPage() {
               </Tabs>
             )}
 
-            {/* Sección de Órdenes No Planificadas */}
-          </div>
         </div>
       </div>
       </>

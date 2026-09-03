@@ -101,7 +101,7 @@ const MateriaPrimaTab = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="flex justify-between items-center gap-4">
                 <div className="relative w-full max-w-sm">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -128,8 +128,10 @@ const MateriaPrimaTab = () => {
 
             </div>
 
-            <Card>
-                <CardHeader className="dir-row justify-between items-center pb-2">
+            {/* Sin marco propio: la pantalla de Operaciones ya es la caja. El card
+                acá adentro era una caja blanca arriba de otra caja blanca. */}
+            <Card className="border-0 shadow-none py-0 gap-4">
+                <CardHeader className="dir-row justify-between items-center px-0 pb-0">
                     <div>
                         <CardTitle>Inventario de Materia Prima</CardTitle>
                         <CardDescription>
@@ -160,7 +162,7 @@ const MateriaPrimaTab = () => {
                         </div>
                     )}
                 </CardHeader>
-                <CardContent>
+                <CardContent className="px-0">
                     <div className="rounded-md border">
                         <Table>
                             <TableHeader>
