@@ -4,6 +4,8 @@ from sqlalchemy import func, case
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
+from backend.dto.fechas import sin_zona
+from backend.infrastructure.db_retry import motivo_error_db
 from datetime import datetime, date
 
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
@@ -110,9 +112,15 @@ class OrdenTrabajoRepository:
                     f"de orden_trabajo: {sorted(descartados)}"
                 )
 
+            # Red de contención de la zona horaria. El normalizado real vive en el DTO
+            # (backend/dto/fechas.py), que es por donde entran el alta y la edición;
+            # esto cubre a cualquier otro que llame al repositorio con una fecha con
+            # zona. Las columnas de fecha son `timestamp without time zone` y asyncpg
+            # rechaza la mezcla con un DataError que el usuario veía como
+            # «Error al actualizar la Orden de Trabajo».
             for key, value in nueva_data.items():
                 if key in columnas:
-                    setattr(orden, key, value)
+                    setattr(orden, key, sin_zona(value))
 
             await self.db.commit()
             await self.db.refresh(orden)
@@ -121,7 +129,15 @@ class OrdenTrabajoRepository:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Repository - Error real en update: {e}")
-            raise InfrastructureException("Error al actualizar la Orden de Trabajo.") from e
+            # El mensaje lleva el MOTIVO. Antes decía sólo «Error al actualizar la Orden
+            # de Trabajo»: el usuario mandaba una foto del cartel y no se podía saber qué
+            # había pasado sin ir a buscar los logs del servidor. Dos bugs distintos
+            # (el nombre del cliente contra la relación, y las fechas con zona horaria)
+            # se veían exactamente igual, y por eso el segundo pareció que el primero
+            # no se había arreglado.
+            raise InfrastructureException(
+                motivo_error_db(e, "guardar los cambios de la Orden de Trabajo")
+            ) from e
 
     async def delete(self, id: int):
         try:
@@ -885,7 +901,7 @@ class OrdenTrabajoRepository:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Repository - Error en update_processes_full: {e}")
-            raise InfrastructureException("Error al actualizar lista de procesos.") from e
+            raise InfrastructureException(motivo_error_db(e, "guardar los procesos de la Orden de Trabajo")) from e
 
     
     async def update_cantidad_entregada(self, id_orden: int, nueva_cantidad: int, total_unidades: int | None):

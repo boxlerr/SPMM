@@ -1,6 +1,7 @@
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+from backend.dto.fechas import FechaSinZona
 
 class OrdenTrabajoProcesoCreateDTO(BaseModel):
     proceso_id: int
@@ -31,7 +32,7 @@ class OrdenTrabajoRequestDTO(BaseModel):
     requerido_por: Optional[str] = None
     aprobado_por: Optional[str] = None
     remitos_salida: Optional[str] = None
-    f_disp_material: Optional[datetime] = None
+    f_disp_material: Optional[FechaSinZona] = None
     
     fabricacion: Optional[bool] = False
     reparacion: Optional[bool] = False
@@ -56,10 +57,10 @@ class OrdenTrabajoRequestDTO(BaseModel):
     id_articulo: int
     # 🔻 Eliminado: id_maquinaria
 
-    fecha_orden: datetime
-    fecha_entrada: datetime
-    fecha_prometida: datetime
-    fecha_entrega: Optional[datetime] = None
+    fecha_orden: FechaSinZona
+    fecha_entrada: FechaSinZona
+    fecha_prometida: FechaSinZona
+    fecha_entrega: Optional[FechaSinZona] = None
     
     procesos: List[OrdenTrabajoProcesoCreateDTO] = []
 

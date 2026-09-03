@@ -226,3 +226,94 @@ def test_el_dto_de_update_declara_cliente_como_texto_de_pantalla():
     mapper = inspect(OrdenTrabajo)
     assert "cliente" not in {a.key for a in mapper.column_attrs}
     assert "cliente" in {r.key for r in mapper.relationships}
+
+
+# ---------------------------------------------------------------------------
+# Segunda tanda (3-sep-2026, misma tarde): arreglado lo de `cliente`, el guardado
+# volvió a fallar con EL MISMO cartel. En los logs del servidor era otra cosa:
+#
+#   asyncpg.exceptions.DataError: invalid input for query argument $2:
+#   datetime.datetime(2026, 9, 3, 0, 0, tzinfo=...)
+#   (can't subtract offset-naive and offset-aware datetimes)
+#
+# El navegador manda `new Date(x).toISOString()` —con la Z de UTC— y las columnas
+# de fecha son `timestamp without time zone`. asyncpg no acepta la mezcla.
+#
+# SQLite se traga los datetime con zona, así que acá NO se puede reproducir el
+# error de la base: lo que se fija es que el DTO entregue la fecha ya sin zona,
+# que es lo que evita que llegue a asyncpg.
+
+def test_las_fechas_del_navegador_llegan_sin_zona_horaria():
+    from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
+
+    # Tal cual lo manda el modal: new Date("2026-09-03").toISOString()
+    dto = OrdenTrabajoUpdateDTO(
+        fecha_orden="2026-09-03T00:00:00.000Z",
+        fecha_entrada="2026-09-02T00:00:00.000Z",
+        fecha_prometida="2026-09-25T00:00:00.000Z",
+        f_disp_material="2026-09-10T00:00:00.000Z",
+    )
+    for campo in ("fecha_orden", "fecha_entrada", "fecha_prometida", "f_disp_material"):
+        v = getattr(dto, campo)
+        assert v.tzinfo is None, f"{campo} llegó con zona horaria y asyncpg lo rechaza"
+
+    # Y sobre todo: NO se corre el día.
+    assert dto.fecha_orden == datetime(2026, 9, 3, 0, 0)
+    assert dto.fecha_prometida == datetime(2026, 9, 25, 0, 0)
+
+
+def test_el_alta_tambien_manda_las_fechas_con_zona():
+    """El modal usa el mismo `toISOString()` para crear; el DTO de alta también."""
+    from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
+
+    dto = OrdenTrabajoRequestDTO(
+        id_otvieja=0, id_prioridad=1, id_sector=1, id_articulo=1,
+        fecha_orden="2026-09-03T00:00:00.000Z",
+        fecha_entrada="2026-09-03T00:00:00.000Z",
+        fecha_prometida="2026-09-30T00:00:00.000Z",
+        procesos=[],
+    )
+    assert dto.fecha_orden.tzinfo is None
+    assert dto.fecha_prometida == datetime(2026, 9, 30, 0, 0)
+
+
+def test_una_fecha_sin_zona_pasa_intacta():
+    """No se toca lo que ya venía bien (por ejemplo, lo que arma el sync)."""
+    from backend.dto.fechas import sin_zona
+    d = datetime(2026, 9, 3, 14, 30)
+    assert sin_zona(d) is d
+    assert sin_zona(None) is None
+    assert sin_zona("no soy fecha") == "no soy fecha"
+
+
+@pytest.mark.asyncio
+async def test_guardar_con_fechas_del_navegador(session):
+    """De punta a punta: el payload del modal con fechas ISO guarda y no corre el día."""
+    await _seed_ot(session)
+
+    resp = await _guardar(
+        session,
+        fecha_orden="2026-08-31T00:00:00.000Z",
+        fecha_entrada="2026-08-30T00:00:00.000Z",
+        fecha_prometida="2026-09-25T00:00:00.000Z",
+    )
+    assert resp.status is True
+
+    session.expire_all()
+    orden = await session.get(OrdenTrabajo, OT_ID)
+    assert orden.fecha_prometida == datetime(2026, 9, 25, 0, 0)
+    assert orden.fecha_orden == datetime(2026, 8, 31, 0, 0)
+
+
+def test_el_error_de_guardado_dice_el_motivo():
+    """
+    El cartel tiene que contar QUÉ pasó. Con «Error al actualizar la Orden de Trabajo»
+    a secas, dos bugs distintos se veían idénticos y hubo que ir a los logs del
+    servidor para distinguirlos.
+    """
+    from backend.infrastructure.db_retry import motivo_error_db
+
+    msg = motivo_error_db(ValueError("can't subtract offset-naive and offset-aware datetimes"),
+                          "guardar los cambios de la Orden de Trabajo")
+    assert "guardar los cambios de la Orden de Trabajo" in msg
+    assert "offset-naive" in msg, "el motivo real tiene que viajar en el mensaje"

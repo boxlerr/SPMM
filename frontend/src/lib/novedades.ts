@@ -63,7 +63,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Operaciones › Órdenes de Trabajo",
         titulo: "Ya se pueden guardar los cambios de una orden: antes no guardaba nada",
         detalle:
-            "Abrías una orden, le cambiabas los procesos o una fecha, apretabas el botón y sólo aparecía «Error al actualizar la Orden de Trabajo»: no se guardaba nada, ni lo que habías tocado ni el resto. Ya está arreglado. Además el botón ahora dice «Guardar cambios» cuando estás editando —decía «Crear Orden» siempre, y confundía— y si algo falla el aviso cuenta qué pasó en vez de decir que no se pudo crear.",
+            "Abrías una orden, le cambiabas los procesos o una fecha, apretabas el botón y sólo aparecía «Error al actualizar la Orden de Trabajo»: no se guardaba nada, ni lo que habías tocado ni el resto. Eran dos problemas distintos que se veían iguales, y los dos están arreglados. Además el botón ahora dice «Guardar cambios» cuando estás editando —decía «Crear Orden» siempre, y confundía— y si algo llega a fallar, el aviso te dice el motivo en vez de un cartel suelto: así se puede arreglar sin tener que adivinar.",
         href: "/operaciones",
     },
     {
