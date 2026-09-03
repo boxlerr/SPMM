@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "guardar-ot-editada",
+        fecha: "2026-09-03",
+        tipo: "arreglo",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "Ya se pueden guardar los cambios de una orden: antes no guardaba nada",
+        detalle:
+            "Abrías una orden, le cambiabas los procesos o una fecha, apretabas el botón y sólo aparecía «Error al actualizar la Orden de Trabajo»: no se guardaba nada, ni lo que habías tocado ni el resto. Ya está arreglado. Además el botón ahora dice «Guardar cambios» cuando estás editando —decía «Crear Orden» siempre, y confundía— y si algo falla el aviso cuenta qué pasó en vez de decir que no se pudo crear.",
+        href: "/operaciones",
+    },
+    {
+        id: "imprimir-el-plano",
+        fecha: "2026-09-03",
+        tipo: "nuevo",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "El plano se puede imprimir y bajar desde la orden",
+        detalle:
+            "Al abrir un plano para verlo ahora tiene un botón «Imprimir» al lado de «Descargar», así sale en papel junto con la hoja de taller. Y el botón de bajar el archivo — el de la lupa y el nombre del plano — antes no hacía nada: ya baja.",
+        href: "/operaciones",
+    },
+    {
         id: "primer-ingreso-cambiar-contrasena",
         fecha: "2026-09-02",
         tipo: "nuevo",

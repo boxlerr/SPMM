@@ -279,7 +279,21 @@ class OrdenTrabajoService:
         logger.info(f"Service - Modificar orden de trabajo ID: {id}")
         
         nueva_data = dto.model_dump(exclude_unset=True)
-        
+
+        # `cliente` es el NOMBRE del cliente y viene sólo para mostrarlo en el modal: en
+        # la tabla no existe esa columna (el vínculo real es `id_cliente`) y en el modelo
+        # ese nombre lo ocupa la relación al objeto Cliente. El alta ya lo ignoraba; acá
+        # se saca explícitamente para que quede dicho, aunque el repositorio igual filtra
+        # por columnas.
+        nueva_data.pop('cliente', None)
+
+        # `id_otvieja` es el número visible de la OT. En el alta un 0 significa
+        # "generalo vos", pero acá no hay nada que lo genere: entraba tal cual y le
+        # pisaba el número a la orden. Y el modal manda 0 con sólo borrar el campo
+        # "Nº OT Vieja". Sin número nuevo, se deja el que ya tenía.
+        if not nueva_data.get('id_otvieja'):
+            nueva_data.pop('id_otvieja', None)
+
         # 🔹 Convert Boolean fields to Integer (0/1) for compatibility with DB schema
         bool_fields = [
             'fabricacion', 'reparacion', 'sin_cargo', 'stock', 'interno', 'revisada',

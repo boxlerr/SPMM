@@ -20,6 +20,7 @@ import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
 import { ProcesosEditor, ProcesoRow } from "@/components/planning/ProcesosEditor";
+import { descargarPlano } from "@/lib/planos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -618,10 +619,17 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             }
 
             if (!response.ok) {
-                const errorData = await response.json();
-                console.error("Error response from backend:", errorData);
+                // El cuerpo del error no siempre es JSON: un 502/504 de Cloud Run devuelve
+                // HTML, y ahí `response.json()` tiraba un "Unexpected token" que se comía el
+                // error de verdad y dejaba al usuario sin saber qué pasó.
+                const crudo = await response.text().catch(() => "");
+                let errorData: any = {};
+                try { errorData = crudo ? JSON.parse(crudo) : {}; } catch { errorData = {}; }
+                console.error("Error response from backend:", response.status, crudo);
 
-                let errorMessage = "Error al crear la orden";
+                let errorMessage = orderToEdit
+                    ? `No se pudieron guardar los cambios de la OT (error ${response.status})`
+                    : `No se pudo crear la orden (error ${response.status})`;
 
                 // Parse standardized backend errors (ResponseDTO)
                 if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
@@ -673,7 +681,9 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             resetForm();
         } catch (error) {
             console.error("Error creating/updating order:", error);
-            toast.error(error instanceof Error ? error.message : "Error desconocido al crear la orden");
+            toast.error(error instanceof Error
+                ? error.message
+                : (orderToEdit ? "Error desconocido al guardar la OT" : "Error desconocido al crear la orden"));
         } finally {
             setSubmitting(false);
         }
@@ -929,17 +939,21 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                 isOpen={showConfirmSubmit}
                 onClose={() => setShowConfirmSubmit(false)}
                 onConfirm={performSubmission}
-                title="Crear Orden de Trabajo"
-                description="¿Estás seguro de que quieres crear esta Orden de Trabajo? Verificá que todos los datos sean correctos."
-                confirmText="Sí, crear orden"
+                title={orderToEdit ? "Guardar cambios de la OT" : "Crear Orden de Trabajo"}
+                description={orderToEdit
+                    ? "¿Guardamos los cambios en esta Orden de Trabajo? Verificá que todos los datos sean correctos."
+                    : "¿Estás seguro de que quieres crear esta Orden de Trabajo? Verificá que todos los datos sean correctos."}
+                confirmText={orderToEdit ? "Sí, guardar cambios" : "Sí, crear orden"}
             />
 
             <ConfirmationDialog
                 isOpen={showConfirmCancel}
                 onClose={() => setShowConfirmCancel(false)}
                 onConfirm={handleClose}
-                title="Cancelar Creación"
-                description="Si cancelas ahora, perderás todos los datos ingresados. ¿Estás seguro?"
+                title={orderToEdit ? "Descartar los cambios" : "Cancelar Creación"}
+                description={orderToEdit
+                    ? "Si cancelas ahora, perderás los cambios que hiciste en esta OT. ¿Estás seguro?"
+                    : "Si cancelas ahora, perderás todos los datos ingresados. ¿Estás seguro?"}
                 confirmText="Sí, cancelar"
                 cancelText="Volver"
                 variant="destructive"
@@ -1265,14 +1279,15 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                                 )}
                                                             </div>
                                                             <div className="flex flex-col min-w-0">
-                                                                <a
-                                                                    href={`${API_URL}/planos/${file.id}/archivo?download=true`}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    className="text-sm font-medium text-gray-700 truncate hover:text-blue-600 hover:underline"
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => descargarPlano(file.id, file.nombre)
+                                                                        .catch(() => toast.error("No se pudo descargar el archivo"))}
+                                                                    className="text-sm font-medium text-gray-700 truncate hover:text-blue-600 hover:underline text-left"
+                                                                    title="Descargar este archivo"
                                                                 >
                                                                     {file.nombre}
-                                                                </a>
+                                                                </button>
                                                                 <span className="text-xs text-gray-400">Existente</span>
                                                             </div>
                                                         </div>
@@ -1508,7 +1523,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             ) : (
                                                 <CheckCircle2 className="mr-2 h-4 w-4" />
                                             )}
-                                            Crear Orden
+                                            {orderToEdit ? "Guardar cambios" : "Crear Orden"}
                                         </Button>
                                     ) : (
                                         <Button

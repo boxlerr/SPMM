@@ -1,8 +1,9 @@
 import React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, Download, X } from "lucide-react";
+import { Loader2, Download, X, Printer } from "lucide-react";
 import { API_URL } from "@/config";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface FileViewerModalProps {
     file: { id: number; nombre: string; tipo_archivo: string } | null;
@@ -20,6 +21,8 @@ export const FileViewerModal = ({ file, isOpen, onClose }: FileViewerModalProps)
     const [objectUrl, setObjectUrl] = React.useState<string | null>(null);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
+    // El visor de PDF del navegador es el que sabe imprimirlo: se le habla por acá.
+    const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
     React.useEffect(() => {
         if (!isOpen || !file) {
@@ -66,6 +69,55 @@ export const FileViewerModal = ({ file, isOpen, onClose }: FileViewerModalProps)
     const isImage = file?.tipo_archivo?.startsWith("image/");
     const isPdf = file?.tipo_archivo === "application/pdf";
 
+    // Imprimir el plano que se está viendo (pedido de Camilo, 3/9): el taller necesita
+    // el plano en papel junto con la OT.
+    //
+    // El archivo ya está en memoria como blob —el endpoint pide token, así que no se
+    // puede apuntar un <img>/<iframe> directo a la URL de la API—, así que se imprime
+    // desde ahí:
+    //   - PDF: se le pide imprimir al iframe que ya lo está mostrando, que es el visor
+    //     del propio navegador. Escribirlo en una ventana nueva no sirve: window.print()
+    //     sobre un PDF embebido que todavía no cargó sale en blanco.
+    //   - Imagen: ventana nueva con la imagen sola, encajada en la hoja, y se imprime
+    //     cuando terminó de cargar.
+    const handlePrint = () => {
+        if (!objectUrl) return;
+
+        if (isPdf) {
+            const marco = iframeRef.current;
+            try {
+                if (marco?.contentWindow) {
+                    marco.contentWindow.focus();
+                    marco.contentWindow.print();
+                    return;
+                }
+            } catch {
+                // Algunos navegadores no dejan tocar el visor de PDF embebido: se cae
+                // a abrirlo en una pestaña, donde el visor trae su propio botón.
+            }
+            const p = window.open(objectUrl, "_blank");
+            if (!p) toast.error("Habilitá las ventanas emergentes para poder imprimir el plano.");
+            else toast.info("Se abrió el plano en una pestaña nueva: imprimilo desde ahí.");
+            return;
+        }
+
+        const w = window.open("", "_blank", "width=900,height=700");
+        if (!w) {
+            toast.error("Habilitá las ventanas emergentes para poder imprimir el plano.");
+            return;
+        }
+        const titulo = (file?.nombre || "Plano").replace(/[<&>]/g, "");
+        w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8">
+<title>${titulo}</title><style>
+html,body{margin:0;padding:0;height:100%}
+body{display:flex;align-items:center;justify-content:center;background:#fff}
+img{max-width:100%;max-height:100%;object-fit:contain}
+@page{margin:8mm}
+</style></head><body><img src="${objectUrl}" alt="${titulo}"
+ onload="window.focus();window.print()"></body></html>`);
+        w.document.close();
+    };
+
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="max-w-4xl w-[90vw] h-[85vh] p-0 overflow-hidden flex flex-col bg-slate-50/95 backdrop-blur-md border-slate-200 shadow-2xl">
@@ -75,12 +127,26 @@ export const FileViewerModal = ({ file, isOpen, onClose }: FileViewerModalProps)
                             {file?.nombre}
                         </DialogTitle>
                         {objectUrl && (
-                             <Button variant="outline" size="sm" asChild className="h-8 gap-2 border-slate-200">
-                                <a href={objectUrl} download={file?.nombre}>
-                                    <Download className="w-4 h-4" />
-                                    Descargar
-                                </a>
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                {(isImage || isPdf) && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handlePrint}
+                                        className="h-8 gap-2 border-slate-200"
+                                        title="Imprimir este plano"
+                                    >
+                                        <Printer className="w-4 h-4" />
+                                        Imprimir
+                                    </Button>
+                                )}
+                                <Button variant="outline" size="sm" asChild className="h-8 gap-2 border-slate-200">
+                                    <a href={objectUrl} download={file?.nombre}>
+                                        <Download className="w-4 h-4" />
+                                        Descargar
+                                    </a>
+                                </Button>
+                            </div>
                         )}
                     </div>
                 </DialogHeader>
@@ -109,6 +175,7 @@ export const FileViewerModal = ({ file, isOpen, onClose }: FileViewerModalProps)
                                 />
                             ) : isPdf ? (
                                 <iframe
+                                    ref={iframeRef}
                                     src={objectUrl}
                                     className="w-full h-full rounded-md border border-slate-200 shadow-inner bg-white animate-in fade-in slide-in-from-bottom-2 duration-400"
                                     title={file?.nombre}

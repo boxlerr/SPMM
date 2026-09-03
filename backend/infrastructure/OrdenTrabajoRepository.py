@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, inspect
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import func, case
 from backend.domain.OrdenTrabajo import OrdenTrabajo
@@ -88,8 +88,31 @@ class OrdenTrabajoRepository:
                 logger.info(f"Repository - Orden de trabajo {id} no encontrada para actualizar.")
                 return None
 
+            # Se escriben SÓLO las columnas de la tabla.
+            #
+            # El setattr era ciego y el DTO de update trae campos que son de pantalla:
+            # `cliente` es el NOMBRE del cliente (un string) mientras que en el modelo
+            # `cliente` es la relación al objeto Cliente. Meterle el string a la relación
+            # hacía morir el flush con "'str' object has no attribute
+            # '_sa_instance_state'", se iba todo al rollback y la OT no guardaba NADA:
+            # el modal sólo mostraba "Error al actualizar la Orden de Trabajo". El
+            # cliente de verdad viaja aparte, en `id_cliente`, que sí es columna.
+            #
+            # Filtrar por columnas deja el error fuera de la clase entera en vez de
+            # tapar un campo: si mañana el DTO gana otro campo de pantalla, el guardado
+            # sigue funcionando. Lo que se descarta se avisa en el log, así no se
+            # esconde un campo que sí se quería guardar y está mal escrito.
+            columnas = {attr.key for attr in inspect(OrdenTrabajo).column_attrs}
+            descartados = [k for k in nueva_data if k not in columnas]
+            if descartados:
+                logger.warning(
+                    f"Repository - update OT {id}: se ignoran campos que no son columnas "
+                    f"de orden_trabajo: {sorted(descartados)}"
+                )
+
             for key, value in nueva_data.items():
-                setattr(orden, key, value)
+                if key in columnas:
+                    setattr(orden, key, value)
 
             await self.db.commit()
             await self.db.refresh(orden)

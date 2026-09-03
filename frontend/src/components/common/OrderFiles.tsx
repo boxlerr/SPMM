@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { FileViewerModal } from "./FileViewerModal";
+import { descargarPlano } from "@/lib/planos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -206,14 +207,17 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
                                     >
                                         <Eye className="w-3.5 h-3.5" />
                                     </button>
-                                    <a
-                                        href={`${API_URL}/planos/${file.id}/archivo?download=true`}
-                                        download={file.nombre}
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            descargarPlano(file.id, file.nombre)
+                                                .catch(() => toast.error("No se pudo descargar el archivo"));
+                                        }}
                                         className="p-1.5 hover:bg-white hover:rounded-md text-gray-500 hover:text-green-600 transition-all"
                                         title="Descargar"
                                     >
                                         <Download className="w-3.5 h-3.5" />
-                                    </a>
+                                    </button>
                                 </div>
                             </div>
                         </div>
