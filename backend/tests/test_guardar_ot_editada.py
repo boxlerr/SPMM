@@ -422,3 +422,43 @@ def test_el_endpoint_de_editar_pasada_acepta_solo_lo_que_cambio():
     body = EditarProcesoRequest(tiempo_proceso=45)
     # exclude_unset: lo que no vino no viaja, así no pisa lo guardado.
     assert body.model_dump(exclude_unset=True) == {"tiempo_proceso": 45}
+
+
+# ---------------------------------------------------------------------------
+# Vaciar una fecha obligatoria desde la edición en línea de la tabla de
+# Planificación (hallazgo de la auditoría del 3-sep-2026).
+#
+# handleDateSave manda `null` cuando se vacía la celda, y fecha_orden / entrada /
+# prometida son NOT NULL: el UPDATE moría con un error de la base. Y como el catch
+# del frontend sólo logueaba, el usuario no veía nada: la celda volvía sola al valor
+# viejo y parecía que el sistema le ignoraba el cambio.
+
+@pytest.mark.asyncio
+async def test_vaciar_una_fecha_obligatoria_no_rompe_el_guardado(session):
+    await _seed_ot(session)
+
+    resp = await _guardar(session, fecha_prometida=None, fecha_entrada=None)
+    assert resp.status is True
+
+    session.expire_all()
+    orden = await session.get(OrdenTrabajo, OT_ID)
+    # Conserva las que tenía: no se inventa una fecha ni se guarda null.
+    assert orden.fecha_prometida == datetime(2026, 9, 20)
+    assert orden.fecha_entrada == datetime(2026, 8, 30)
+
+
+@pytest.mark.asyncio
+async def test_vaciar_la_fecha_de_entrega_si_se_permite(session):
+    """`fecha_entrega` vacía es un dato válido: quiere decir que todavía no se entregó."""
+    await _seed_ot(session)
+
+    orden = await session.get(OrdenTrabajo, OT_ID)
+    orden.fecha_entrega = datetime(2026, 9, 10)
+    await session.commit()
+
+    resp = await _guardar(session, fecha_entrega=None)
+    assert resp.status is True
+
+    session.expire_all()
+    orden = await session.get(OrdenTrabajo, OT_ID)
+    assert orden.fecha_entrega is None

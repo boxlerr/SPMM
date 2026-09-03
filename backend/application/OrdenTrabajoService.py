@@ -294,6 +294,18 @@ class OrdenTrabajoService:
         if not nueva_data.get('id_otvieja'):
             nueva_data.pop('id_otvieja', None)
 
+        # Fechas obligatorias en null: se descartan en vez de tumbar el guardado.
+        #
+        # La edición en línea de la tabla de Planificación manda `null` cuando alguien
+        # vacía la celda, y estas tres columnas son NOT NULL: el UPDATE moría con un
+        # error de la base. Se ignora el campo y la orden conserva la fecha que tenía —
+        # el aviso de que no puede quedar vacía lo da la pantalla. `fecha_entrega` NO
+        # va acá: vaciarla es válido, significa "todavía no se entregó".
+        for campo in ('fecha_orden', 'fecha_entrada', 'fecha_prometida'):
+            if campo in nueva_data and nueva_data[campo] is None:
+                logger.warning(f"Service - OT {id}: se ignora {campo}=null (es obligatoria)")
+                nueva_data.pop(campo)
+
         # 🔹 Convert Boolean fields to Integer (0/1) for compatibility with DB schema
         bool_fields = [
             'fabricacion', 'reparacion', 'sin_cargo', 'stock', 'interno', 'revisada',

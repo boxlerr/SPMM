@@ -6,7 +6,7 @@ import { AddProcessRow } from "@/components/planning/AddProcessRow";
 import { RegistrarIncidenciaModal } from "@/components/planning/RegistrarIncidenciaModal";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { cn, getWorkOrderRowColor } from "@/lib/utils";
+import { cn, getWorkOrderRowColor, parseApiError } from "@/lib/utils";
 import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 import { Input } from "@/components/ui/input";
 import {
@@ -585,6 +585,22 @@ function _PlanningListTable({
             return;
         }
 
+        // La fecha de entrada y la prometida son obligatorias en la orden: vaciar la
+        // celda mandaba null y la base lo rechazaba. Como el catch de abajo sólo
+        // logueaba, el usuario no veía NADA: la celda volvía sola al valor viejo y
+        // parecía que el sistema le ignoraba el cambio. La de entrega sí puede quedar
+        // vacía (es "todavía no se entregó").
+        const OBLIGATORIAS = ['fecha_entrada', 'fecha_prometida'];
+        if (OBLIGATORIAS.includes(editingOrder.field) && !editingOrder.value) {
+            toast.error(
+                editingOrder.field === 'fecha_entrada'
+                    ? "La fecha de entrada no puede quedar vacía"
+                    : "La fecha prometida no puede quedar vacía"
+            );
+            setEditingOrder(null);
+            return;
+        }
+
         try {
             const response = await fetch(`${API_URL}/ordenes/${editingOrder.id}`, {
                 method: 'PUT',
@@ -594,10 +610,14 @@ function _PlanningListTable({
                 })
             });
 
-            if (!response.ok) throw new Error('Failed to update field');
+            if (!response.ok) {
+                // El backend manda el motivo; sin esto el usuario se quedaba sin saber
+                // por qué no se guardó.
+                throw new Error(parseApiError(await response.text().catch(() => "")) || `No se pudo guardar (error ${response.status})`);
+            }
 
             setEditingOrder(null);
-            
+
             // If the parent provided an onDataChange callback, use it
             if (onDataChange) {
                 onDataChange();
@@ -605,7 +625,8 @@ function _PlanningListTable({
 
         } catch (error) {
             console.error('Error saving date:', error);
-            // Optionally show error toast
+            toast.error(error instanceof Error ? error.message : "No se pudo guardar el cambio");
+            setEditingOrder(null);
         }
     };
 
