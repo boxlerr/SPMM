@@ -985,6 +985,38 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en eliminarProceso: {e}")
             raise InfrastructureException("Error al eliminar proceso de la orden.") from e
 
+    async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict):
+        """
+        Edita UNA pasada de proceso de la OT (la fila `id_otp`).
+
+        Se toca sólo lo que viene en `cambios`: así el que edita los minutos desde la
+        lista no le borra sin querer la máquina o la persona que ya tenía elegidas.
+        El estado y el avance (inicio_real/fin_real) no se tocan nunca acá — para eso
+        están los endpoints de estado.
+        """
+        try:
+            logger.info(f"Repository - Editar pasada {id_otp} de la Orden {id_orden}")
+            linea = await self._buscar_linea(id_orden, None, id_otp)
+            if not linea:
+                return None
+
+            editables = {"id_proceso", "tiempo_proceso", "cant_operarios",
+                         "id_maquinaria", "id_operario"}
+            for k, v in cambios.items():
+                if k in editables:
+                    setattr(linea, k, v)
+
+            await self.db.commit()
+            await self.db.refresh(linea)
+            logger.info("Repository - Pasada editada correctamente.")
+            return linea
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error real en editarProceso: {e}")
+            raise InfrastructureException(
+                motivo_error_db(e, "guardar los cambios del proceso")
+            ) from e
+
     async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None, id_operario: int | None = None):
         try:
             logger.info(f"Repository - Agregar proceso {id_proceso} a Orden {id_orden}")

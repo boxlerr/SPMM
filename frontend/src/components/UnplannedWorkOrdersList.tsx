@@ -27,6 +27,7 @@ import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
+import { ProcessRowActions } from "@/components/planning/ProcessRowActions";
 import { AddProcessRow } from "./planning/AddProcessRow";
 import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 
@@ -622,17 +623,18 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                     <div className="flex flex-col">
                                                                         {order.procesos && order.procesos.length > 0 ? (
                                                                             <>
-                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[30px_3fr_100px_80px_80px_2fr] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
+                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[30px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
                                                                                     <div>#</div>
                                                                                     <div>Proceso</div>
                                                                                     <div>Estado</div>
                                                                                     <div className="text-center">Min. Est.</div>
                                                                                     <div className="text-center">Min. Real</div>
                                                                                     <div>Recurso humano</div>
+                                                                                    <div className="text-right">Acciones</div>
                                                                                 </div>
                                                                                 {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
-                                                                                    <div key={`${order.id}-${proc.proceso.id}`} className={cn(
-                                                                                        "grid grid-cols-[30px_3fr_100px_80px_80px_2fr] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
+                                                                                    <div key={`${order.id}-${(proc as any).id ?? proc.proceso.id}`} className={cn(
+                                                                                        "group/proc grid grid-cols-[30px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
                                                                                         pIdx === order.procesos!.length - 1 && "border-b-0"
                                                                                     )}>
                                                                                         <div className="text-gray-300 font-mono text-[10px]">{pIdx + 1}</div>
@@ -657,6 +659,14 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                         <div className="text-gray-500 text-[10px] font-medium truncate flex items-center gap-1.5 border-l border-gray-100 pl-2 h-4">
                                                                                             {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
                                                                                         </div>
+                                                                                        <ProcessRowActions
+                                                                                            orderId={order.id}
+                                                                                            idOtp={(proc as any).id}
+                                                                                            idProceso={proc.proceso.id}
+                                                                                            nombre={proc.proceso?.nombre || "el proceso"}
+                                                                                            minutos={proc.tiempo_proceso}
+                                                                                            onChanged={() => onDataChange && onDataChange()}
+                                                                                        />
                                                                                     </div>
                                                                                 ))}
                                                                                 <div className="bg-gray-50/50 border-t border-gray-100">

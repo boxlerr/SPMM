@@ -466,13 +466,17 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             return false;
         }
 
-        // Sólo validamos los procesos tildados ("Va"): los destildados no se guardan.
+        // Una OT puede quedarse sin procesos a propósito.
+        //
+        // Antes acá se cortaba con "Debes agregar al menos un proceso": el que sacaba
+        // todos los pasos no podía guardar, y quedaba encerrado sin forma de salir más
+        // que cancelando y perdiendo el resto de los cambios. Las OT que llegan del
+        // sistema viejo entran sin ningún proceso, así que "sin procesos" es un estado
+        // normal de la orden, no un error de carga.
+        //
+        // Los pasos se cargan después, desde la lista o desde acá mismo. El aviso de
+        // que quedó sin pasos lo da la confirmación, que no bloquea.
         const incluidos = processes.filter(p => p.incluido);
-        if (incluidos.length === 0) {
-            toast.error("Debes agregar al menos un proceso");
-            setActiveTab("procesos");
-            return false;
-        }
 
         for (const p of incluidos) {
             if (!p.proceso_id || !p.tiempo) {
@@ -940,9 +944,14 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                 onClose={() => setShowConfirmSubmit(false)}
                 onConfirm={performSubmission}
                 title={orderToEdit ? "Guardar cambios de la OT" : "Crear Orden de Trabajo"}
-                description={orderToEdit
-                    ? "¿Guardamos los cambios en esta Orden de Trabajo? Verificá que todos los datos sean correctos."
-                    : "¿Estás seguro de que quieres crear esta Orden de Trabajo? Verificá que todos los datos sean correctos."}
+                description={
+                    // Quedarse sin pasos es válido, pero conviene decirlo: una OT sin
+                    // procesos no entra en la planificación hasta que se le carguen.
+                    processes.filter(p => p.incluido && p.proceso_id).length === 0
+                        ? "Esta Orden de Trabajo va a quedar SIN PROCESOS. Se guarda igual, pero no se va a poder planificar hasta que le cargues los pasos. ¿Seguimos?"
+                        : orderToEdit
+                            ? "¿Guardamos los cambios en esta Orden de Trabajo? Verificá que todos los datos sean correctos."
+                            : "¿Estás seguro de que quieres crear esta Orden de Trabajo? Verificá que todos los datos sean correctos."}
                 confirmText={orderToEdit ? "Sí, guardar cambios" : "Sí, crear orden"}
             />
 

@@ -218,6 +218,29 @@ async def agregar_proceso_orden(id_orden: int, body: AgregarProcesoRequest, db=D
     return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden, body.cant_operarios or 1, body.id_maquinaria, body.id_operario)
 
 
+class EditarProcesoRequest(BaseModel):
+    """
+    Editar una pasada ya cargada. Todo opcional: se manda sólo lo que cambió, así
+    tocar los minutos no le borra la máquina ni la persona que ya tenía.
+    """
+    id_proceso: int | None = None
+    tiempo_proceso: int | None = None
+    cant_operarios: int | None = None
+    id_maquinaria: int | None = None
+    id_operario: int | None = None
+
+
+@router.put("/ordenes/{id_orden}/procesos/linea/{id_otp}")
+async def editar_proceso_orden(id_orden: int, id_otp: int, body: EditarProcesoRequest, db=Depends(get_db)):
+    """Edita UNA pasada (orden_trabajo_proceso.id = id_otp), no todas las del mismo proceso.
+
+    La ruta lleva `/linea/` para no chocar con /ordenes/{id}/procesos/{id_proceso}/...,
+    que direcciona por id de PROCESO y no por id de pasada."""
+    logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/linea/{id_otp}")
+    service = OrdenTrabajoService(db)
+    return await service.editarProceso(id_orden, id_otp, body.model_dump(exclude_unset=True))
+
+
 @router.delete("/ordenes/{id_orden}/procesos/{id_proceso}")
 async def eliminar_proceso_orden(id_orden: int, id_proceso: int, id_otp: int | None = None, db=Depends(get_db)):
     """Borra UNA pasada del proceso, no todas las del mismo proceso en la OT.

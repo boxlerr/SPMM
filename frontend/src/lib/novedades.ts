@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "editar-y-sacar-procesos-desde-la-lista",
+        fecha: "2026-09-03",
+        tipo: "nuevo",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "Cambiá los minutos o sacá un paso desde la misma lista",
+        detalle:
+            "Abriendo una orden, cada paso tiene ahora un lápiz y un tacho al pasar el mouse: el lápiz te deja corregir los minutos ahí mismo y el tacho saca ese paso de la orden, avisándote antes que se pierde el avance que tenga cargado. Antes había que abrir la orden entera, ir hasta la tercera solapa y guardar todo para cambiar un número. Y si sacás todos los pasos, ahora podés guardar igual: antes te lo impedía y la orden quedaba trabada.",
+        href: "/operaciones",
+    },
+    {
         id: "buscar-ot-sin-resultados",
         fecha: "2026-09-03",
         tipo: "arreglo",

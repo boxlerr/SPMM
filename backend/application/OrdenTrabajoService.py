@@ -304,8 +304,14 @@ class OrdenTrabajoService:
             if field in nueva_data and isinstance(nueva_data[field], bool):
                 nueva_data[field] = 1 if nueva_data[field] else 0
         
-        # Extract processes to handle separately
-        procesos_data = nueva_data.pop('procesos', [])
+        # Extract processes to handle separately.
+        #
+        # Se distingue "no vino la clave" (None -> no se tocan los procesos) de "vino
+        # vacía" ([] -> el usuario los sacó todos y hay que borrarlos). Antes las dos
+        # cosas caían en la misma bolsa y una lista vacía no llamaba a
+        # update_processes_full: el usuario borraba todos los procesos, guardaba, y
+        # volvían a aparecer.
+        procesos_data = nueva_data.pop('procesos', None)
         
         # Update base order
         orden_actualizada = await self.repository.update(id, nueva_data)
@@ -313,8 +319,9 @@ class OrdenTrabajoService:
         if not orden_actualizada:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
 
-        # Update processes intelligently
-        if procesos_data:
+        # Update processes intelligently. Con lista vacía, update_processes_full no
+        # conserva ninguna y las borra todas, que es justo lo que se pidió.
+        if procesos_data is not None:
              await self.repository.update_processes_full(id, procesos_data)
              # Reload to return full object including new processes
              orden_actualizada = await self.repository.find_by_id(id)
@@ -596,6 +603,17 @@ class OrdenTrabajoService:
         nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria, id_operario)
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
+
+    async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict):
+        """Edita una pasada de proceso ya cargada en la OT (minutos, máquina, persona)."""
+        logger.info(f"Service - Editar pasada {id_otp} de la Orden {id_orden}")
+
+        linea = await self.repository.editarProceso(id_orden, id_otp, cambios)
+        if not linea:
+            raise NotFoundException(
+                f"No se encontró el proceso {id_otp} en la orden de trabajo {id_orden}"
+            )
+        return ResponseDTO(status=True, data=jsonable_encoder(linea))
 
     async def obtenerHistorialProcesos(self, id_articulo: int, excluir_orden_id: int | None = None):
         """

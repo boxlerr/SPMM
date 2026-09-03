@@ -317,3 +317,108 @@ def test_el_error_de_guardado_dice_el_motivo():
                           "guardar los cambios de la Orden de Trabajo")
     assert "guardar los cambios de la Orden de Trabajo" in msg
     assert "offset-naive" in msg, "el motivo real tiene que viajar en el mensaje"
+
+
+# ---------------------------------------------------------------------------
+# Sacarle TODOS los procesos a una OT y guardar (pedido de Julián, 3-sep-2026).
+#
+# Había dos frenos encadenados: el modal exigía al menos un proceso para dejar
+# guardar, y aunque lo dejara, el backend recibía la lista vacía y NO borraba nada
+# —trataba igual "no me mandaron procesos" que "me mandaron cero"—, así que los
+# procesos volvían a aparecer solos.
+
+@pytest.mark.asyncio
+async def test_guardar_sin_procesos_los_borra(session):
+    await _seed_ot(session)
+
+    resp = await _guardar(session, procesos=[])
+    assert resp.status is True
+
+    session.expire_all()
+    from sqlalchemy import select
+    quedan = (await session.execute(
+        select(OrdenTrabajoProceso).where(OrdenTrabajoProceso.id_orden_trabajo == OT_ID)
+    )).scalars().all()
+    assert quedan == [], "se pidió sacar todos los procesos y volvieron a quedar"
+
+
+@pytest.mark.asyncio
+async def test_no_mandar_procesos_no_los_toca(session):
+    """
+    Distinto de mandar la lista vacía: si la clave no viene, los procesos que ya
+    estaban se quedan como están (lo usan los guardados que sólo tocan la cabecera).
+    """
+    from backend.application.OrdenTrabajoService import OrdenTrabajoService
+    from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
+
+    await _seed_ot(session)
+    payload = {k: v for k, v in _payload_del_modal().items() if k != "procesos"}
+    resp = await OrdenTrabajoService(session).modificarOrden(OT_ID, OrdenTrabajoUpdateDTO(**payload))
+    assert resp.status is True
+
+    session.expire_all()
+    from sqlalchemy import select
+    quedan = (await session.execute(
+        select(OrdenTrabajoProceso).where(OrdenTrabajoProceso.id_orden_trabajo == OT_ID)
+    )).scalars().all()
+    assert len(quedan) == 1, "sin mandar procesos no hay que tocar los que ya estaban"
+
+
+# ---------------------------------------------------------------------------
+# Editar UNA pasada desde la lista, sin abrir la OT entera.
+
+@pytest.mark.asyncio
+async def test_editar_una_pasada(session):
+    from backend.application.OrdenTrabajoService import OrdenTrabajoService
+
+    await _seed_ot(session)
+    resp = await OrdenTrabajoService(session).editarProceso(
+        OT_ID, 1, {"tiempo_proceso": 99, "cant_operarios": 3})
+    assert resp.status is True
+
+    session.expire_all()
+    proc = await session.get(OrdenTrabajoProceso, 1)
+    assert proc.tiempo_proceso == 99
+    assert proc.cant_operarios == 3
+    # No se toca el avance ni el estado.
+    assert proc.id_estado == 1
+
+
+@pytest.mark.asyncio
+async def test_editar_una_pasada_no_pisa_lo_que_no_mandaron(session):
+    """Tocar los minutos no le tiene que borrar la máquina que ya tenía elegida."""
+    from backend.application.OrdenTrabajoService import OrdenTrabajoService
+
+    from backend.domain.Maquinaria import Maquinaria
+
+    await _seed_ot(session)
+    session.add(Maquinaria(id=7, nombre="TORNO T1"))
+    await session.commit()
+    proc = await session.get(OrdenTrabajoProceso, 1)
+    proc.id_maquinaria = 7
+    await session.commit()
+
+    await OrdenTrabajoService(session).editarProceso(OT_ID, 1, {"tiempo_proceso": 20})
+
+    session.expire_all()
+    proc = await session.get(OrdenTrabajoProceso, 1)
+    assert proc.tiempo_proceso == 20
+    assert proc.id_maquinaria == 7, "se perdió la máquina preseleccionada"
+
+
+@pytest.mark.asyncio
+async def test_editar_una_pasada_que_no_existe_avisa(session):
+    from backend.application.OrdenTrabajoService import OrdenTrabajoService
+    from backend.commons.exceptions.NotFoundException import NotFoundException
+
+    await _seed_ot(session)
+    with pytest.raises(NotFoundException):
+        await OrdenTrabajoService(session).editarProceso(OT_ID, 9999, {"tiempo_proceso": 5})
+
+
+def test_el_endpoint_de_editar_pasada_acepta_solo_lo_que_cambio():
+    from backend.presentation.OrdenTrabajoAPI import EditarProcesoRequest
+
+    body = EditarProcesoRequest(tiempo_proceso=45)
+    # exclude_unset: lo que no vino no viaja, así no pisa lo guardado.
+    assert body.model_dump(exclude_unset=True) == {"tiempo_proceso": 45}
