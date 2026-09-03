@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "buscar-ot-sin-resultados",
+        fecha: "2026-09-03",
+        tipo: "arreglo",
+        seccion: "Operaciones › Órdenes de Trabajo",
+        titulo: "Si buscás una OT y no aparece, ahora te dice por qué",
+        detalle:
+            "Buscabas una orden por número, no estaba en la solapa donde estabas parado, y la pantalla te decía «Todas las órdenes de trabajo ya han sido planificadas»: cualquiera entendía que esa OT no existía en el sistema. Ahora dice que no hubo resultados para lo que buscaste y te avisa que puede estar en otra solapa o tapada por un filtro. Ojo que la búsqueda mira sólo la solapa abierta: si no la encontrás en No Planificadas, fijate en Planificadas e Historial.",
+        href: "/operaciones",
+    },
+    {
         id: "guardar-ot-editada",
         fecha: "2026-09-03",
         tipo: "arreglo",

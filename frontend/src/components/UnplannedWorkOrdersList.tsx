@@ -155,6 +155,10 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                codArticle.includes(searchLower);
     });
 
+    // ¿La lista está vacía porque no hay nada, o porque lo que buscaron no está acá?
+    const hayBusqueda = searchTerm.trim() !== "" ||
+        JSON.stringify(filters) !== JSON.stringify(initialFilterState);
+
     const sortedOrders = React.useMemo(() => {
         if (!sortConfig.key || !sortConfig.direction) return filteredOrders;
         return [...filteredOrders].sort((a, b) => {
@@ -269,10 +273,28 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">
                     <Clock className="w-12 h-12 text-gray-200 mx-auto mb-3" />
-                    <h4 className="text-lg font-medium text-gray-900 font-bold">{copy.vacioTitulo}</h4>
-                    <p className="text-gray-500 max-w-xs mx-auto text-sm">
-                        {copy.vacioBajada}
-                    </p>
+                    {/* Buscar algo y no encontrarlo NO es lo mismo que no tener nada.
+                        Camilo (3/9) buscó la OT 15810 acá y leyó «Todas las órdenes ya han
+                        sido planificadas»: entendió que la OT no existía en el sistema. La
+                        búsqueda además mira sólo ESTA solapa, así que una OT que está pero
+                        ya fue planificada tampoco aparece. */}
+                    {hayBusqueda ? (
+                        <>
+                            <h4 className="text-lg text-gray-900 font-bold">
+                                Sin resultados en esta solapa
+                            </h4>
+                            <p className="text-gray-500 max-w-sm mx-auto text-sm">
+                                {searchTerm
+                                    ? <>No hay ninguna orden que coincida con <span className="font-semibold">«{searchTerm}»</span> entre las {copy.titulo.toLowerCase()}. Puede estar en otra solapa, o el filtro la está tapando.</>
+                                    : <>Ninguna de las {copy.titulo.toLowerCase()} pasa los filtros puestos.</>}
+                            </p>
+                        </>
+                    ) : (
+                        <>
+                            <h4 className="text-lg text-gray-900 font-bold">{copy.vacioTitulo}</h4>
+                            <p className="text-gray-500 max-w-xs mx-auto text-sm">{copy.vacioBajada}</p>
+                        </>
+                    )}
                 </div>
             ) : (
                 <>
