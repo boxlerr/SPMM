@@ -52,7 +52,7 @@ export default function PrimerIngreso({ onListo }: { onListo: () => void }) {
         setGuardando(true);
         setError(null);
         try {
-            const res = await fetch(`${API_URL}/change-password`, {
+            const res = await fetch(`${API_URL}/auth/change-password`, {
                 method: "POST",
                 headers: getAuthHeaders(),
                 body: JSON.stringify({

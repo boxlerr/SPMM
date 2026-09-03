@@ -3,7 +3,7 @@
 /**
  * Cambiar la propia contraseña.
  *
- * El endpoint existía desde siempre (`POST /change-password`) pero no había pantalla,
+ * El endpoint existía desde siempre (`POST /auth/change-password`) pero no había pantalla,
  * así que en los hechos nadie podía cambiarla: al que entraba por primera vez le
  * quedaba para siempre la que le habían pasado por WhatsApp. Aparece cuando se le da
  * de alta a alguien nuevo — el 2/9 con Matías.
@@ -52,7 +52,7 @@ export default function CambiarPassword() {
         setGuardando(true);
         setError(null);
         try {
-            const res = await fetch(`${API_URL}/change-password`, {
+            const res = await fetch(`${API_URL}/auth/change-password`, {
                 method: "POST",
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
