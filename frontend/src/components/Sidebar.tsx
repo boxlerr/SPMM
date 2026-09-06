@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ClipboardList,
   Briefcase,
+  Ruler,
   Sparkles
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -38,6 +39,15 @@ const sidebarItems: SidebarItem[] = [
     name: "Operaciones",
     href: "/operaciones",
     icon: ArrowLeftRight
+  },
+  {
+    // Planos: la biblioteca completa, para el que busca un plano por código de
+    // producto y no tiene a mano la OT que lo usa. Va pegado a Operaciones porque es
+    // la otra puerta al mismo archivo: desde la orden si sabés el número, desde acá
+    // si lo que sabés es el código.
+    name: "Planos",
+    href: "/planos",
+    icon: Ruler
   },
   {
     name: "Recursos",

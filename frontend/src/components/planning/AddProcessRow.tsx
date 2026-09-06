@@ -1,16 +1,70 @@
 import React from 'react';
 import { Button } from "@/components/ui/button";
-import { PlusCircle, X, Save } from "lucide-react";
+import { PlusCircle, X, Save, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { API_URL } from "@/config";
 import { ProcesosEditor, ProcesoRow, makeEmptyRow } from "@/components/planning/ProcesosEditor";
+import { PlanoPanel } from "@/components/common/PlanoPanel";
+import { usePlanosDeOrden } from "@/hooks/usePlanos";
+import type { Plano } from "@/lib/planos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
     const token = localStorage.getItem('access_token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 };
+
+/**
+ * El plano, al costado del listado de procesos.
+ *
+ * El que carga los pasos los está leyendo del dibujo mientras los escribe: si para
+ * verlo tiene que abrir un modal que tapa la pantalla, la cuenta la hace de memoria.
+ *
+ * Se pliega porque en un notebook el panel le saca 320px al listado y las columnas de
+ * máquina y minutos quedan espichadas: el que ya sabe de memoria qué va lo cierra y
+ * recupera el ancho.
+ */
+function PanelDePlanos({ planos, cargando, error }: { planos: Plano[]; cargando: boolean; error: string | null }) {
+    const [abierto, setAbierto] = React.useState(true);
+
+    if (!abierto) {
+        return (
+            <button
+                type="button"
+                onClick={() => setAbierto(true)}
+                title="Ver el plano"
+                className="order-1 lg:order-2 flex-shrink-0 flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:border-blue-400 hover:text-blue-600 transition-colors"
+            >
+                <Paperclip className="w-3 h-3" />
+                <span className="lg:hidden">Ver el plano{planos.length > 0 ? ` (${planos.length})` : ""}</span>
+                <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+        );
+    }
+
+    return (
+        <aside className="order-1 lg:order-2 flex-shrink-0 w-full lg:w-[320px] relative rounded-xl border border-gray-200 bg-white p-3">
+            <button
+                type="button"
+                onClick={() => setAbierto(false)}
+                title="Plegar el plano"
+                className="absolute right-2 top-2 z-10 p-1 rounded-md text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+                <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            <div className="max-h-[45vh] overflow-y-auto pr-1">
+                <PlanoPanel
+                    planos={planos}
+                    cargando={cargando}
+                    compacto
+                    titulo="Plano"
+                    vacioTexto={error ?? "Esta orden no tiene ningún plano cargado."}
+                />
+            </div>
+        </aside>
+    );
+}
 
 /**
  * Alta rápida (inline) de procesos sobre una OT existente. Usa el mismo listado
@@ -26,6 +80,10 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
     const [maquinarias, setMaquinarias] = React.useState<any[]>([]);
     const [operarios, setOperarios] = React.useState<any[]>([]);
     const [rows, setRows] = React.useState<ProcesoRow[]>([]);
+    // Recién cuando se abre el editor: este componente se dibuja una vez por fila del
+    // listado, y pedir los planos siempre sería un pedido por OT en pantalla.
+    // El endpoint de la orden ya trae también los planos del producto que fabrica.
+    const { planos, cargando: planosCargando, error: planosError } = usePlanosDeOrden(isAdding ? orderId : undefined);
 
     const fetchCatalogos = async () => {
         try {
@@ -147,13 +205,19 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
                 </Button>
             </div>
 
-            <ProcesosEditor
-                rows={rows}
-                onChange={setRows}
-                procesos={procesos}
-                maquinarias={maquinarias}
-                operarios={operarios}
-            />
+            <div className="flex flex-col lg:flex-row lg:items-start gap-3">
+                <div className="order-2 lg:order-1 flex-1 min-w-0">
+                    <ProcesosEditor
+                        rows={rows}
+                        onChange={setRows}
+                        procesos={procesos}
+                        maquinarias={maquinarias}
+                        operarios={operarios}
+                    />
+                </div>
+
+                <PanelDePlanos planos={planos} cargando={planosCargando} error={planosError} />
+            </div>
 
             <div className="flex items-center justify-end mt-1">
                 <Button

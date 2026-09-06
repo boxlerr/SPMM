@@ -1,5 +1,7 @@
+from collections.abc import Mapping
+
 from backend.domain.Plano import Plano
-from backend.dto.PlanoRequestDTO import PlanoRequestDTO
+from backend.dto.PlanoRequestDTO import PlanoRequestDTO, PlanoUpdateDTO
 from backend.infrastructure.PlanoRepository import PlanoRepository
 from backend.commons.ResponseDTO import ResponseDTO
 
@@ -13,6 +15,20 @@ from backend.commons.loggers.logger import logger
 from fastapi.encoders import jsonable_encoder
 
 
+def _campo(fila, nombre, default=None):
+    """Lee un campo venga como venga: entidad Plano, Row de SQLAlchemy o dict.
+
+    Los listados no devuelven entidades a propósito (no traen el blob `archivo`), así
+    que llegan como filas; el alta y la modificación sí devuelven la entidad.
+    """
+    if isinstance(fila, Mapping):
+        return fila.get(nombre, default)
+    mapping = getattr(fila, "_mapping", None)
+    if mapping is not None:
+        return mapping.get(nombre, default)
+    return getattr(fila, nombre, default)
+
+
 class PlanoService:
     def __init__(self, db_session):
         self.repository = PlanoRepository(db_session)
@@ -21,13 +37,17 @@ class PlanoService:
         try:
             logger.info("Service - Crear Plano.")
 
-            # No hay validaciones de negocio por ahora
+            # El destino (OT o artículo) ya lo validó el DTO.
             plano = Plano(
                 nombre=dto.nombre,
                 descripcion=dto.descripcion,
                 tipo_archivo=dto.tipo_archivo,
                 archivo=dto.archivo,
-                id_orden_trabajo=dto.id_orden_trabajo
+                id_orden_trabajo=dto.id_orden_trabajo,
+                id_articulo=dto.id_articulo,
+                drive_file_id=dto.drive_file_id,
+                drive_md5=dto.drive_md5,
+                drive_modificado=dto.drive_modificado
             )
 
             plano_guardado = await self.repository.save(plano)
@@ -43,7 +63,7 @@ class PlanoService:
     async def obtenerPlanoPorId(self, id: int):
         logger.info(f"Service - Obtener Plano ID: {id}")
 
-        plano = await self.repository.find_by_id(id)
+        plano = await self.repository.find_ficha(id)
 
         if not plano:
             raise NotFoundException(f"No se encontró el Plano con ID {id}")
@@ -51,12 +71,46 @@ class PlanoService:
         return ResponseDTO(status=True, data=self._plano_to_dict(plano))
 
     async def obtenerPlanosPorOrdenTrabajo(self, id_orden: int):
+        """Lo que se ve abierto en la OT: sus planos y los del artículo que fabrica.
+
+        Cada fila trae `origen` para que la pantalla sepa cuál puede borrar desde ahí
+        (el de la OT) y cuál es del catálogo (el del artículo).
+        """
         logger.info(f"Service - Obtener Planos por OrdenTrabajo ID: {id_orden}")
 
-        planos = await self.repository.find_by_orden_trabajo(id_orden)
+        planos = await self.repository.find_por_orden_con_articulo(id_orden)
 
         data = [self._plano_to_dict(p) for p in planos]
         return ResponseDTO(status=True, data=data)
+
+    async def obtenerPlanosPorArticulo(self, id_articulo: int):
+        logger.info(f"Service - Obtener Planos por Articulo ID: {id_articulo}")
+
+        planos = await self.repository.find_by_articulo(id_articulo)
+
+        data = [self._plano_to_dict(p) for p in planos]
+        return ResponseDTO(status=True, data=data)
+
+    async def obtenerArticulosConPlano(self) -> list[int]:
+        logger.info("Service - Obtener artículos con plano")
+
+        articulos = await self.repository.find_articulos_con_plano()
+        return sorted(articulos)
+
+    async def buscarPlanos(self, texto: str | None = None, limit: int = 50, offset: int = 0):
+        """Biblioteca paginada. Devuelve el shape que espera la pantalla: data + total."""
+        logger.info(f"Service - Buscar Planos (texto={texto!r}, limit={limit}, offset={offset})")
+
+        filas, total = await self.repository.buscar(texto=texto, limit=limit, offset=offset)
+
+        data = []
+        for fila in filas:
+            item = self._plano_to_dict(fila)
+            item["cod_articulo"] = _campo(fila, "cod_articulo")
+            item["descripcion_articulo"] = _campo(fila, "descripcion_articulo")
+            data.append(item)
+
+        return {"data": data, "total": total}
 
     async def obtenerContenidoPlano(self, id: int):
         logger.info(f"Service - Obtener Contenido Plano ID: {id}")
@@ -75,48 +129,49 @@ class PlanoService:
 
         return ResponseDTO(status=True, data={"deleted": id})
 
-    async def modificarPlano(self, id: int, dto: PlanoRequestDTO):
+    async def modificarPlano(self, id: int, dto: PlanoUpdateDTO):
         logger.info(f"Service - Modificar Plano ID: {id}")
 
-        plano = await self.repository.find_by_id(id)
-
-        if not plano:
-            raise NotFoundException(f"No existe el Plano con ID {id}")
-
-        # Actualiza campos
-        plano.nombre = dto.nombre
-        plano.descripcion = dto.descripcion
-        plano.tipo_archivo = dto.tipo_archivo
-        plano.archivo = dto.archivo
-
-        actualizado = await self.repository.update(plano.id, {
+        # No se busca antes para chequear que exista: find_by_id trae el archivo entero
+        # y acá lo único que se hace con el viejo es pisarlo. update() ya devuelve None
+        # cuando el plano no está, que es lo mismo que necesitábamos saber.
+        actualizado = await self.repository.update(id, {
             "nombre": dto.nombre,
             "descripcion": dto.descripcion,
             "tipo_archivo": dto.tipo_archivo,
             "archivo": dto.archivo
         })
-        # Note: repository.update takes (id, dict) based on previous reading, wait, let me check PlanoRepository.update signature again.
-        # Checking PlanoRepository.py content from history...
-        # async def update(self, id: int, nueva_data: dict):
-        # Yes, it takes id and dict. But in previous code 'modificarPlano' was calling 'self.repository.update(plano)'.
-        # Let's check the previous code of PlanoService.py provided in Step 61.
-        # Line 94: actualizado = await self.repository.update(plano)
-        # But looking at PlanoRepository.py in Step 55, line 63: async def update(self, id: int, nueva_data: dict):
-        # DISCREPANCY DETECTED. The previous Service code was likely broken or I misread.
-        # Looking at Step 55 again:
-        # async def update(self, id: int, nueva_data: dict): ...
-        # So the Service needs to call it with a dict. The previous service code I read in Step 61 line 94 says:
-        # actualizado = await self.repository.update(plano)
-        # If I replace it, I must fix this usage.
-        
+
+        if not actualizado:
+            raise NotFoundException(f"No existe el Plano con ID {id}")
+
         return ResponseDTO(status=True, data=self._plano_to_dict(actualizado))
 
-    def _plano_to_dict(self, plano: Plano) -> dict:
+    def _plano_to_dict(self, plano) -> dict:
+        """Un plano para la pantalla, sin el archivo.
+
+        Recibe tanto la entidad Plano (alta, modificación) como las filas de los
+        listados, que vienen sin blob justamente para no arrastrar cientos de megas.
+        """
+        tamanio = _campo(plano, "bytes")
+        if tamanio is None:
+            # Vino la entidad completa: el tamaño se saca del blob que ya está en
+            # memoria, así el front no tiene que distinguir de dónde salió el dato.
+            contenido = _campo(plano, "archivo")
+            tamanio = len(contenido) if contenido is not None else None
+
+        id_orden_trabajo = _campo(plano, "id_orden_trabajo")
+
         return {
-            "id": plano.id,
-            "nombre": plano.nombre,
-            "descripcion": plano.descripcion,
-            "tipo_archivo": plano.tipo_archivo,
-            "fecha_subida": plano.fecha_subida,
-            "id_orden_trabajo": plano.id_orden_trabajo
+            "id": _campo(plano, "id"),
+            "nombre": _campo(plano, "nombre"),
+            "descripcion": _campo(plano, "descripcion"),
+            "tipo_archivo": _campo(plano, "tipo_archivo"),
+            "fecha_subida": _campo(plano, "fecha_subida"),
+            "bytes": tamanio,
+            "id_orden_trabajo": id_orden_trabajo,
+            "id_articulo": _campo(plano, "id_articulo"),
+            # Solo find_por_orden_con_articulo lo manda explícito, porque es la única
+            # lista que mezcla las dos procedencias. En el resto se deduce del destino.
+            "origen": _campo(plano, "origen") or ("ot" if id_orden_trabajo is not None else "articulo"),
         }

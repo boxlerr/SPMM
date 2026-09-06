@@ -1,7 +1,30 @@
-from sqlalchemy import select
+from sqlalchemy import select, func
 from backend.domain.Plano import Plano
+from backend.domain.Articulo import Articulo
+from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
+
+
+# Las columnas que se leen en CUALQUIER listado. La que no está es `archivo`, y es a
+# propósito. Medido sobre la carpeta de Drive del taller (6/9/2026): 613 PDFs, mediana
+# 108 KB, el más grande 6,7 MB, 226 MB en total. La biblioteca los lista de a 48, así que
+# traer el blob en un listado son ~5 MB de mediana por página —y 300 MB si alguien pide
+# todo—, contra el pooler de Supabase y el contenedor de Cloud Run.
+# En vez del blob va su tamaño, que además es lo que necesita el front para decidir si
+# vale la pena bajarlo para dibujar la miniatura.
+# El archivo lo trae únicamente find_by_id, que es de donde sale la descarga.
+def _columnas_listado():
+    return (
+        Plano.id,
+        Plano.nombre,
+        Plano.descripcion,
+        Plano.tipo_archivo,
+        Plano.fecha_subida,
+        Plano.id_orden_trabajo,
+        Plano.id_articulo,
+        func.octet_length(Plano.archivo).label("bytes"),
+    )
 
 
 class PlanoRepository:
@@ -17,14 +40,46 @@ class PlanoRepository:
         interpretación de planos es DURO, eso dejaba fuera de la planificación a
         todos los operarios que no leen planos —pasantes, ayudantes, tercerizados—
         en OTs que en realidad no tienen plano ninguno.
+
+        REGLA CRÍTICA: acá van SOLO los planos adjuntos DIRECTAMENTE a la OT. Las OTs
+        cuyo ARTÍCULO tiene plano NO entran, aunque desde 2026-09-06 el plano de
+        artículo exista y la pantalla de la OT lo muestre. El motivo es el mismo
+        filtro duro: hoy la tabla está casi vacía, o sea que el filtro está apagado, y
+        si al importar los ~600 planos de productos se prendiera solo, de un día para
+        el otro cientos de OTs quedarían reservadas a los que leen planos. Esa es una
+        decisión del taller, no nuestra. Si alguna vez se quiere, se prende a mano.
         """
         try:
-            result = await self.db.execute(select(Plano.id_orden_trabajo).distinct())
+            result = await self.db.execute(
+                select(Plano.id_orden_trabajo)
+                .where(Plano.id_orden_trabajo.is_not(None))
+                .distinct()
+            )
             return {row[0] for row in result.all() if row[0] is not None}
         except Exception as e:
             logger.error(f"Repository - Error en find_ordenes_con_plano: {e}")
             raise InfrastructureException(
                 "Error al consultar qué órdenes tienen plano adjunto."
+            ) from e
+
+    async def find_articulos_con_plano(self) -> set[int]:
+        """IDs de los artículos que tienen plano.
+
+        Es el equivalente de find_ordenes_con_plano para el catálogo, pero NO alimenta
+        ningún filtro del planificador: solo sirve para marcar en la pantalla de
+        artículos cuáles ya tienen el plano cargado y cuáles faltan.
+        """
+        try:
+            result = await self.db.execute(
+                select(Plano.id_articulo)
+                .where(Plano.id_articulo.is_not(None))
+                .distinct()
+            )
+            return {row[0] for row in result.all() if row[0] is not None}
+        except Exception as e:
+            logger.error(f"Repository - Error en find_articulos_con_plano: {e}")
+            raise InfrastructureException(
+                "Error al consultar qué artículos tienen plano."
             ) from e
 
     async def save(self, plano: Plano):
@@ -60,6 +115,7 @@ class PlanoRepository:
             raise InfrastructureException("Error al eliminar el Plano.") from e
 
     async def find_by_id(self, id: int):
+        """El único método que trae el archivo entero: de acá sale la descarga."""
         try:
             logger.info(f"Repository - Buscar Plano por ID {id}.")
             result = await self.db.execute(select(Plano).where(Plano.id == id))
@@ -68,11 +124,32 @@ class PlanoRepository:
             logger.error(f"Repository - Error real en find_by_id Plano: {e}")
             raise InfrastructureException("Error al buscar el Plano por ID.") from e
 
+    async def find_ficha(self, id: int):
+        """Los datos de un plano SIN el archivo.
+
+        Existe aparte de find_by_id porque pedir la ficha no tiene por qué levantar el
+        blob: lo traía del pooler, lo pasaba por el contenedor y lo tiraba para devolver
+        un JSON de doscientos bytes. Es el mismo cuidado de _columnas_listado, que acá
+        faltaba.
+        """
+        try:
+            logger.info(f"Repository - Ficha de Plano ID {id}.")
+            result = await self.db.execute(
+                select(*_columnas_listado()).where(Plano.id == id)
+            )
+            fila = result.mappings().first()
+            return dict(fila) if fila else None
+        except Exception as e:
+            logger.error(f"Repository - Error real en find_ficha Plano: {e}")
+            raise InfrastructureException("Error al buscar el Plano por ID.") from e
+
     async def find_all(self):
         try:
             logger.info("Repository - Obtener todos los Planos.")
-            result = await self.db.execute(select(Plano))
-            data = result.scalars().all()
+            result = await self.db.execute(
+                select(*_columnas_listado()).order_by(Plano.id.asc())
+            )
+            data = [dict(fila) for fila in result.mappings().all()]
             logger.info(f"Repository - Resultado OK ({len(data)} registros).")
             return data
         except Exception as e:
@@ -103,12 +180,218 @@ class PlanoRepository:
             raise InfrastructureException("Error al actualizar el Plano.") from e
 
     async def find_by_orden_trabajo(self, id_orden: int):
+        """Solo los planos pegados a esta OT. Sin el archivo (ver _columnas_listado)."""
         try:
             logger.info(f"Repository - Obtener Planos por OrdenTrabajo ID {id_orden}.")
-            result = await self.db.execute(select(Plano).where(Plano.id_orden_trabajo == id_orden))
-            data = result.scalars().all()
+            result = await self.db.execute(
+                select(*_columnas_listado())
+                .where(Plano.id_orden_trabajo == id_orden)
+                .order_by(Plano.id.asc())
+            )
+            data = [dict(fila) for fila in result.mappings().all()]
             logger.info(f"Repository - Resultado OK ({len(data)} registros).")
             return data
         except Exception as e:
             logger.error(f"Repository - Error real en find_by_orden_trabajo: {e}")
             raise InfrastructureException("Error al obtener Planos por Orden de Trabajo.") from e
+
+    def _articulos_del_mismo_codigo(self, id_articulo: int):
+        """Los artículos que comparten código con este, incluido él mismo.
+
+        El catálogo tiene el mismo código cargado más de una vez: 20 códigos repetidos,
+        algunos por un espacio de más (' -00E002' y '-00E002' son dos filas del mismo
+        eje) y otros porque un código abarca un rango de piezas y se cargó una fila por
+        pieza (CLLEE030031 son 24 filas). En Drive hay UN plano por código, así que el
+        importador lo cuelga de una sola de esas filas.
+
+        Si se buscara por id pelado, la OT que apunta a cualquiera de las otras filas
+        quedaría sin plano sin motivo visible. Se busca por código normalizado —el mismo
+        criterio con el que el importador machea la carpeta— y así el plano aparece en
+        todas. Duplicar el archivo por cada fila repetida sería la otra salida, pero deja
+        copias que después hay que borrar de a una cuando el taller limpie el catálogo.
+        """
+        # Se normaliza EXACTAMENTE igual que el importador (`normalizar_codigo` en
+        # backend/scripts/planos/importar_planos.py): sacar los espacios de los bordes,
+        # colapsar los del medio y pasar a mayúsculas. Si los dos lados normalizaran
+        # distinto, el importador vería un solo código —y colgaría el plano de una sola
+        # fila— mientras que esta consulta vería dos códigos y no las uniría: el plano
+        # quedaría invisible en la fila hermana, justo lo que este método existe para
+        # evitar. Hoy no cambia nada (en el catálogo no hay ningún código con espacios
+        # dobles en el medio), pero es la clase de diferencia que no avisa cuando aparece.
+        def normalizado(col):
+            return func.upper(func.regexp_replace(func.btrim(col), r"\s+", " ", "g"))
+
+        codigo = (
+            select(normalizado(Articulo.cod_articulo))
+            .where(Articulo.id == id_articulo)
+            .scalar_subquery()
+        )
+        return (
+            select(Articulo.id)
+            .where(normalizado(Articulo.cod_articulo) == codigo)
+            .scalar_subquery()
+        )
+
+    async def find_by_articulo(self, id_articulo: int):
+        """Los planos del producto. Sin el archivo (ver _columnas_listado)."""
+        try:
+            logger.info(f"Repository - Obtener Planos por Articulo ID {id_articulo}.")
+            result = await self.db.execute(
+                select(*_columnas_listado())
+                .where(Plano.id_articulo.in_(self._articulos_del_mismo_codigo(id_articulo)))
+                .order_by(Plano.id.asc())
+            )
+            data = [dict(fila) for fila in result.mappings().all()]
+            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
+            return data
+        except Exception as e:
+            logger.error(f"Repository - Error real en find_by_articulo: {e}")
+            raise InfrastructureException("Error al obtener Planos por Artículo.") from e
+
+    async def find_por_orden_con_articulo(self, id_orden: int):
+        """Todo lo que el taller tiene que ver abierto en esa OT.
+
+        Los planos de la OT MÁS los del artículo que se está fabricando. Van juntos
+        porque para el que está en la máquina son lo mismo: el dibujo de la pieza. Lo
+        que sí cambia es de dónde salió, y eso importa para la pantalla —el de la OT se
+        puede borrar desde ahí, el del artículo es del catálogo y lo tocás en el
+        catálogo—, así que cada fila viaja con `origen`.
+
+        Ojo: NO alimenta el filtro de planos del planificador. Eso lo sigue decidiendo
+        find_ordenes_con_plano, que mira solo la OT.
+        """
+        try:
+            logger.info(f"Repository - Obtener Planos (OT + artículo) por OT ID {id_orden}.")
+
+            resultado_articulo = await self.db.execute(
+                select(OrdenTrabajo.id_articulo).where(OrdenTrabajo.id == id_orden)
+            )
+            id_articulo = resultado_articulo.scalar_one_or_none()
+
+            resultado_ot = await self.db.execute(
+                select(*_columnas_listado())
+                .where(Plano.id_orden_trabajo == id_orden)
+                .order_by(Plano.id.asc())
+            )
+            data = [{**fila, "origen": "ot"} for fila in resultado_ot.mappings().all()]
+
+            if id_articulo is not None:
+                vistos = {fila["id"] for fila in data}
+                resultado_art = await self.db.execute(
+                    select(*_columnas_listado())
+                    .where(Plano.id_articulo.in_(self._articulos_del_mismo_codigo(id_articulo)))
+                    .order_by(Plano.id.asc())
+                )
+                # Un plano puede tener las dos FK cargadas (se subió a la OT y además se
+                # marcó como plano del producto). Sin este filtro saldría dos veces en
+                # la misma lista.
+                data += [
+                    {**fila, "origen": "articulo"}
+                    for fila in resultado_art.mappings().all()
+                    if fila["id"] not in vistos
+                ]
+
+            logger.info(f"Repository - Resultado OK ({len(data)} registros).")
+            return data
+        except Exception as e:
+            logger.error(f"Repository - Error real en find_por_orden_con_articulo: {e}")
+            raise InfrastructureException(
+                "Error al obtener los planos de la Orden de Trabajo."
+            ) from e
+
+    async def buscar(self, texto: str | None = None, limit: int = 50, offset: int = 0):
+        """Biblioteca de planos, paginada. Devuelve (filas, total).
+
+        Es la pantalla donde el taller busca un plano sin pasar por una OT: escribe el
+        código del artículo, un pedazo de la descripción o el nombre del archivo. Por
+        eso el `ilike` va contra los tres.
+
+        El join con artículo es LEFT: los planos cargados sobre una OT puntual no
+        tienen artículo y tienen que aparecer igual en la búsqueda por nombre.
+
+        Acá tampoco viaja el archivo. Con ~600 planos paginados de a 50, traer los
+        blobs serían cientos de megas por página.
+        """
+        try:
+            logger.info(f"Repository - Buscar Planos (texto={texto!r}, limit={limit}, offset={offset}).")
+
+            filtro = None
+            if texto and texto.strip():
+                patron = f"%{texto.strip()}%"
+                filtro = (
+                    Articulo.cod_articulo.ilike(patron)
+                    | Articulo.descripcion.ilike(patron)
+                    | Plano.nombre.ilike(patron)
+                )
+
+            query_total = select(func.count()).select_from(Plano).join(
+                Articulo, Plano.id_articulo == Articulo.id, isouter=True
+            )
+            if filtro is not None:
+                query_total = query_total.where(filtro)
+
+            resultado_total = await self.db.execute(query_total)
+            total = resultado_total.scalar() or 0
+
+            query = (
+                select(
+                    Plano.id,
+                    Plano.nombre,
+                    Plano.descripcion,
+                    Plano.tipo_archivo,
+                    Plano.fecha_subida,
+                    func.octet_length(Plano.archivo).label("bytes"),
+                    Plano.id_articulo,
+                    Articulo.cod_articulo,
+                    Articulo.descripcion.label("descripcion_articulo"),
+                    Plano.id_orden_trabajo,
+                )
+                .join(Articulo, Plano.id_articulo == Articulo.id, isouter=True)
+                # Por código de artículo, que es como los busca el taller. En Postgres
+                # los NULL (los planos de OT suelta) quedan al final solos.
+                .order_by(Articulo.cod_articulo.asc(), Plano.nombre.asc(), Plano.id.asc())
+                .limit(limit)
+                .offset(offset)
+            )
+            if filtro is not None:
+                query = query.where(filtro)
+
+            resultado = await self.db.execute(query)
+            data = [dict(fila) for fila in resultado.mappings().all()]
+
+            logger.info(f"Repository - Resultado OK ({len(data)} de {total} registros).")
+            return data, total
+        except Exception as e:
+            logger.error(f"Repository - Error real en buscar Planos: {e}")
+            raise InfrastructureException("Error al buscar Planos.") from e
+
+    async def find_by_drive_file_id(self, drive_file_id: str):
+        """El plano que ya se importó de ese archivo de Drive, si existe.
+
+        Lo usa el importador para no duplicar: si vuelve a pasar por la carpeta y el
+        archivo ya está, compara `drive_md5` y solo reemplaza cuando cambió. Tampoco
+        trae el blob: para decidir alcanza con el checksum, y el que se quiere guardar
+        es el nuevo, no el viejo.
+        """
+        try:
+            logger.info(f"Repository - Buscar Plano por drive_file_id {drive_file_id}.")
+            result = await self.db.execute(
+                select(
+                    Plano.id,
+                    Plano.nombre,
+                    Plano.tipo_archivo,
+                    Plano.fecha_subida,
+                    Plano.id_orden_trabajo,
+                    Plano.id_articulo,
+                    Plano.drive_file_id,
+                    Plano.drive_md5,
+                    Plano.drive_modificado,
+                ).where(Plano.drive_file_id == drive_file_id)
+            )
+            fila = result.mappings().first()
+            return dict(fila) if fila is not None else None
+        except Exception as e:
+            logger.error(f"Repository - Error real en find_by_drive_file_id: {e}")
+            raise InfrastructureException(
+                "Error al buscar el Plano por su archivo de Drive."
+            ) from e

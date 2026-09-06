@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -20,7 +20,9 @@ import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
 import { ProcesosEditor, ProcesoRow } from "@/components/planning/ProcesosEditor";
-import { descargarPlano } from "@/lib/planos";
+import { PlanoPanel } from "@/components/common/PlanoPanel";
+import { usePlanosDeArticulo } from "@/hooks/usePlanos";
+import { descargarPlano, type Plano } from "@/lib/planos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -65,6 +67,59 @@ interface MateriaPrimaItem {
     c_usado: string;
     utilizado: boolean;
     cortes: string;
+}
+
+
+/**
+ * El plano del producto, al costado de la carga de procesos.
+ *
+ * Los pasos salen del dibujo: el que los escribe lo está mirando. Si para verlo hay que
+ * abrir un modal que tapa el listado, la cuenta la termina haciendo de memoria.
+ *
+ * Se pliega porque en un notebook el panel le saca 320px al listado y las columnas de
+ * máquina, minutos y personas quedan espichadas: el que ya sabe qué va lo cierra.
+ */
+function PanelDePlanos({ planos, cargando, vacioTexto }: { planos: Plano[]; cargando: boolean; vacioTexto: string }) {
+    const [abierto, setAbierto] = useState(true);
+
+    if (!abierto) {
+        return (
+            <button
+                type="button"
+                onClick={() => setAbierto(true)}
+                title="Ver el plano del producto"
+                className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:border-blue-400 hover:text-blue-600 transition-colors"
+            >
+                <Paperclip className="w-3 h-3" />
+                <span className="lg:hidden">Ver el plano{planos.length > 0 ? ` (${planos.length})` : ""}</span>
+                <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+        );
+    }
+
+    return (
+        <aside className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 w-full lg:w-[330px] relative rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+            <button
+                type="button"
+                onClick={() => setAbierto(false)}
+                title="Plegar el plano"
+                className="absolute right-2 top-2 z-10 p-1 rounded-md text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+                <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+            {/* El panel scrollea solo: el modal ya tiene su propio scroll y una lista
+                larga de planos lo empujaría más allá del alto fijo del diálogo. */}
+            <div className="max-h-[46vh] overflow-y-auto pr-1">
+                <PlanoPanel
+                    planos={planos}
+                    cargando={cargando}
+                    compacto
+                    titulo="Plano del producto"
+                    vacioTexto={vacioTexto}
+                />
+            </div>
+        </aside>
+    );
 }
 
 export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
@@ -137,11 +192,19 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const [files, setFiles] = useState<File[]>([]);
     const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
     const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
+    /** Ids de los planos que son del producto, no de esta orden. Borrar uno de estos
+     *  lo saca de todas las órdenes del artículo y no se recupera, así que se guardan
+     *  aparte y se filtran otra vez al guardar: que el botón no esté alcanza hoy, pero
+     *  esto sigue protegiendo si mañana aparece otra forma de sacar un archivo. */
+    const planosDelProducto = useRef<Set<number>>(new Set());
 
     interface ExistingFile {
         id: number;
         nombre: string;
         tipo_archivo: string;
+        /** "ot" = adjunto de esta orden · "articulo" = plano del producto, compartido. */
+        origen?: "ot" | "articulo";
+        id_articulo?: number | null;
     }
 
     // Data options
@@ -239,7 +302,20 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         if (res.ok) {
                             const data = await res.json();
                             if (data.status && Array.isArray(data.data)) {
-                                setExistingFiles(data.data);
+                                // Esta lista ya no es solo "los archivos de la orden": el
+                                // endpoint suma los planos del producto. Se le marca de
+                                // dónde viene cada uno porque acá se ofrece borrarlos, y
+                                // borrar el del producto lo saca de TODAS las órdenes que
+                                // lo fabrican. Si la API todavía no manda `origen` (el
+                                // backend se deploya a mano), se deduce del id_articulo.
+                                const conOrigen: ExistingFile[] = data.data.map((f: ExistingFile) => ({
+                                    ...f,
+                                    origen: f.origen ?? (f.id_articulo ? "articulo" : "ot"),
+                                }));
+                                planosDelProducto.current = new Set(
+                                    conOrigen.filter(f => f.origen === "articulo").map(f => f.id)
+                                );
+                                setExistingFiles(conOrigen);
                             }
                         }
                     })
@@ -514,6 +590,16 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
      */
     const isLegacyOT = false;
 
+    // El panel de planos de la solapa Procesos sigue al producto elegido en General: se
+    // cambia el artículo ahí y acá cambia el dibujo, sin recargar nada.
+    const articuloElegido = Number(generalData.articulo_id) || undefined;
+    const { planos: planosArticulo, cargando: planosCargando, error: planosError } =
+        usePlanosDeArticulo(articuloElegido);
+    const planosVacioTexto = planosError
+        ?? (!articuloElegido
+            ? "Elegí el producto en la solapa General y su plano aparece acá."
+            : "Este producto todavía no tiene planos cargados.");
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -654,9 +740,10 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
             // Handle file updates for EDIT mode
             if (orderToEdit) {
-                // 1. Delete removed files
-                if (deletedFileIds.length > 0) {
-                    await Promise.all(deletedFileIds.map(id =>
+                // 1. Delete removed files (nunca los del producto: ver planosDelProducto)
+                const aBorrar = deletedFileIds.filter(id => !planosDelProducto.current.has(id));
+                if (aBorrar.length > 0) {
+                    await Promise.all(aBorrar.map(id =>
                         fetch(`${API_URL}/planos/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
                     ));
                 }
@@ -1297,10 +1384,15 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                                 >
                                                                     {file.nombre}
                                                                 </button>
-                                                                <span className="text-xs text-gray-400">Existente</span>
+                                                                <span className="text-xs text-gray-400">
+                                                                    {file.origen === "articulo" ? "Del producto" : "Existente"}
+                                                                </span>
                                                             </div>
                                                         </div>
-                                                        {!isLegacyOT && (
+                                                        {/* El plano del producto NO se borra desde una orden: es el mismo
+                                                            archivo para todas las órdenes de ese artículo y para la sección
+                                                            Planos. Solo se saca el adjunto propio de esta orden. */}
+                                                        {!isLegacyOT && file.origen !== "articulo" && (
                                                             <Button
                                                                 type="button"
                                                                 variant="ghost"
@@ -1467,19 +1559,29 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </p>
                                     </div>
 
-                                    <ProcesosEditor
-                                        rows={processes}
-                                        onChange={setProcesses}
-                                        procesos={procesosOptions}
-                                        maquinarias={maquinarias}
-                                        operarios={operarios}
-                                        disabled={isLegacyOT}
-                                        onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
-                                        historialLoading={historialLoading}
-                                        onCrearProceso={handleCrearProceso}
-                                        onEliminarProceso={handleEliminarProceso}
-                                        quienPuede={quienPuede}
-                                    />
+                                    <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+                                        <div className="order-2 lg:order-1 flex-1 min-w-0">
+                                            <ProcesosEditor
+                                                rows={processes}
+                                                onChange={setProcesses}
+                                                procesos={procesosOptions}
+                                                maquinarias={maquinarias}
+                                                operarios={operarios}
+                                                disabled={isLegacyOT}
+                                                onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
+                                                historialLoading={historialLoading}
+                                                onCrearProceso={handleCrearProceso}
+                                                onEliminarProceso={handleEliminarProceso}
+                                                quienPuede={quienPuede}
+                                            />
+                                        </div>
+
+                                        <PanelDePlanos
+                                            planos={planosArticulo}
+                                            cargando={planosCargando}
+                                            vacioTexto={planosVacioTexto}
+                                        />
+                                    </div>
                                 </TabsContent>
                             </Tabs>
                         </div>

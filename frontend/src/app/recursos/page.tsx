@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search, Target, MapPin, AlertTriangle } from "lucide-react";
+import { Eye, Pencil, Trash2, User, RefreshCw, Plus, Factory, Phone, Layers, Search, Target, MapPin, AlertTriangle, Ruler } from "lucide-react";
 import { useApi } from "@/hooks/useApi";
 import OperarioForm from "./_components/OperarioForm";
 import MaquinaForm from "./_components/MaquinaForm";
@@ -26,6 +26,7 @@ import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList"
 import { useCoberturaRangos, problemaDelProceso } from "@/hooks/useCoberturaRangos";
 import EditorRangosDe from "./_components/EditorRangosDe";
 import EditorMaquinasDe from "./_components/EditorMaquinasDe";
+import { BibliotecaPlanos } from "@/components/planos/BibliotecaPlanos";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -52,7 +53,7 @@ export default function RecursosPage() {
   // unas decenas. Sin esto hay que buscarlos a ojo entre todos.
   const [soloProblemas, setSoloProblemas] = useState(false);
 
-  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos" | "rangos" | "sectores">("operarios");
+  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos" | "rangos" | "sectores" | "planos">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
   const [procesos, setProcesos] = useState<Proceso[]>([]);
@@ -92,7 +93,10 @@ export default function RecursosPage() {
       fetchOperarios();
     } else if (tabActiva === "maquinas") {
       fetchMaquinas();
-    } else {
+    } else if (tabActiva !== "planos") {
+      // Planos se arregla solo: la biblioteca sale a buscar su propia lista paginada y
+      // no mira `procesos` para nada. Sin esta salida, entrar a la solapa disparaba el
+      // pedido de los 414 procesos para no mostrarlos en ningún lado.
       fetchProcesos();
     }
   }, [tabActiva]);
@@ -124,7 +128,7 @@ export default function RecursosPage() {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
     if (!tab) return;
-    if (!["operarios", "maquinas", "procesos", "rangos", "sectores"].includes(tab)) return;
+    if (!["operarios", "maquinas", "procesos", "rangos", "sectores", "planos"].includes(tab)) return;
     focoAplicado.current = true;
 
     setTabActiva(tab as typeof tabActiva);
@@ -365,10 +369,10 @@ export default function RecursosPage() {
       )}
 
       {/* Grilla y no `flex gap-2` con `flex-1`: los Button de shadcn traen
-          `whitespace-nowrap` y no achican, así que "Recurso maquinaria" y los otros
-          cuatro pedían ~820px y abajo de eso la fila se iba de la pantalla. Con
+          `whitespace-nowrap` y no achican, así que "Recurso maquinaria" y los demás
+          pedían ~820px y abajo de eso la fila se iba de la pantalla. Con
           grilla el ancho lo pone la columna y los rótulos se acomodan solos. */}
-      <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+      <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
@@ -408,6 +412,14 @@ export default function RecursosPage() {
         >
           <MapPin className="h-4 w-4 mr-2" />
           <span>Sectores</span>
+        </Button>
+        <Button
+          variant={tabActiva === "planos" ? "default" : "outline"}
+          onClick={() => setTabActiva("planos")}
+          className={`flex-1 ${tabActiva === "planos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+        >
+          <Ruler className="h-4 w-4 mr-2" />
+          <span>Planos</span>
         </Button>
       </div>
 
@@ -980,6 +992,29 @@ export default function RecursosPage() {
           descripcion="Gestión de sectores del taller (donde se asignan las OTs)."
           icon={<MapPin className="h-5 w-5 text-muted-foreground" />}
         />
+      )}
+
+      {/* BIBLIOTECA DE PLANOS */}
+      {tabActiva === "planos" && (
+        <div className="rounded-lg border bg-card">
+          <div className="p-4 md:p-6 border-b">
+            <div className="flex items-center gap-2">
+              <Ruler className="h-5 w-5 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">Planos</h2>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">
+              Todos los planos cargados, buscables por código de producto.
+            </p>
+          </div>
+
+          {/* Sin el encabezado propio de la biblioteca: acá arriba ya hay un título
+              "Planos" y el componente trae otro igual, así que quedaban dos encimados y
+              parecían dos pantallas metidas una adentro de la otra. Apagado, deja solo
+              su barra de buscador + Subir plano + Actualizar. */}
+          <div className="p-4 md:p-6">
+            <BibliotecaPlanos conEncabezado={false} />
+          </div>
+        </div>
       )}
 
       {/* DIÁLOGOS */}

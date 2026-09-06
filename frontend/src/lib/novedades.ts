@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "biblioteca-de-planos",
+        fecha: "2026-09-06",
+        tipo: "nuevo",
+        seccion: "Planos",
+        titulo: "Los planos ahora son del producto y los tenés en la sección Planos",
+        detalle:
+            "Hay una sección nueva en el menú, Planos —y la misma lista está en Recursos—: buscás por el código, por la descripción del producto o por el nombre del archivo, y tocando cualquiera lo abrís grande, pasás al siguiente con las flechas, lo imprimís o lo bajás. Desde ahí también podés subir uno nuevo eligiendo a qué producto va, o borrarlo. Lo que subís queda pegado al PRODUCTO, así que lo ven todas las órdenes que lo fabrican, las de hoy y las que se carguen mañana: antes había que subir el mismo archivo orden por orden y casi ninguna lo tenía. Y cuando cargás los procesos de una orden, ahora te aparece al costado el plano del producto que esa orden fabrica, sin tener que cerrar lo que estás cargando para ir a buscarlo.",
+        href: "/planos",
+    },
+    {
         id: "editar-y-sacar-procesos-desde-la-lista",
         fecha: "2026-09-03",
         tipo: "nuevo",
