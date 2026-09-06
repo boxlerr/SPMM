@@ -7,7 +7,13 @@ import { RegistrarIncidenciaModal } from "@/components/planning/RegistrarInciden
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn, getWorkOrderRowColor, parseApiError } from "@/lib/utils";
-import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
+import {
+    useOrdenesConPlano,
+    usePlanosDisponibles,
+    estadoPlano,
+    rankPlano,
+} from "@/hooks/useOrdenesConPlano";
+import { PlanoDeOrden } from "@/components/common/PlanoDeOrden";
 import { Input } from "@/components/ui/input";
 import {
     Search, ChevronDown, ChevronRight, CalendarClock,
@@ -178,8 +184,18 @@ function _PlanningListTable({
     colapsarFilasKey
 }: PlanningListTableProps) {
 
-    // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
+    // Las dos preguntas sobre el plano, que hasta ahora eran una sola y por eso esta
+    // columna decía "No" en todas las filas: los más de mil planos que hay cargados
+    // cuelgan del ARTÍCULO, ninguno de una orden, así que el conjunto de abajo venía
+    // vacío y la tabla negaba planos que están a un click.
+    //   · `ordenesConPlano`   -> qué OT EXIGEN saber leer planos (filtro duro del
+    //     planificador). No se toca: sumarle 198 OT de golpe es una decisión del taller.
+    //   · `planosDisponibles` -> qué OT tienen algo PARA MIRAR, sea propio o del producto.
+    // Acá se necesitan las dos porque la columna se puede ordenar, y ordenar es cosa de
+    // la tabla; el badge de cada fila las vuelve a pedir por su cuenta, pero el hook
+    // cachea la respuesta a nivel de módulo y sale un solo pedido para toda la pantalla.
     const ordenesConPlano = useOrdenesConPlano();
+    const planosDisponibles = usePlanosDisponibles();
 
     const [sortConfig, setSortConfig] = React.useState<{
         key: SortColumn | null;
@@ -469,7 +485,7 @@ function _PlanningListTable({
                 case 'prioridad': return item.id_prioridad || 0;
                 case 'material': return materialRank(item.estado_material);
                 case 'proceso': return procesoRank(item);
-                case 'plano': return rankPlano(estadoPlano(item.id, item.tiene_plano, ordenesConPlano));
+                case 'plano': return rankPlano(estadoPlano(item.id, item.tiene_plano, ordenesConPlano, planosDisponibles));
                 case 'estado': return getOrderStatus(item);
                 case 'entrega': return entregaRank(item);
                 case 'aprobado_por': return item.aprobado_por || "";
@@ -503,7 +519,12 @@ function _PlanningListTable({
             }
             return dir * (va - vb);
         });
-    }, [filteredData, sortConfig, pinSelectedOnTop, pinnedIds]);
+    // Las dos respuestas de planos entran en las dependencias porque llegan DESPUÉS del
+    // primer dibujo (son un fetch). Faltaban, y hasta ahora no se notaba porque el
+    // conjunto venía vacío y todas las filas empataban; ahora que la columna distingue
+    // propio / del producto / sin archivo, sin esto quien ordenara por Plano antes de
+    // que contestara el backend se quedaba con el orden viejo mirando badges nuevos.
+    }, [filteredData, sortConfig, pinSelectedOnTop, pinnedIds, ordenesConPlano, planosDisponibles]);
 
     // Observa el scroll horizontal del contenedor de la tabla y actualiza `showRightFade`:
     //   true  → hay más columnas a la derecha → mostrar el gradient fade
@@ -1254,7 +1275,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('plano')}
-                                    title="¿La OT tiene plano cargado? Ordena primero las que NO tienen"
+                                    title="¿Hay un plano para mirar? Tocalo y se abre sin salir de la tabla. Ordena primero las OT que no tienen nada"
                                 >
                                     <div className="flex items-center justify-center">
                                         Plano
@@ -1494,27 +1515,21 @@ function _PlanningListTable({
                                                     <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                 )}
                                             </td>
-                                            {/* Plano: verde si el archivo está cargado, ámbar si la OT está
-                                                marcada con plano pero no hay archivo, gris si no lleva plano.
-                                                La diferencia importa: el planificador solo restringe a los
-                                                operarios que leen planos cuando el archivo existe de verdad. */}
+                                            {/* Plano: el badge se toca y abre el archivo acá mismo. Esta es LA
+                                                pantalla desde la que se planifica, y hasta ahora la columna solo
+                                                informaba —y encima informaba mal, "No" en todas las filas—: para
+                                                ver un plano había que abrir la ficha de la OT, perder la lista y
+                                                volver a buscarla. Ahora dice "Del producto" cuando el plano es el
+                                                del artículo que fabrica (que es el caso de casi todas) y se mira
+                                                sin moverse de la fila. Ojo: mostrarlo NO lo convierte en una OT
+                                                que exija saber leer planos; eso lo sigue decidiendo el otro
+                                                conjunto, el del filtro duro del planificador. */}
                                             <td className="px-3 py-3 text-center">
-                                                {(() => {
-                                                    const est = estadoPlano(item.id, item.tiene_plano, ordenesConPlano);
-                                                    if (est === 'adjunto') return (
-                                                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                    );
-                                                    if (est === 'marcado_sin_archivo') return (
-                                                        <Badge
-                                                            variant="outline"
-                                                            className="bg-amber-50 text-amber-700 border-amber-200 font-semibold"
-                                                            title="La OT figura con plano pero no tiene el archivo cargado. Para el planificador es una OT sin plano."
-                                                        >
-                                                            Sin archivo
-                                                        </Badge>
-                                                    );
-                                                    return <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>;
-                                                })()}
+                                                <PlanoDeOrden
+                                                    ordenId={item.id}
+                                                    tienePlano={item.tiene_plano}
+                                                    compacto={compacto}
+                                                />
                                             </td>
                                             {!hideStatus && (
                                                 <td className="px-3 py-3 text-center">

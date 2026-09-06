@@ -91,6 +91,27 @@ class PlanoService:
         data = [self._plano_to_dict(p) for p in planos]
         return ResponseDTO(status=True, data=data)
 
+    async def obtenerOrdenesConPlanoDisponible(self) -> dict[str, list[int]]:
+        """Las OTs que tienen un plano para abrir, separadas por de dónde sale.
+
+        Es lo que necesita cualquier listado de OTs para mostrar la columna Plano: hasta
+        ahora se calculaba con el conjunto del planificador, y como en producción no hay
+        ni un plano pegado a una orden (los 1183 cuelgan del artículo), decía "Sin
+        archivo" en todas las filas.
+
+        Ojo con no confundirlo con lo que RESTRINGE la planificación: eso lo sigue
+        decidiendo find_ordenes_con_plano, que mira solo la OT. El porqué de la
+        separación está en el docstring de find_ordenes_con_plano_disponible.
+
+        Van ordenados para que la respuesta sea estable entre llamadas y el front pueda
+        compararla o buscar por bisección si el listado crece.
+        """
+        logger.info("Service - Obtener órdenes con plano disponible (para mostrar)")
+
+        propios, del_producto = await self.repository.find_ordenes_con_plano_disponible()
+
+        return {"propios": sorted(propios), "del_producto": sorted(del_producto)}
+
     async def obtenerArticulosConPlano(self) -> list[int]:
         logger.info("Service - Obtener artículos con plano")
 

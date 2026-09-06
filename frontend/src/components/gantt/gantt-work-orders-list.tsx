@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { GanttTask } from "@/lib/types";
 import { toTitleCase } from "@/lib/gantt-utils";
 import { OrderFiles } from "@/components/common/OrderFiles";
+import { PlanoDeOrden } from "@/components/common/PlanoDeOrden";
 import { RegisterDeliveryDialog } from "@/components/planning/RegisterDeliveryDialog";
 import { AddProcessRow } from "@/components/planning/AddProcessRow";
 import { cn } from "@/lib/utils";
@@ -580,6 +581,17 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                     )}
                                     {/* Fila de metadatos: procesos, duración total, inicio, fin */}
                                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-[11px] text-gray-500 font-medium">
+                                        {/* El plano va en la cabecera de la OT, no adentro de los procesos:
+                                            la cabecera se ve siempre, aunque la OT esté contraída, y es
+                                            mirando esta lista que se decide qué proceso mover. Antes había
+                                            que abrir la OT y entrar a Archivos para saber si existía.
+                                            Va sin `tienePlano` a propósito: acá las filas son procesos del
+                                            Gantt y no arrastran la bandera del legacy —que además miente—,
+                                            así que lo que se muestra sale solo de qué archivo hay de verdad. */}
+                                        <span className="flex items-center gap-1" title="Plano de esta OT">
+                                            <span className="text-gray-400 uppercase text-[10px] font-bold tracking-wider">Plano</span>
+                                            <PlanoDeOrden ordenId={head.workOrderId} className="text-[10px] px-1.5 py-0" />
+                                        </span>
                                         <span className="flex items-center gap-1" title="Cantidad de procesos">
                                             <Cog className="w-3 h-3 text-gray-400" />
                                             {totalTasks} {totalTasks === 1 ? "proceso" : "procesos"}

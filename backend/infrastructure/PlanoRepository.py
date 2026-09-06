@@ -1,4 +1,5 @@
 from sqlalchemy import select, func
+from sqlalchemy.orm import aliased
 from backend.domain.Plano import Plano
 from backend.domain.Articulo import Articulo
 from backend.domain.OrdenTrabajo import OrdenTrabajo
@@ -25,6 +26,25 @@ def _columnas_listado():
         Plano.id_articulo,
         func.octet_length(Plano.archivo).label("bytes"),
     )
+
+
+# El código de artículo, normalizado, para comparar dos filas del catálogo.
+#
+# Se normaliza EXACTAMENTE igual que el importador (`normalizar_codigo` en
+# backend/scripts/planos/importar_planos.py): sacar los espacios de los bordes,
+# colapsar los del medio y pasar a mayúsculas. Si los dos lados normalizaran distinto,
+# el importador vería un solo código —y colgaría el plano de una sola fila— mientras
+# que estas consultas verían dos códigos y no las unirían: el plano quedaría invisible
+# en la fila hermana, justo lo que esto existe para evitar. Hoy no cambia nada (en el
+# catálogo no hay ningún código con espacios dobles en el medio), pero es la clase de
+# diferencia que no avisa cuando aparece.
+#
+# Está suelta acá arriba, y no adentro de _articulos_del_mismo_codigo como estaba, para
+# que las dos consultas que la necesitan —la de los planos de un artículo y la del
+# listado de OTs con plano disponible— compartan una sola definición. Tenerla escrita
+# dos veces es exactamente el desfasaje que el párrafo de arriba pide evitar.
+def _codigo_normalizado(col):
+    return func.upper(func.regexp_replace(func.btrim(col), r"\s+", " ", "g"))
 
 
 class PlanoRepository:
@@ -60,6 +80,83 @@ class PlanoRepository:
             logger.error(f"Repository - Error en find_ordenes_con_plano: {e}")
             raise InfrastructureException(
                 "Error al consultar qué órdenes tienen plano adjunto."
+            ) from e
+
+    async def find_ordenes_con_plano_disponible(self) -> tuple[set[int], set[int]]:
+        """Qué OTs tienen un plano PARA MIRAR. Es dato de pantalla: no filtra nada.
+
+        Devuelve dos conjuntos de ids de OT:
+          · `propios`: la OT tiene un plano pegado a la orden.
+          · `del_producto`: el ARTÍCULO que fabrica esa OT tiene plano. Es el mismo
+            dibujo de la pieza, cargado en el catálogo en vez de en la orden.
+
+        Existe porque la pantalla de Órdenes de Trabajo venía preguntando "¿esta OT
+        tiene plano?" con find_ordenes_con_plano, que en realidad contesta otra cosa.
+        Hoy en producción hay 1183 planos y TODOS cuelgan del artículo, ninguno de una
+        OT: la columna Plano decía "Sin archivo" en todas las filas mientras 198 órdenes
+        tenían el plano de su producto a un clic.
+
+        Acá se separan las dos preguntas, que hasta ahora compartían la misma fuente:
+          · lo que se MUESTRA  -> este método: "¿hay un dibujo para abrir?"
+          · lo que RESTRINGE   -> find_ordenes_con_plano: "¿esta OT exige saber leer
+            planos?". Ese sigue mirando SOLO la OT y no se toca. Prender el filtro duro
+            para 198 OTs de golpe deja esos procesos reservados a los que interpretan
+            planos, y eso lo decide el taller, no nosotros.
+
+        Por lo mismo `propios` no sale de llamar a find_ordenes_con_plano aunque hoy dé
+        el mismo conjunto: si mañana el filtro del planificador cambia de criterio, la
+        pantalla no tiene por qué cambiar atrás de él. Separadas de verdad o no están
+        separadas.
+
+        Los dos conjuntos se pueden pisar (una OT con plano propio cuyo artículo además
+        tiene el suyo). Se devuelven crudos y el que muestra decide con cuál se queda;
+        restarlos acá le sacaría información al front.
+
+        Nunca trae la columna `archivo`: son 396 MB de blobs y acá solo hacen falta ids.
+        """
+        try:
+            logger.info("Repository - Órdenes con plano disponible (para mostrar).")
+
+            resultado_propios = await self.db.execute(
+                select(Plano.id_orden_trabajo)
+                .where(Plano.id_orden_trabajo.is_not(None))
+                .distinct()
+            )
+            propios = {row[0] for row in resultado_propios.all() if row[0] is not None}
+
+            # El salto de la OT al plano del producto no se hace por id de artículo
+            # pelado: el catálogo tiene 20 códigos repetidos (un espacio de más, o un
+            # código que abarca un rango de piezas y se cargó una fila por pieza) y el
+            # importador cuelga el único plano de Drive de UNA sola de esas filas. La OT
+            # que apunta a la fila gemela quedaría sin plano sin motivo visible. Es el
+            # mismo problema —y la misma solución— que _articulos_del_mismo_codigo, pero
+            # para todas las OTs de una, así que va como join y no como subconsulta por
+            # artículo.
+            articulo_de_la_ot = aliased(Articulo)
+            articulo_gemelo = aliased(Articulo)
+
+            resultado_producto = await self.db.execute(
+                select(OrdenTrabajo.id)
+                .join(articulo_de_la_ot, OrdenTrabajo.id_articulo == articulo_de_la_ot.id)
+                .join(
+                    articulo_gemelo,
+                    _codigo_normalizado(articulo_gemelo.cod_articulo)
+                    == _codigo_normalizado(articulo_de_la_ot.cod_articulo),
+                )
+                .join(Plano, Plano.id_articulo == articulo_gemelo.id)
+                .distinct()
+            )
+            del_producto = {row[0] for row in resultado_producto.all() if row[0] is not None}
+
+            logger.info(
+                f"Repository - Resultado OK ({len(propios)} con plano propio, "
+                f"{len(del_producto)} con plano del producto)."
+            )
+            return propios, del_producto
+        except Exception as e:
+            logger.error(f"Repository - Error en find_ordenes_con_plano_disponible: {e}")
+            raise InfrastructureException(
+                "Error al consultar qué órdenes tienen un plano para ver."
             ) from e
 
     async def find_articulos_con_plano(self) -> set[int]:
@@ -209,26 +306,18 @@ class PlanoRepository:
         criterio con el que el importador machea la carpeta— y así el plano aparece en
         todas. Duplicar el archivo por cada fila repetida sería la otra salida, pero deja
         copias que después hay que borrar de a una cuando el taller limpie el catálogo.
-        """
-        # Se normaliza EXACTAMENTE igual que el importador (`normalizar_codigo` en
-        # backend/scripts/planos/importar_planos.py): sacar los espacios de los bordes,
-        # colapsar los del medio y pasar a mayúsculas. Si los dos lados normalizaran
-        # distinto, el importador vería un solo código —y colgaría el plano de una sola
-        # fila— mientras que esta consulta vería dos códigos y no las uniría: el plano
-        # quedaría invisible en la fila hermana, justo lo que este método existe para
-        # evitar. Hoy no cambia nada (en el catálogo no hay ningún código con espacios
-        # dobles en el medio), pero es la clase de diferencia que no avisa cuando aparece.
-        def normalizado(col):
-            return func.upper(func.regexp_replace(func.btrim(col), r"\s+", " ", "g"))
 
+        El criterio de comparación vive en _codigo_normalizado, arriba de todo: tiene que
+        ser el mismo que usa el importador y el mismo que usa la consulta del listado.
+        """
         codigo = (
-            select(normalizado(Articulo.cod_articulo))
+            select(_codigo_normalizado(Articulo.cod_articulo))
             .where(Articulo.id == id_articulo)
             .scalar_subquery()
         )
         return (
             select(Articulo.id)
-            .where(normalizado(Articulo.cod_articulo) == codigo)
+            .where(_codigo_normalizado(Articulo.cod_articulo) == codigo)
             .scalar_subquery()
         )
 

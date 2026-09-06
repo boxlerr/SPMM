@@ -131,6 +131,27 @@ async def obtener_ordenes_con_plano(db=Depends(get_db)):
     return {"ordenes_con_plano": sorted(ordenes)}
 
 
+# 🔹 Qué OTs tienen un plano PARA VER (propio o heredado del producto)
+#
+# También antes de /planos/{id}, por lo mismo que la de arriba: si quedara después,
+# "ordenes-con-plano-disponible" entraría como el parámetro {id} y devolvería 422.
+#
+# Este es el dato de PANTALLA, el que va en la columna Plano de Operaciones y en
+# cualquier listado donde se vean OTs. Es distinto del de arriba a propósito: acá sí
+# entran las OTs cuyo artículo tiene el plano cargado (hoy, 198 de las que decían
+# "Sin archivo"), porque para el que va a mirar el dibujo son lo mismo. Sumarlas acá no
+# le saca el trabajo a ningún operario: el filtro duro sigue leyendo la otra ruta.
+#
+# Se devuelven los dos conjuntos por separado, sin mezclar, para que la pantalla pueda
+# decir de dónde sale el plano (el propio se borra desde la OT, el del producto se
+# toca en el catálogo) y no para que el front tenga que adivinarlo.
+@router.get("/planos/ordenes-con-plano-disponible")
+async def obtener_ordenes_con_plano_disponible(db=Depends(get_db)):
+    logger.info("API - Inicio GET /planos/ordenes-con-plano-disponible")
+    service = PlanoService(db)
+    return await service.obtenerOrdenesConPlanoDisponible()
+
+
 # 🔹 Qué artículos ya tienen el plano cargado
 #
 # También antes de /planos/{id}, por lo mismo. Es para marcar el catálogo: solo

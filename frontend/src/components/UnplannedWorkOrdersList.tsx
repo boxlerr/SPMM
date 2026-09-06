@@ -29,7 +29,8 @@ import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 import { ProcessRowActions } from "@/components/planning/ProcessRowActions";
 import { AddProcessRow } from "./planning/AddProcessRow";
-import { useOrdenesConPlano, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
+import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
+import { PlanoDeOrden } from "./common/PlanoDeOrden";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -78,8 +79,17 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
 
-    // OTs con el archivo del plano realmente cargado (la bandera del legacy no alcanza).
+    // Las dos preguntas sobre el plano, separadas a propósito, porque no son la misma:
+    //   · `planosDisponibles` = qué hay PARA MIRAR (el de la OT o el del producto que
+    //     fabrica). Es lo que se muestra en la columna.
+    //   · `ordenesConPlano` = qué OT tienen el archivo pegado a la orden. Ese conjunto
+    //     alimenta el filtro duro del planificador (solo agarra el proceso quien sabe
+    //     leer planos) y no se toca desde acá.
+    // Acá se usan solo para ORDENAR la columna; el cartelito de cada fila lo resuelve
+    // `PlanoDeOrden`, que pide lo mismo (las respuestas están cacheadas a nivel módulo,
+    // así que no son dos pedidos más por fila).
     const ordenesConPlano = useOrdenesConPlano();
+    const planosDisponibles = usePlanosDisponibles();
 
     // Mismo patrón que PlanningListTable: el degradado del borde derecho se oculta
     // dinámicamente cuando el usuario llegó al final del scroll horizontal.
@@ -200,7 +210,10 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                     return sortConfig.direction === 'asc' ? diff : -diff;
                 }
                 case 'plano': {
-                    const has = (o: WorkOrder) => rankPlano(estadoPlano(o.id, o.tiene_plano, ordenesConPlano));
+                    // Ordena por lo que se puede abrir: plano propio > del producto >
+                    // marcado sin archivo > nada. Antes no miraba los del producto, así
+                    // que ordenar por esta columna no movía nada (todas empataban en 0).
+                    const has = (o: WorkOrder) => rankPlano(estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles));
                     const diff = has(a) - has(b);
                     return sortConfig.direction === 'asc' ? diff : -diff;
                 }
@@ -218,7 +231,10 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                     return 0;
             }
         });
-    }, [filteredOrders, sortConfig]);
+        // Los planos llegan por fetch, después del primer dibujo: si no estuvieran en las
+        // dependencias, una tabla ya ordenada por Plano se quedaría con el orden que se
+        // calculó cuando todavía no había respuesta.
+    }, [filteredOrders, sortConfig, ordenesConPlano, planosDisponibles]);
 
     const formatDate = (dateStr?: string) => {
         if (!dateStr || dateStr.startsWith('1950')) return "-";
@@ -338,6 +354,13 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                 <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
                                                 <span className="font-medium text-gray-700">{order.aprobado_por || "-"}</span>
                                             </div>
+                                            {/* En el celular la OT no mostraba nada del plano: había que abrir
+                                                la fila y bajar hasta Archivos. Mismo cartelito que en la tabla, y
+                                                tocarlo abre el visor en vez de plegar la tarjeta. */}
+                                            <div>
+                                                <span className="text-gray-500 block text-[10px] uppercase">Plano</span>
+                                                <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto className="h-5 px-1.5 text-[10px]" />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -428,7 +451,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" title="¿La OT tiene procesos cargados?" onClick={() => handleSort('proceso')}>
                                             <div className="flex items-center justify-center">Proceso<SortIcon column="proceso" /></div>
                                         </th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" title="¿La OT tiene plano cargado?" onClick={() => handleSort('plano')}>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" title="¿Hay un plano para mirar? Tocalo y se abre sin salir de la lista." onClick={() => handleSort('plano')}>
                                             <div className="flex items-center justify-center">Plano<SortIcon column="plano" /></div>
                                         </th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group" onClick={() => handleSort('entrega')}>
@@ -520,27 +543,15 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                             <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                         )}
                                                     </td>
-                                                    {/* Plano: verde si el archivo está cargado, ámbar si la OT
-                                                        está marcada con plano pero no hay archivo, gris si no
-                                                        lleva. Solo el archivo real restringe la asignación a
-                                                        operarios que saben leer planos. */}
+                                                    {/* Plano: acá decía "Sin archivo" o "No" en TODAS las filas,
+                                                        porque solo contaba el plano pegado a la orden y en
+                                                        producción no hay ninguno (los mil y pico que hay cuelgan
+                                                        del artículo). El plano estaba, la pantalla lo negaba.
+                                                        Ahora `PlanoDeOrden` muestra el que haya —propio o del
+                                                        producto— y lo abre en el visor sin salir de la lista, que
+                                                        es lo que hace falta para planificar mirando la tabla. */}
                                                     <td className="px-3 py-3 text-center">
-                                                        {(() => {
-                                                            const est = estadoPlano(order.id, order.tiene_plano, ordenesConPlano);
-                                                            if (est === 'adjunto') return (
-                                                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                            );
-                                                            if (est === 'marcado_sin_archivo') return (
-                                                                <Badge
-                                                                    variant="outline"
-                                                                    className="bg-amber-50 text-amber-700 border-amber-200 font-semibold"
-                                                                    title="La OT figura con plano pero no tiene el archivo cargado. Para el planificador es una OT sin plano."
-                                                                >
-                                                                    Sin archivo
-                                                                </Badge>
-                                                            );
-                                                            return <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>;
-                                                        })()}
+                                                        <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
                                                         <span className={cn(

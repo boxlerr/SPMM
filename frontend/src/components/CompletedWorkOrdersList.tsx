@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
+import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 
@@ -222,7 +223,13 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                             <span className="font-semibold text-gray-900 line-clamp-1">
                                                 {typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}
                                             </span>
-                                            <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
+                                            {/* En el celular no hay columna Plano donde meterlo, así que va
+                                                pegado al código del artículo: es el plano de ESE producto y
+                                                se abre sin desplegar la tarjeta ni entrar a la ficha. */}
+                                            <div className="flex items-center gap-1.5 shrink-0">
+                                                <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
+                                                <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto className="text-[10px] px-1.5" />
+                                            </div>
                                         </div>
                                         <div className="text-gray-600 line-clamp-2 text-xs">{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : order.articulo?.descripcion}</div>
                                         <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
@@ -323,7 +330,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Prioridad</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Material</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tenía procesos cargados?">Proceso</th>
-                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="¿La OT tenía plano cargado?">Plano</th>
+                                        <th className="px-3 py-3 font-bold text-gray-600 text-center" title="Qué plano hay para ver de esta OT: el suyo, el del producto que fabricaba, o ninguno. Tocalo y se abre.">Plano</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Estado</th>
                                         <th className="px-3 py-3 font-bold text-gray-600 text-center">Entrega</th>
                                         <th className="px-3 py-3 font-bold text-gray-600">F. Prometida</th>
@@ -408,13 +415,15 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                             <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
                                                         )}
                                                     </td>
-                                                    {/* Plano: Sí (verde) si tenía plano cargado. */}
+                                                    {/* Plano: qué hay para MIRAR, y se abre desde acá mismo.
+                                                        Antes esta celda solo repetía la bandera `tiene_plano` que
+                                                        viene del legacy, y esa bandera está en 1 en casi todas las
+                                                        OTs: decía "Sí" sobre órdenes sin ningún archivo, y "No"
+                                                        sobre órdenes cuyo plano estaba cargado —en el artículo—.
+                                                        Es una columna de consulta: no toca el filtro de planos del
+                                                        planificador, que sigue leyendo solo el plano propio. */}
                                                     <td className="px-3 py-3 text-center">
-                                                        {Number(order.tiene_plano) === 1 ? (
-                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                        ) : (
-                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
-                                                        )}
+                                                        <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
                                                         <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">

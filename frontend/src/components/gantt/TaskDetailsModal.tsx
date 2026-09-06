@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Activity, AlertCircle, FileText, Image as ImageIcon, Eye, Download } from "lucide-react";
+import { Activity, AlertCircle } from "lucide-react";
 import {
     Dialog,
     DialogContent,
@@ -15,6 +15,8 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { PlanoPanel } from "@/components/common/PlanoPanel";
+import { usePlanosDeOrden } from "@/hooks/usePlanos";
 import { isOperatorQualified } from "@/lib/gantt-utils";
 import { limitacionDeMaquina } from "@/lib/maquinas";
 import { API_URL } from "@/config";
@@ -104,6 +106,21 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
 
     const [isSaving, setIsSaving] = React.useState(false);
     const [showSuccess, setShowSuccess] = React.useState(false);
+
+    // Los planos de esta OT: los que alguien le pegó a la orden y los del producto que
+    // fabrica —que hoy son los únicos que hay, porque los 1183 planos cargados cuelgan
+    // todos del artículo—. El gancho los junta y el panel aclara en cada tarjeta de
+    // dónde sale cada uno.
+    //
+    // Se piden SOLO con la ficha a la vista: en Operaciones este panel vive montado y
+    // corrido fuera de pantalla (entra y sale con un translate), y dibujar una miniatura
+    // cuesta bajarse el archivo entero, así que con la ficha cerrada estaríamos bajando
+    // planos que nadie está mirando.
+    const {
+        planos,
+        cargando: cargandoPlanos,
+        error: errorPlanos,
+    } = usePlanosDeOrden(isOpen ? selectedItem?.orden_id : undefined);
 
     // Initialize local state when selectedItem changes
     React.useEffect(() => {
@@ -443,6 +460,28 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                             </div>
                         </div>
 
+                        {/* Planos de la OT.
+                            Acá antes había dos archivos inventados escritos en el código
+                            ("plano_pieza_v2.png", "especificaciones_tecnicas.pdf") con
+                            botones de ver y descargar que no hacían nada. Esta ficha se
+                            abre desde el Gantt justo cuando alguien va a hacer el trabajo,
+                            así que es donde más falta hace el dibujo de verdad: la
+                            miniatura se toca y el plano se abre en grande, con zoom, con
+                            las flechas para pasar al siguiente y con el botón de imprimir.
+                            Va abajo del artículo porque es la misma pregunta: el artículo
+                            dice qué pieza es y el plano la muestra.
+                            Ojo: mostrar el plano NO es lo mismo que exigir saber leerlo.
+                            El filtro del planificador sigue mirando su propia lista
+                            (GET /planos/ordenes-con-plano) y acá no se toca. */}
+                        <div className="p-4 rounded-lg border border-gray-200 bg-white">
+                            <PlanoPanel
+                                planos={planos}
+                                cargando={cargandoPlanos}
+                                compacto
+                                vacioTexto={errorPlanos ?? "Esta OT no tiene ningún plano para mirar."}
+                            />
+                        </div>
+
                         {/* Observaciones */}
                         <div>
                             <div className="flex justify-between items-center mb-2">
@@ -457,56 +496,6 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                     value={localObservaciones}
                                     onChange={(e) => setLocalObservaciones(e.target.value)}
                                 />
-                            </div>
-                        </div>
-
-                        {/* Archivos Adjuntos (Mock) */}
-                        <div>
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 block">
-                                Archivos Adjuntos
-                            </label>
-                            <div className="space-y-3">
-                                {/* Mock File 1: Image */}
-                                <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white hover:border-blue-300 transition-all group">
-                                    <div className="flex items-center gap-3 overflow-hidden">
-                                        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 text-blue-600">
-                                            <ImageIcon className="w-5 h-5" />
-                                        </div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-sm font-medium text-gray-900 truncate">plano_pieza_v2.png</span>
-                                            <span className="text-xs text-gray-500">2.4 MB • 12/05/2024</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors" title="Ver archivo">
-                                            <Eye className="w-4 h-4" />
-                                        </button>
-                                        <button className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors" title="Descargar">
-                                            <Download className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Mock File 2: PDF */}
-                                <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white hover:border-red-300 transition-all group">
-                                    <div className="flex items-center gap-3 overflow-hidden">
-                                        <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0 text-red-600">
-                                            <FileText className="w-5 h-5" />
-                                        </div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-sm font-medium text-gray-900 truncate">especificaciones_tecnicas.pdf</span>
-                                            <span className="text-xs text-gray-500">1.8 MB • 10/05/2024</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors" title="Ver archivo">
-                                            <Eye className="w-4 h-4" />
-                                        </button>
-                                        <button className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors" title="Descargar">
-                                            <Download className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
                         </div>
 
