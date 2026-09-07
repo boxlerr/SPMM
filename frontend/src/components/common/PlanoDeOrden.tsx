@@ -48,20 +48,23 @@ const PINTA: Record<EstadoPlano, { texto: string; corto: string; clase: string; 
         title:
             "El plano no está cargado en la OT: es el del producto que fabrica, y sirve igual para trabajar. Tocá para verlo.",
     },
+    // Se ve IGUAL que `sin_plano` a propósito: la diferencia era una marca del sistema
+    // viejo y en pantalla se leían como dos cosas distintas ("Sin archivo" y "No") sin
+    // que nadie supiera por qué. Para el que trabaja las dos significan lo mismo.
     marcado_sin_archivo: {
-        texto: "Sin archivo",
-        corto: "Sin archivo",
-        clase: "bg-amber-50 text-amber-700 border-amber-200",
+        texto: "Sin plano",
+        corto: "Sin plano",
+        clase: "bg-gray-100 text-gray-500 border-gray-300",
         // Ojo: este texto se completa abajo según si se pudo preguntar por el plano del
         // producto o no. Afirmar "ni del producto" cuando no se preguntó es justo la
         // mentira que este cambio vino a sacar.
-        title: "La OT figura con plano pero no hay ningún archivo cargado en la orden.",
+        title: "No hay ningún plano ni foto para mirar en esta orden.",
     },
     sin_plano: {
-        texto: "No",
-        corto: "No",
+        texto: "Sin plano",
+        corto: "Sin plano",
         clase: "bg-gray-100 text-gray-500 border-gray-300",
-        title: "Esta OT no lleva plano.",
+        title: "No hay ningún plano ni foto para mirar en esta orden.",
     },
 };
 
@@ -92,12 +95,54 @@ export const PlanoDeOrden = ({ ordenId, tienePlano, className, compacto }: Plano
     const pinta = PINTA[estado];
     const seAbre = estado === "adjunto" || estado === "del_producto";
 
+    // QUÉ hay y CUÁNTO, no solo de dónde viene.
+    //
+    // Julián: "sigo viendo producto solamente en la columna de plano (…) que muestre la
+    // cantidad de fotos que hay". "Del producto" dice de dónde sale el archivo pero no si
+    // es el DIBUJO o una foto de la pieza, y sin el número no se sabe si vale la pena
+    // abrir. De las 198 órdenes que muestran algo: 130 tienen solo dibujo, 46 solo fotos
+    // y 22 las dos cosas.
+    const cuenta = disponibles?.porOrden.get(ordenId) ?? null;
+
+    /** "Plano", "2 planos", "15 fotos", "Plano + 3 fotos". */
+    const rotularCuenta = (c: { planos: number; fotos: number }, corto: boolean): string => {
+        const p = c.planos === 1 ? "Plano" : `${c.planos} planos`;
+        const f = c.fotos === 1 ? "1 foto" : `${c.fotos} fotos`;
+        if (c.planos && c.fotos) return corto ? `${c.planos}P · ${c.fotos}F` : `${p} + ${f}`;
+        if (c.planos) return p;
+        if (c.fotos) return f;
+        return "";
+    };
+
+    const rotulo = seAbre && cuenta ? rotularCuenta(cuenta, false) : pinta.texto;
+    const rotuloCorto = seAbre && cuenta ? rotularCuenta(cuenta, true) : pinta.corto;
+
+    const deDonde =
+        cuenta && cuenta.deLaOrden > 0 && cuenta.deLaOrden === cuenta.planos + cuenta.fotos
+            ? "cargado en esta orden"
+            : cuenta && cuenta.deLaOrden > 0
+              ? "entre esta orden y el producto"
+              : "del producto que fabrica";
+
+    // El dibujo se destaca; las fotos solas van en gris apagado, que es lo que son: una
+    // ayuda, no el plano.
+    const claseSegunQueEs =
+        !seAbre || !cuenta
+            ? pinta.clase
+            : cuenta.planos > 0
+              ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+              : "bg-slate-100 text-slate-600 border-slate-300";
+
     // Mientras el servidor no tenga la consulta nueva —pasa de verdad: el servidor se
     // actualiza a mano y la pantalla sale sola por Vercel— no se sabe nada de los planos
     // del producto, así que el cartel no puede decir que tampoco hay. Se dice lo que sí
     // se sabe, y se avisa que puede haber uno del producto.
     const explicacion =
-        estado === "marcado_sin_archivo"
+        seAbre && cuenta
+            ? cuenta.planos > 0
+                ? `${rotulo}, ${deDonde}. Tocá para verlo.`
+                : `No hay plano: lo que hay son ${rotulo.toLowerCase()} de la pieza, ${deDonde}. Tocá para verlas.`
+        : estado === "marcado_sin_archivo"
             ? disponibles
                 ? "La OT figura con plano pero no hay ningún archivo, ni suyo ni del producto. No hay nada para abrir."
                 : "La OT figura con plano pero no tiene ningún archivo cargado en la orden. Todavía no se pudo averiguar si el producto tiene el suyo."
@@ -154,13 +199,13 @@ export const PlanoDeOrden = ({ ordenId, tienePlano, className, compacto }: Plano
     };
 
     const clases = cn(
-        pinta.clase,
+        claseSegunQueEs,
         "font-semibold",
         seAbre && "cursor-pointer hover:brightness-95 transition",
         className
     );
 
-    const etiqueta = compacto ? pinta.corto : pinta.texto;
+    const etiqueta = compacto ? rotuloCorto : rotulo;
 
     if (!seAbre) {
         return (

@@ -109,8 +109,19 @@ class PlanoService:
         logger.info("Service - Obtener órdenes con plano disponible (para mostrar)")
 
         propios, del_producto = await self.repository.find_ordenes_con_plano_disponible()
+        # Aparte de "¿hay algo?", hace falta "¿hay un DIBUJO?": 46 de las 198 órdenes que
+        # muestran algo tienen solo fotos de la pieza, y llamarles plano a esas manda a
+        # buscar un dibujo que no existe.
+        # Cuántos dibujos y cuántas fotos tiene cada una. La columna no puede decir solo
+        # "hay algo": "Plano" y "3 fotos" son cosas distintas para el que planifica.
+        resumen = await self.repository.find_resumen_por_orden()
 
-        return {"propios": sorted(propios), "del_producto": sorted(del_producto)}
+        return {
+            "propios": sorted(propios),
+            "del_producto": sorted(del_producto),
+            # Las claves van como texto: JSON no admite números como clave de objeto.
+            "ordenes": {str(k): v for k, v in resumen.items()},
+        }
 
     async def obtenerArticulosConPlano(self) -> list[int]:
         logger.info("Service - Obtener artículos con plano")

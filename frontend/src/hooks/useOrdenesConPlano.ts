@@ -54,6 +54,15 @@ export interface PlanosDisponibles {
     propios: Set<number>;
     /** El plano cuelga del artículo que la orden fabrica y se ve igual desde la OT. */
     delProducto: Set<number>;
+    /**
+     * Cuánto y de qué tipo tiene cada orden: {planos, fotos, deLaOrden}.
+     *
+     * No alcanza con saber que "hay algo". De las 198 órdenes que muestran algo, 130
+     * tienen solo dibujo, 46 solo fotos y 22 las dos cosas: decirles "Del producto" a
+     * todas no le sirve a nadie. Y el número importa —"15 fotos" no es "1 foto"— porque
+     * el que planifica decide si vale la pena abrir.
+     */
+    porOrden: Map<number, { planos: number; fotos: number; deLaOrden: number }>;
 }
 
 let cacheDisponibles: Promise<PlanosDisponibles | null> | null = null;
@@ -74,6 +83,18 @@ function cargarDisponibles(): Promise<PlanosDisponibles | null> {
                 ? {
                       propios: new Set<number>(d.propios),
                       delProducto: new Set<number>(d.del_producto),
+                      // El backend viejo no manda el detalle: sin él no se puede decir
+                      // si es dibujo o foto, y el cartel se queda en el rótulo genérico.
+                      porOrden: new Map<number, { planos: number; fotos: number; deLaOrden: number }>(
+                          Object.entries(d.ordenes ?? {}).map(([id, v]: [string, any]) => [
+                              Number(id),
+                              {
+                                  planos: Number(v?.planos ?? 0),
+                                  fotos: Number(v?.fotos ?? 0),
+                                  deLaOrden: Number(v?.de_la_orden ?? 0),
+                              },
+                          ])
+                      ),
                   }
                 : null
         )
@@ -125,6 +146,15 @@ export function usePlanosDisponibles(): PlanosDisponibles | null {
 }
 
 /** Los estados posibles de la columna Plano, del que más tiene al que no tiene nada. */
+/**
+ * Los estados de la columna Plano.
+ *
+ * "marcado_sin_archivo" y "sin_plano" se ven IGUAL en pantalla a propósito. Antes eran
+ * dos carteles distintos ("Sin archivo" y "No") y Julián preguntó por qué: la diferencia
+ * es que el sistema viejo marcó la OT con plano, un dato interno que no cambia nada para
+ * el que trabaja. Las dos cosas significan lo mismo donde importa: no hay nada para
+ * mirar. Se conservan separadas acá porque el orden de la columna las usa.
+ */
 export type EstadoPlano = "adjunto" | "del_producto" | "marcado_sin_archivo" | "sin_plano";
 
 export function estadoPlano(

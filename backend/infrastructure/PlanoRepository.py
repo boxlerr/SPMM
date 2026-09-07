@@ -1,4 +1,4 @@
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text as sa_text
 from sqlalchemy.orm import aliased
 from backend.domain.Plano import Plano
 from backend.domain.Articulo import Articulo
@@ -80,6 +80,66 @@ class PlanoRepository:
             logger.error(f"Repository - Error en find_ordenes_con_plano: {e}")
             raise InfrastructureException(
                 "Error al consultar qué órdenes tienen plano adjunto."
+            ) from e
+
+    async def find_resumen_por_orden(self) -> dict:
+        """Cuántos DIBUJOS y cuántas FOTOS tiene para mirar cada OT.
+
+        Devuelve {id_orden: {"planos": n, "fotos": n, "de_la_orden": n}}, solo con las OT
+        que tienen algo. Es dato de PANTALLA: no filtra ni restringe nada (el filtro duro
+        del planificador lo sigue decidiendo find_ordenes_con_plano, que mira solo la OT).
+
+        Se cuenta y no se devuelve un simple sí/no porque la columna tiene que decir QUÉ
+        hay: "Plano" no es lo mismo que "3 fotos". De las 198 órdenes que muestran algo,
+        46 tienen únicamente fotos de la pieza, y llamarles plano manda al que planifica a
+        buscar un dibujo que no existe.
+
+        El salto de la OT al plano del producto va por CÓDIGO normalizado y no por id de
+        artículo: el catálogo repite códigos y el plano cuelga de una sola de esas filas.
+        """
+        try:
+            logger.info("Repository - Resumen de planos por orden (para mostrar).")
+            sql = sa_text(r"""
+                with archivos_de_la_ot as (
+                    select p.id_orden_trabajo as orden_id, p.tipo_archivo, 1 as propio
+                    from plano p
+                    where p.id_orden_trabajo is not null
+                ),
+                archivos_del_producto as (
+                    select o.id as orden_id, p.tipo_archivo, 0 as propio
+                    from orden_trabajo o
+                    join articulo ao on ao.id = o.id_articulo
+                    join articulo ag
+                      on upper(regexp_replace(btrim(ag.cod_articulo), '\s+', ' ', 'g'))
+                       = upper(regexp_replace(btrim(ao.cod_articulo), '\s+', ' ', 'g'))
+                    join plano p on p.id_articulo = ag.id
+                ),
+                todo as (
+                    select * from archivos_de_la_ot
+                    union all
+                    select * from archivos_del_producto
+                )
+                select orden_id,
+                       count(*) filter (where tipo_archivo ilike '%pdf%')     as planos,
+                       count(*) filter (where tipo_archivo not ilike '%pdf%') as fotos,
+                       count(*) filter (where propio = 1)                     as de_la_orden
+                from todo
+                group by orden_id
+            """)
+            filas = (await self.db.execute(sql)).mappings().all()
+            return {
+                int(f["orden_id"]): {
+                    "planos": int(f["planos"]),
+                    "fotos": int(f["fotos"]),
+                    "de_la_orden": int(f["de_la_orden"]),
+                }
+                for f in filas
+                if f["orden_id"] is not None
+            }
+        except Exception as e:
+            logger.error(f"Repository - Error en find_resumen_por_orden: {e}")
+            raise InfrastructureException(
+                "Error al consultar qué planos tiene cada orden."
             ) from e
 
     async def find_ordenes_con_plano_disponible(self) -> tuple[set[int], set[int]]:

@@ -167,13 +167,20 @@ export const PlanoPanel = ({
                 repetidos.set(salida[i], (repetidos.get(salida[i]) ?? 0) + 1);
             });
 
-            // Si al recortar quedaron dos tarjetas diciendo lo mismo —o dos archivos con
-            // el nombre exacto, que en Drive pasa— se los numera: "Foto 3 de 15" no dice
-            // qué pieza es, pero al menos deja saber cuál se está mirando y cuántas faltan.
+            // Cuando hay más de uno, SIEMPRE se numera.
+            //
+            // Julián: "si ponemos producto o algo así, cómo va a saber diferenciar de qué
+            // es cada foto". Y no hay forma de saberlo por el nombre: los quince archivos
+            // de una pieza se llaman igual y en Drive nadie los va a renombrar. Lo que sí
+            // se puede dar es una referencia estable para hablar entre personas —"mirá la
+            // foto 3"— y para saber cuántas faltan. Si además quedó una cola que
+            // distingue ("…(3).jpeg"), se muestra al lado; el nombre completo va en el
+            // title de la tarjeta.
             indices.forEach((i, n) => {
-                if ((repetidos.get(salida[i]) ?? 0) > 1 || !salida[i]) {
-                    salida[i] = `${rotulo} ${n + 1} de ${indices.length}`;
-                }
+                if (indices.length === 1) return;
+                const orden = `${rotulo} ${n + 1} de ${indices.length}`;
+                const cola = (repetidos.get(salida[i]) ?? 0) > 1 ? "" : salida[i];
+                salida[i] = cola ? `${orden} · ${cola}` : orden;
             });
         }
         return salida;
