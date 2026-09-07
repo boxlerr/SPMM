@@ -1,11 +1,11 @@
 import React from "react";
-import { Eye, Download, Paperclip, Trash2, UploadCloud, Plus } from "lucide-react";
+import { Trash2, UploadCloud } from "lucide-react";
 import { API_URL } from "@/config";
 import { toast } from "sonner";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { PlanoPanel, contarArchivos } from "./PlanoPanel";
 import { FileViewerModal } from "./FileViewerModal";
-import { PlanoThumb } from "./PlanoThumb";
-import { descargarPlano, olvidarPlano, type Plano } from "@/lib/planos";
+import { olvidarPlano, type Plano } from "@/lib/planos";
 import { invalidarOrdenesConPlano } from "@/hooks/useOrdenesConPlano";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -27,30 +27,67 @@ const conOrigen = (fila: any): Plano => ({
     origen: fila?.origen ?? (fila?.id_articulo ? "articulo" : "ot"),
 });
 
-/** Qué archivos hay, contados por dónde viven. "3" a secas no dice de quién son. */
-function resumen(planos: Plano[]): string {
+/**
+ * Alto máximo de la galería adentro del desplegable.
+ *
+ * Antes las tarjetas se apilaban sueltas y la fila crecía con ellas: quince archivos
+ * estiraban el desplegable tanto que para volver a la lista de OT había que scrollear la
+ * página entera. Con un tope, el que scrollea es el panel y la fila mide lo mismo con un
+ * archivo que con veinte.
+ */
+const ALTO_GALERIA = "max-h-80";
+
+/**
+ * El encabezado, que además dice de quién es cada cosa.
+ *
+ * PlanoPanel ya pone a la derecha QUÉ hay ("1 plano · 15 fotos"); lo que falta es de
+ * DÓNDE cuelga, y eso no es un detalle: el archivo del producto lo comparten todas las OT
+ * que fabrican el artículo, así que desde una orden no se saca. Contarlos a ojo tarjeta
+ * por tarjeta era justamente lo que no se podía hacer con quince.
+ */
+function tituloSegunOrigen(planos: Plano[]): string {
+    if (planos.length === 0) return "Archivos";
     const propios = planos.filter(p => p.origen === "ot").length;
     const delProducto = planos.length - propios;
-    if (delProducto === 0) return `${propios}`;
-    if (propios === 0) return `${delProducto} del producto`;
-    return `${propios} de esta orden · ${delProducto} del producto`;
+    if (propios === 0) return "Archivos del producto";
+    if (delProducto === 0) return "Archivos de esta orden";
+    return `Archivos · ${propios} de esta orden y ${delProducto} del producto`;
 }
 
-const fechaCorta = (iso?: string | null): string => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
-};
+/**
+ * El final del nombre, que es lo único que distingue un archivo de otro.
+ *
+ * Los archivos de una pieza se llaman todos igual salvo el final —"Matriz 46x240x307mm de
+ * 2 partes (1).jpg", "… (2).jpg"—, así que recortar por el final (que es lo que hace
+ * `truncate`) deja una fila de chips idénticos. Se muestra la cola y se pierde el arranque,
+ * que es el pedazo que ya se sabe de memoria.
+ */
+const colaDelNombre = (nombre: string, max = 26): string =>
+    nombre.length <= max ? nombre : `…${nombre.slice(-max)}`;
 
 // Component to fetch and display files for an order
-export const OrderFiles = ({ orderId }: { orderId: number }) => {
+interface OrderFilesProps {
+    orderId: number;
+    /**
+     * Un solo renglón en vez de la galería.
+     *
+     * La lista de OT del Gantt monta esto AL LADO del título "Procesos asignados", dentro
+     * de un renglón de 10px pensado para algo diminuto. Con la galería completa, una OT
+     * sin archivos metía un recuadro de ~110px y una con quince metía 320px adentro de ese
+     * renglón: el encabezado dejaba de ser un encabezado. Acá se dice qué hay y se abre en
+     * el visor, que es lo que sirve mientras se mira el Gantt.
+     */
+    resumen?: boolean;
+}
+
+export const OrderFiles = ({ orderId, resumen = false }: OrderFilesProps) => {
     const [files, setFiles] = React.useState<Plano[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [isUploading, setIsUploading] = React.useState(false);
-    const [fileToDelete, setFileToDelete] = React.useState<{ id: number, name: string } | null>(null);
-    // Se guarda la POSICIÓN y no el archivo: el visor recibe la lista entera para que se
-    // pueda pasar de un plano al siguiente sin volver al listado por cada uno.
+    // Solo lo usa la variante `resumen`: ahí no hay galería, así que el visor lo abre
+    // este componente. En la variante normal el visor lo pone PlanoPanel.
     const [viendo, setViendo] = React.useState<number | null>(null);
+    const [fileToDelete, setFileToDelete] = React.useState<{ id: number, name: string } | null>(null);
 
     const fetchFiles = React.useCallback(async () => {
         if (!orderId) return;
@@ -149,19 +186,45 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
         }
     };
 
-    if (loading) {
+    // Los del producto no se listan acá: el botón de sacar existe solo para los que se
+    // subieron a esta orden.
+    const propios = files.filter(f => f.origen === "ot");
+
+    if (resumen) {
+        const c = contarArchivos(files);
         return (
-            <div className="mt-3 px-1 animate-pulse">
-                <div className="h-3 w-24 bg-gray-200 rounded mb-2"></div>
-                <div className="flex gap-2">
-                    <div className="h-10 w-40 bg-gray-50 rounded border border-gray-100"></div>
-                </div>
-            </div>
+            <>
+                <FileViewerModal
+                    isOpen={viendo !== null}
+                    onClose={() => setViendo(null)}
+                    file={viendo !== null ? files[viendo] ?? null : null}
+                    planos={files}
+                    indice={viendo ?? 0}
+                    onIndiceChange={setViendo}
+                />
+                {loading ? (
+                    <span className="text-[10px] text-gray-400">buscando planos…</span>
+                ) : files.length === 0 ? (
+                    <span className="text-[10px] text-gray-400">sin planos</span>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setViendo(0);
+                        }}
+                        title="Ver los planos y fotos de esta orden"
+                        className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                    >
+                        {c.resumen}
+                    </button>
+                )}
+            </>
         );
     }
 
     return (
-        <div className="mt-2 mb-2">
+        <div className="mt-2 mb-2 min-w-0 flex flex-col gap-2">
             <ConfirmationDialog
                 isOpen={!!fileToDelete}
                 onClose={() => setFileToDelete(null)}
@@ -173,130 +236,58 @@ export const OrderFiles = ({ orderId }: { orderId: number }) => {
                 variant="destructive"
             />
 
-            <FileViewerModal
-                isOpen={viendo !== null}
-                onClose={() => setViendo(null)}
-                file={viendo !== null ? files[viendo] ?? null : null}
+            {/* La misma galería que la solapa Planos y que la carga de procesos: planos
+                primero, cada tarjeta rotulada Plano o Foto, y el aviso cuando de un producto
+                solo hay fotos. Acá va con alto para que scrollee adentro del desplegable. */}
+            <PlanoPanel
                 planos={files}
-                indice={viendo ?? 0}
-                onIndiceChange={setViendo}
+                cargando={loading}
+                titulo={tituloSegunOrigen(files)}
+                alto={ALTO_GALERIA}
+                vacioTexto="Esta orden no tiene planos ni fotos, ni propios ni del producto."
             />
 
-            <div className="flex items-center justify-between mb-3">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Paperclip className="w-3 h-3" />
-                    Archivos <span className="text-gray-400 font-normal ml-0.5">({resumen(files)})</span>
-                </h4>
-            </div>
-
-            {files.length === 0 ? (
-                <div className="relative group inline-block">
+            <div className="flex flex-wrap items-center gap-2">
+                <div className="relative group inline-flex">
                     <input
                         type="file"
                         multiple
                         accept="image/*,.pdf"
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-wait"
                         onChange={handleFileUpload}
                         disabled={isUploading}
                     />
-                    <div className="flex items-center gap-2 py-1 px-2 border border-dashed border-gray-300 rounded hover:border-blue-400 hover:bg-blue-50/50 transition-all">
+                    <div className="flex items-center gap-1.5 py-1 px-2 border border-dashed border-gray-300 rounded-lg hover:border-blue-400 hover:bg-blue-50/50 transition-all">
                         <UploadCloud className="w-3 h-3 text-gray-400 group-hover:text-blue-500" />
-                        <span className="text-[10px] text-gray-400 group-hover:text-blue-600">
-                            Subir planos
+                        <span className="text-[10px] text-gray-500 group-hover:text-blue-600">
+                            {isUploading ? "Subiendo…" : "Subir planos o fotos"}
                         </span>
                     </div>
                 </div>
-            ) : (
-                <div className="flex flex-wrap gap-3">
-                    {files.map((file, i) => {
-                        const delProducto = file.origen === "articulo";
-                        return (
-                            <div
-                                key={file.id}
-                                className={`flex items-center gap-3 p-2.5 rounded-xl border border-gray-200 bg-white hover:border-blue-400 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group shadow-sm max-w-sm min-w-[200px] relative ${delProducto ? "pr-3" : "pr-8"}`}
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => setViendo(i)}
-                                    title={`Ver ${file.nombre}`}
-                                    className="flex items-center gap-3 min-w-0 flex-grow text-left cursor-zoom-in focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-lg"
-                                >
-                                    <PlanoThumb plano={file} className="h-11 w-11 flex-shrink-0" />
-                                    <div className="flex flex-col min-w-0 mr-2">
-                                        <span className="text-xs font-bold text-gray-700 truncate block max-w-[120px]" title={file.nombre}>{file.nombre}</span>
-                                        {delProducto ? (
-                                            <span className="text-[9px] font-semibold text-indigo-600 bg-indigo-50 rounded-full px-1.5 py-0.5 mt-1 self-start whitespace-nowrap">
-                                                Del producto
-                                            </span>
-                                        ) : (
-                                            <span className="text-[10px] text-gray-400 font-medium flex items-center gap-1 mt-0.5">
-                                                {fechaCorta(file.fecha_subida)}
-                                            </span>
-                                        )}
-                                    </div>
-                                </button>
 
-                                {/* Actions */}
-                                <div className="flex items-center gap-1 absolute right-2 top-1/2 -translate-y-1/2">
-                                    {/* El plano del producto lo comparten TODAS las OTs que lo fabrican:
-                                        borrarlo desde una orden se lo saca a las demás. Se saca de la orden
-                                        en la ficha del producto, no acá. */}
-                                    {!delProducto && (
-                                        <button
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                handleDeleteFile(file.id, file.nombre);
-                                            }}
-                                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-all opacity-0 group-hover:opacity-100"
-                                            title="Eliminar archivo"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    )}
-
-                                    {/* View/Download Buttons */}
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all bg-gray-50 rounded-lg p-0.5 border border-gray-100 shadow-sm absolute -right-2 -top-8 z-10 pointer-events-none group-hover:pointer-events-auto">
-                                        <button
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                setViendo(i);
-                                            }}
-                                            className="p-1.5 hover:bg-white hover:rounded-md text-gray-500 hover:text-blue-600 transition-all"
-                                            title="Ver archivo"
-                                        >
-                                            <Eye className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                descargarPlano(file.id, file.nombre)
-                                                    .catch(() => toast.error("No se pudo descargar el archivo"));
-                                            }}
-                                            className="p-1.5 hover:bg-white hover:rounded-md text-gray-500 hover:text-green-600 transition-all"
-                                            title="Descargar"
-                                        >
-                                            <Download className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
-
-                    {/* Tiny Add Button at end of list */}
-                    <div className="w-10 h-10 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300 hover:text-blue-500 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer relative group" title="Agregar más archivos">
-                        <input
-                            type="file"
-                            multiple
-                            accept="image/*,.pdf"
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                            onChange={handleFileUpload}
-                            disabled={isUploading}
-                        />
-                        <Plus className="w-5 h-5" />
-                    </div>
-                </div>
-            )}
+                {/* Las tarjetas de la galería no traen botón de borrar a propósito: el plano
+                    del producto lo comparten TODAS las OT que lo fabrican y borrarlo desde
+                    una orden se lo saca a las demás (eso se hace en la ficha del producto).
+                    Acá abajo aparecen únicamente los que se subieron a ESTA orden, que son
+                    los únicos que se pueden sacar sin arrastrar a nadie. */}
+                {propios.map((file) => (
+                    <span
+                        key={file.id}
+                        title={file.nombre}
+                        className="inline-flex items-center gap-1 max-w-[200px] rounded-full bg-slate-100 border border-slate-200 pl-2 pr-0.5 py-0.5 text-[10px] text-slate-600"
+                    >
+                        <span className="truncate">{colaDelNombre(file.nombre)}</span>
+                        <button
+                            type="button"
+                            onClick={() => handleDeleteFile(file.id, file.nombre)}
+                            className="p-1 rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title={`Sacar ${file.nombre} de esta orden`}
+                        >
+                            <Trash2 className="w-3 h-3" />
+                        </button>
+                    </span>
+                ))}
+            </div>
         </div>
     );
 };

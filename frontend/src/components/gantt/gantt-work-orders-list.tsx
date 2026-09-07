@@ -668,10 +668,14 @@ export function GanttWorkOrdersList({ tasks, onTaskClick, onBulkStatusChange, on
                                             ({completedTasks}/{totalTasks} completados)
                                         </span>
                                     </h5>
-                                    {/* Archivos compacto: solo enlace para subir/ver — no ocupa espacio si no hay nada */}
+                                    {/* Acá va el RESUMEN de un renglón, no la galería: este
+                                        bloque es el encabezado de "Procesos asignados" y mide
+                                        una línea. Con la galería entera, una OT sin archivos
+                                        metía un recuadro vacío y una con quince metía 320px
+                                        adentro del título. Se dice qué hay y se abre el visor. */}
                                     <div className="flex items-center gap-1 text-[10px] text-gray-500">
                                         <Paperclip className="w-3 h-3" />
-                                        <OrderFiles orderId={head.workOrderId} />
+                                        <OrderFiles orderId={head.workOrderId} resumen />
                                     </div>
                                 </div>
 

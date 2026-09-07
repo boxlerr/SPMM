@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,8 @@ import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
 import { ProcesosEditor, ProcesoRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
-import { usePlanosDeArticulo } from "@/hooks/usePlanos";
-import { descargarPlano, type Plano } from "@/lib/planos";
+import { usePlanosDeArticulo, usePlanosDeOrden } from "@/hooks/usePlanos";
+import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -71,6 +71,58 @@ interface MateriaPrimaItem {
 
 
 /**
+ * El orden en el que Anterior/Siguiente recorren las solapas.
+ *
+ * Antes cada botón tenía su propia cadena de `if` ("si estoy en general voy a materias, si
+ * estoy en materias voy a procesos"), duplicada y al revés en el otro. Agregar Planos al
+ * final quería decir tocar los dos y acordarse de los dos; escrito una sola vez acá, no
+ * hay forma de que queden diciendo cosas distintas.
+ */
+const ORDEN_SOLAPAS = ["general", "materias", "procesos", "planos"] as const;
+type Solapa = (typeof ORDEN_SOLAPAS)[number];
+
+/**
+ * "1 plano · 15 fotos".
+ *
+ * Se cuenta en vez de listar porque el problema era justamente listar: los quince archivos
+ * de una pieza se llaman igual salvo el final —"Matriz 46x240x307mm de 2 partes (1).jpg",
+ * "… (15).jpg"— y el renglón los corta por ahí, que es lo único que los distingue. Quince
+ * renglones idénticos ocupando toda la solapa no dicen nada; "15 fotos" sí, y el detalle
+ * con la miniatura está a un click en la solapa Planos.
+ *
+ * Plano y foto se separan porque no son lo mismo: hay 122 productos que no tienen ni un
+ * dibujo, solo fotos de la pieza, y llamarles "planos" a todos manda al que planifica a
+ * buscar un archivo que no existe.
+ */
+/**
+ * El final del nombre, que es lo único que distingue a quince archivos que arrancan
+ * igual ("Matriz 46x240x307mm de 2 partes (1).jpg" … "(15).jpg"). Cortando por el final,
+ * como hacía `truncate`, los quince se leían idénticos y al lado de cada uno había un
+ * botón de sacarlo de la orden: no había forma de saber cuál estabas sacando.
+ */
+function colaDelNombre(nombre: string, max = 34): string {
+    if (!nombre || nombre.length <= max) return nombre;
+    return "…" + nombre.slice(-(max - 1));
+}
+
+function resumirArchivos(archivos: { tipo_archivo?: string | null }[]): string {
+    let planos = 0;
+    let fotos = 0;
+    let otros = 0;
+    for (const a of archivos) {
+        if (esPlano(a.tipo_archivo)) planos++;
+        else if (esFoto(a.tipo_archivo)) fotos++;
+        else otros++;
+    }
+
+    const partes: string[] = [];
+    if (planos) partes.push(`${planos} ${planos === 1 ? "plano" : "planos"}`);
+    if (fotos) partes.push(`${fotos} ${fotos === 1 ? "foto" : "fotos"}`);
+    if (otros) partes.push(`${otros} ${otros === 1 ? "archivo" : "archivos"}`);
+    return partes.join(" · ");
+}
+
+/**
  * El plano del producto, al costado de la carga de procesos.
  *
  * Los pasos salen del dibujo: el que los escribe lo está mirando. Si para verlo hay que
@@ -79,7 +131,14 @@ interface MateriaPrimaItem {
  * Se pliega porque en un notebook el panel le saca 320px al listado y las columnas de
  * máquina, minutos y personas quedan espichadas: el que ya sabe qué va lo cierra.
  */
-function PanelDePlanos({ planos, cargando, vacioTexto }: { planos: Plano[]; cargando: boolean; vacioTexto: string }) {
+function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
+    planos: Plano[];
+    cargando: boolean;
+    vacioTexto: string;
+    titulo: string;
+    /** Saltar a la solapa Planos, donde entran todos a la vez y más grandes. */
+    onVerTodos: () => void;
+}) {
     const [abierto, setAbierto] = useState(true);
 
     if (!abierto) {
@@ -114,10 +173,21 @@ function PanelDePlanos({ planos, cargando, vacioTexto }: { planos: Plano[]; carg
                     planos={planos}
                     cargando={cargando}
                     compacto
-                    titulo="Plano del producto"
+                    titulo={titulo}
                     vacioTexto={vacioTexto}
                 />
             </div>
+            {/* En 330px las miniaturas entran de a dos y chiquitas: alcanza para saber cuál
+                es cuál, no para leer una cota. El que necesita mirar el dibujo en serio se
+                va a la solapa Planos y vuelve, sin perder lo que estaba cargando. */}
+            <button
+                type="button"
+                onClick={onVerTodos}
+                className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+            >
+                <Paperclip className="w-3 h-3" />
+                Ver todos los planos
+            </button>
         </aside>
     );
 }
@@ -564,15 +634,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         return true;
     };
 
-    const handleNextStep = () => {
-        if (activeTab === "general") setActiveTab("materias");
-        else if (activeTab === "materias") setActiveTab("procesos");
+    /** Correrse una solapa. Se apoya en ORDEN_SOLAPAS para no repetir el orden en cada botón. */
+    const moverSolapa = (paso: 1 | -1) => {
+        const i = ORDEN_SOLAPAS.indexOf(activeTab as Solapa);
+        const destino = i >= 0 ? ORDEN_SOLAPAS[i + paso] : undefined;
+        if (destino) setActiveTab(destino);
     };
 
-    const handlePrevStep = () => {
-        if (activeTab === "procesos") setActiveTab("materias");
-        else if (activeTab === "materias") setActiveTab("general");
-    }
+    const handleNextStep = () => moverSolapa(1);
+    const handlePrevStep = () => moverSolapa(-1);
 
     // OT proveniente del sistema legacy: solo se puede editar fecha_prometida.
     /**
@@ -590,15 +660,66 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
      */
     const isLegacyOT = false;
 
-    // El panel de planos de la solapa Procesos sigue al producto elegido en General: se
-    // cambia el artículo ahí y acá cambia el dibujo, sin recargar nada.
+    /**
+     * De dónde salen los planos que muestran la solapa Planos y el panel de Procesos.
+     *
+     * Editando una OT alcanza con el endpoint de la orden: ya devuelve los adjuntos propios
+     * MÁS los del producto que fabrica, que es todo lo que hay para mirar. La excepción es
+     * haber cambiado el producto en la solapa General y no haber guardado todavía: esa
+     * lista quedó vieja —sigue trayendo los dibujos del artículo anterior— y mientras dura
+     * ese rato se piden los del producto recién elegido, que es el que la persona tiene en
+     * la cabeza. Creando una OT nueva no hay orden todavía, así que siempre es por artículo.
+     *
+     * Los dos hooks se llaman siempre porque son hooks, pero solo uno recibe id: el otro
+     * devuelve la lista vacía sin salir a la red.
+     */
     const articuloElegido = Number(generalData.articulo_id) || undefined;
-    const { planos: planosArticulo, cargando: planosCargando, error: planosError } =
-        usePlanosDeArticulo(articuloElegido);
+    const articuloGuardado = orderToEdit
+        ? Number(orderToEdit.articulo?.id ?? orderToEdit.id_articulo) || undefined
+        : undefined;
+    const planosSonDeLaOrden = !!orderToEdit && articuloElegido === articuloGuardado;
+
+    const { planos: planosDeLaOrden, cargando: cargandoOrden, error: errorOrden } =
+        usePlanosDeOrden(planosSonDeLaOrden ? orderToEdit?.id : undefined);
+    const { planos: planosDelArticulo, cargando: cargandoArticulo, error: errorArticulo } =
+        usePlanosDeArticulo(planosSonDeLaOrden ? undefined : articuloElegido);
+
+    const planosCargando = planosSonDeLaOrden ? cargandoOrden : cargandoArticulo;
+    const planosError = planosSonDeLaOrden ? errorOrden : errorArticulo;
+
+    /**
+     * Lo que se ve en la galería.
+     *
+     * Un archivo que sacaron en la solapa 1 desaparece acá en el acto, aunque el borrado
+     * real recién salga al guardar: si siguiera a la vista, el que lo sacó vuelve a la
+     * solapa Planos, lo encuentra ahí y cree que el botón no hizo nada.
+     */
+    const planosVisibles = useMemo(() => {
+        const lista = planosSonDeLaOrden ? planosDeLaOrden : planosDelArticulo;
+        return deletedFileIds.length > 0
+            ? lista.filter(p => !deletedFileIds.includes(p.id))
+            : lista;
+    }, [planosSonDeLaOrden, planosDeLaOrden, planosDelArticulo, deletedFileIds]);
+
+    /** Sin producto elegido no hay nada que pedir, y hay que decirlo con todas las letras. */
+    const faltaElegirProducto = !articuloElegido && !planosSonDeLaOrden;
+
+    const planosTitulo = planosSonDeLaOrden ? "Planos de esta OT" : "Planos del producto";
     const planosVacioTexto = planosError
-        ?? (!articuloElegido
+        ?? (faltaElegirProducto
             ? "Elegí el producto en la solapa General y su plano aparece acá."
-            : "Este producto todavía no tiene planos cargados.");
+            : planosSonDeLaOrden
+                ? "Ni esta orden ni el producto que fabrica tienen archivos cargados."
+                : "Este producto todavía no tiene planos cargados.");
+
+    /**
+     * Los adjuntos de la orden se separan de los del producto porque no se tratan igual:
+     * el del producto es el mismo archivo para TODAS las órdenes del artículo (borrarlo lo
+     * saca de todas), así que en la solapa 1 solo se cuenta; el propio de la orden es el
+     * único que se puede sacar desde acá.
+     */
+    const adjuntosDeLaOrden = existingFiles.filter(f => f.origen !== "articulo");
+    const adjuntosDelProducto = existingFiles.filter(f => f.origen === "articulo");
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1075,18 +1196,38 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
                         <div className="flex-1 overflow-y-auto px-6 py-4 relative">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                                <TabsList className="grid w-full grid-cols-3 mb-4 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
-                                    <TabsTrigger value="general" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <FileText size={16} className="mr-1 md:mr-2" />
-                                        1. Información General
+                                {/* Los rótulos se acortan abajo de lg y no se dejan enteros.
+                                    El TabsTrigger es `whitespace-nowrap` y la columna del grid mide
+                                    1fr: en un notebook angosto, "1. Información General" no entra en
+                                    su celda y se le monta encima a la de al lado. Pasando de tres
+                                    solapas a cuatro cada celda perdió un cuarto de ancho, así que lo
+                                    que antes zafaba raspando ahora se pisa. Abajo de lg queda
+                                    "1. General · 2. Materias · 3. Procesos · 4. Planos". */}
+                                <TabsList className="grid w-full grid-cols-4 mb-4 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
+                                    <TabsTrigger value="general" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <FileText size={16} className="mr-1 md:mr-2 shrink-0" />
+                                        <span className="truncate">1. <span className="hidden lg:inline">Información </span>General</span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="materias" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <Layers size={16} className="mr-1 md:mr-2" />
-                                        2. Materias Primas
+                                    <TabsTrigger value="materias" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Layers size={16} className="mr-1 md:mr-2 shrink-0" />
+                                        <span className="truncate">2. Materias<span className="hidden lg:inline"> Primas</span></span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="procesos" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <Settings size={16} className="mr-1 md:mr-2" />
-                                        3. Procesos (Opcional)
+                                    <TabsTrigger value="procesos" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Settings size={16} className="mr-1 md:mr-2 shrink-0" />
+                                        <span className="truncate">3. Procesos<span className="hidden lg:inline"> (Opcional)</span></span>
+                                    </TabsTrigger>
+                                    {/* Los planos son parte de planificar, no un anexo: el que arma los pasos
+                                        los está mirando. La cuenta va en la solapa para no tener que entrar a
+                                        ver si hay algo —y para que "0" se lea de una, que es el caso de los
+                                        122 productos que solo tienen fotos. */}
+                                    <TabsTrigger value="planos" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Paperclip size={16} className="mr-1 md:mr-2 shrink-0" />
+                                        <span className="truncate">4. Planos</span>
+                                        {!planosCargando && planosVisibles.length > 0 && (
+                                            <span className="ml-1.5 shrink-0 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold tabular-nums">
+                                                {resumirArchivos(planosVisibles)}
+                                            </span>
+                                        )}
                                     </TabsTrigger>
                                 </TabsList>
 
@@ -1304,9 +1445,42 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     </div>
 
                                     <div className="space-y-2 pt-3">
-                                        <Label className="text-sm font-semibold text-gray-700">
-                                            Archivos Adjuntos (Planos, Especificaciones)
-                                        </Label>
+                                        {/* Acá se subía y se listaba todo junto: con quince archivos del
+                                            producto la lista se comía la solapa entera y encima los quince
+                                            renglones se leían iguales (mismo nombre, cortado por el final,
+                                            que es lo único que cambia). Ahora acá queda lo que se hace
+                                            —cuántos hay y subir uno más— y verlos es la solapa Planos, que
+                                            los muestra con la miniatura. */}
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <Label className="text-sm font-semibold text-gray-700">
+                                                Archivos Adjuntos (Planos, Especificaciones)
+                                            </Label>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setActiveTab("planos")}
+                                                className="h-8 gap-2 text-xs"
+                                            >
+                                                <Paperclip className="w-3.5 h-3.5" />
+                                                Verlos en la solapa Planos
+                                            </Button>
+                                        </div>
+
+                                        {existingFiles.length > 0 && (
+                                            <p className="text-xs text-gray-500">
+                                                Ya hay <span className="font-semibold text-gray-700">{resumirArchivos(existingFiles)}</span>
+                                                {adjuntosDelProducto.length > 0 && (
+                                                    <>
+                                                        {" "}—{" "}
+                                                        {adjuntosDelProducto.length === 1
+                                                            ? "uno es del producto y se ve en todas las OT que lo fabrican"
+                                                            : `${adjuntosDelProducto.length} son del producto y se ven en todas las OT que lo fabrican`}
+                                                    </>
+                                                )}
+                                                .
+                                            </p>
+                                        )}
                                         {/* Dynamic Upload Box */}
                                         <div
                                             className={cn(
@@ -1361,38 +1535,36 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             )}
                                         </div>
 
-                                        {(existingFiles.length > 0 || files.length > 0) && (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                                                {/* Existing Files */}
-                                                {existingFiles.map((file) => (
-                                                    <div key={`existing-${file.id}`} className="flex items-center justify-between p-3 bg-blue-50/50 border border-blue-100 rounded-lg group hover:border-blue-300 transition-all">
-                                                        <div className="flex items-center gap-3 overflow-hidden">
-                                                            <div className="p-2 bg-white rounded-md border border-gray-100 text-gray-500">
-                                                                {file.tipo_archivo.includes('pdf') || file.nombre.endsWith('.pdf') ? (
-                                                                    <FileText className="w-4 h-4 text-red-500" />
-                                                                ) : (
-                                                                    <ImageIcon className="w-4 h-4 text-blue-500" />
-                                                                )}
-                                                            </div>
-                                                            <div className="flex flex-col min-w-0">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => descargarPlano(file.id, file.nombre)
-                                                                        .catch(() => toast.error("No se pudo descargar el archivo"))}
-                                                                    className="text-sm font-medium text-gray-700 truncate hover:text-blue-600 hover:underline text-left"
-                                                                    title="Descargar este archivo"
-                                                                >
-                                                                    {file.nombre}
-                                                                </button>
-                                                                <span className="text-xs text-gray-400">
-                                                                    {file.origen === "articulo" ? "Del producto" : "Existente"}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                        {/* El plano del producto NO se borra desde una orden: es el mismo
-                                                            archivo para todas las órdenes de ese artículo y para la sección
-                                                            Planos. Solo se saca el adjunto propio de esta orden. */}
-                                                        {!isLegacyOT && file.origen !== "articulo" && (
+                                        {/* Solo lo que se puede tocar desde acá: el adjunto propio de la
+                                            orden y el que se acaba de elegir. El plano del PRODUCTO no se
+                                            borra desde una OT —es el mismo archivo para todas las órdenes
+                                            del artículo y para la sección Planos—, así que no aparece como
+                                            renglón: se cuenta arriba y se mira en la solapa Planos.
+                                            El alto está topeado a propósito: es lo que evitaba que la solapa
+                                            se estirara y hubiera que scrollear la página entera. */}
+                                        {(adjuntosDeLaOrden.length > 0 || files.length > 0) && (
+                                            <div className="flex flex-wrap gap-2 mt-3 max-h-28 overflow-y-auto pr-1">
+                                                {adjuntosDeLaOrden.map((file) => (
+                                                    <span
+                                                        key={`existing-${file.id}`}
+                                                        title={file.nombre}
+                                                        className="inline-flex items-center gap-1.5 max-w-[290px] pl-2 pr-1 py-1 bg-blue-50/60 border border-blue-100 rounded-lg"
+                                                    >
+                                                        {esPlano(file.tipo_archivo) || file.nombre.toLowerCase().endsWith(".pdf") ? (
+                                                            <FileText className="w-3.5 h-3.5 shrink-0 text-red-500" />
+                                                        ) : (
+                                                            <ImageIcon className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => descargarPlano(file.id, file.nombre)
+                                                                .catch(() => toast.error("No se pudo descargar el archivo"))}
+                                                            className="text-xs font-medium text-gray-700 truncate hover:text-blue-600 hover:underline"
+                                                            title="Descargar este archivo"
+                                                        >
+                                                            {colaDelNombre(file.nombre)}
+                                                        </button>
+                                                        {!isLegacyOT && (
                                                             <Button
                                                                 type="button"
                                                                 variant="ghost"
@@ -1401,40 +1573,39 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                                     setDeletedFileIds(prev => [...prev, file.id]);
                                                                     setExistingFiles(prev => prev.filter(f => f.id !== file.id));
                                                                 }}
-                                                                className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                                className="h-5 w-5 shrink-0 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                                title="Sacar este archivo de la orden"
                                                             >
-                                                                <Trash2 className="w-4 h-4" />
+                                                                <Trash2 className="w-3 h-3" />
                                                             </Button>
                                                         )}
-                                                    </div>
+                                                    </span>
                                                 ))}
 
-                                                {/* New Files */}
                                                 {files.map((file, index) => (
-                                                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-lg group hover:border-blue-200 transition-all">
-                                                        <div className="flex items-center gap-3 overflow-hidden">
-                                                            <div className="p-2 bg-white rounded-md border border-gray-100 text-gray-500">
-                                                                {file.type.includes('pdf') ? (
-                                                                    <FileText className="w-4 h-4 text-red-500" />
-                                                                ) : (
-                                                                    <ImageIcon className="w-4 h-4 text-blue-500" />
-                                                                )}
-                                                            </div>
-                                                            <div className="flex flex-col min-w-0">
-                                                                <span className="text-sm font-medium text-gray-700 truncate">{file.name}</span>
-                                                                <span className="text-xs text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                                                            </div>
-                                                        </div>
+                                                    <span
+                                                        key={`nuevo-${index}`}
+                                                        title={file.name}
+                                                        className="inline-flex items-center gap-1.5 max-w-[290px] pl-2 pr-1 py-1 bg-gray-50 border border-gray-200 rounded-lg"
+                                                    >
+                                                        {file.type.includes("pdf") ? (
+                                                            <FileText className="w-3.5 h-3.5 shrink-0 text-red-500" />
+                                                        ) : (
+                                                            <ImageIcon className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                                                        )}
+                                                        <span className="text-xs font-medium text-gray-700 truncate">{file.name}</span>
+                                                        <span className="text-[10px] font-semibold text-amber-600 shrink-0">sin subir</span>
                                                         <Button
                                                             type="button"
                                                             variant="ghost"
                                                             size="icon"
                                                             onClick={() => setFiles(files.filter((_, i) => i !== index))}
-                                                            className="h-8 w-8 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                            className="h-5 w-5 shrink-0 text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                                            title="No subir este archivo"
                                                         >
-                                                            <X className="w-4 h-4" />
+                                                            <X className="w-3 h-3" />
                                                         </Button>
-                                                    </div>
+                                                    </span>
                                                 ))}
                                             </div>
                                         )}
@@ -1552,11 +1723,29 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                 {/* Tab: Procesos */}
                                 <TabsContent value="procesos" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
-                                    <div className="space-y-1 mb-1">
-                                        <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
-                                        <p className="text-sm text-gray-500">
-                                            Elegí proceso, máquina, recurso humano, minutos y cuánto recurso humano hace falta. Destildá los que esta vez no van (opcional).
-                                        </p>
+                                    <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
+                                        <div className="space-y-1">
+                                            <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
+                                            <p className="text-sm text-gray-500">
+                                                Elegí proceso, máquina, recurso humano, minutos y cuánto recurso humano hace falta. Destildá los que esta vez no van (opcional).
+                                            </p>
+                                        </div>
+                                        {/* Ir y volver a los planos sin apuntarle a la solapa cada vez: los pasos
+                                            salen del dibujo, así que este viaje se hace muchas veces por orden. */}
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => setActiveTab("planos")}
+                                            className="h-9 gap-2 shrink-0 hover:text-blue-600 hover:border-blue-200"
+                                        >
+                                            <Paperclip className="w-4 h-4" />
+                                            Ver los planos
+                                            {!planosCargando && planosVisibles.length > 0 && (
+                                                <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold tabular-nums">
+                                                    {resumirArchivos(planosVisibles)}
+                                                </span>
+                                            )}
+                                        </Button>
                                     </div>
 
                                     <div className="flex flex-col lg:flex-row lg:items-start gap-4">
@@ -1577,11 +1766,82 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </div>
 
                                         <PanelDePlanos
-                                            planos={planosArticulo}
+                                            planos={planosVisibles}
                                             cargando={planosCargando}
                                             vacioTexto={planosVacioTexto}
+                                            titulo={planosTitulo}
+                                            onVerTodos={() => setActiveTab("planos")}
                                         />
                                     </div>
+                                </TabsContent>
+
+                                {/* Tab: Planos */}
+                                <TabsContent value="planos" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
+                                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                                        <div className="space-y-1">
+                                            <h3 className="text-lg font-semibold text-gray-900">Planos</h3>
+                                            <p className="text-sm text-gray-500">
+                                                El dibujo del producto, las fotos de la pieza y lo que se haya adjuntado a esta orden. Tocá una miniatura para verla grande y pasar de una a la otra.
+                                            </p>
+                                        </div>
+                                        {/* La vuelta del atajo que está en Procesos: se mira el plano, se vuelve
+                                            a cargar el paso y no se perdió nada de lo que estaba escrito. */}
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => setActiveTab("procesos")}
+                                            className="h-9 gap-2 shrink-0 hover:text-blue-600 hover:border-blue-200"
+                                        >
+                                            <Settings className="w-4 h-4" />
+                                            Ir a procesos
+                                            <ArrowRight className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+
+                                    {faltaElegirProducto ? (
+                                        /* Sin producto no hay planos que traer, y conviene decirlo derecho: en
+                                           la solapa Procesos esto mismo salía como un panel vacío y parecía
+                                           que la pantalla estaba rota. */
+                                        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/50 px-6 py-10 text-center space-y-3">
+                                            <Package className="w-8 h-8 mx-auto text-gray-300" />
+                                            <div className="space-y-1">
+                                                <p className="text-sm font-semibold text-gray-600">Todavía no elegiste el producto</p>
+                                                <p className="text-xs text-gray-400">
+                                                    Los planos cuelgan del producto que la OT fabrica. Elegilo en la solapa 1 y aparecen acá.
+                                                </p>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={() => setActiveTab("general")}
+                                                className="h-9 gap-2"
+                                            >
+                                                <ArrowLeft className="w-4 h-4" />
+                                                Ir a Información General
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* Sin `alto`: la solapa ya scrollea sola y acá el pedido es
+                                                justamente que entren todos a la vista, no dentro de una
+                                                cajita con su propio scroll. Con el modal en 1200px entran
+                                                siete por fila, así que quince archivos son tres filas. */}
+                                            <PlanoPanel
+                                                planos={planosVisibles}
+                                                cargando={planosCargando}
+                                                titulo={planosTitulo}
+                                                vacioTexto={planosVacioTexto}
+                                            />
+
+                                            {files.length > 0 && (
+                                                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                                    {files.length === 1
+                                                        ? "Hay 1 archivo elegido que todavía no se subió: aparece acá cuando guardes la orden."
+                                                        : `Hay ${files.length} archivos elegidos que todavía no se subieron: aparecen acá cuando guardes la orden.`}
+                                                </p>
+                                            )}
+                                        </>
+                                    )}
                                 </TabsContent>
                             </Tabs>
                         </div>
@@ -1609,7 +1869,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     </Button>
                                 </div>
                                 <div className="flex gap-3">
-                                    {(activeTab === "procesos" || activeTab === "materias") && (
+                                    {activeTab !== "general" && (
                                         <Button
                                             key="prev-button"
                                             type="button"
@@ -1622,7 +1882,10 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </Button>
                                     )}
 
-                                    {activeTab === "procesos" ? (
+                                    {/* Guardar se puede desde Procesos (como siempre) y también desde
+                                        Planos: es la última solapa, y quedar ahí sin más botón que
+                                        "Anterior" obliga a volver solo para apretar Guardar. */}
+                                    {activeTab === "procesos" || activeTab === "planos" ? (
                                         <Button
                                             key="submit-button"
                                             type="submit"

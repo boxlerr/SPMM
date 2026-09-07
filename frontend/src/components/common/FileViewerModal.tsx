@@ -215,29 +215,6 @@ export const FileViewerModal = ({
                         </div>
 
                         <div className="flex items-center gap-2 flex-shrink-0">
-                            {hayVarios && (
-                                <div className="flex items-center gap-1 mr-1">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => irA(pos - 1)}
-                                        className="h-8 w-8 p-0 border-slate-200"
-                                        title="Plano anterior (flecha izquierda)"
-                                    >
-                                        <ChevronLeft className="w-4 h-4" />
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => irA(pos + 1)}
-                                        className="h-8 w-8 p-0 border-slate-200"
-                                        title="Plano siguiente (flecha derecha)"
-                                    >
-                                        <ChevronRight className="w-4 h-4" />
-                                    </Button>
-                                </div>
-                            )}
-
                             {objectUrl && isImage && (
                                 <div className="flex items-center gap-1 mr-1">
                                     <Button
@@ -299,10 +276,62 @@ export const FileViewerModal = ({
                     </div>
                 </DialogHeader>
 
+                {/* Envoltorio que NO scrollea. Las flechas viven acá y no adentro del
+                    área del plano: cuando se hace zoom, esa área pasa a `overflow-auto` y
+                    todo lo posicionado adentro se va con el scroll — o sea que justo
+                    cuando alguien está mirando un detalle de cerca, las flechas se le
+                    escapaban de la pantalla. */}
+                <div className="flex-grow relative min-h-0 flex">
+                    {/* Las flechas van A LOS COSTADOS y no en el encabezado (pedido de
+                        Julián, 7/9). Arriba quedaban perdidas entre el zoom y los
+                        botones, y encima lejos: se mira el plano en el centro de la
+                        pantalla y hay que subir hasta la barra para pasar al siguiente.
+                        Acá caen justo donde la mano ya está.
+
+                        Van por ENCIMA del visor de PDF (z-20): un <iframe> se dibuja
+                        arriba de todo lo que no tenga su propio contexto de apilado, así
+                        que sin esto las flechas quedaban tapadas justo en los PDF, que es
+                        la mayoría de los planos. */}
+                    {hayVarios && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => irA(pos - 1)}
+                                title="Plano anterior (o flecha izquierda del teclado)"
+                                aria-label="Plano anterior"
+                                className="absolute left-2 top-1/2 -translate-y-1/2 z-20 h-12 w-12 rounded-full
+                                           bg-white/90 backdrop-blur border border-slate-200 shadow-lg
+                                           flex items-center justify-center text-slate-600
+                                           hover:bg-white hover:text-slate-900 hover:scale-105
+                                           active:scale-95 transition
+                                           focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                            >
+                                <ChevronLeft className="w-6 h-6" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => irA(pos + 1)}
+                                title="Plano siguiente (o flecha derecha del teclado)"
+                                aria-label="Plano siguiente"
+                                /* Separada del borde a propósito: el visor de PDF del
+                                   navegador dibuja SU barra de scroll pegada a la derecha,
+                                   y con la flecha ahí encima, arrastrar la barra a media
+                                   altura saltaba al plano siguiente en vez de scrollear. */
+                                className="absolute right-7 top-1/2 -translate-y-1/2 z-20 h-12 w-12 rounded-full
+                                           bg-white/90 backdrop-blur border border-slate-200 shadow-lg
+                                           flex items-center justify-center text-slate-600
+                                           hover:bg-white hover:text-slate-900 hover:scale-105
+                                           active:scale-95 transition
+                                           focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                            >
+                                <ChevronRight className="w-6 h-6" />
+                            </button>
+                        </>
+                    )}
                 <div
                     ref={zonaRef}
                     className={cn(
-                        "flex-grow relative flex p-4",
+                        "flex-grow flex p-4 min-h-0",
                         // Con zoom la imagen desborda y hay que poder recorrerla; el
                         // `m-auto` de adentro es el que la centra sin comerse el borde
                         // de arriba, cosa que `items-center` sí hace cuando desborda.
@@ -361,6 +390,7 @@ export const FileViewerModal = ({
                             )}
                         </>
                     )}
+                </div>
                 </div>
             </DialogContent>
         </Dialog>

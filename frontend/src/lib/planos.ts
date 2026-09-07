@@ -311,3 +311,67 @@ export function formatearBytes(n?: number | null): string {
     const mb = kb / 1024;
     return `${mb.toFixed(mb < 10 ? 1 : 0).replace(".", ",")} MB`;
 }
+
+/**
+ * Plano y foto NO son lo mismo, y la pantalla lo tiene que decir.
+ *
+ * Hasta acá todos los archivos se mostraban igual, rotulados solo por de dónde colgaban
+ * ("Del producto"), así que un dibujo y una foto de la pieza sacada en el taller se veían
+ * idénticos en la lista. Medido en producción: 920 PDF y 263 fotos, y 122 productos que
+ * NO tienen ni un dibujo, solo fotos. En esos 122, llamarle "plano" a una foto manda al
+ * que planifica a buscar en la biblioteca un archivo que no existe. Distinguirlos deja
+ * decirle de entrada "acá no hay dibujo, hay 15 fotos" y que siga con lo suyo.
+ */
+
+/**
+ * ¿Es el dibujo? El dibujo siempre viene en PDF: los que bajamos de Drive, los que suben
+ * a mano y los escaneados. Se reusa `esPdf` para no terminar con dos listas de tipos que
+ * se desincronizan —ahí ya está contemplado el "application/x-pdf" que manda Windows—.
+ */
+export function esPlano(tipo?: string | null): boolean {
+    return esPdf(tipo);
+}
+
+/**
+ * ¿Es una foto de la pieza? Se apoya en `esImagen`, que deja el SVG afuera a propósito
+ * (puede traer `<script>` adentro). Eso está bien acá también: un SVG cae en "Archivo" y
+ * así ni se lo previsualiza ni se lo anuncia como si fuera una foto del taller.
+ */
+export function esFoto(tipo?: string | null): boolean {
+    return esImagen(tipo);
+}
+
+/** Cómo se lo nombra en pantalla. */
+export type RotuloArchivo = "Plano" | "Foto" | "Archivo";
+
+export function rotuloDeArchivo(tipo?: string | null): RotuloArchivo {
+    if (esPlano(tipo)) return "Plano";
+    if (esFoto(tipo)) return "Foto";
+    return "Archivo";
+}
+
+/** Primero los dibujos, después las fotos y al final lo que no es ni una cosa ni la otra. */
+const PESO_ROTULO: Record<RotuloArchivo, number> = { Plano: 0, Foto: 1, Archivo: 2 };
+
+/**
+ * Los planos arriba de todo.
+ *
+ * El que abre una OT para planificar lo primero que necesita ver es el dibujo con las
+ * medidas, no la foto 12 de la pieza. Con el orden que venía del backend (por fecha de
+ * subida) el único PDF de un producto podía quedar sepultado abajo de catorce fotos y
+ * había que scrollear para encontrarlo.
+ */
+export function ordenarPlanosPrimero<T extends { nombre: string; tipo_archivo?: string | null }>(
+    lista: readonly T[]
+): T[] {
+    // Copia: la lista que llega suele ser el estado de un componente, y ordenarla en el
+    // lugar muta algo que React da por inmutable (no se entera y no vuelve a dibujar).
+    return [...lista].sort((a, b) => {
+        const pa = PESO_ROTULO[rotuloDeArchivo(a.tipo_archivo)];
+        const pb = PESO_ROTULO[rotuloDeArchivo(b.tipo_archivo)];
+        if (pa !== pb) return pa - pb;
+        // `numeric` para que la (2) vaya antes que la (10): comparados como texto pelado,
+        // "(10)" entra antes que "(2)" y las quince fotos quedan barajadas.
+        return a.nombre.localeCompare(b.nombre, "es", { numeric: true, sensitivity: "base" });
+    });
+}
