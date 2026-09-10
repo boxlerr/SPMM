@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "auditoria-dice-quien",
+        fecha: "2026-09-10",
+        tipo: "mejora",
+        seccion: "Auditoría",
+        titulo: "La auditoría ahora dice quién planificó y quién borró",
+        detalle:
+            "Antes cada movimiento quedaba anotado con qué pasó y cuándo, pero no con quién lo hizo, y esa es la primera pregunta cuando un plan aparece cambiado. Ahora cada intento de planificación y cada borrado llevan el nombre de la persona. Los movimientos anteriores al 10 de septiembre dicen «sin registrar», porque en ese momento el dato no se guardaba: es distinto de no saberlo.",
+        href: "/auditoria",
+    },
+    {
         id: "todas-las-ordenes-en-una-lista",
         fecha: "2026-09-10",
         tipo: "nuevo",

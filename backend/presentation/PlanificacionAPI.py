@@ -27,7 +27,14 @@ async def get_db():
         yield session
 
 @router.post("/planificar")
-async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO | None = None):
+async def planificar_endpoint(
+    db = Depends(get_db),
+    body: PlanificarRequestDTO | None = None,
+    # Quién planificó. El front ya mandaba el token en esta llamada; lo que faltaba
+    # era leerlo. Sin esto la auditoría contaba qué pasó pero no quién lo hizo, que
+    # es la primera pregunta cuando un plan aparece cambiado.
+    current_user: dict = Depends(get_current_user),
+):
 
     repo_orden = OrdenTrabajoRepository(db)
     repo_operario = OperarioRepository(db)
@@ -71,6 +78,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
         await auditoria.registrar_intento(
             tipo, ordenes_ids, "ok",
             int((_time.monotonic() - t0) * 1000), salida=resultados,
+            usuario=current_user,
         )
         # El plan se confirmó: su borrador dejó de ser un borrador. Si no se borra
         # acá, la próxima vez que abran Planificar Órdenes les ofrece "retomar" algo
@@ -95,6 +103,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
         await auditoria.registrar_intento(
             tipo, ordenes_ids, "sin_solucion",
             int((_time.monotonic() - t0) * 1000), error=str(e),
+            usuario=current_user,
         )
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -102,6 +111,7 @@ async def planificar_endpoint(db = Depends(get_db), body: PlanificarRequestDTO |
         await auditoria.registrar_intento(
             tipo, ordenes_ids, "error",
             int((_time.monotonic() - t0) * 1000), error=f"{type(e).__name__}: {e}",
+            usuario=current_user,
         )
         raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al procesar la planificación. Por favor, intente con menos órdenes.")
 
@@ -326,7 +336,11 @@ async def actualizar_planificacion(id: int, dto: PlanificacionUpdateDTO, db = De
     return {"message": "Planificación actualizada correctamente"}
 
 @router.post("/planificacion/quitar-ordenes")
-async def quitar_ordenes_planificacion(dto: QuitarOrdenesPlanificacionDTO, db = Depends(get_db)):
+async def quitar_ordenes_planificacion(
+    dto: QuitarOrdenesPlanificacionDTO,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """Saca OTs puntuales de la planificación sin tocar el resto del lote.
 
     Se usa cuando se planificó una OT por error: la OT vuelve a estar disponible
@@ -336,16 +350,21 @@ async def quitar_ordenes_planificacion(dto: QuitarOrdenesPlanificacionDTO, db = 
         raise HTTPException(status_code=400, detail="No se recibieron órdenes para quitar.")
 
     repo_planificacion = PlanificacionRepository(db)
-    borrados = await repo_planificacion.eliminar_ordenes(dto.orden_ids, dto.id_lote)
+    borrados = await repo_planificacion.eliminar_ordenes(
+        dto.orden_ids, dto.id_lote, usuario=current_user)
     return {
         "message": f"{len(dto.orden_ids)} orden(es) quitadas de la planificación",
         "registros_eliminados": borrados,
     }
 
 @router.delete("/planificacion/lote/{id_lote}")
-async def eliminar_planificacion_lote(id_lote: str, db = Depends(get_db)):
+async def eliminar_planificacion_lote(
+    id_lote: str,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     repo_planificacion = PlanificacionRepository(db)
-    await repo_planificacion.eliminar_lote(id_lote)
+    await repo_planificacion.eliminar_lote(id_lote, usuario=current_user)
     return {"message": "Lote de planificación eliminado correctamente"}
 
 app.include_router(router)

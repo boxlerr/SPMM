@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
+from backend.infrastructure.AuditoriaRepository import nombre_de
 
 # El backend puede correr en un servidor con TZ=UTC (cloud). Guardamos los
 # timestamps visibles al usuario en hora local de Argentina para evitar el
@@ -78,12 +79,22 @@ class PlanificacionRepository:
                     borrado_en TIMESTAMP NOT NULL
                 )
             """))
+            # Quién lo borró. Va como ALTER porque la tabla ya existe en producción.
+            # Era el agujero de la auditoría: el 10/09 desaparecieron 105 filas de un
+            # plan y el registro decía qué y cuándo, pero no quién — así que no había
+            # forma de contestar "yo no fui".
+            await self.db.execute(text(
+                "ALTER TABLE planificacion_borrada "
+                "ADD COLUMN IF NOT EXISTS id_usuario INTEGER, "
+                "ADD COLUMN IF NOT EXISTS usuario VARCHAR(120)"))
             await self.db.commit()
         except Exception as e:
             await self.db.rollback()
             logger.warning(f"Repository - No se pudo asegurar planificacion_borrada: {e}")
 
-    async def _registrar_borrado(self, alcance: str, id_lote: str | None, orden_ids: list[int] | None = None):
+    async def _registrar_borrado(self, alcance: str, id_lote: str | None,
+                                 orden_ids: list[int] | None = None,
+                                 usuario: dict | None = None):
         """Deja constancia de lo que se está por borrar.
 
         Se llama ANTES del DELETE porque después ya no hay de dónde sacar el conteo.
@@ -113,10 +124,12 @@ class PlanificacionRepository:
             await self.db.execute(text("""
                 INSERT INTO planificacion_borrada (
                     id_planificacion_lote, descripcion_lote, alcance,
-                    filas_borradas, ots_borradas, orden_ids, creado_en_lote, borrado_en
+                    filas_borradas, ots_borradas, orden_ids, creado_en_lote, borrado_en,
+                    id_usuario, usuario
                 ) VALUES (
                     :lote, :descripcion, :alcance,
-                    :filas, :ots, :orden_ids, :creado, :borrado_en
+                    :filas, :ots, :orden_ids, :creado, :borrado_en,
+                    :id_usuario, :usuario
                 )
             """), {
                 "lote": id_lote,
@@ -127,11 +140,14 @@ class PlanificacionRepository:
                 "orden_ids": str(orden_ids) if orden_ids else None,
                 "creado": resumen.creado if resumen else None,
                 "borrado_en": _ahora_ar(),
+                "id_usuario": (usuario or {}).get("id_usuario"),
+                "usuario": nombre_de(usuario),
             })
             await self.db.commit()
             logger.info(
                 f"Repository - Borrado registrado ({alcance}): lote={id_lote} "
-                f"filas={(resumen.filas if resumen else 0)}"
+                f"filas={(resumen.filas if resumen else 0)} "
+                f"por={nombre_de(usuario) or 'sin identificar'}"
             )
         except Exception as e:
             await self.db.rollback()
@@ -217,7 +233,8 @@ class PlanificacionRepository:
                 "Error al guardar la planificación en la base de datos."
             ) from e
 
-    async def eliminar_ordenes(self, orden_ids: list[int], id_lote: str | None = None):
+    async def eliminar_ordenes(self, orden_ids: list[int], id_lote: str | None = None,
+                               usuario: dict | None = None):
         """
         Saca OTs puntuales de la planificación (se planificaron por error o ya no van).
         A diferencia de `eliminar_lote`, acá el lote sigue existiendo con el resto de
@@ -234,7 +251,7 @@ class PlanificacionRepository:
             f"(lote={id_lote or 'TODOS'}): {orden_ids}"
         )
 
-        await self._registrar_borrado("ordenes", id_lote, orden_ids)
+        await self._registrar_borrado("ordenes", id_lote, orden_ids, usuario=usuario)
 
         # IN con placeholders nombrados (no interpolamos los ids en el SQL) para que
         # funcione igual con cualquier driver.
@@ -258,14 +275,14 @@ class PlanificacionRepository:
                 "Error al quitar las órdenes de la planificación."
             ) from e
 
-    async def eliminar_lote(self, id_lote: str):
+    async def eliminar_lote(self, id_lote: str, usuario: dict | None = None):
         """
         Elimina los registros de planificación asociados a un ID de lote,
         PERO solo para aquellas órdenes que NO han sido finalizadas/entregadas aún.
         """
         logger.info(f"Repository - Eliminando lote de planificación (solo activas): {id_lote}")
 
-        await self._registrar_borrado("lote", id_lote)
+        await self._registrar_borrado("lote", id_lote, usuario=usuario)
 
         # Eliminar todos los registros del lote sin importar el estado de entrega de la orden
         delete_query = text("""

@@ -8,6 +8,19 @@ from backend.commons.loggers.logger import logger
 _TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
+def nombre_de(usuario: dict | None) -> str | None:
+    """"Nombre Apellido", o el usuario, o nada.
+
+    Sin usuario devuelve None y no "sistema": un borrado que no sabemos quién hizo
+    tiene que verse distinto de uno hecho por un proceso automático. Inventarle un
+    autor es peor que dejarlo vacío.
+    """
+    if not usuario:
+        return None
+    completo = " ".join(x for x in [usuario.get("nombre"), usuario.get("apellido")] if x)
+    return (completo or usuario.get("username") or None)
+
+
 def _ahora_ar() -> datetime:
     return datetime.now(_TZ_AR).replace(tzinfo=None)
 
@@ -51,6 +64,14 @@ class AuditoriaRepository:
                     id_planificacion_lote UUID
                 )
             """))
+            # Quién lo hizo. Va como ALTER y no dentro del CREATE porque la tabla ya
+            # existe en producción desde agosto. Julián, 10/09: "todo tiene que estar
+            # auditado bien completo" — un intento sin nombre no contesta la única
+            # pregunta que se hace cuando algo aparece cambiado: quién lo tocó.
+            await self.db.execute(text(
+                "ALTER TABLE planificacion_intento "
+                "ADD COLUMN IF NOT EXISTS id_usuario INTEGER, "
+                "ADD COLUMN IF NOT EXISTS usuario VARCHAR(120)"))
             await self.db.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_planificacion_intento_fecha "
                 "ON planificacion_intento (creado_en DESC)"))
@@ -67,6 +88,7 @@ class AuditoriaRepository:
         duracion_ms: int,
         salida: dict | None = None,
         error: str | None = None,
+        usuario: dict | None = None,
     ):
         """Guarda el intento. Nunca levanta: que la auditoría falle no puede
         convertir una planificación buena en un error, ni tapar el error real
@@ -113,12 +135,14 @@ class AuditoriaRepository:
                     creado_en, tipo, ordenes_pedidas, ordenes_ids, ordenes_visibles,
                     resultado, procesos_planificados, procesos_excedentes,
                     sin_asignar, sin_maquina, diagnosticos_bloqueantes,
-                    diagnosticos_avisos, duracion_ms, error, id_planificacion_lote
+                    diagnosticos_avisos, duracion_ms, error, id_planificacion_lote,
+                    id_usuario, usuario
                 ) VALUES (
                     :creado, :tipo, :pedidas, :ids, :visibles,
                     :resultado, :plan_n, :exced_n,
                     :sin_asig, :sin_maq, :d_bloq,
-                    :d_avisos, :dur, :error, :lote
+                    :d_avisos, :dur, :error, :lote,
+                    :id_usuario, :usuario
                 )
             """), {
                 "creado": _ahora_ar(),
@@ -136,6 +160,8 @@ class AuditoriaRepository:
                 "dur": duracion_ms,
                 "error": (error or None) and str(error)[:2000],
                 "lote": lote,
+                "id_usuario": (usuario or {}).get("id_usuario"),
+                "usuario": nombre_de(usuario),
             })
             await self.db.commit()
         except Exception as e:
@@ -151,7 +177,8 @@ class AuditoriaRepository:
             SELECT id, creado_en, tipo, ordenes_pedidas, ordenes_visibles,
                    resultado, procesos_planificados, procesos_excedentes,
                    sin_asignar, sin_maquina, diagnosticos_bloqueantes,
-                   diagnosticos_avisos, duracion_ms, error, id_planificacion_lote
+                   diagnosticos_avisos, duracion_ms, error, id_planificacion_lote,
+                   usuario
             FROM planificacion_intento
             ORDER BY creado_en DESC
             LIMIT :lim
@@ -163,7 +190,8 @@ class AuditoriaRepository:
         try:
             filas = await self.db.execute(text("""
                 SELECT id, id_planificacion_lote, descripcion_lote, alcance,
-                       filas_borradas, ots_borradas, orden_ids, creado_en_lote, borrado_en
+                       filas_borradas, ots_borradas, orden_ids, creado_en_lote, borrado_en,
+                       usuario
                 FROM planificacion_borrada
                 ORDER BY borrado_en DESC
                 LIMIT :lim

@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
     ClipboardList, RefreshCw, ChevronDown, ChevronRight,
-    CheckCircle2, XCircle, AlertTriangle, Trash2, Clock,
+    CheckCircle2, XCircle, AlertTriangle, Trash2, Clock, User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,8 @@ interface Intento {
     duracion_ms: number | null;
     error: string | null;
     id_planificacion_lote: string | null;
+    /** Quién lo hizo. Null en los registros anteriores al 10/09, cuando no se guardaba. */
+    usuario?: string | null;
 }
 
 interface Borrado {
@@ -56,6 +58,33 @@ interface Borrado {
     ots_borradas: number;
     orden_ids: string | null;
     borrado_en: string;
+    /** Quién borró. Null en los registros anteriores al 10/09. */
+    usuario?: string | null;
+}
+
+/**
+ * Quién lo hizo.
+ *
+ * Los registros de antes del 10/09 no lo tienen, y ahí dice "sin registrar" en vez
+ * de dejar el renglón mudo: la diferencia entre "no lo sabemos" y "no se guardaba"
+ * importa cuando alguien pregunta quién borró un plan. Inventar un autor sería peor.
+ */
+function Quien({ usuario }: { usuario?: string | null }) {
+    if (!usuario) {
+        return (
+            <span className="text-xs text-muted-foreground/60 italic shrink-0"
+                  title="Este registro es anterior al 10/09/2026, cuando todavía no se guardaba el usuario">
+                sin registrar
+            </span>
+        );
+    }
+    return (
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground shrink-0"
+              title={`Lo hizo ${usuario}`}>
+            <User className="h-3 w-3" />
+            {usuario}
+        </span>
+    );
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -185,6 +214,10 @@ export default function AuditoriaPage() {
                                                     )}
                                                 </span>
                                                 <span className="flex-1" />
+                                                {/* Quién lo hizo va antes de las trabas y el reloj:
+                                                    es lo primero que se busca cuando algo aparece
+                                                    cambiado, no un detalle del final. */}
+                                                <Quien usuario={it.usuario} />
                                                 {(it.diagnosticos_bloqueantes ?? 0) > 0 && (
                                                     <span className="flex items-center gap-1 text-xs text-rose-600 shrink-0" title="Trabas detectadas">
                                                         <AlertTriangle className="h-3 w-3" />
@@ -258,12 +291,13 @@ export default function AuditoriaPage() {
                                         <Badge variant="outline" className="text-xs font-normal shrink-0">
                                             {b.alcance === "lote" ? "Lote entero" : "OTs sueltas"}
                                         </Badge>
-                                        <span className="text-gray-700">
+                                        <span className="text-gray-700 flex-1 min-w-0">
                                             {b.filas_borradas} fila{b.filas_borradas !== 1 ? "s" : ""} de {b.ots_borradas} OT{b.ots_borradas !== 1 ? "s" : ""}
                                             {b.descripcion_lote && (
                                                 <span className="text-muted-foreground"> · {b.descripcion_lote}</span>
                                             )}
                                         </span>
+                                        <Quien usuario={b.usuario} />
                                     </li>
                                 ))}
                             </ul>
