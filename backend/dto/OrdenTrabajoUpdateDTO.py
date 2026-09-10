@@ -33,6 +33,7 @@ class OrdenTrabajoUpdateDTO(BaseModel):
     suspendida: Optional[bool] = None
     email: Optional[bool] = None
     tiene_plano: Optional[bool] = None
+    no_lleva_plano: Optional[bool] = None
     programada: Optional[bool] = None
     en_proceso: Optional[bool] = None
     

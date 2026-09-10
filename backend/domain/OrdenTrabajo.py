@@ -41,6 +41,10 @@ class OrdenTrabajo(Base):
     suspendida = Column(Integer, nullable=True, default=0)
     email = Column(Integer, nullable=True, default=0)
     tiene_plano = Column(Integer, nullable=True, default=0)
+    # "Esta pieza NO lleva plano", que es distinto de "todavía no lo cargaron".
+    # Con tiene_plano=0 las dos cosas se veían iguales y el que revisa no sabía cuál
+    # ir a buscar. Ver migrations/2026-09-10_tipo_trabajo_y_sin_plano.sql.
+    no_lleva_plano = Column(Integer, nullable=False, default=0)
     programada = Column(Integer, nullable=True, default=0)
     en_proceso = Column(Integer, nullable=True, default=0)
 

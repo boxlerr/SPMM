@@ -91,6 +91,7 @@ class OrdenTrabajoResponseDTO(BaseModel):
     suspendida: Optional[int] = 0
     email: Optional[int] = 0
     tiene_plano: Optional[int] = 0
+    no_lleva_plano: Optional[int] = 0
     programada: Optional[int] = 0
     en_proceso: Optional[int] = 0
     

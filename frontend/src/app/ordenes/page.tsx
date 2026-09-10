@@ -50,7 +50,12 @@ interface OrdenResumen {
     fabricacion: number | null;
     reparacion: number | null;
     tiene_plano: number | null;
+    no_lleva_plano: number | null;
     prioridad: string | null;
+    /** "fabricacion" | "reparacion" | "ambas" | null — lo arma el backend. */
+    tipo_trabajo: "fabricacion" | "reparacion" | "ambas" | null;
+    /** "tiene" | "no_lleva" | "falta". Tres estados: el que falta hay que ir a buscarlo. */
+    estado_plano: "tiene" | "no_lleva" | "falta";
     procesos: number;
     procesos_finalizados: number;
     planos: number;
@@ -67,6 +72,8 @@ interface Resumen {
     sin_planificar: number;
     entregadas: number;
     sin_procesos: number;
+    sin_tipo: number;
+    falta_plano: number;
 }
 
 type Filtro = "todas" | EstadoPlan;
@@ -101,7 +108,7 @@ export default function OrdenesPage() {
 
     const [filtro, setFiltro] = useState<Filtro>("todas");
     const [busqueda, setBusqueda] = useState("");
-    const [soloSinProcesos, setSoloSinProcesos] = useState(false);
+    const [huecos, setHuecos] = useState<("procesos" | "tipo" | "plano")[]>([]);
     const [orden, setOrden] = useState<Orden>("prometida");
     const [visibles, setVisibles] = useState(100);
 
@@ -125,13 +132,18 @@ export default function OrdenesPage() {
     };
 
     useEffect(() => { cargar(); }, []);
-    useEffect(() => { setVisibles(100); }, [filtro, busqueda, soloSinProcesos, orden]);
+    useEffect(() => { setVisibles(100); }, [filtro, busqueda, huecos, orden]);
 
     const filtradas = useMemo(() => {
         const q = busqueda.trim().toLowerCase();
         let lista = ordenes.filter(o => {
             if (filtro !== "todas" && o.estado_plan !== filtro) return false;
-            if (soloSinProcesos && o.procesos > 0) return false;
+            // Los huecos SUMAN: tildar dos muestra las que tienen cualquiera de los dos,
+            // porque lo que se busca es "qué me falta completar", no la intersección.
+            if (huecos.length && !huecos.some(h =>
+                h === "procesos" ? o.procesos === 0
+                    : h === "tipo" ? !o.tipo_trabajo
+                        : o.estado_plano === "falta")) return false;
             if (!q) return true;
             return [o.id_otvieja, o.cliente, o.articulo, o.codigo, o.detalle]
                 .some(v => String(v ?? "").toLowerCase().includes(q));
@@ -144,7 +156,7 @@ export default function OrdenesPage() {
             procesos: (a, b) => b.procesos - a.procesos,
         };
         return [...lista].sort(cmp[orden]);
-    }, [ordenes, filtro, busqueda, soloSinProcesos, orden]);
+    }, [ordenes, filtro, busqueda, huecos, orden]);
 
     const abrirOT = async (o: OrdenResumen) => {
         try {
@@ -228,20 +240,29 @@ export default function OrdenesPage() {
                         onChange={e => setBusqueda(e.target.value)}
                     />
                 </div>
-                <label className="flex items-center gap-2 text-sm text-gray-700 shrink-0 px-1">
-                    <input
-                        type="checkbox"
-                        className="h-4 w-4 accent-red-600"
-                        checked={soloSinProcesos}
-                        onChange={e => setSoloSinProcesos(e.target.checked)}
-                    />
-                    Solo sin procesos
-                    {resumen && (
-                        <span className="rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-semibold">
-                            {resumen.sin_procesos}
-                        </span>
-                    )}
-                </label>
+                {/* Los tres huecos de datos que frenan el trabajo, cada uno con su
+                    número: sin procesos no se planifica, sin tipo no se filtra, y
+                    sin plano alguien tiene que ir a buscarlo al Drive. */}
+                {([
+                    ["procesos", "Sin procesos", "sin_procesos"],
+                    ["tipo", "Sin tipo", "sin_tipo"],
+                    ["plano", "Falta plano", "falta_plano"],
+                ] as const).map(([clave, texto, campo]) => (
+                    <label key={clave} className="flex items-center gap-1.5 text-sm text-gray-700 shrink-0 px-1">
+                        <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-red-600"
+                            checked={huecos.includes(clave)}
+                            onChange={e => setHuecos(h => e.target.checked ? [...h, clave] : h.filter(x => x !== clave))}
+                        />
+                        {texto}
+                        {resumen && (
+                            <span className="rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-semibold">
+                                {resumen[campo]}
+                            </span>
+                        )}
+                    </label>
+                ))}
                 <select
                     value={orden}
                     onChange={e => setOrden(e.target.value as Orden)}
@@ -261,7 +282,7 @@ export default function OrdenesPage() {
                     <div className="text-sm text-gray-500 flex items-center gap-1.5">
                         <ArrowUpDown className="h-3.5 w-3.5" />
                         {filtradas.length} {filtradas.length === 1 ? "orden" : "órdenes"}
-                        {filtro !== "todas" || busqueda || soloSinProcesos
+                        {filtro !== "todas" || busqueda || huecos.length
                             ? ` de ${ordenes.length} en total` : ""}
                     </div>
 
@@ -275,6 +296,7 @@ export default function OrdenesPage() {
                                         <th className="px-3 py-2.5">Artículo</th>
                                         <th className="px-3 py-2.5 text-right">Cant.</th>
                                         <th className="px-3 py-2.5">Prometida</th>
+                                        <th className="px-3 py-2.5">Trabajo</th>
                                         <th className="px-3 py-2.5">Prioridad</th>
                                         <th className="px-3 py-2.5 text-center">Procesos</th>
                                         <th className="px-3 py-2.5 text-center">Plano</th>
@@ -314,6 +336,23 @@ export default function OrdenesPage() {
                                                         </span>
                                                     )}
                                                 </td>
+                                                <td className="px-3 py-2 whitespace-nowrap">
+                                                    {o.tipo_trabajo ? (
+                                                        <span className={cn(
+                                                            "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                                                            o.tipo_trabajo === "reparacion"
+                                                                ? "bg-violet-100 text-violet-800"
+                                                                : o.tipo_trabajo === "fabricacion"
+                                                                    ? "bg-sky-100 text-sky-800"
+                                                                    : "bg-gray-100 text-gray-600"
+                                                        )}>
+                                                            {o.tipo_trabajo === "ambas" ? "Las dos"
+                                                                : o.tipo_trabajo === "reparacion" ? "Reparación" : "Fabricación"}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-300">—</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{o.prioridad || "—"}</td>
                                                 <td className="px-3 py-2 text-center">
                                                     {o.procesos === 0 ? (
@@ -331,14 +370,24 @@ export default function OrdenesPage() {
                                                         </span>
                                                     )}
                                                 </td>
+                                                {/* Tres estados, no dos. "No lleva" y "falta" se veían
+                                                    iguales y son opuestos: uno se saltea, al otro hay que
+                                                    ir a buscarlo. */}
                                                 <td className="px-3 py-2 text-center">
                                                     {o.planos > 0 ? (
                                                         <span className="inline-flex items-center gap-1 text-blue-700" title={`${o.planos} archivo(s)`}>
                                                             <FileText className="h-3.5 w-3.5" />
                                                             <span className="tabular-nums text-[11px]">{o.planos}</span>
                                                         </span>
+                                                    ) : o.estado_plano === "no_lleva" ? (
+                                                        <span className="text-[11px] text-gray-400" title="El taller marcó que esta pieza no necesita plano">
+                                                            no lleva
+                                                        </span>
                                                     ) : (
-                                                        <span className="text-gray-300">—</span>
+                                                        <span className="text-[11px] font-medium text-amber-700"
+                                                              title="No hay plano cargado y nadie marcó que no lleve: hay que buscarlo">
+                                                            falta
+                                                        </span>
                                                     )}
                                                 </td>
                                                 <td className="px-3 py-2 whitespace-nowrap">

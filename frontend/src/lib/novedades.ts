@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "reparacion-fabricacion-y-sin-plano",
+        fecha: "2026-09-10",
+        tipo: "nuevo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Cada OT dice si es reparación o fabricación, y cuáles no llevan plano",
+        detalle:
+            "En la orden ahora se elige Fabricación o Reparación con un clic —es una sola elección, no dos casillas— y el listado tiene su columna, así que se filtra de un vistazo. Y al lado de «Tiene plano» apareció «No lleva plano»: hasta ahora una pieza sin plano cargado y una que no necesita ninguno se veían iguales, y son lo contrario. Con eso marcado, el que revisa planos se la saltea en vez de ir a buscarla al Drive. Arriba del listado están los tres contadores de lo que falta completar —sin procesos, sin tipo y falta plano— y cada uno filtra.",
+        href: "/ordenes",
+    },
+    {
         id: "guardar-plan-muestra-progreso",
         fecha: "2026-09-10",
         tipo: "arreglo",

@@ -45,6 +45,7 @@ class OrdenTrabajoRequestDTO(BaseModel):
     suspendida: Optional[bool] = False
     email: Optional[bool] = False
     tiene_plano: Optional[bool] = False
+    no_lleva_plano: Optional[bool] = False
     programada: Optional[bool] = False
     en_proceso: Optional[bool] = False
     

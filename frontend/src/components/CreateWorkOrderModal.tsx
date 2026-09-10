@@ -238,6 +238,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         suspendida: false,
         email: false,
         tiene_plano: false,
+        no_lleva_plano: false,
         programada: false,
         en_proceso: false,
     });
@@ -334,6 +335,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     suspendida: orderToEdit.suspendida === 1 || orderToEdit.suspendida === true,
                     email: orderToEdit.email === 1 || orderToEdit.email === true,
                     tiene_plano: orderToEdit.tiene_plano === 1 || orderToEdit.tiene_plano === true,
+                    no_lleva_plano: (orderToEdit as any).no_lleva_plano === 1 || (orderToEdit as any).no_lleva_plano === true,
                     programada: orderToEdit.programada === 1 || orderToEdit.programada === true,
                     en_proceso: orderToEdit.en_proceso === 1 || orderToEdit.en_proceso === true
                 });
@@ -784,6 +786,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             suspendida: generalData.suspendida,
             email: generalData.email,
             tiene_plano: generalData.tiene_plano,
+            no_lleva_plano: generalData.no_lleva_plano,
             programada: generalData.programada,
             en_proceso: generalData.en_proceso,
 
@@ -908,7 +911,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             fecha_entrega: "", cantidad_entregada: "", reclamo: false, finalizadototal: false, finalizadoparcial: false,
             n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
             f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
-            revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false,
+            revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false, no_lleva_plano: false,
             programada: false, en_proceso: false, id_otvieja: ""
         });
         setDetailsData({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
@@ -1350,14 +1353,41 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                         {/* Section: Flags (Compact) */}
                                         <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-2 p-2.5 border border-gray-100 rounded-xl bg-gray-50/30 mt-1">
-                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="fabricacion" disabled={isLegacyOT} checked={generalData.fabricacion} onCheckedChange={(c) => setGeneralData({ ...generalData, fabricacion: !!c })} /> 
-                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Fabricación</span>
-                                            </Label>
-                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="reparacion" disabled={isLegacyOT} checked={generalData.reparacion} onCheckedChange={(c) => setGeneralData({ ...generalData, reparacion: !!c })} /> 
-                                                <span className="text-xs text-gray-600 font-medium tracking-tight">Reparación</span>
-                                            </Label>
+                                            {/* Reparación o fabricación: UNA elección, no dos casillas.
+                                                Pedido de Lucas (10/09) para poder filtrar de un vistazo. En la
+                                                base siguen siendo dos banderas del legacy —que las escribe el
+                                                sync—, pero acá se eligen como lo que son: excluyentes. */}
+                                            <div className="col-span-2 md:col-span-2 flex items-center gap-1 px-2 py-1 h-8">
+                                                <span className="text-xs text-gray-500 font-medium tracking-tight mr-1 shrink-0">Trabajo:</span>
+                                                {([
+                                                    ["fabricacion", "Fabricación"],
+                                                    ["reparacion", "Reparación"],
+                                                ] as const).map(([clave, texto]) => {
+                                                    const activo = clave === "fabricacion" ? generalData.fabricacion : generalData.reparacion;
+                                                    return (
+                                                        <button
+                                                            key={clave}
+                                                            type="button"
+                                                            disabled={isLegacyOT}
+                                                            /* Volver a tocar el que ya está elegido lo apaga: sin eso,
+                                                               una OT marcada por error no se puede dejar en blanco. */
+                                                            onClick={() => setGeneralData({
+                                                                ...generalData,
+                                                                fabricacion: clave === "fabricacion" ? !activo : false,
+                                                                reparacion: clave === "reparacion" ? !activo : false,
+                                                            })}
+                                                            className={cn(
+                                                                "text-xs font-medium px-2 py-1 rounded border transition-colors",
+                                                                activo
+                                                                    ? "bg-red-50 border-red-300 text-red-700"
+                                                                    : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"
+                                                            )}
+                                                        >
+                                                            {texto}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
                                                 <Checkbox id="stock" disabled={isLegacyOT} checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Stock</span>
@@ -1401,8 +1431,15 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         {/* Status block (Row 7) */}
                                         <div className="md:col-span-4 flex items-center justify-between gap-4 py-2 border-t border-gray-100 mt-1">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="tiene_plano" disabled={isLegacyOT} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c })} /> 
+                                                <Checkbox id="tiene_plano" disabled={isLegacyOT} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c, no_lleva_plano: c ? false : generalData.no_lleva_plano })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Tiene Plano</span>
+                                            </Label>
+                                            {/* "No lleva" es distinto de "no hay ninguno cargado": con esto marcado,
+                                                el que revisa planos se la saltea en vez de ir a buscarla al Drive
+                                                (Lucas, 10/09: "si dice sin plano lo va a tener que revisar"). */}
+                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
+                                                <Checkbox id="no_lleva_plano" disabled={isLegacyOT} checked={generalData.no_lleva_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_plano: !!c, tiene_plano: c ? false : generalData.tiene_plano })} /> 
+                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">No lleva plano</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
                                                 <Checkbox id="programada" disabled={isLegacyOT} checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 

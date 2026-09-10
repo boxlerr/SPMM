@@ -90,6 +90,7 @@ class OrdenTrabajoService:
                 suspendida=1 if dto.suspendida else 0,
                 email=1 if dto.email else 0,
                 tiene_plano=1 if dto.tiene_plano else 0,
+                no_lleva_plano=1 if dto.no_lleva_plano else 0,
                 programada=1 if dto.programada else 0,
                 en_proceso=1 if dto.en_proceso else 0,
 
@@ -310,7 +311,8 @@ class OrdenTrabajoService:
         bool_fields = [
             'fabricacion', 'reparacion', 'sin_cargo', 'stock', 'interno', 'revisada',
             'tercerizado_total', 'tercerizado_parcial', 'suspendida', 'email',
-            'tiene_plano', 'programada', 'en_proceso', 'finalizadototal', 'finalizadoparcial', 'reclamo'
+            'tiene_plano', 'no_lleva_plano', 'programada', 'en_proceso', 'finalizadototal',
+            'finalizadoparcial', 'reclamo'
         ]
         for field in bool_fields:
             if field in nueva_data and isinstance(nueva_data[field], bool):
@@ -562,6 +564,17 @@ class OrdenTrabajoService:
 
         for o in ordenes:
             o["entregada"] = entregada(o)
+            # Reparación o fabricación, en una sola palabra. En la base son dos
+            # banderas del legacy que pueden estar las dos o ninguna; la pantalla
+            # muestra UNA cosa, que es como se lee y como lo pidió Lucas.
+            fab, rep = o.get("fabricacion") == 1, o.get("reparacion") == 1
+            o["tipo_trabajo"] = ("ambas" if fab and rep else
+                                 "fabricacion" if fab else
+                                 "reparacion" if rep else None)
+            # Tres estados y no dos: hay plano, no lleva, o falta y hay que buscarlo.
+            o["estado_plano"] = ("tiene" if (o.get("planos") or 0) > 0 or o.get("tiene_plano") == 1
+                                 else "no_lleva" if o.get("no_lleva_plano") == 1
+                                 else "falta")
             # Una OT entregada ya no está "afuera del plan": está terminada. El corte
             # que importa —lo que falta planificar— es sobre las que siguen abiertas.
             o["estado_plan"] = (
@@ -577,6 +590,11 @@ class OrdenTrabajoService:
             "entregadas": sum(1 for o in ordenes if o["estado_plan"] == "entregada"),
             "sin_procesos": sum(1 for o in ordenes
                                 if o["estado_plan"] == "sin_planificar" and not o["procesos"]),
+            # Las que hay que ir a buscar al Drive: sin plano y sin marcar que no lleva.
+            "sin_tipo": sum(1 for o in ordenes
+                            if o["estado_plan"] != "entregada" and not o["tipo_trabajo"]),
+            "falta_plano": sum(1 for o in ordenes
+                               if o["estado_plan"] != "entregada" and o["estado_plano"] == "falta"),
         }
         logger.info(f"Service - Resumen OK: {resumen}")
         return ResponseDTO(status=True, data={"resumen": resumen,
