@@ -12,6 +12,7 @@ import {
     Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import EditarProcesosOTModal from "@/components/planning/EditarProcesosOTModal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -778,6 +779,34 @@ export function PlanningPreviewScreen({
 
     /** Saca una OT del plan y recalcula (sin esa OT). Pensado para el botón "x"
      *  de cada fila en la tabla de resultados. */
+    /**
+     * Arreglar los procesos de una OT sin salir de acá (Lucas, 10/09).
+     *
+     * Es distinto de la X de la fila: esa saca la OT del plan y no toca la orden, así
+     * que al recalcular vuelve igual. Esto edita la OT de verdad — el historial trajo
+     * procesos que no van, faltan preparaciones y hay pasos en el orden equivocado— y
+     * después recalcula para ver cómo queda.
+     */
+    const [editandoProcesosDe, setEditandoProcesosDe] = React.useState<{ id: number; visible: number | string } | null>(null);
+
+    const handleProcesosEditados = (ordenId: number) => {
+        // Los procesos elegidos a mano de ESTA OT dejan de valer: apuntaban a pasadas
+        // por id y la edición pudo borrarlas o crear otras. La OT vuelve entera, que es
+        // lo único que se puede afirmar después de tocarle los procesos.
+        setTandasManuales(prev => prev.map(t => ({
+            ...t,
+            lineas: Object.fromEntries(Object.entries(t.lineas).filter(([oid]) => Number(oid) !== ordenId)),
+        })));
+        toast.success("Procesos guardados en la OT. Recalculando el plan…");
+        if (!onRecalculate) return;
+        const forcedArr = Array.from(forzarOrdenIds);
+        const mergedIds = buildOrdenIdsForRecalc(forcedArr);
+        // Sin `lineasParaEnviar`: acaba de cambiar justo lo que esas restricciones
+        // referenciaban. El resto de las OT conserva las suyas porque salen de
+        // `lineasVigentes`, que ya quedó sin las de esta.
+        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds));
+    };
+
     const handleRemoveOrderAndRecalculate = (ordenId: number) => {
         if (!onRecalculate) {
             toast.error("Eliminar no está disponible en este contexto.");
@@ -2795,8 +2824,22 @@ export function PlanningPreviewScreen({
                                                             ) : null}
                                                         </td>
                                                         )}
-                                                        {/* Acciones: quitar OT del plan. Click no debe expandir la fila. */}
-                                                        <td className="px-2 py-3 text-center">
+                                                        {/* Acciones: editar los procesos de la OT y quitarla del plan.
+                                                            Click no debe expandir la fila. */}
+                                                        <td className="px-2 py-3 text-center whitespace-nowrap">
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setEditandoProcesosDe({ id: ordenId, visible: firstItem.id_otvieja || ordenId });
+                                                                }}
+                                                                disabled={isCalculating || isConfirming}
+                                                                title="Editar los procesos de esta OT: agregar, sacar, reordenar, elegir máquina y persona"
+                                                            >
+                                                                <ListChecks className="w-4 h-4" />
+                                                            </Button>
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
@@ -3430,6 +3473,21 @@ export function PlanningPreviewScreen({
             description={`Quedaron ${Object.keys(excedentesPorOrden).length} OT fuera del plan que no forzaste. Si guardás ahora, esas OT NO se incluyen. Cerrá este aviso para forzarlas, o guardá igual.`}
             confirmText="Guardar igual"
             cancelText="Volver a revisar"
+        />
+        {/* Editar los procesos de una OT sin salir del plan. Va acá afuera, hermano de
+            los diálogos, y no adentro de la fila: la tabla se vuelve a dibujar en cada
+            recálculo y el modal se cerraría solo. */}
+        <EditarProcesosOTModal
+            ordenId={editandoProcesosDe?.id ?? null}
+            numeroVisible={editandoProcesosDe?.visible}
+            maquinarias={(availableMachines || []).map((m: any) => ({
+                id: m.id, nombre: m.nombre, cod_maquina: m.cod_maquina,
+            }))}
+            operarios={(availableOperators || []).map((o: any) => ({
+                id: o.id, nombre: o.nombre, apellido: o.apellido,
+            }))}
+            onClose={() => setEditandoProcesosDe(null)}
+            onGuardado={handleProcesosEditados}
         />
         </>
     );

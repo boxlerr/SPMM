@@ -57,6 +57,16 @@ export const NOVEDADES: Novedad[] = [
         href: "/ordenes",
     },
     {
+        id: "editar-procesos-desde-el-plan",
+        fecha: "2026-09-10",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Podés arreglar los procesos de una OT sin salir de la planificación",
+        detalle:
+            "En la vista previa, cada OT tiene ahora un botón al lado de la cruz que abre sus procesos: agregás, sacás, cambiás los minutos, arrastrás para reordenar y elegís la máquina y la persona de cada paso. Se guarda en la orden —no sólo en este plan— y al cerrar el plan se recalcula solo. Ojo con la diferencia: la cruz saca la OT del plan y no toca la orden, así que al recalcular vuelve igual; esto arregla la orden de verdad, que es lo que hace falta cuando el historial trajo un proceso que no va o falta una preparación.",
+        href: "/operaciones",
+    },
+    {
         id: "trabas-de-una-frase",
         fecha: "2026-09-10",
         tipo: "mejora",
