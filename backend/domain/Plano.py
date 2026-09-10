@@ -20,7 +20,17 @@ class Plano(Base):
     nombre = Column(String(255), nullable=False)
     descripcion = Column(String(500))
     tipo_archivo = Column(String(20))
-    archivo = Column(LargeBinary, nullable=False)
+
+    # El archivo vive en Supabase Storage (bucket privado `planos`) y acá queda la ruta
+    # del objeto. `archivo` es el camino viejo —el blob adentro de la base— y sigue
+    # nullable para los planos que todavía no se movieron: quien lee mira storage_path
+    # primero y cae al blob si no hay. Ver 2026-09-09_planos_en_storage.sql y
+    # backend/infrastructure/storage_planos.py.
+    storage_path = Column(String(400), nullable=True)
+    archivo = Column(LargeBinary, nullable=True)
+    # Bytes del archivo. Con el archivo afuera de la base no hay octet_length que valga,
+    # y los listados muestran el peso (el front decide con eso si baja la miniatura).
+    tamano = Column(Integer, nullable=True)
     fecha_subida = Column(DateTime, default=datetime.utcnow)
 
     id_orden_trabajo = Column(Integer, ForeignKey("orden_trabajo.id"), nullable=True)

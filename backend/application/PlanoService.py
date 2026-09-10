@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from backend.domain.Plano import Plano
 from backend.dto.PlanoRequestDTO import PlanoRequestDTO, PlanoUpdateDTO
 from backend.infrastructure.PlanoRepository import PlanoRepository
+from backend.infrastructure import storage_planos
 from backend.commons.ResponseDTO import ResponseDTO
 
 # Excepciones
@@ -38,11 +39,21 @@ class PlanoService:
             logger.info("Service - Crear Plano.")
 
             # El destino (OT o artículo) ya lo validó el DTO.
+
+            # El archivo va a Storage y en la fila queda la ruta. Se sube ANTES de
+            # insertar: si Storage falla, no queda una fila apuntando a un objeto que
+            # no existe. Al revés (fila primero) el error dejaría un plano roto en la
+            # lista. Un objeto huérfano, en cambio, no molesta a nadie.
+            ruta = storage_planos.ruta_para(
+                dto.nombre, id_articulo=dto.id_articulo, id_orden=dto.id_orden_trabajo)
+            await storage_planos.subir(ruta, dto.archivo, dto.tipo_archivo)
+
             plano = Plano(
                 nombre=dto.nombre,
                 descripcion=dto.descripcion,
                 tipo_archivo=dto.tipo_archivo,
-                archivo=dto.archivo,
+                storage_path=ruta,
+                tamano=len(dto.archivo or b""),
                 id_orden_trabajo=dto.id_orden_trabajo,
                 id_articulo=dto.id_articulo,
                 drive_file_id=dto.drive_file_id,
@@ -145,19 +156,54 @@ class PlanoService:
         return {"data": data, "total": total}
 
     async def obtenerContenidoPlano(self, id: int):
+        """Los bytes del plano, estén donde estén.
+
+        Storage primero, blob después. Los dos caminos conviven a propósito mientras
+        queden filas sin migrar (ver migrar_planos_a_storage): así se puede mover la
+        biblioteca en tandas, con la app andando, sin una ventana donde un plano no se
+        pueda abrir.
+
+        El archivo se sirve desde acá y no con una URL firmada de Supabase para que no
+        cambie nada del front ni de los permisos: el bucket es privado, el plano viaja
+        con el token de la app como siempre, y ninguna URL de Storage llega al navegador.
+        """
         logger.info(f"Service - Obtener Contenido Plano ID: {id}")
         plano = await self.repository.find_by_id(id)
         if not plano:
             raise NotFoundException(f"No se encontró el Plano con ID {id}")
-        return plano.archivo, plano.tipo_archivo, plano.nombre
+
+        contenido = plano.archivo
+        if plano.storage_path:
+            try:
+                contenido = await storage_planos.bajar(plano.storage_path)
+            except Exception as e:
+                logger.error(f"Service - No se pudo bajar de Storage el plano {id} "
+                             f"({plano.storage_path}): {e}")
+                if contenido is None:
+                    raise InfrastructureException(
+                        "No se pudo abrir el archivo del plano.") from e
+
+        return contenido, plano.tipo_archivo, plano.nombre
 
     async def eliminarPlano(self, id: int):
         logger.info(f"Service - Eliminar Plano ID: {id}")
 
+        ruta = await self.repository.find_storage_path(id)
         eliminado = await self.repository.delete(id)
 
         if not eliminado:
             raise NotFoundException(f"No se encontró el Plano con ID {id}")
+
+        # El objeto se borra DESPUÉS de la fila y sin cortar la respuesta si falla: la
+        # fila ya no está, que es lo que el usuario pidió. Un objeto que quede en el
+        # bucket lo levanta `migrar_planos_a_storage --huerfanos`; en cambio fallar acá
+        # dejaría el plano listado y sin poder borrarlo.
+        if ruta:
+            try:
+                await storage_planos.borrar(ruta)
+            except Exception as e:
+                logger.error(f"Service - Plano {id} borrado, pero quedó el objeto "
+                             f"{ruta} en Storage: {e}")
 
         return ResponseDTO(status=True, data={"deleted": id})
 
@@ -167,11 +213,20 @@ class PlanoService:
         # No se busca antes para chequear que exista: find_by_id trae el archivo entero
         # y acá lo único que se hace con el viejo es pisarlo. update() ya devuelve None
         # cuando el plano no está, que es lo mismo que necesitábamos saber.
+        # El archivo nuevo va a Storage con una ruta nueva, y la fila deja de apuntar
+        # al blob viejo (si lo tenía). El objeto anterior queda huérfano y lo limpia
+        # `migrar_planos_a_storage --huerfanos`; borrarlo acá dejaría sin archivo a
+        # quien esté mirando el plano en ese mismo momento.
+        ruta = storage_planos.ruta_para(dto.nombre)
+        await storage_planos.subir(ruta, dto.archivo, dto.tipo_archivo)
+
         actualizado = await self.repository.update(id, {
             "nombre": dto.nombre,
             "descripcion": dto.descripcion,
             "tipo_archivo": dto.tipo_archivo,
-            "archivo": dto.archivo
+            "storage_path": ruta,
+            "tamano": len(dto.archivo or b""),
+            "archivo": None
         })
 
         if not actualizado:
@@ -187,8 +242,11 @@ class PlanoService:
         """
         tamanio = _campo(plano, "bytes")
         if tamanio is None:
-            # Vino la entidad completa: el tamaño se saca del blob que ya está en
-            # memoria, así el front no tiene que distinguir de dónde salió el dato.
+            # Vino la entidad completa. Con el archivo en Storage el tamaño está en la
+            # columna `tamano`; en las filas viejas todavía se saca del blob que ya está
+            # en memoria. Así el front no tiene que distinguir de dónde salió el dato.
+            tamanio = _campo(plano, "tamano")
+        if tamanio is None:
             contenido = _campo(plano, "archivo")
             tamanio = len(contenido) if contenido is not None else None
 

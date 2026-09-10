@@ -42,6 +42,9 @@ from dotenv import load_dotenv
 
 RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 load_dotenv(os.path.join(RAIZ, ".env"))
+sys.path.insert(0, RAIZ)
+
+from backend.infrastructure import storage_planos
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -286,11 +289,22 @@ def _fecha_sin_zona(iso: Optional[str]) -> Optional[datetime]:
 # ── Drive ──────────────────────────────────────────────────────────────────
 
 def _servicio_drive():
-    """Cliente de Drive con las credenciales de gcloud (ADC).
+    """Cliente de Drive: con API key si la carpeta es pública, si no con gcloud (ADC).
 
     No hay service account ni client_secret.json en el repo a propósito: la carpeta es
     de una persona del taller y se comparte con la cuenta de Google de quien corre esto.
     Las credenciales salen de `gcloud auth application-default login`.
+
+    POR QUÉ TAMBIÉN HAY API KEY (9/9/2026): compartida con una cuenta, la carpeta se ve
+    INCOMPLETA. La corrida del 6/9 con ADC listó 863 subcarpetas y 1801 archivos; con la
+    carpeta puesta en «cualquiera con el link» y una API key, la MISMA carpeta tiene
+    **4374 subcarpetas y 10415 archivos**. O sea que el 80% de la biblioteca nunca se vio,
+    y no era un bug de paginado: era permiso. Si alguna vez el import vuelve a traer una
+    fracción sospechosa, es esto — mirar cuántas subcarpetas dice la línea "Drive: N
+    subcarpetas en la raíz" antes de creerle al resto del informe.
+
+    La key sale de `DRIVE_API_KEY` (en el `.env`). Sirve sólo para leer lo que ya es
+    público, así que no reemplaza al ADC para una carpeta privada.
     """
     try:
         from google.auth import default as credenciales_por_defecto
@@ -300,6 +314,11 @@ def _servicio_drive():
             f"Falta una librería de Google ({e.name}).\n"
             f"  .venv/bin/pip install -r requirements-dev.txt"
         )
+
+    api_key = os.getenv("DRIVE_API_KEY")
+    if api_key:
+        print("Drive: leyendo con API key (carpeta pública).")
+        return build("drive", "v3", developerKey=api_key, cache_discovery=False)
 
     creds, proyecto = credenciales_por_defecto(scopes=[SCOPE_DRIVE])
     # cache_discovery=False: el cache en disco de googleapiclient tira warnings feos y
@@ -351,6 +370,12 @@ def _listar_hijos(svc, id_padre: str) -> list:
     y contesta una lista vacía sin avisar de nada.
     """
     campos = "nextPageToken, files(id,name,mimeType,md5Checksum,size,modifiedTime,parents)"
+    # Con API key esos tres parámetros dan 400 (Bad Request): son para buscar en unidades
+    # compartidas *de una cuenta*, y una key no representa a ninguna. Sin ellos la key ve
+    # igual la carpeta pública entera.
+    unidades = {} if os.getenv("DRIVE_API_KEY") else {
+        "corpora": "allDrives", "supportsAllDrives": True, "includeItemsFromAllDrives": True,
+    }
     salida, token = [], None
     while True:
         resp = _reintentando(
@@ -360,9 +385,7 @@ def _listar_hijos(svc, id_padre: str) -> list:
                 pageSize=1000,
                 orderBy="name",
                 pageToken=token,
-                corpora="allDrives",
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
+                **unidades,
             ).execute(),
             f"listar la carpeta {id_padre}",
         )
@@ -377,7 +400,8 @@ def _bajar_de_drive(svc, id_archivo: str) -> bytes:
 
     def _hacerlo() -> bytes:
         buffer = io.BytesIO()
-        pedido = svc.files().get_media(fileId=id_archivo, supportsAllDrives=True)
+        extra = {} if os.getenv("DRIVE_API_KEY") else {"supportsAllDrives": True}
+        pedido = svc.files().get_media(fileId=id_archivo, **extra)
         bajada = MediaIoBaseDownload(buffer, pedido)
         listo = False
         while not listo:
@@ -387,7 +411,7 @@ def _bajar_de_drive(svc, id_archivo: str) -> bytes:
     return _reintentando(_hacerlo, f"bajar el archivo {id_archivo}")
 
 
-def leer_drive(id_carpeta: str, limite: Optional[int]) -> Iterator[CarpetaArticulo]:
+def leer_drive(id_carpeta: str, limite: Optional[int], desde: int = 0) -> Iterator[CarpetaArticulo]:
     svc = _servicio_drive()
     try:
         hijos = _listar_hijos(svc, id_carpeta)
@@ -399,6 +423,12 @@ def leer_drive(id_carpeta: str, limite: Optional[int]) -> Iterator[CarpetaArticu
     suelto = f" (y {len(sueltos)} archivo{'s' if len(sueltos) != 1 else ''} suelto"
     suelto += f"{'s' if len(sueltos) != 1 else ''}, que se ignoran)"
     print(f"Drive: {len(subcarpetas)} subcarpetas en la raíz" + (suelto if sueltos else ""))
+    # `orderBy="name"` hace que este orden sea el mismo en cada corrida: por eso --desde
+    # puede repartir la carpeta entre varios procesos sin que se pisen. Se saltea DESPUÉS
+    # de imprimir el total, si no el mensaje miente sobre cuántas tiene la carpeta.
+    if desde:
+        subcarpetas = subcarpetas[desde:]
+        print(f"— salteadas las primeras {desde}, quedan {len(subcarpetas)} —")
 
     for n, carpeta in enumerate(subcarpetas, start=1):
         if limite and n > limite:
@@ -429,7 +459,7 @@ def leer_drive(id_carpeta: str, limite: Optional[int]) -> Iterator[CarpetaArticu
 
 # ── Carpeta local ──────────────────────────────────────────────────────────
 
-def leer_carpeta_local(ruta: str, limite: Optional[int]) -> Iterator[CarpetaArticulo]:
+def leer_carpeta_local(ruta: str, limite: Optional[int], desde: int = 0) -> Iterator[CarpetaArticulo]:
     """Plan B: el ZIP de Drive bajado a mano y descomprimido.
 
     Misma estructura (una subcarpeta por código). Acá no hay id de Drive, así que la
@@ -446,6 +476,8 @@ def leer_carpeta_local(ruta: str, limite: Optional[int]) -> Iterator[CarpetaArti
         key=lambda e: e.name,
     )
     print(f"Carpeta local: {len(subcarpetas)} subcarpetas en {ruta}")
+    if desde:
+        subcarpetas = subcarpetas[desde:]
 
     for n, carpeta in enumerate(subcarpetas, start=1):
         if limite and n > limite:
@@ -486,6 +518,19 @@ def _url_de_la_base() -> str:
         if url.startswith(viejo):
             url = "postgresql+asyncpg://" + url[len(viejo):]
             break
+
+    # PUERTO 6543 (transaction pooler) Y NO 5432 (session pooler), A PROPÓSITO.
+    #
+    # El session pooler admite 15 clientes para TODO el proyecto, y el backend en Cloud
+    # Run ya puede usar los 15 él solo (pool 5 + 10 de overflow). El 9/9/2026 correr esto
+    # en paralelo con la app hizo que la pantalla de Planos contestara 500 en la mitad de
+    # los archivos: no era Storage, era `(EMAXCONNSESSION) max clients reached`.
+    #
+    # El transaction pooler no gasta esas 15 plazas. Pide `statement_cache_size=0`, que
+    # es lo que ya usan los engines de estos scripts: asyncpg prepara sentencias del lado
+    # del servidor y pgbouncer en modo transacción no se lo permite.
+    url = url.replace(":5432/", ":6543/")
+
     # El querystring (sslmode=..., pgbouncer=...) lo rechaza asyncpg.
     return re.sub(r"\?.*$", "", url)
 
@@ -512,17 +557,18 @@ def crear_engine():
     )
 
 
+# El archivo NO va en la fila: se sube al bucket `planos` de Supabase Storage y acá
+# queda la ruta del objeto y su tamaño. Ver backend/infrastructure/storage_planos.py y
+# la migración 2026-09-09_planos_en_storage.sql.
 SQL_INSERT = sa.text("""
-    INSERT INTO plano (nombre, descripcion, tipo_archivo, archivo, fecha_subida,
-                       id_orden_trabajo, id_articulo,
+    INSERT INTO plano (nombre, descripcion, tipo_archivo, storage_path, tamano,
+                       fecha_subida, id_orden_trabajo, id_articulo,
                        drive_file_id, drive_md5, drive_modificado)
-    VALUES (:nombre, :descripcion, :tipo, :archivo, :subida,
-            NULL, :id_articulo,
+    VALUES (:nombre, :descripcion, :tipo, :storage_path, :tamano,
+            :subida, NULL, :id_articulo,
             :drive_id, :md5, :modificado)
     RETURNING id
 """).bindparams(
-    # asyncpg necesita que le digan que esto es bytea y no texto.
-    sa.bindparam("archivo", type_=sa.LargeBinary()),
     sa.bindparam("subida", type_=sa.DateTime()),
     sa.bindparam("modificado", type_=sa.DateTime()),
 )
@@ -536,12 +582,16 @@ SQL_INSERT = sa.text("""
 # parámetros `:nombre` en TODO el string, comentarios `--` incluidos, así que nombrar un
 # parámetro dentro de un comentario SQL lo duplica y el execute revienta con
 # "Incorrect number of bindings supplied".)
+# `archivo = NULL` a propósito: si esta fila era vieja y tenía el blob adentro, al
+# reemplazar el contenido se lo saca de la base. El archivo nuevo ya está en Storage.
 SQL_UPDATE = sa.text("""
     UPDATE plano
        SET nombre = :nombre,
            descripcion = :descripcion,
            tipo_archivo = :tipo,
-           archivo = :archivo,
+           storage_path = :storage_path,
+           tamano = :tamano,
+           archivo = NULL,
            fecha_subida = :subida,
            id_articulo = :id_articulo,
            drive_file_id = COALESCE(:drive_id, drive_file_id),
@@ -549,7 +599,6 @@ SQL_UPDATE = sa.text("""
            drive_modificado = :modificado
      WHERE id = :id
 """).bindparams(
-    sa.bindparam("archivo", type_=sa.LargeBinary()),
     sa.bindparam("subida", type_=sa.DateTime()),
     sa.bindparam("modificado", type_=sa.DateTime()),
 )
@@ -644,8 +693,8 @@ def _kb(n: int) -> str:
 
 
 async def importar(args) -> int:
-    fuente = (leer_drive(args.desde_drive, args.limite) if args.desde_drive
-              else leer_carpeta_local(args.desde_carpeta, args.limite))
+    fuente = (leer_drive(args.desde_drive, args.limite, args.desde) if args.desde_drive
+              else leer_carpeta_local(args.desde_carpeta, args.limite, args.desde))
 
     engine = crear_engine()
     filas_csv: list[dict] = []
@@ -821,8 +870,13 @@ async def procesar_archivo(conn, archivo, id_art, descripcion,
             datos, campos["tipo"], detalle_img = optimizar_imagen(datos, archivo.mime)
             campos["tipo"] = campos["tipo"][:20]
         if not dry_run:
+            # Primero el objeto, después la fila: si Storage falla no queda un plano
+            # listado que al abrirlo no muestra nada. Un objeto sin fila no molesta.
+            ruta = storage_planos.ruta_para(archivo.nombre, id_articulo=id_art)
+            await asyncio.to_thread(storage_planos.subir_sync, ruta, datos, campos["tipo"])
             nuevo = (await conn.execute(SQL_INSERT, {
-                **campos, "archivo": datos, "md5": md5, "subida": datetime.now(),
+                **campos, "storage_path": ruta, "tamano": len(datos),
+                "md5": md5, "subida": datetime.now(),
             })).scalar_one()
             nueva_fila = {"id": nuevo, "drive_id": archivo.drive_id, "md5": md5}
             if archivo.drive_id:
@@ -860,8 +914,11 @@ async def procesar_archivo(conn, archivo, id_art, descripcion,
     # link que alguien haya guardado (/planos/{id}/archivo) sigue sirviendo y apunta a
     # la revisión nueva del plano.
     if not dry_run:
+        ruta = storage_planos.ruta_para(archivo.nombre, id_articulo=id_art)
+        await asyncio.to_thread(storage_planos.subir_sync, ruta, datos, campos["tipo"])
         await conn.execute(SQL_UPDATE, {
-            **campos, "id": fila["id"], "archivo": datos, "md5": md5,
+            **campos, "id": fila["id"], "storage_path": ruta, "tamano": len(datos),
+            "md5": md5,
             # Se pisa la fecha de subida: el contenido es otro, decir que se subió en
             # marzo un PDF que llegó hoy confunde a cualquiera.
             "subida": datetime.now(),
@@ -956,6 +1013,10 @@ def parsear():
                    help="guarda las fotos tal cual vienen, sin reducirlas ni recomprimir.")
     p.add_argument("--limite", type=int, metavar="N",
                    help="procesa solo las primeras N subcarpetas.")
+    p.add_argument("--desde", type=int, default=0, metavar="N",
+                   help="saltea las primeras N subcarpetas. Con --limite parte la carpeta "
+                        "en tramos: sirve para correr dos o tres procesos en paralelo "
+                        "sobre tramos distintos (una carpeta la toca uno solo).")
     p.add_argument("--csv", metavar="RUTA",
                    help="dónde dejar el reporte (por defecto tmp/planos-<fecha>.csv).")
 

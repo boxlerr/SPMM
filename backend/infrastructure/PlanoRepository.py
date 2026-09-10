@@ -24,7 +24,9 @@ def _columnas_listado():
         Plano.fecha_subida,
         Plano.id_orden_trabajo,
         Plano.id_articulo,
-        func.octet_length(Plano.archivo).label("bytes"),
+        # `tamano` se guarda al subir; octet_length es el respaldo para las filas
+        # viejas que todavía tienen el blob adentro y ningún tamaño anotado.
+        func.coalesce(Plano.tamano, func.octet_length(Plano.archivo)).label("bytes"),
     )
 
 
@@ -251,6 +253,21 @@ class PlanoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error real en save Plano: {e}")
             raise InfrastructureException("Error al guardar un nuevo Plano.") from e
+
+    async def find_storage_path(self, id: int) -> str | None:
+        """La ruta del objeto en Storage, sin traer el archivo.
+
+        Existe para poder borrar el objeto cuando se borra el plano: find_by_id sirve,
+        pero trae el blob entero para leer una columna de texto.
+        """
+        try:
+            result = await self.db.execute(
+                select(Plano.storage_path).where(Plano.id == id)
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Repository - Error real en find_storage_path Plano: {e}")
+            raise InfrastructureException("Error al buscar el archivo del Plano.") from e
 
     async def delete(self, id: int):
         try:
@@ -489,7 +506,8 @@ class PlanoRepository:
                     Plano.descripcion,
                     Plano.tipo_archivo,
                     Plano.fecha_subida,
-                    func.octet_length(Plano.archivo).label("bytes"),
+                    func.coalesce(Plano.tamano,
+                                  func.octet_length(Plano.archivo)).label("bytes"),
                     Plano.id_articulo,
                     Articulo.cod_articulo,
                     Articulo.descripcion.label("descripcion_articulo"),
