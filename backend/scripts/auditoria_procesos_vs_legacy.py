@@ -2,7 +2,27 @@
 
 Para qué: cuando en el taller dicen "se duplicaron los procesos", hay que poder
 contestar con la base vieja en la mano y no de memoria. Este script pone las dos
-listas una al lado de la otra —el legacy manda— y dicta un veredicto por OT:
+listas una al lado de la otra —el legacy manda— y dicta un veredicto por OT.
+
+⚠️ LO QUE HAY QUE SABER ANTES DE LEER `dbo.otrabajoProceso`
+
+Esa tabla NO es la lista de procesos de la OT: es el PARTE DE TRABAJO. Cada fila
+tiene `empleado`, `fecha`, `hinicio`, `hfinal` y `REMITO`, o sea quién trabajó, qué
+día, de qué hora a qué hora y en qué remito se facturó. Conviven dos cosas:
+
+  · LÍNEAS DE PLAN  — sin empleado y sin fecha, sólo el tiempo estimado. Esos SÍ son
+    los procesos de la OT, lo que hay que planificar.
+  · PARTES DE TRABAJO — con empleado y fecha. Es historia: trabajo ya hecho, muchas
+    veces ya remitado. NO son procesos a planificar.
+
+Confundirlos fue lo que rompió los datos: la OT 13345 tiene 12 líneas de plan y 8
+partes, y quedó con 20 procesos en SPMM; la 13813 tiene 0 líneas de plan y 23
+partes —23 sesiones de torno de agosto y septiembre de 2025, ya remitadas— y quedó
+con 23 procesos. Cuando la OT no tiene líneas de plan, el proceso sale de AGRUPAR
+los partes por nombre y sumar los tiempos, que es lo que hizo la migración de julio
+y por eso la 13813 tenía 3 y estaba bien.
+
+Veredicto por OT:
 
     IDENTICA   las dos listas coinciden paso a paso: proceso, posición y minutos.
     FALTAN     el legacy tiene pasadas que en SPMM no están.
@@ -14,14 +34,14 @@ julio, SPMM es el dueño de los procesos y el taller carga acá; todo lo cargado
 después no existe en el legacy y aparece como sobrante. Por eso el script las
 lista una por una en vez de contarlas: hay que mirarlas.
 
-Y ojo con el revés: que una OT tenga el MISMO proceso varias veces es dato válido
-—el legacy guarda una fila por pasada, la OT 13813 tiene TORNO CNC 13 veces— y no
-es una duplicación. La duplicación de verdad es una fila de más SIN respaldo en el
-legacy, que es justo lo que este script separa.
+Que una OT repita un proceso en las LÍNEAS DE PLAN sigue siendo dato válido: si el
+taller escribió dos veces el mismo paso, van los dos. Lo que no es dato válido es
+que se repita porque se copió un parte de trabajo.
 
-Es de sólo lectura: no escribe nunca. Para arreglar lo que encuentre:
-    - FALTAN o DIFIEREN  -> backend.scripts.remigrar_procesos_legacy <ot> --aplicar
-    - SOBRAN             -> a mano, después de confirmar con el taller cuáles cargaron ellos.
+Es de sólo lectura: no escribe nunca.
+
+🚫 NO arreglar con `remigrar_procesos_legacy`: ese script es el que metió los partes
+como procesos. Está frenado hasta que se le agregue este filtro.
 
     venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy 13345 13813
     venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy --abiertas
@@ -96,6 +116,48 @@ async def _objetivo(c):
     return {}
 
 
+def _es_linea_de_plan(fila) -> bool:
+    """Sin empleado y sin fecha = línea de plan. Con cualquiera de los dos, alguien
+    ya trabajó y la fila es el parte de ese trabajo."""
+    return not (fila["empleado"] or "").strip() and not (fila["fecha"] or "").strip()
+
+
+def _por_ot(crudas):
+    d = defaultdict(list)
+    for r in crudas:
+        d[r["idot"]].append(r)
+    return d
+
+
+def _procesos_del_legacy(filas):
+    """Los procesos que la OT tiene que tener, leídos como los lee el sistema viejo.
+
+    Con líneas de plan cargadas, son esas y nada más. Sin ellas, se agrupan los
+    partes por proceso sumando los tiempos: es la única lectura posible —el trabajo
+    se hizo, pero nadie dejó escrito el plan— y es la que usó la migración de julio.
+    """
+    plan = [r for r in filas if _es_linea_de_plan(r)]
+    if plan:
+        salida = []
+        for r in sorted(plan, key=lambda x: (x["orden"] or 0)):
+            nom = _clave(_nombre(r["proceso"]))
+            if nom:
+                salida.append((r["orden"] or 1, nom, _minutos(r["total"])))
+        return salida
+
+    # Agrupado: se conserva el orden de la primera aparición, que es el orden en que
+    # se trabajó, y los minutos se suman.
+    acumulado, primer_orden = {}, {}
+    for r in sorted(filas, key=lambda x: (x["orden"] or 0)):
+        nom = _clave(_nombre(r["proceso"]))
+        if not nom:
+            continue
+        acumulado[nom] = acumulado.get(nom, 0) + _minutos(r["total"])
+        primer_orden.setdefault(nom, r["orden"] or 1)
+    return [(i + 1, nom, acumulado[nom])
+            for i, nom in enumerate(sorted(acumulado, key=lambda n: primer_orden[n]))]
+
+
 async def main():
     if not OTS_PEDIDAS and not ABIERTAS and not DESDE:
         print(__doc__)
@@ -112,16 +174,14 @@ async def main():
         # --- Lo que dice el legacy: una fila por pasada, en orden de paso ---
         lista = ",".join(str(v) for v in por_vieja)
         crudas = await sync_db._leer(
-            f"SELECT op.Idot AS idot, op.orden, op.proceso, op.total "
+            f"SELECT op.Idot AS idot, op.orden, op.proceso, op.total, "
+            f"       op.empleado, op.fecha "
             f"FROM dbo.otrabajoProceso op WHERE op.Idot IN ({lista})")
 
-        legacy = defaultdict(list)
-        for r in crudas:
-            nom = _clave(_nombre(r["proceso"]))
-            if nom:
-                legacy[r["idot"]].append((r["orden"] or 1, nom, _minutos(r["total"])))
-        for filas in legacy.values():
-            filas.sort(key=lambda f: f[0])
+        legacy = {otv: _procesos_del_legacy(filas)
+                  for otv, filas in _por_ot(crudas).items()}
+        partes_por_ot = {otv: sum(1 for r in filas if not _es_linea_de_plan(r))
+                         for otv, filas in _por_ot(crudas).items()}
 
         # --- Lo que hay en SPMM ---
         spmm = defaultdict(list)
@@ -176,8 +236,12 @@ async def main():
             veredictos[estado].append(otv)
 
             marca = "OK " if estado == "IDENTICA" else "!! "
+            partes = partes_por_ot.get(otv, 0)
+            # Los partes se nombran aunque la OT esté bien: son el número que explica
+            # de dónde salió el sobrante cuando hay sobrante.
+            nota_partes = f"   [{partes} partes de trabajo, no van al plan]" if partes else ""
             print(f"{marca}OT {otv:<6} {estado:<9} legacy {len(L):>3} líneas / {sum(x[2] for x in L):>5} min"
-                  f"   SPMM {len(S):>3} filas / {sum(x[2] for x in S):>5} min")
+                  f"   SPMM {len(S):>3} filas / {sum(x[2] for x in S):>5} min{nota_partes}")
 
             for orden_l, nom_l, min_l in faltan:
                 print(f"      FALTA   paso {orden_l:>3}  {min_l:>5}m  {nom_l}")
@@ -208,14 +272,13 @@ async def main():
             print(f"{'SIN BASE':<9} {len(sin_legacy):>4} OT   sin líneas en el legacy — nacidas en "
                   f"SPMM o no migradas: {', '.join(str(o) for o in sin_legacy[:20])}")
 
-        arreglables = veredictos["FALTAN"] + veredictos["DIFIEREN"]
-        if arreglables:
-            print("\nPara devolverlas a como está el legacy:")
-            print("  venv/bin/python -m backend.scripts.remigrar_procesos_legacy "
-                  + " ".join(str(o) for o in sorted(arreglables)[:30]) + " --aplicar")
-        if veredictos["SOBRAN"]:
-            print("\nLas de SOBRAN no se tocan solas: confirmá con el taller si esas filas "
-                  "las cargaron ellos en SPMM después del cutover de julio.")
+        rotas = veredictos["SOBRAN"] + veredictos["DIFIEREN"] + veredictos["FALTAN"]
+        if rotas:
+            print("\nNinguna se toca sola. Para ver qué habría que sacar, en seco:")
+            print("  venv/bin/python -m backend.scripts.limpiar_partes_de_trabajo "
+                  + " ".join(str(o) for o in sorted(rotas)[:30]))
+            print("\nY ojo: una fila de más puede ser un proceso que el taller cargó en "
+                  "SPMM después del cutover de julio. Esas son de ellos y quedan.")
     finally:
         await c.close()
 
