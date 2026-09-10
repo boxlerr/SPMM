@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "guardar-plan-muestra-progreso",
+        fecha: "2026-09-10",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Guardar la planificación ya no deja la pantalla muda",
+        detalle:
+            "Al confirmar un plan ahora aparece la misma barra de progreso que ya salía en la vista previa, con el tiempo transcurrido y en qué paso va. Antes no mostraba nada: en un lote grande son hasta 60 segundos sin una sola señal, y parecía que se había colgado. El cartel además aclara algo que sorprendía: guardar vuelve a calcular el plan con las decisiones que tomaste, así que tarda lo mismo que la vista previa, no menos.",
+        href: "/operaciones",
+    },
+    {
         id: "auditoria-dice-quien",
         fecha: "2026-09-10",
         tipo: "mejora",

@@ -41,6 +41,14 @@ const ETAPAS: Etapa[] = [
     { peso: 0.15, titulo: "Ordenando el resultado", Icono: Save },
 ];
 
+/** Al confirmar se vuelve a calcular Y ADEMÁS se guarda, así que el último paso
+ *  no es "ordenar el resultado" sino escribirlo. Es el mismo cálculo: por eso
+ *  tarda lo mismo que la vista previa y no menos, que era la sorpresa. */
+const ETAPAS_GUARDAR: Etapa[] = [
+    ...ETAPAS.slice(0, 3),
+    { peso: 0.15, titulo: "Guardando el plan", Icono: Save },
+];
+
 /** Hasta acá llega sola. El resto lo completa la respuesta. */
 const TECHO = 92;
 
@@ -57,12 +65,16 @@ export function ProgresoPlanificacion({
     activo,
     cantidadOts,
     listo = false,
+    modo = "calcular",
 }: {
     activo: boolean;
     cantidadOts: number;
     /** La respuesta llegó: la barra se completa y recién ahí se va. */
     listo?: boolean;
+    /** "guardar" = se está confirmando el plan, no sólo mirándolo. */
+    modo?: "calcular" | "guardar";
 }) {
+    const etapas = modo === "guardar" ? ETAPAS_GUARDAR : ETAPAS;
     const [pct, setPct] = useState(0);
     const [segundos, setSegundos] = useState(0);
     const inicio = useRef<number>(0);
@@ -96,8 +108,8 @@ export function ProgresoPlanificacion({
 
     // Qué etapa toca según cuánto lleva la barra.
     let acumulado = 0;
-    let etapa = ETAPAS[ETAPAS.length - 1];
-    for (const e of ETAPAS) {
+    let etapa = etapas[etapas.length - 1];
+    for (const e of etapas) {
         acumulado += e.peso * 100;
         if (pct <= acumulado) {
             etapa = e;
@@ -117,7 +129,8 @@ export function ProgresoPlanificacion({
                     <div className="min-w-0">
                         <p className="font-semibold text-slate-800">{etapa.titulo}</p>
                         <p className="text-xs text-slate-500">
-                            {cantidadOts} {cantidadOts === 1 ? "orden" : "órdenes"} en cálculo
+                            {cantidadOts} {cantidadOts === 1 ? "orden" : "órdenes"}
+                            {modo === "guardar" ? " · guardando la planificación" : " en cálculo"}
                         </p>
                     </div>
                     <span className="ml-auto text-2xl font-semibold tabular-nums text-slate-700">
@@ -136,6 +149,9 @@ export function ProgresoPlanificacion({
                     {tarda && " · está tardando más de lo habitual, seguí esperando"}
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                    {modo === "guardar"
+                        ? "Guardar vuelve a calcular el plan con las decisiones que tomaste, así que tarda lo mismo que la vista previa. No cierres esta pantalla. "
+                        : ""}
                     El porcentaje es una estimación por tiempo; el cálculo termina cuando
                     encuentra la mejor combinación o deja de mejorar.
                 </p>

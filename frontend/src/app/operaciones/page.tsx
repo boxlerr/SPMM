@@ -104,7 +104,7 @@ export default function OperacionesPage() {
   const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
   // Overlay de progreso del cálculo. `listo` marca que la respuesta llegó: la
   // barra se completa y el overlay se baja cuando termina de armarse la vista previa.
-  const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; listo: boolean }>(
+  const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; listo: boolean; modo?: "calcular" | "guardar" }>(
     { activo: false, ots: 0, listo: false }
   )
   // Autoguardado del plan sin confirmar. El navegador escribe en cada cambio (cubre
@@ -1220,6 +1220,13 @@ export default function OperacionesPage() {
     try {
       setIsConfirmingPlan(true);
 
+      // Confirmar TAMBIÉN pasa por el solver —vuelve a calcular con las decisiones
+      // tomadas— y en un lote grande eso es un minuto. Hasta ahora no mostraba nada:
+      // el 10/09 Lucas estuvo 62 segundos frente a una pantalla muda y concluyó "se
+      // clavó, ¿no?". Frenaron la planificación por eso. La vista previa sí lo
+      // mostraba; faltaba acá.
+      setCalculando({ activo: true, ots: selectedOrderIds.length, listo: false, modo: "guardar" });
+
       // Distinguir entre el caso "manual plan" (array) y el nuevo "decisiones de excedentes" ({forzarOrdenIds})
       let manualPlan: any[] | undefined = undefined;
       let forzarOrdenIds: number[] | undefined = undefined;
@@ -1277,6 +1284,8 @@ export default function OperacionesPage() {
       setEdicionesIniciales({});
       setForzarIdsIniciales([]);
 
+      setCalculando(c => ({ ...c, listo: true }));
+
       // Refresh data
       await fetchData();
 
@@ -1284,6 +1293,7 @@ export default function OperacionesPage() {
       toast.error("Error al guardar la planificación");
     } finally {
       setIsConfirmingPlan(false);
+      setCalculando({ activo: false, ots: 0, listo: false, modo: "calcular" });
     }
   };
 
@@ -2252,6 +2262,7 @@ export default function OperacionesPage() {
         activo={calculando.activo}
         cantidadOts={calculando.ots}
         listo={calculando.listo}
+        modo={calculando.modo}
       />
 
       <AvailabilityConfigModal
