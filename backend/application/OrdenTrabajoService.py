@@ -543,6 +543,45 @@ class OrdenTrabajoService:
         return ResponseDTO(status=True, data={"updated": True})
 
 
+    async def resumenTodas(self):
+        """Todas las OT en una lista, con el corte planificada / sin planificar.
+
+        Devuelve además el total y los conteos ya hechos: la pantalla los muestra
+        arriba y no tiene por qué recontar 1.400 filas en el navegador.
+        """
+        logger.info("Service - Resumen de todas las órdenes.")
+        ordenes = await self.repository.resumen_todas()
+
+        def entregada(o):
+            # Mismo criterio que isOrderDelivered() en el front (lib/utils.ts): el
+            # legacy marca "sin entregar" con fecha_entrega = 1950-01-01, no con NULL.
+            if o.get("finalizadototal") == 1:
+                return True
+            f = o.get("fecha_entrega")
+            return bool(f and f.year > 1950)
+
+        for o in ordenes:
+            o["entregada"] = entregada(o)
+            # Una OT entregada ya no está "afuera del plan": está terminada. El corte
+            # que importa —lo que falta planificar— es sobre las que siguen abiertas.
+            o["estado_plan"] = (
+                "entregada" if o["entregada"]
+                else "planificada" if o.get("planificada")
+                else "sin_planificar"
+            )
+
+        resumen = {
+            "total": len(ordenes),
+            "planificadas": sum(1 for o in ordenes if o["estado_plan"] == "planificada"),
+            "sin_planificar": sum(1 for o in ordenes if o["estado_plan"] == "sin_planificar"),
+            "entregadas": sum(1 for o in ordenes if o["estado_plan"] == "entregada"),
+            "sin_procesos": sum(1 for o in ordenes
+                                if o["estado_plan"] == "sin_planificar" and not o["procesos"]),
+        }
+        logger.info(f"Service - Resumen OK: {resumen}")
+        return ResponseDTO(status=True, data={"resumen": resumen,
+                                              "ordenes": jsonable_encoder(ordenes)})
+
     async def obtenerOrdenesNoPlanificadas(self):
         """
         Obtiene las órdenes de trabajo que no han sido planificadas

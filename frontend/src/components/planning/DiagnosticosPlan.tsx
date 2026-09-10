@@ -179,6 +179,12 @@ export interface Diagnostico {
     tiene?: string;
     pide?: string;
     titulo: string;
+    /**
+     * Una frase, la que se lee con el aviso cerrado (Lucas 10/09: "cortita y al pie").
+     * Opcional: un borrador guardado antes del 10/09 trae sus diagnósticos adentro y
+     * no la tiene, así que en ese caso se cae al `detalle` como venía siendo.
+     */
+    resumen?: string;
     detalle: string;
     impacto: {
         procesos: number;
@@ -1080,11 +1086,17 @@ export function DiagnosticosPlan({
                                                         )}
                                                     </span>
                                                 )}
+                                                {/* Cerrado va el resumen —una frase, entera—; abierto, el
+                                                    detalle completo. Antes cerrado mostraba las dos primeras
+                                                    líneas del detalle, o sea un párrafo cortado a la mitad:
+                                                    para saber de qué hablaba había que abrirlo igual. */}
                                                 <span className={cn(
                                                     "min-w-0 flex-1 text-[11.5px] leading-[1.35] text-gray-600",
-                                                    !activo && "line-clamp-2"
+                                                    !activo && !d.resumen && "line-clamp-2"
                                                 )}>
-                                                    {conNegritas(d.detalle)}
+                                                    {activo || !d.resumen
+                                                        ? conNegritas(d.detalle)
+                                                        : d.resumen}
                                                 </span>
                                                 <span className="mt-px hidden shrink-0 items-center gap-1 md:flex" title={otsTexto}>
                                                     {impacto.map((t) => (

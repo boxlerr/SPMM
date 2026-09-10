@@ -265,6 +265,8 @@ def construir_diagnosticos(
     diagnosticos += _trabajo_en_puestos_vacantes(resultados, nombre_operario)
 
     _avisar_nombres_repetidos(diagnosticos)
+    for d in diagnosticos:
+        d["resumen"] = _resumen_corto(d)
 
     # El desempate por `id` no es cosmético: sin él, dos líneas con los mismos minutos
     # se intercambian entre recálculos —el orden de entrada sale de dicts armados
@@ -274,6 +276,61 @@ def construir_diagnosticos(
         key=lambda d: (orden.get(d["severidad"], 9), -d["impacto"]["minutos"], d["id"])
     )
     return diagnosticos
+
+
+def _resumen_corto(d) -> str:
+    """Una frase. Es lo que se lee con el aviso cerrado.
+
+    Lucas, 10/09: «hay que hacer más sencillas las trabas, que las entienda
+    cualquiera; más sencilla, cortita y al pie». El `detalle` largo no se va —tiene
+    el porqué y el impacto, y se sigue viendo al abrir el aviso—, pero deja de ser
+    lo primero que se lee: cerrado mostraba sus dos primeras líneas, que es un
+    párrafo cortado a la mitad.
+
+    La forma es la que dictó él mismo el 28/08 mirando su Excel: qué recurso, qué
+    tiene hoy, qué le pide el trabajo. Sin negritas ni jerga —«rango», «skill» y
+    «SETUP» no van—, y en el orden en que se pregunta: primero de qué se habla,
+    después qué falta.
+
+    Sale de los campos que el aviso ya trae armados (`recurso`, `subtipo`, `tiene`,
+    `pide`), no de recortar el detalle: recortar texto da frases sin verbo.
+    """
+    # Los títulos son todos «Sujeto: qué le pasa» desde el lote del 1/9, así que el
+    # sujeto sale del corte. Si alguno no lo respeta, se usa el título entero: peor
+    # es quedarse sin frase.
+    sujeto = (d["titulo"].split(":", 1)[0] or d["titulo"]).strip()
+    tiene, pide = (d.get("tiene") or "").strip(), (d.get("pide") or "").strip()
+    recurso, subtipo = d.get("recurso"), d.get("subtipo")
+
+    if recurso == MAQUINA and subtipo == RANGO and tiene and pide:
+        # El malentendido de la reunión del 10/09 se arregla acá: el título decía
+        # «sus 3 máquinas no aceptan el rango que pide» y Lucas leía que el problema
+        # era el proceso. Nombrar los dos lados y quién es cada uno lo cierra.
+        return (f"La máquina solo la puede usar un {_min(tiene)}. "
+                f"«{sujeto}» lo tiene que hacer un {_min(pide)}.")
+
+    if recurso == HUMANO and subtipo == RANGO and tiene and pide:
+        return (f"«{sujeto}» lo hace un {_min(tiene)}, "
+                f"pero la máquina solo la puede usar un {_min(pide)}.")
+
+    if recurso == HUMANO and subtipo == SKILL:
+        return f"Nadie tiene cargado que sepa hacer «{sujeto}»."
+
+    if recurso == MAQUINA and subtipo == CAPACIDAD:
+        return f"No hay máquina libre para todo el «{sujeto}» que entró al plan."
+
+    if tiene and pide:
+        return f"«{sujeto}»: tiene {_min(tiene)} y necesita {_min(pide)}."
+
+    # Sin dos lados que comparar no hay frase que armar: queda el problema del
+    # título, que ya es corto.
+    return d["titulo"].split(":", 1)[-1].strip().capitalize() or d["titulo"]
+
+
+def _min(texto: str) -> str:
+    """Los rangos vienen en mayúscula de la base («MEDIO OFICIAL»). Gritados en el
+    medio de una frase se leen peor, y acá lo que importa es que la frase se lea."""
+    return (texto or "").lower()
 
 
 def _avisar_nombres_repetidos(diagnosticos):

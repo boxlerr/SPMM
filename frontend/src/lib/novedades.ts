@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "todas-las-ordenes-en-una-lista",
+        fecha: "2026-09-10",
+        tipo: "nuevo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Una pantalla con TODAS las órdenes, las que están en el plan y las que no",
+        detalle:
+            "Es la primera del menú. Arriba están los cuatro números —el total, cuántas entraron al plan, cuántas quedaron afuera y cuántas ya se entregaron— y cada uno es un filtro: lo tocás y la lista queda con esas nomás. Cada orden dice su cliente, el artículo, para cuándo está prometida, cuántos procesos tiene y si hay plano; las atrasadas van en rojo y las que no tienen ningún proceso cargado avisan, porque esas no se pueden planificar. Se busca por número de OT, cliente, artículo o código, y con un clic en la fila se abre la orden. Hasta ahora el trabajo se veía repartido en las solapas de Operaciones y el total no estaba en ninguna.",
+        href: "/ordenes",
+    },
+    {
+        id: "trabas-de-una-frase",
+        fecha: "2026-09-10",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Las trabas del plan se entienden de una leída",
+        detalle:
+            "Cada aviso arranca ahora con una sola frase que dice de qué se trata: «La máquina solo la puede usar un operario calificado. “Prensa” lo tiene que hacer un ayudante». Antes lo primero que se leía eran las dos primeras líneas de la explicación larga, o sea un párrafo cortado por la mitad, y para saber cuál era el problema había que abrirlo igual. La explicación completa sigue estando: aparece al desplegar el aviso.",
+        href: "/operaciones",
+    },
+    {
         id: "biblioteca-de-planos-completa",
         fecha: "2026-09-09",
         tipo: "mejora",

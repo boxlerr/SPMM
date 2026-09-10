@@ -439,3 +439,63 @@ def test_un_proceso_con_rango_tercerizado_no_se_reporta_como_que_nadie_lo_puede_
     assert "proceso_sin_operarios" not in tipos, "no falta gente: sale del taller"
     d = _por_tipo(diags, "trabajo_tercerizado")
     assert "CILINDRADO DE CHAPA".lower() in d["titulo"].lower()
+
+
+# --------------------------------------------------------------------------
+# El resumen de una frase (Lucas 10/09: "cortita y al pie")
+# --------------------------------------------------------------------------
+from backend.application.DiagnosticoPlanificacion import _resumen_corto  # noqa: E402
+
+
+def test_resumen_maquina_rango_nombra_los_dos_lados():
+    """El malentendido de la reunión del 10/09.
+
+    El título decía «sus 3 máquinas no aceptan el rango que pide» y Lucas lo leía
+    como que el problema era el proceso: «entonces el problema es el proceso, no es
+    la máquina». El resumen tiene que dejar claro cuál es cuál sin que haga falta
+    abrir nada.
+    """
+    resumen = _resumen_corto({
+        "titulo": "Prensa: sus 3 máquinas no aceptan el rango que pide",
+        "recurso": "maquina", "subtipo": "rango",
+        "tiene": "OPERARIO CALIFICADO", "pide": "AYUDANTE o INGRESANTE",
+    })
+    assert resumen == ("La máquina solo la puede usar un operario calificado. "
+                       "«Prensa» lo tiene que hacer un ayudante o ingresante.")
+    # Una frase para leer, no un formulario: sin negritas ni la palabra "rango".
+    assert "**" not in resumen and "rango" not in resumen.lower()
+
+
+def test_resumen_humano_rango_dice_quien_no_llega():
+    resumen = _resumen_corto({
+        "titulo": "Soldadura con MIG: los que lo hacen no pueden tomar la máquina",
+        "recurso": "humano", "subtipo": "rango",
+        "tiene": "OFICIAL", "pide": "MEDIO OFICIAL",
+    })
+    assert resumen == ("«Soldadura con MIG» lo hace un oficial, pero la máquina solo "
+                       "la puede usar un medio oficial.")
+
+
+def test_resumen_sin_dos_lados_cae_al_problema_del_titulo():
+    """Hay avisos donde no hay dos cosas que comparar. Ahí el resumen es el problema
+    del título, que ya viene corto — no una frase inventada."""
+    assert _resumen_corto({
+        "titulo": "Control de medidas: hoy no lo puede hacer nadie",
+        "recurso": "humano", "subtipo": "skill",
+    }) == "Nadie tiene cargado que sepa hacer «Control de medidas»."
+    assert _resumen_corto({
+        "titulo": "Embalado: se lo puede llevar cualquiera, sepa o no",
+    }) == "Se lo puede llevar cualquiera, sepa o no"
+
+
+def test_todos_los_diagnosticos_traen_resumen_y_es_corto():
+    """Cerrado se ve UNA frase. Si alguna se va de largo, vuelve el párrafo cortado
+    a la mitad que era el problema."""
+    diags = _diagnosticar([
+        _proc(15279, 30, "CONTROL DE MEDIDAS", {AYUDANTE, INGRESANTE}),
+        _proc(15279, 46, "EMBALADO", set()),
+    ], nativas_off={30: {45, 46}})
+    assert diags
+    for d in diags:
+        assert d["resumen"], f"{d['tipo']} salió sin resumen"
+        assert len(d["resumen"]) <= 160, f"{d['tipo']}: {len(d['resumen'])} caracteres"

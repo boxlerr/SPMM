@@ -1143,3 +1143,80 @@ class OrdenTrabajoRepository:
             return {oid: 'sin_datos' for oid in orden_ids}
 
 
+
+    async def resumen_todas(self):
+        """Una fila por OT — TODAS, planificadas y no— para la pantalla de Órdenes.
+
+        Por qué una consulta cruda y no el ORM: la pantalla muestra el taller entero
+        (hoy ~1.400 OTs) y lo único que necesita de cada una es la cabecera más tres
+        conteos. Traerlas con `joinedload(procesos)` es el camino que hace lenta a
+        Operaciones —una fila por proceso, miles de objetos que después se colapsan—
+        y acá los conteos los hace Postgres.
+
+        `planificada` sale de que la OT tenga filas en `planificacion`: es el mismo
+        criterio con el que Operaciones arma su listado, así que los números de las
+        dos pantallas dan igual. `entregada` replica isOrderDelivered() del front
+        (finalizadototal=1 o fecha_entrega con año > 1950; el legacy usa 1950-01-01
+        como "sin entregar").
+        """
+        from sqlalchemy import text
+        try:
+            logger.info("Repository - Resumen de todas las órdenes.")
+            filas = await self.db.execute(text("""
+                with plan as (
+                    select orden_id,
+                           count(*) as procesos_planificados,
+                           max(creado_en) as planificada_en,
+                           max(id_planificacion_lote::text) as lote
+                    from planificacion group by orden_id
+                ),
+                proc as (
+                    select id_orden_trabajo,
+                           count(*) as procesos,
+                           count(*) filter (where id_estado = 3) as procesos_finalizados
+                    from orden_trabajo_proceso group by id_orden_trabajo
+                ),
+                dib as (
+                    select id_articulo, count(*) as n
+                    from plano where id_articulo is not null group by id_articulo
+                )
+                select ot.id,
+                       ot.id_otvieja,
+                       c.nombre                       as cliente,
+                       a.cod_articulo                 as codigo,
+                       a.descripcion                  as articulo,
+                       ot.detalle,
+                       ot.unidades,
+                       ot.cantidad_entregada,
+                       ot.fecha_orden,
+                       ot.fecha_prometida,
+                       ot.fecha_entrega,
+                       ot.finalizadototal,
+                       ot.suspendida,
+                       ot.fabricacion,
+                       ot.reparacion,
+                       ot.tiene_plano,
+                       p.descripcion                  as prioridad,
+                       coalesce(proc.procesos, 0)             as procesos,
+                       coalesce(proc.procesos_finalizados, 0) as procesos_finalizados,
+                       coalesce(dib.n, 0)                     as planos,
+                       (plan.orden_id is not null)    as planificada,
+                       plan.procesos_planificados,
+                       plan.planificada_en,
+                       plan.lote
+                from orden_trabajo ot
+                left join cliente   c    on c.id = ot.id_cliente
+                left join articulo  a    on a.id = ot.id_articulo
+                left join prioridad p    on p.id = ot.id_prioridad
+                left join proc           on proc.id_orden_trabajo = ot.id
+                left join dib            on dib.id_articulo = ot.id_articulo
+                left join plan           on plan.orden_id = ot.id
+                order by ot.fecha_prometida desc nulls last, ot.id desc
+            """))
+            ordenes = [dict(f) for f in filas.mappings()]
+            logger.info(f"Repository - Resumen OK: {len(ordenes)} órdenes.")
+            return ordenes
+        except Exception as e:
+            logger.error(f"Repository - Error en resumen_todas: {e}")
+            raise InfrastructureException(
+                motivo_error_db(e, "listar todas las órdenes de trabajo")) from e

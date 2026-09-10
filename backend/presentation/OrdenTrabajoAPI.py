@@ -195,6 +195,19 @@ async def obtener_ordenes_no_planificadas(db=Depends(get_db)):
     return await service.obtenerOrdenesNoPlanificadas()
 
 
+# 🔹 TODAS las órdenes en una sola lista, con su estado de planificación.
+#
+# Operaciones muestra el trabajo repartido en solapas (Planificadas, Semanal,
+# Diaria, Completadas…) y no hay ningún lugar donde se vea el total: cuántas OT
+# hay, cuántas entraron al plan y cuántas quedaron afuera. Esto alimenta esa
+# pantalla; el corte entre adentro y afuera lo hace `planificada`.
+@router.get("/ordenes-resumen")
+async def resumen_ordenes(db=Depends(get_db)):
+    logger.info("API - Inicio GET /ordenes-resumen")
+    service = OrdenTrabajoService(db)
+    return await service.resumenTodas()
+
+
 
 
 
