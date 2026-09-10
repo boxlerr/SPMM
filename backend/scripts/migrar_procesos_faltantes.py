@@ -32,7 +32,10 @@ Corre en seco por defecto. Con --aplicar escribe.
 # ---------------------------------------------------------------------------
 import sys as _sys
 
-if "--sin-freno" not in _sys.argv:
+# Sólo frena si alguien lo EJECUTA. Al importarlo no: `auditoria_procesos_vs_legacy`
+# y `limpiar_partes_de_trabajo` reusan sus helpers de parseo (_minutos, _nombre), que
+# están bien — lo que estaba mal era qué filas leía, no cómo las leía.
+if __name__ == "__main__" and "--sin-freno" not in _sys.argv:
     print(__doc__.split("\n")[0])
     print("\n🚫 FRENADO: este script metía los PARTES DE TRABAJO del legacy como si fueran")
     print("   procesos de la OT. Rompió 22 OT el 31/8. Ver el comentario de arriba.")

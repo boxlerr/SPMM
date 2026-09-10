@@ -32,7 +32,11 @@ la única lectura posible y la que usó julio— y la compara con lo que hay en 
 QUÉ TOCA Y QUÉ NO
 
   ✓ Borra las copias de más de un proceso que el legacy tiene menos veces.
-  ✓ Corrige `orden` y `tiempo_proceso` de las que quedan, para que digan el plan.
+  ✓ Reacomoda el `orden` (el paso) de las que quedan, que es de lo que depende la
+    regla de "sólo se puede agregar a mano un proceso de paso 1 o 2".
+  ✗ NO toca los minutos. El estimado del legacy es de cuando se presupuestó y el
+    taller lo corrige en la pantalla; es dato de ellos. Con `--minutos` se pisan
+    igual, pero no hace falta.
   ✗ NO toca una fila con avance (`id_estado` distinto de Pendiente): alguien ya
     trabajó sobre ella y ese dato es del taller.
   ✗ NO toca una fila que esté en una planificación guardada.
@@ -66,6 +70,11 @@ from backend.scripts.auditoria_procesos_vs_legacy import (
 )
 
 APLICAR = "--aplicar" in sys.argv
+# Los minutos NO se tocan (Julián, 10/09: "los minutos no importan, eso pueden
+# ponerlo ellos"). El estimado del legacy es de cuando se presupuestó y el taller lo
+# corrige a ojo en la pantalla; pisárselo sería cambiarles un dato que ellos manejan
+# mejor. El PASO sí se acomoda: de eso depende la regla de orden 1-2.
+MINUTOS = "--minutos" in sys.argv
 ABIERTAS = "--abiertas" in sys.argv
 OTS_PEDIDAS = [int(a) for a in sys.argv[1:] if a.isdigit() and len(a) <= 6]
 
@@ -151,8 +160,9 @@ async def main():
                 cola = quedan.get(nombre)
                 if cola:
                     orden_ok, min_ok = cola.pop(0)
-                    if (fila["orden"], fila["minutos"]) != (orden_ok, min_ok):
-                        ajustar_ot.append({**fila, "otv": otv, "a": (orden_ok, min_ok)})
+                    destino = (orden_ok, min_ok if MINUTOS else fila["minutos"])
+                    if (fila["orden"], fila["minutos"]) != destino:
+                        ajustar_ot.append({**fila, "otv": otv, "a": destino})
                     continue
 
                 # Sobra. Antes de proponerla para borrar, los tres frenos.
@@ -179,16 +189,21 @@ async def main():
 
             if borrar_ot or ajustar_ot:
                 min_antes = sum(f["minutos"] for f in filas)
-                min_despues = sum(m for _, _, m in esperado)
+                borradas = {f["id"] for f in borrar_ot}
+                min_despues = (sum(m for _, _, m in esperado) if MINUTOS
+                               else sum(f["minutos"] for f in filas if f["id"] not in borradas))
+                plan = sum(m for _, _, m in esperado)
+                nota_min = "" if MINUTOS else f"  (el legacy dice {plan})"
                 print(f"OT {otv:<6} {len(filas):>3} filas → {len(filas) - len(borrar_ot):>3}    "
-                      f"{min_antes:>5} min → {min_despues:>5} min    "
+                      f"{min_antes:>5} min → {min_despues:>5} min{nota_min}    "
                       f"({partes.get(otv, 0)} partes de trabajo en el legacy)")
                 for f in borrar_ot:
                     print(f"     borrar   paso {f['orden']:>3}  {f['minutos']:>5}m  "
                           f"{f['nombre'][:44]}  (fila #{f['id']})")
                 for f in ajustar_ot:
-                    print(f"     ajustar  {f['nombre'][:36]:<36} paso {f['orden']}→{f['a'][0]}, "
-                          f"{f['minutos']}→{f['a'][1]} min  (fila #{f['id']})")
+                    cambio = (f"paso {f['orden']}→{f['a'][0]}"
+                              + (f", {f['minutos']}→{f['a'][1]} min" if MINUTOS else ""))
+                    print(f"     mover    {f['nombre'][:36]:<36} {cambio}  (fila #{f['id']})")
             a_borrar += borrar_ot
             a_ajustar += ajustar_ot
 
@@ -196,8 +211,11 @@ async def main():
         print(f"OT miradas                   : {len(por_vieja)}")
         print(f"Filas a BORRAR               : {len(a_borrar)} "
               f"en {len({f['otv'] for f in a_borrar})} OT")
-        print(f"Filas a ajustar (paso/min)   : {len(a_ajustar)} "
+        que = "paso y minutos" if MINUTOS else "paso"
+        print(f"Filas a reacomodar ({que:<13}): {len(a_ajustar)} "
               f"en {len({f['otv'] for f in a_ajustar})} OT")
+        if not MINUTOS:
+            print("   (los minutos quedan como están: los pone el taller)")
         if intactas:
             print(f"\nFilas que SOBRAN pero NO se tocan ({len(intactas)}):")
             for otv, f, motivo in intactas[:20]:
@@ -247,8 +265,8 @@ async def main():
         print(f"\nBORRADAS {len(a_borrar)} filas, AJUSTADAS {len(a_ajustar)}.")
         print(f"Copia de las {len(ids)} filas tocadas en `{respaldo}`.")
         print(f"Volver atrás: insert into orden_trabajo_proceso select * from {respaldo};")
-        print("\nOJO: las OT tocadas cambiaron de minutos. El plan guardado de esas OT "
-              "quedó viejo y hay que replanificarlas.")
+        print("\nOJO: las OT tocadas cambiaron. El plan guardado de esas OT quedó viejo "
+              "y hay que replanificarlas.")
     finally:
         await c.close()
 

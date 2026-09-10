@@ -138,11 +138,16 @@ def _procesos_del_legacy(filas):
     """
     plan = [r for r in filas if _es_linea_de_plan(r)]
     if plan:
+        # El paso se RENUMERA 1..N. En el legacy las líneas de plan comparten la
+        # numeración con los partes, así que la 13345 tiene su plan en los pasos 9 a
+        # 20 sólo porque antes hay 8 partes. Sacados los partes, esos huecos no
+        # significan nada, y el paso importa: de él depende la regla de "a mano sólo
+        # se agrega un proceso de paso 1 o 2".
         salida = []
         for r in sorted(plan, key=lambda x: (x["orden"] or 0)):
             nom = _clave(_nombre(r["proceso"]))
             if nom:
-                salida.append((r["orden"] or 1, nom, _minutos(r["total"])))
+                salida.append((len(salida) + 1, nom, _minutos(r["total"])))
         return salida
 
     # Agrupado: se conserva el orden de la primera aparición, que es el orden en que
