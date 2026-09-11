@@ -64,6 +64,18 @@ class OrdenTrabajo(Base):
     fecha_prometida = Column(DateTime, nullable=False)
     fecha_entrega = Column(DateTime, nullable=True)
 
+    # Quién y cuándo tocó esta OT por última vez DESDE SPMM. Hora local AR, sin zona,
+    # como todo el resto de las fechas de la base.
+    #
+    # NULL no es "se desconoce": es "nunca se tocó desde acá". Casi todas las OT las
+    # trajo el sistema viejo, que no tiene este dato, y el sync tampoco las escribe —
+    # que el legacy pise una OT importada no es una persona modificándola. Por eso el
+    # repositorio tiene una forma explícita de no estampar (update(..., estampar=False)).
+    #
+    # Ver migrations/2026-09-11_modificado_en_ot.sql.
+    modificado_en = Column(DateTime, nullable=True)
+    modificado_por = Column(String(120), nullable=True)
+
     # Relaciones
     procesos = relationship("OrdenTrabajoProceso", back_populates="orden_trabajo")
     prioridad = relationship("Prioridad")

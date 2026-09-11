@@ -362,8 +362,14 @@ class OrdenTrabajoService:
         # volvían a aparecer.
         procesos_data = nueva_data.pop('procesos', None)
         
-        # Update base order
-        orden_actualizada = await self.repository.update(id, nueva_data)
+        # Update base order.
+        #
+        # El `usuario` viaja hasta el repositorio y no se queda acá: editar SÓLO la
+        # cabecera (cliente, fechas, cantidades, observaciones) no dejaba ningún
+        # rastro. Los procesos sí lo dejaban desde el 10/09, así que una OT podía
+        # aparecer con otra fecha prometida y el historial decía que nadie la había
+        # tocado.
+        orden_actualizada = await self.repository.update(id, nueva_data, usuario=usuario)
 
         if not orden_actualizada:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
@@ -511,7 +517,8 @@ class OrdenTrabajoService:
         # `id_otp` es la PASADA puntual. El mismo proceso puede estar varias veces en
         # la OT, así que sin él el repo tiene que adivinar cuál (toma la del paso más
         # bajo y lo loguea).
-        ot_proceso = await self.repository.update_proceso_status(id_orden, id_proceso, id_estado, id_otp=id_otp)
+        ot_proceso = await self.repository.update_proceso_status(
+            id_orden, id_proceso, id_estado, id_otp=id_otp, usuario=user)
         
         if not ot_proceso:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
@@ -557,10 +564,12 @@ class OrdenTrabajoService:
             "fin_real": ot_proceso.fin_real
         })
 
-    async def actualizarObservacionesProceso(self, id_orden: int, id_proceso: int, observaciones: str, id_otp: int | None = None):
+    async def actualizarObservacionesProceso(self, id_orden: int, id_proceso: int, observaciones: str,
+                                             id_otp: int | None = None, usuario: dict | None = None):
         logger.info(f"Service - Actualizar observaciones proceso: Orden {id_orden}, Proceso {id_proceso}")
 
-        ok = await self.repository.update_proceso_observaciones(id_orden, id_proceso, observaciones, id_otp=id_otp)
+        ok = await self.repository.update_proceso_observaciones(
+            id_orden, id_proceso, observaciones, id_otp=id_otp, usuario=usuario)
         
         if not ok:
             raise NotFoundException(f"No se encontró la relación Orden {id_orden} - Proceso {id_proceso}")
@@ -570,10 +579,11 @@ class OrdenTrabajoService:
             
         return ResponseDTO(status=True, data={"updated": True, "observaciones": observaciones})
 
-    async def actualizarOrdenProcesos(self, id_orden: int, process_orders: list[dict]):
+    async def actualizarOrdenProcesos(self, id_orden: int, process_orders: list[dict],
+                                      usuario: dict | None = None):
         logger.info(f"Service - Actualizar orden de procesos para Orden {id_orden}")
         
-        ok = await self.repository.update_procesos_order(id_orden, process_orders)
+        ok = await self.repository.update_procesos_order(id_orden, process_orders, usuario=usuario)
         
         if not ok:
              raise ApplicationException(f"Error al actualizar el orden de procesos para la orden {id_orden}")
@@ -722,7 +732,8 @@ class OrdenTrabajoService:
             raise ApplicationException("Error al obtener órdenes no planificadas.") from e
 
     
-    async def registrarEntrega(self, id_orden: int, cantidad_agregar: int):
+    async def registrarEntrega(self, id_orden: int, cantidad_agregar: int,
+                               usuario: dict | None = None):
         logger.info(f"Service - Registrar entrega para Orden {id_orden}: Agregar {cantidad_agregar}")
         
         # 1. Obtener orden actual
@@ -738,13 +749,14 @@ class OrdenTrabajoService:
             nueva_cantidad = 0
             
         # 3. Actualizar
-        orden_actualizada = await self.repository.update_cantidad_entregada(id_orden, nueva_cantidad, orden.unidades)
+        orden_actualizada = await self.repository.update_cantidad_entregada(
+            id_orden, nueva_cantidad, orden.unidades, usuario=usuario)
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
         
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None, id_operario: int | None = None):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None, id_operario: int | None = None, usuario: dict | None = None):
         logger.info(f"Service - Agregar proceso {id_proceso} a Orden {id_orden}")
 
         # Verify order exists
@@ -758,15 +770,16 @@ class OrdenTrabajoService:
         # varias veces — es lo normal en el taller (el legacy carga una fila por
         # pasada). Si el taller lo repite, se guarda repetido; corregirlo es decisión
         # de ellos, no nuestra.
-        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria, id_operario)
+        nuevo = await self.repository.agregarProceso(id_orden, id_proceso, tiempo_estimado, orden, cant_operarios, id_maquinaria, id_operario, usuario=usuario)
 
         return ResponseDTO(status=True, data=jsonable_encoder(nuevo))
 
-    async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict):
+    async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict,
+                            usuario: dict | None = None):
         """Edita una pasada de proceso ya cargada en la OT (minutos, máquina, persona)."""
         logger.info(f"Service - Editar pasada {id_otp} de la Orden {id_orden}")
 
-        linea = await self.repository.editarProceso(id_orden, id_otp, cambios)
+        linea = await self.repository.editarProceso(id_orden, id_otp, cambios, usuario=usuario)
         if not linea:
             raise NotFoundException(
                 f"No se encontró el proceso {id_otp} en la orden de trabajo {id_orden}"
@@ -795,7 +808,8 @@ class OrdenTrabajoService:
         ]
         return ResponseDTO(status=True, data=data)
 
-    async def eliminarProceso(self, id_orden: int, id_proceso: int, id_otp: int | None = None):
+    async def eliminarProceso(self, id_orden: int, id_proceso: int, id_otp: int | None = None,
+                              usuario: dict | None = None):
         logger.info(f"Service - Eliminar proceso {id_proceso} de Orden {id_orden}")
 
         exists = await self.repository.find_by_id(id_orden)
@@ -811,5 +825,5 @@ class OrdenTrabajoService:
             raise NotFoundException(f"El proceso {id_proceso} no está cargado en la OT {id_orden}.")
 
         # Borra UNA pasada, no todas las del mismo proceso.
-        await self.repository.eliminarProceso(id_orden, id_proceso, id_otp=id_otp)
+        await self.repository.eliminarProceso(id_orden, id_proceso, id_otp=id_otp, usuario=usuario)
         return ResponseDTO(status=True, data={"message": "Proceso eliminado correctamente"})

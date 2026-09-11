@@ -110,6 +110,13 @@ class OrdenTrabajoResponseDTO(BaseModel):
     fecha_entrada: Optional[datetime] = None
     fecha_prometida: Optional[datetime] = None
     fecha_entrega: Optional[datetime] = None
+
+    # Último rastro de edición. Los dos en None significan "nunca se tocó desde SPMM"
+    # (las OT que trajo el sistema viejo), no "no se sabe". Y `modificado_por` en None
+    # con `modificado_en` escrito significa que el cambio entró por una puerta que no
+    # pudo identificar al usuario: antes que inventar un autor, se manda vacío.
+    modificado_en: Optional[datetime] = None
+    modificado_por: Optional[str] = None
     
     # Relations
     prioridad: Optional[PrioridadDTO] = None

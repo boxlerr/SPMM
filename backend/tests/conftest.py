@@ -35,6 +35,10 @@ from backend.domain.Prioridad import Prioridad
 from backend.domain.Sector import Sector
 from backend.domain.Articulo import Articulo
 from backend.domain.Cliente import Cliente
+# Borrar una pasada de proceso limpia primero la fila del plan que la apunta, así que
+# sin esta tabla ese camino ni se puede probar (y es el cambio más destructivo que
+# tiene la OT).
+from backend.domain.Planificacion import Planificacion
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -57,6 +61,7 @@ TEST_TABLES = [
     Sector.__table__,
     Articulo.__table__,
     Cliente.__table__,
+    Planificacion.__table__,
 ]
 
 

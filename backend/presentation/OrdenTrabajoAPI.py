@@ -38,10 +38,18 @@ async def crear_orden(
 from backend.dto.RegistrarEntregaDTO import RegistrarEntregaDTO
 
 @router.put("/ordenes/{id}/entrega")
-async def registrar_entrega(id: int, dto: RegistrarEntregaDTO, db=Depends(get_db)):
+async def registrar_entrega(
+    id: int,
+    dto: RegistrarEntregaDTO,
+    db=Depends(get_db),
+    # El router ya va montado con protección global (main.py), así que el token
+    # llegaba y se validaba igual: lo que faltaba era LEERLO. Sin esto, registrar una
+    # entrega modificaba la OT de forma anónima.
+    current_user: dict = Depends(get_current_user),
+):
     logger.info(f"API - Inicio PUT /ordenes/{id}/entrega")
     service = OrdenTrabajoService(db)
-    return await service.registrarEntrega(id, dto.cantidad_agregar)
+    return await service.registrarEntrega(id, dto.cantidad_agregar, usuario=current_user)
 
 # 🔹 Listar todas las órdenes
 @router.get("/ordenes")
@@ -189,10 +197,17 @@ class ObservacionesUpdate(BaseModel):
     id_otp: int | None = None  # pasada puntual; ver EstadoUpdate
 
 @router.put("/ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
-async def actualizar_observaciones_proceso(id_orden: int, id_proceso: int, body: ObservacionesUpdate, db=Depends(get_db)):
+async def actualizar_observaciones_proceso(
+    id_orden: int,
+    id_proceso: int,
+    body: ObservacionesUpdate,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/{id_proceso}/observaciones")
     service = OrdenTrabajoService(db)
-    return await service.actualizarObservacionesProceso(id_orden, id_proceso, body.observaciones, id_otp=body.id_otp)
+    return await service.actualizarObservacionesProceso(
+        id_orden, id_proceso, body.observaciones, id_otp=body.id_otp, usuario=current_user)
     
 class ProcessReorderItem(BaseModel):
     id_proceso: int
@@ -205,12 +220,17 @@ class ProcessReorderRequest(BaseModel):
     ordenes: List[ProcessReorderItem]
 
 @router.put("/ordenes/{id_orden}/procesos/reorder")
-async def reorder_processes(id_orden: int, body: ProcessReorderRequest, db=Depends(get_db)):
+async def reorder_processes(
+    id_orden: int,
+    body: ProcessReorderRequest,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/reorder")
     service = OrdenTrabajoService(db)
     # Convert Pydantic models to dicts
     process_orders = [item.dict() for item in body.ordenes]
-    return await service.actualizarOrdenProcesos(id_orden, process_orders)
+    return await service.actualizarOrdenProcesos(id_orden, process_orders, usuario=current_user)
 
 
 # 🔹 Obtener órdenes no planificadas
@@ -251,10 +271,15 @@ class AgregarProcesoRequest(BaseModel):
     id_operario: int | None = None
 
 @router.post("/ordenes/{id_orden}/procesos")
-async def agregar_proceso_orden(id_orden: int, body: AgregarProcesoRequest, db=Depends(get_db)):
+async def agregar_proceso_orden(
+    id_orden: int,
+    body: AgregarProcesoRequest,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     logger.info(f"API - Inicio POST /ordenes/{id_orden}/procesos")
     service = OrdenTrabajoService(db)
-    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden, body.cant_operarios or 1, body.id_maquinaria, body.id_operario)
+    return await service.agregarProceso(id_orden, body.id_proceso, body.tiempo_estimado, body.orden, body.cant_operarios or 1, body.id_maquinaria, body.id_operario, usuario=current_user)
 
 
 class EditarProcesoRequest(BaseModel):
@@ -270,21 +295,34 @@ class EditarProcesoRequest(BaseModel):
 
 
 @router.put("/ordenes/{id_orden}/procesos/linea/{id_otp}")
-async def editar_proceso_orden(id_orden: int, id_otp: int, body: EditarProcesoRequest, db=Depends(get_db)):
+async def editar_proceso_orden(
+    id_orden: int,
+    id_otp: int,
+    body: EditarProcesoRequest,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """Edita UNA pasada (orden_trabajo_proceso.id = id_otp), no todas las del mismo proceso.
 
     La ruta lleva `/linea/` para no chocar con /ordenes/{id}/procesos/{id_proceso}/...,
     que direcciona por id de PROCESO y no por id de pasada."""
     logger.info(f"API - Inicio PUT /ordenes/{id_orden}/procesos/linea/{id_otp}")
     service = OrdenTrabajoService(db)
-    return await service.editarProceso(id_orden, id_otp, body.model_dump(exclude_unset=True))
+    return await service.editarProceso(
+        id_orden, id_otp, body.model_dump(exclude_unset=True), usuario=current_user)
 
 
 @router.delete("/ordenes/{id_orden}/procesos/{id_proceso}")
-async def eliminar_proceso_orden(id_orden: int, id_proceso: int, id_otp: int | None = None, db=Depends(get_db)):
+async def eliminar_proceso_orden(
+    id_orden: int,
+    id_proceso: int,
+    id_otp: int | None = None,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
     """Borra UNA pasada del proceso, no todas las del mismo proceso en la OT.
 
     `id_otp` (query param) dice cuál. Sin él se borra la del paso más bajo."""
     logger.info(f"API - Inicio DELETE /ordenes/{id_orden}/procesos/{id_proceso}")
     service = OrdenTrabajoService(db)
-    return await service.eliminarProceso(id_orden, id_proceso, id_otp=id_otp)
+    return await service.eliminarProceso(id_orden, id_proceso, id_otp=id_otp, usuario=current_user)

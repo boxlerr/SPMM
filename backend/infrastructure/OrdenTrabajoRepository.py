@@ -12,10 +12,43 @@ from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Proceso import Proceso
 from backend.domain.Cliente import Cliente
+from backend.infrastructure.AuditoriaRepository import nombre_de
+from zoneinfo import ZoneInfo
+
+# El contenedor de Cloud Run no fija TZ, así que datetime.now() da UTC y todo lo que
+# se estampa desde acá quedaba 3 horas adelantado respecto del resto de la auditoría
+# —que sí usa hora local— y del reloj del taller. Mismo helper que
+# AuditoriaRepository y PlanificacionRepository.
+_TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _ahora_ar() -> datetime:
+    """Hora actual en Argentina, naive (las columnas son timestamp sin zona)."""
+    return datetime.now(_TZ_AR).replace(tzinfo=None)
+
 
 class OrdenTrabajoRepository:
     def __init__(self, db):
         self.db = db
+
+    async def _sellar_modificacion(self, id_orden: int, usuario: dict | None):
+        """Deja escrito quién y cuándo tocó la OT, en TODA puerta que la modifique.
+
+        Se llama pegado al cambio y ANTES del commit, en la misma transacción: si el
+        cambio se guarda, el rastro se guarda; si se va al rollback, no queda un sello
+        de algo que nunca pasó. Por eso va como UPDATE suelto y no tocando el objeto
+        ORM — la mayoría de las puertas (agregar un proceso, cambiarle el estado,
+        reordenar) ni siquiera tienen la cabecera cargada, y hacer un SELECT extra por
+        cada una para sellarla sería pagar dos consultas donde alcanza una.
+
+        Sin usuario queda NULL. Un cambio que no sabemos quién hizo tiene que verse
+        distinto de uno hecho por una máquina, y las dos cosas tienen que verse
+        distintas de un autor inventado — que es lo único que no se hace nunca.
+        """
+        await self.db.execute(text(
+            "UPDATE orden_trabajo SET modificado_en = :cuando, modificado_por = :quien "
+            "WHERE id = :id"
+        ), {"cuando": _ahora_ar(), "quien": nombre_de(usuario), "id": id_orden})
 
     async def save(self, orden: OrdenTrabajo):
         try:
@@ -81,7 +114,18 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error real en find_by_id: {e}")
             raise InfrastructureException("Error al buscar la Orden de Trabajo por ID.") from e
 
-    async def update(self, id: int, nueva_data: dict):
+    async def update(self, id: int, nueva_data: dict, usuario: dict | None = None,
+                     estampar: bool = True):
+        """Guarda la cabecera de la OT (cliente, fechas, cantidades, observaciones).
+
+        `estampar=False` es para el que NO es una persona: el sync del legacy y los
+        scripts de migración. Que el sistema viejo pise una OT importada no es alguien
+        modificándola, y si lo estampáramos, toda la base terminaría diciendo que la
+        última modificación la hizo el sync a las 4 de la mañana — que es exactamente
+        el ruido que haría inútil la columna. Hoy el sync no pasa por acá (desde el
+        2/9 no se traen más OT del legacy), pero el día que vuelva tiene que tener por
+        dónde entrar sin mentir.
+        """
         try:
             logger.info(f"Repository - Actualizar orden de trabajo ID {id}.")
             result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id))
@@ -112,15 +156,37 @@ class OrdenTrabajoRepository:
                     f"de orden_trabajo: {sorted(descartados)}"
                 )
 
+            # El sello lo pone el backend, no el que llama. Son columnas de la tabla,
+            # así que el filtro de arriba las dejaría pasar: si el día de mañana el DTO
+            # las expone, cualquiera podría escribir quién tocó la OT — y el dato existe
+            # justamente para no tener que creerle a nadie.
+            for reservada in ("modificado_en", "modificado_por"):
+                nueva_data.pop(reservada, None)
+
             # Red de contención de la zona horaria. El normalizado real vive en el DTO
             # (backend/dto/fechas.py), que es por donde entran el alta y la edición;
             # esto cubre a cualquier otro que llame al repositorio con una fecha con
             # zona. Las columnas de fecha son `timestamp without time zone` y asyncpg
             # rechaza la mezcla con un DataError que el usuario veía como
             # «Error al actualizar la Orden de Trabajo».
+            # Se anota si ALGO cambió de verdad, para no sellar un guardado vacío.
+            #
+            # El modal manda la cabecera completa en cada PUT, así que abrir una OT y
+            # apretar Guardar sin tocar nada llegaba acá con veinte campos idénticos a
+            # los que ya estaban. Sellando siempre, la columna terminaba contestando
+            # «quién apretó Guardar por última vez» en vez de «quién la modificó», que
+            # es lo que promete. Y el dato existe justamente para poder creerle.
+            hubo_cambio = False
             for key, value in nueva_data.items():
-                if key in columnas:
-                    setattr(orden, key, sin_zona(value))
+                if key not in columnas:
+                    continue
+                limpio = sin_zona(value)
+                if getattr(orden, key) != limpio:
+                    hubo_cambio = True
+                setattr(orden, key, limpio)
+
+            if estampar and hubo_cambio:
+                await self._sellar_modificacion(id, usuario)
 
             await self.db.commit()
             await self.db.refresh(orden)
@@ -548,7 +614,8 @@ class OrdenTrabajoRepository:
             )
         return lineas[0] if lineas else None
 
-    async def update_proceso_status(self, id_orden: int, id_proceso: int, id_estado: int, id_otp: int | None = None):
+    async def update_proceso_status(self, id_orden: int, id_proceso: int, id_estado: int,
+                                    id_otp: int | None = None, usuario: dict | None = None):
         try:
             logger.info(f"Repository - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso}, ID Estado {id_estado}")
 
@@ -567,12 +634,19 @@ class OrdenTrabajoRepository:
                 ot_proceso.fin_real = None
             elif id_estado == 2:  # En Proceso
                 if not ot_proceso.inicio_real:
-                    ot_proceso.inicio_real = datetime.now()
+                    # Hora local AR. Con datetime.now() pelado, en Cloud Run (TZ=UTC)
+                    # el taller veía que un proceso había arrancado 3 horas más tarde
+                    # de lo que lo arrancó.
+                    ot_proceso.inicio_real = _ahora_ar()
                 # If reverting from finalized to in-process, clear finish time
                 ot_proceso.fin_real = None
             elif id_estado == 3:  # Finalizado
-                ot_proceso.fin_real = datetime.now()
-                
+                ot_proceso.fin_real = _ahora_ar()
+
+            # Mover un proceso de la OT es modificar la OT: es el cambio que más se
+            # hace y el que más se pregunta después ("¿quién lo dio por terminado?").
+            await self._sellar_modificacion(id_orden, usuario)
+
             await self.db.commit()
             await self.db.refresh(ot_proceso)
             
@@ -584,7 +658,8 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_proceso_status: {e}")
             raise InfrastructureException("Error al actualizar estado del proceso.") from e
 
-    async def update_proceso_observaciones(self, id_orden: int, id_proceso: int, observaciones: str, id_otp: int | None = None):
+    async def update_proceso_observaciones(self, id_orden: int, id_proceso: int, observaciones: str,
+                                           id_otp: int | None = None, usuario: dict | None = None):
         try:
             logger.info(f"Repository - Actualizar observaciones proceso: Orden {id_orden}, Proceso {id_proceso}")
 
@@ -595,6 +670,7 @@ class OrdenTrabajoRepository:
                 return False
                 
             ot_proceso.observaciones = observaciones
+            await self._sellar_modificacion(id_orden, usuario)
             await self.db.commit()
             await self.db.refresh(ot_proceso)
             
@@ -606,7 +682,8 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_proceso_observaciones: {e}")
             raise InfrastructureException("Error al actualizar observaciones del proceso.") from e
 
-    async def update_procesos_order(self, id_orden: int, process_orders: list[dict]):
+    async def update_procesos_order(self, id_orden: int, process_orders: list[dict],
+                                    usuario: dict | None = None):
         """
         Actualiza el orden de los procesos para una orden de trabajo.
         process_orders: lista de dicts {id_otp?: int, id_proceso: int, orden: int}
@@ -638,6 +715,8 @@ class OrdenTrabajoRepository:
 
                 if ot_proceso:
                     ot_proceso.orden = item['orden']
+
+            await self._sellar_modificacion(id_orden, usuario)
 
             await self.db.commit()
             logger.info("Repository - Orden de procesos actualizado correctamente.")
@@ -743,10 +822,12 @@ class OrdenTrabajoRepository:
                 logger.error(f"Repository - Orden {id_orden} no encontrada para marcar como completada.")
                 return False
                 
-            orden.fecha_entrega = datetime.now()
+            # Hora local AR: la fecha de entrega se muestra y se compara contra el
+            # resto de las fechas de la base, que están todas en hora de Argentina.
+            orden.fecha_entrega = _ahora_ar()
             await self.db.commit()
             await self.db.refresh(orden)
-            
+
             logger.info(f"Repository - Orden {id_orden} marcada como completada correctamente.")
             return True
             
@@ -817,7 +898,6 @@ class OrdenTrabajoRepository:
         planificación, y por la misma razón.
         """
         import json
-        from backend.infrastructure.AuditoriaRepository import nombre_de
         try:
             await self.db.execute(text("""
                 CREATE TABLE IF NOT EXISTS orden_trabajo_proceso_version (
@@ -840,7 +920,7 @@ class OrdenTrabajoRepository:
                     (id_orden_trabajo, creado_en, id_usuario, usuario, motivo, procesos)
                 VALUES (:ot, :creado, :id_usuario, :usuario, :motivo, CAST(:procesos AS JSONB))
             """), {
-                "ot": id_orden, "creado": sin_zona(datetime.now()),
+                "ot": id_orden, "creado": _ahora_ar(),
                 "id_usuario": (usuario or {}).get("id_usuario"),
                 "usuario": nombre_de(usuario), "motivo": motivo[:60],
                 "procesos": json.dumps(foto),
@@ -891,8 +971,14 @@ class OrdenTrabajoRepository:
             # única forma de poder deshacer. Va en su propia transacción (hace commit),
             # así que si el guardado de abajo falla, la foto queda igual — sobra una
             # versión idéntica a lo que hay, que no molesta a nadie.
-            if current_processes:
-                await self._guardar_version_procesos(id_orden, current_processes, motivo, usuario)
+            #
+            # Y va SIEMPRE, aunque la OT no tuviera NINGÚN proceso. Antes ese caso se
+            # salteaba, que es como decir que la lista vacía no es un estado: la
+            # primera carga de procesos sobre una OT vacía —el caso más común desde
+            # que se cargan desde la planificación— quedaba sin foto previa y era el
+            # único cambio de procesos que no se podía deshacer. Una foto de cero
+            # procesos es exactamente lo que hace falta para volver atrás esa carga.
+            await self._guardar_version_procesos(id_orden, current_processes, motivo, usuario)
             
             # El mismo proceso puede estar varias veces en la OT, así que no se puede
             # mapear por id_proceso (colapsaría las pasadas en una). Se machea por id
@@ -980,7 +1066,9 @@ class OrdenTrabajoRepository:
             for proc in current_processes:
                 if proc.id not in conservadas:
                     await self.db.delete(proc)
-            
+
+            await self._sellar_modificacion(id_orden, usuario)
+
             await self.db.commit()
             logger.info("Repository - Procesos actualizados correctamente.")
             return True
@@ -991,7 +1079,8 @@ class OrdenTrabajoRepository:
             raise InfrastructureException(motivo_error_db(e, "guardar los procesos de la Orden de Trabajo")) from e
 
     
-    async def update_cantidad_entregada(self, id_orden: int, nueva_cantidad: int, total_unidades: int | None):
+    async def update_cantidad_entregada(self, id_orden: int, nueva_cantidad: int,
+                                        total_unidades: int | None, usuario: dict | None = None):
         try:
             logger.info(f"Repository - Actualizar entrega Orden {id_orden}: {nueva_cantidad}")
             
@@ -1016,12 +1105,14 @@ class OrdenTrabajoRepository:
             
             if total_unidades and nueva_cantidad >= total_unidades:
                 if not orden.fecha_entrega or orden.fecha_entrega.year == 1950:
-                    orden.fecha_entrega = datetime.now()
+                    orden.fecha_entrega = _ahora_ar()
             elif total_unidades and nueva_cantidad < total_unidades:
                 # If reverting (e.g. subtracted), maybe clear completion date?
                 # Only if it was previously auto-completed. Safer to leave it if manual?
                 # Let's enforce: if incomplete delivery, fecha_entrega = 1950 (open)
                 orden.fecha_entrega = datetime(1950, 1, 1)
+
+            await self._sellar_modificacion(id_orden, usuario)
 
             await self.db.commit()
             await self.db.refresh(orden)
@@ -1032,7 +1123,8 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en update_cantidad_entregada: {e}")
             raise InfrastructureException("Error al actualizar la cantidad entregada.") from e
 
-    async def eliminarProceso(self, id_orden: int, id_proceso: int, id_otp: int | None = None):
+    async def eliminarProceso(self, id_orden: int, id_proceso: int, id_otp: int | None = None,
+                              usuario: dict | None = None):
         from sqlalchemy import text
         try:
             logger.info(f"Repository - Eliminar proceso {id_proceso} de Orden {id_orden}")
@@ -1063,6 +1155,8 @@ class OrdenTrabajoRepository:
                 {"otp": linea.id}
             )
 
+            await self._sellar_modificacion(id_orden, usuario)
+
             await self.db.commit()
             logger.info("Repository - Proceso eliminado correctamente.")
             return True
@@ -1072,7 +1166,8 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en eliminarProceso: {e}")
             raise InfrastructureException("Error al eliminar proceso de la orden.") from e
 
-    async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict):
+    async def editarProceso(self, id_orden: int, id_otp: int, cambios: dict,
+                            usuario: dict | None = None):
         """
         Edita UNA pasada de proceso de la OT (la fila `id_otp`).
 
@@ -1093,6 +1188,8 @@ class OrdenTrabajoRepository:
                 if k in editables:
                     setattr(linea, k, v)
 
+            await self._sellar_modificacion(id_orden, usuario)
+
             await self.db.commit()
             await self.db.refresh(linea)
             logger.info("Repository - Pasada editada correctamente.")
@@ -1104,7 +1201,7 @@ class OrdenTrabajoRepository:
                 motivo_error_db(e, "guardar los cambios del proceso")
             ) from e
 
-    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None, id_operario: int | None = None):
+    async def agregarProceso(self, id_orden: int, id_proceso: int, tiempo_estimado: int, orden: int | None = None, cant_operarios: int = 1, id_maquinaria: int | None = None, id_operario: int | None = None, usuario: dict | None = None):
         try:
             logger.info(f"Repository - Agregar proceso {id_proceso} a Orden {id_orden}")
 
@@ -1129,6 +1226,7 @@ class OrdenTrabajoRepository:
             )
             
             self.db.add(nuevo_proceso)
+            await self._sellar_modificacion(id_orden, usuario)
             await self.db.commit()
             await self.db.refresh(nuevo_proceso)
             
@@ -1278,6 +1376,11 @@ class OrdenTrabajoRepository:
                        ot.fecha_orden,
                        ot.fecha_prometida,
                        ot.fecha_entrega,
+                       -- Quién la tocó por última vez y cuándo. Va acá y no sólo en la
+                       -- OT abierta: la pregunta "¿esto lo cambió alguien?" se hace
+                       -- mirando la lista, no entrando de a una.
+                       ot.modificado_en,
+                       ot.modificado_por,
                        ot.finalizadototal,
                        ot.suspendida,
                        ot.fabricacion,

@@ -1760,10 +1760,121 @@ def _agregar_ventanas_horarias(model,procesos_norm,inicio_vars,dur_map,ventanas,
                 model.Add(sum(en_ventana) == 1)
 
 # ------------------------------------------------------------
+# Presupuesto de tiempo del solver
+# ------------------------------------------------------------
+
+# Piso y pendiente del presupuesto. Salen de dos anclas medidas sobre
+# planificacion_intento (la tabla que guarda cada corrida real con su duración):
+#
+#   - 73 procesos (la tanda de 6 OT que se cita más abajo, la del 15/08) tardó
+#     entre 30 y 61 s según el día. Es el caso que HOY se come el minuto entero,
+#     así que se le deja un techo de 80 s: un poco de aire, no cuatro minutos.
+#   - 364 procesos ≈ 50 OT. Una tanda de 60 OT (~436 procesos, ver la razón de
+#     abajo) necesita ~244 s, así que de ahí para arriba se le da todo el techo.
+#
+# La recta que une (73 → 80 s) con (364 → 240 s) tiene pendiente
+# (240-80)/(364-73) = 0,55 s por proceso y ordenada 80 - 0,55*73 ≈ 40 s.
+# Para recalcular con datos nuevos: elegir dos tandas de las que hay en
+# planificacion_intento, y PENDIENTE = (seg_grande - seg_chica) / (proc_grande -
+# proc_chico); PISO = seg_chica - PENDIENTE * proc_chico.
+SOLVER_PISO_SEG = 40
+SOLVER_SEG_POR_PROCESO = 0.55
+
+# Y abajo de todo, un piso duro: NADIE recibe menos presupuesto del que tenía.
+#
+# La recta calibrada arriba pasa por debajo de los 60 s de hoy en todo lote de 35
+# procesos o menos —o sea 1 a 5 OT, que es el caso más frecuente del taller—: con
+# la recta pelada, una tanda de 27 procesos pasaba de 60 s a 55. Bajarle el
+# presupuesto a la corrida de todos los días para arreglar la de 60 OT es cambiar
+# un problema por otro, y el que se rompe es peor: si un lote chico y difícil no
+# llega a la primera solución, el taller no ve un plan peor, ve «no se pudo generar
+# una planificación viable».
+#
+# Va como piso y no sumándole 20 a la ordenada para no mover las dos anclas
+# medidas: con `max(60, recta)` el lote de 73 procesos sigue recibiendo sus 80 s.
+SOLVER_MINIMO_SEG = 60
+
+# Techo por defecto. Antes era el presupuesto PLANO de todas las corridas (60 s) y
+# ahora es sólo el tope de la recta: por eso sube a 240 sin castigar a las tandas
+# chicas. Va como default del código y no como variable de Cloud Run a propósito —
+# el backend se deploya a mano y la idea es que esto salga con el deploy, sin tocar
+# configuración. Los 240 s entran cómodos en el timeoutSeconds=600 del servicio,
+# contando la lectura de datos, el diagnóstico y el guardado que van alrededor.
+SOLVER_TECHO_SEG_DEFAULT = 240
+
+# El corte por estancamiento vale 1/6 del presupuesto: la misma proporción que rige
+# hoy (10 s sobre 60), para que una tanda chica se comporte igual que antes.
+#
+# Escala con el presupuesto porque mide PACIENCIA, no tiempo absoluto: cuanto más
+# grande el modelo, más tarda el solver entre una mejora y la siguiente, y un corte
+# fijo de 10 s sobre un presupuesto de 240 s cortaría a un solver que todavía está
+# mejorando.
+#
+# HONESTIDAD SOBRE EL 1/6: es continuidad, no medición. Para medirlo de verdad hace
+# falta el hueco entre mejoras sucesivas DENTRO de una corrida, y eso hoy no se
+# guarda en ningún lado — `planificacion_intento` sólo tiene la duración total. Lo
+# que se sabe es que la misma tanda de 73 procesos terminó en 30, 32, 33, 33, 39,
+# 42 y 61 s en siete corridas distintas, o sea que el solver sigue encontrando
+# mejoras tarde; eso justifica que el corte NO sea fijo, no el 1/6 exacto. Si
+# alguna vez se loguea el instante de cada mejora, recalibrar acá.
+SOLVER_CORTE_FRACCION = 6
+SOLVER_CORTE_MIN_SEG = 10
+
+
+def presupuesto_solver(cant_procesos: int, techo_seg: int | None = None) -> tuple[int, int]:
+    """Segundos de presupuesto y de corte por estancamiento para un lote.
+
+    Se mide por PROCESOS y no por órdenes porque una OT de 3 pasos no le cuesta al
+    solver lo mismo que una de 20, y los logs lo muestran sin lugar a dudas: dos
+    tandas de 5 OT tardaron 4,1 s y 62 s (27 vs 60 procesos), y una de 10 OT salió
+    en 7,2 s mientras una de 6 OT se comía 61 s (97 vs 73 procesos). Sobre las 33
+    corridas guardadas, la correlación de la duración con la cantidad de procesos es
+    0,80 (Spearman 0,70) contra 0,72 (Spearman 0,52) con la cantidad de órdenes.
+    Contar OTs haría exactamente lo contrario de lo que se busca: le daría cuatro
+    minutos a una tanda de 60 OT flacas y un minuto a una de 6 OT pesadas.
+
+    Se cuenta la lista que ENTRA al solver, no `procesos_norm`: la normalización
+    parte los procesos en tramos y multiplica por operario, y ese factor no está en
+    los logs contra los que se calibraron el piso y la pendiente. Si algún día se
+    quiere afinar con el tamaño real del modelo, hay que recalibrar las dos anclas.
+
+    Para pasar de OTs a procesos: en las tandas reales de planificación dan 7,27
+    procesos por OT (el promedio sobre TODAS las OT de la base es 4,42, pero al
+    planificador se le mandan las grandes).
+    """
+    cant = max(0, int(cant_procesos or 0))
+    # La variable cambió de significado: antes era el presupuesto PLANO de todas las
+    # corridas, ahora es sólo el techo de la recta. Por eso el nombre nuevo es
+    # SOLVER_TECHO_SEG. Se sigue leyendo SOLVER_MAX_SEG como alternativa porque es
+    # el nombre que quedó escrito en la documentación vieja y en esta conversación:
+    # si alguien la setea creyendo que hace lo de antes, que al menos siga fijando
+    # el tope y no quede ignorada en silencio. Hoy en Cloud Run no está ninguna de
+    # las dos, así que manda el default del código.
+    del_entorno = os.getenv("SOLVER_TECHO_SEG") or os.getenv("SOLVER_MAX_SEG")
+    techo = int(techo_seg if techo_seg is not None else (del_entorno or SOLVER_TECHO_SEG_DEFAULT))
+    recta = SOLVER_PISO_SEG + SOLVER_SEG_POR_PROCESO * cant
+    # El techo gana por encima de todo (incluso del mínimo): si alguien lo baja a
+    # mano a 30 s, es porque quiere 30 s.
+    max_seg = min(techo, max(SOLVER_MINIMO_SEG, int(round(recta))))
+    # Nunca menos de un segundo: con el techo puesto a mano en 0 o en negativo el
+    # solver devolvería UNKNOWN y el taller se quedaría sin plan y sin explicación.
+    max_seg = max(1, max_seg)
+
+    # Si alguien fijó el corte a mano, gana: es la válvula para una corrida puntual.
+    # Sin eso, sale de la proporción y nunca por debajo de los 10 s de siempre.
+    corte_fijo = os.getenv("SOLVER_CORTE_SIN_MEJORA_SEG")
+    if corte_fijo:
+        corte_seg = max(1, int(corte_fijo))
+    else:
+        corte_seg = max(SOLVER_CORTE_MIN_SEG, int(round(max_seg / SOLVER_CORTE_FRACCION)))
+    return max_seg, corte_seg
+
+
+# ------------------------------------------------------------
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None):
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None):
     model = cp_model.CpModel()
 
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
@@ -1992,7 +2103,22 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # para 6 OTs que localmente salen en 10s) y multiplicaban la memoria — cada
     # worker mantiene su propia copia del modelo, y el contenedor murió por OOM con
     # 1115 MiB. Con workers = cpus, en Cloud Run son 2 y en la laptop los que haya.
-    solver.parameters.max_time_in_seconds = int(os.getenv("SOLVER_MAX_SEG", "60"))
+    #
+    # El presupuesto ya no es plano: se calcula con el tamaño del lote (ver
+    # presupuesto_solver). Con el tope fijo en 60 s, DIEZ de las últimas 30
+    # planificaciones reales terminaron entre 60,9 y 62,5 s — se comieron el
+    # presupuesto entero y el corte por estancamiento no las salvó — y una tanda de
+    # 60 OT que necesita ~244 s salía con un plan peor de lo que podía. Subir el
+    # tope a 240 s para todas habría castigado al tercio de corridas que hoy
+    # resuelve en un minuto.
+    cant_procesos = len(procesos or ())
+    max_seg, corte_seg = presupuesto_solver(cant_procesos)
+    logger.info(
+        f"PLANIFICADOR: presupuesto {max_seg}s (corte por estancamiento {corte_seg}s) "
+        f"para {cant_procesos} procesos"
+        + (f" de {cant_ordenes} OT" if cant_ordenes is not None else "")
+    )
+    solver.parameters.max_time_in_seconds = max_seg
     solver.parameters.num_search_workers = int(os.getenv("SOLVER_WORKERS", "0")) or max(2, min(8, os.cpu_count() or 2))
     solver.parameters.log_search_progress = False
 
@@ -2001,6 +2127,8 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # máximo (60s): la solución final aparecía a los pocos segundos y el resto era
     # el solver intentando demostrar que no hay nada mejor — una garantía que al
     # taller no le cambia el plan pero sí lo tiene un minuto mirando el spinner.
+    # `corte_seg` sale del presupuesto (1/6) y no de un número fijo, así que una
+    # tanda chica sigue cortando a los 10 s y una grande espera hasta 40.
     import threading
     import time as _t
 
@@ -2010,7 +2138,6 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
         def on_solution_callback(self):
             _ultima_mejora["t"] = _t.monotonic()
 
-    corte_seg = int(os.getenv("SOLVER_CORTE_SIN_MEJORA_SEG", "10"))
     _fin_vigia = threading.Event()
 
     def _vigia():
@@ -2533,6 +2660,10 @@ async def planificar(
         blocked_dates,
         preseleccion_op,
         maquinas_por_proceso,
+        # Sólo para el log del presupuesto: el cálculo va por procesos, pero el
+        # taller (y la tabla planificacion_intento) hablan en OTs, y cruzar las dos
+        # cifras es lo primero que uno quiere cuando una corrida se satura.
+        len(ordenes),
     )
 
     _marcar_lineas(resultados, linea_por_clave)
@@ -2711,6 +2842,7 @@ async def planificar_pendientes(
             calendarios,
             blocked_dates,
             maquinas_por_proceso=maquinas_por_proceso,
+            cant_ordenes=len(ordenes),
         )
 
         _marcar_lineas(resultados, linea_por_clave)

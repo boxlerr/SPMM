@@ -28,6 +28,7 @@ from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
 from backend.scripts.sync_db import main as sync_main, run_sync as run_sync_once
+from backend.infrastructure.migraciones import aplicar_migraciones
 import os
 from datetime import datetime
 
@@ -165,6 +166,12 @@ async def internal_sync(request: Request):
 
 @app.on_event("startup")
 async def startup_event():
+    # 🔹 DDL que el código nuevo necesita, antes de atender la primera consulta.
+    #    El deploy a Cloud Run es a mano: si el modelo declara una columna que en la
+    #    base no está, el SELECT la pide igual y se cae la lectura de TODAS las OT.
+    #    Ver backend/infrastructure/migraciones.py.
+    await aplicar_migraciones()
+
     print("RUTAS REGISTRADAS:")
     for route in app.routes:
         print(f"  - {route.path} ({getattr(route, 'methods', 'WS')})")
