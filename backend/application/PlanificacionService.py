@@ -2306,6 +2306,28 @@ async def planificar(
     lineas_por_orden: dict[int, list[int]] | None = None,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
+
+    # 🔹 Plan ya armado: se guarda TAL CUAL, sin pasar por el solver.
+    #
+    # Es el camino normal al confirmar desde la vista previa: se guarda lo que el
+    # usuario aprobó en pantalla. Volver a resolver acá tardaba lo mismo que la
+    # vista previa entera y, peor, podía guardar un reparto distinto del que se
+    # miró — el solver no devuelve siempre lo mismo.
+    #
+    # Va PRIMERO, antes de leer nada. Estaba cincuenta líneas más abajo y para
+    # llegar hasta acá el guardado ya se había traído skills, prioridades, rangos,
+    # máquinas por proceso, planos, calendarios y feriados: media docena de consultas
+    # para después no usarlas.
+    #
+    # Devuelve la MISMA forma que el camino del solver ({planificados, excedentes,
+    # diagnosticos}) y no el dict pelado del repositorio: la auditoría lee
+    # `salida["planificados"]` para sacar el id del lote, y con el dict pelado ese
+    # campo venía vacío — los guardados quedaban registrados sin lote.
+    if not preview and plan:
+        logger.info(f"Service - Guardando plan ya armado ({len(plan)} items), sin solver")
+        guardado = await repo_planificacion.insertar_planificacion_lote(plan)
+        return {"planificados": guardado, "excedentes": [], "diagnosticos": []}
+
     forzar_set = set(forzar_ordenes_ids or [])
 
     # 🔹 Inyectar repo de skills si no viene
@@ -2335,11 +2357,6 @@ async def planificar(
     calendarios = calendarios_de_operarios(await repo_operario.find_all())
     # 🔹 Feriados / días de mantenimiento, ahora desde la base.
     blocked_dates = await DiaBloqueadoRepository(db).listar()
-
-    # 🔹 Si nos pasan un plan manual, lo guardamos directamente sin pasar por el solver
-    if not preview and plan:
-        logger.info(f"Service - Guardando plan manual ({len(plan)} items)")
-        return await repo_planificacion.insertar_planificacion_lote(plan)
 
     ##ordenes = await repo_orden.find_with_procesos()
     if ordenes_ids:

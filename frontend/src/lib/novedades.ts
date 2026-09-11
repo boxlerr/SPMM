@@ -61,9 +61,9 @@ export const NOVEDADES: Novedad[] = [
         fecha: "2026-09-10",
         tipo: "arreglo",
         seccion: "Operaciones",
-        titulo: "Guardar la planificación ya no deja la pantalla muda",
+        titulo: "Guardar la planificación es instantáneo y guarda lo que ves",
         detalle:
-            "Al confirmar un plan ahora aparece la misma barra de progreso que ya salía en la vista previa, con el tiempo transcurrido y en qué paso va. Antes no mostraba nada: en un lote grande son hasta 60 segundos sin una sola señal, y parecía que se había colgado. El cartel además aclara algo que sorprendía: guardar vuelve a calcular el plan con las decisiones que tomaste, así que tarda lo mismo que la vista previa, no menos.",
+            "Antes, al apretar Guardar, el sistema volvía a calcular el plan entero: hasta un minuto de pantalla muda, y con una trampa escondida — como el cálculo no da siempre el mismo reparto, podías mirar un plan y guardar otro distinto sin enterarte. Ahora se guarda exactamente lo que está en pantalla, que es lo que aprobaste, y tarda segundos. No hace falta recalcular: cada cosa que tocás acá (forzar una OT, sacarla, editarle los procesos) ya recalcula en el momento, y si cambiás algo en Recursos el plan se revisa solo al volver.",
         href: "/operaciones",
     },
     {

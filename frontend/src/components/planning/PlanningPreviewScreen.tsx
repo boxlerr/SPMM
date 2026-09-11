@@ -456,37 +456,32 @@ export function PlanningPreviewScreen({
     };
 
     /**
-     * Al confirmar, decidimos entre dos rutas:
+     * Guardar = guardar LO QUE ESTÁ EN PANTALLA. No se vuelve a calcular.
      *
-     *  - **Modo forzar (default)**: si el usuario NO asignó manualmente ningún
-     *    proceso "unfit", se confirma como antes — el backend re-corre el solver
-     *    con `forzar_ordenes_ids` y guarda lo que pueda asignar automáticamente.
-     *    Los procesos que el solver no pudo ubicar quedan fuera (no se guardan).
+     * Antes había dos rutas y la de todos los días era la mala: si nadie había
+     * asignado a mano un proceso "unfit", el backend re-corría el solver con
+     * `forzar_ordenes_ids` y guardaba lo que ese segundo cálculo devolviera.
      *
-     *  - **Modo manual+forzar**: si el usuario asignó a mano al menos un proceso
-     *    unfit (operario+maquinaria+horario), armamos un `plan` manual que incluye:
-     *      • Procesos auto-asignados (con cualquier edit del usuario)
-     *      • Procesos unfit completamente asignados a mano
-     *    Los procesos unfit que el usuario NO completó se omiten (no se guardan).
-     *    Esto le da control total sin obligar a completar todo.
+     * Dos problemas, y el segundo es el grave:
+     *
+     *  1. Tardaba. Guardar 5 OT se llevaba 62 segundos (10/09) porque estaba
+     *     resolviendo todo de nuevo, y encima sin mostrar nada en pantalla.
+     *
+     *  2. Podías aprobar un plan y guardar otro. El solver no devuelve siempre lo
+     *     mismo —medido el 10/09 sobre 40 OT: con distinto presupuesto de tiempo
+     *     reparte el trabajo distinto—, así que el plan mirado y el guardado podían
+     *     no coincidir. Nadie se iba a dar cuenta.
+     *
+     * Recalcular no hacía falta: cada decisión que se toma acá —forzar una OT,
+     * quitarla, agregar procesos, editarle los procesos a una OT— YA dispara su
+     * recálculo en el momento, y al volver a la pantalla se compara la huella de
+     * Recursos y se recalcula solo si cambió algo (`revisarSiCambioAlgo`). Para
+     * cuando se aprieta Guardar, lo que está en pantalla es el plan vigente.
+     *
+     * Qué se guarda: los procesos del plan con los retoques hechos a mano, más los
+     * unfit que se completaron. Los unfit a medio completar se omiten, como antes.
      */
     const handleConfirmWithDecisions = () => {
-        // ¿Hay al menos un unfit completamente asignado a mano?
-        let anyManuallyAssigned = false;
-        for (const info of forcedPartialMap.values()) {
-            if (info.unfit.some(u => isUnfitManuallyAssigned(u))) {
-                anyManuallyAssigned = true;
-                break;
-            }
-        }
-
-        if (!anyManuallyAssigned) {
-            // Flujo original: el backend usa el solver con forzar_ordenes_ids.
-            onConfirm({ forzarOrdenIds: Array.from(forzarOrdenIds) });
-            return;
-        }
-
-        // Modo manual: armamos plan completo.
         const manualPlan: any[] = [];
 
         // 1. Procesos auto-asignados (con edits del usuario aplicados).

@@ -41,12 +41,10 @@ const ETAPAS: Etapa[] = [
     { peso: 0.15, titulo: "Ordenando el resultado", Icono: Save },
 ];
 
-/** Al confirmar se vuelve a calcular Y ADEMÁS se guarda, así que el último paso
- *  no es "ordenar el resultado" sino escribirlo. Es el mismo cálculo: por eso
- *  tarda lo mismo que la vista previa y no menos, que era la sorpresa. */
+/** Guardar ya NO vuelve a calcular: escribe el plan que está en pantalla, que es
+ *  el que se aprobó. Una sola etapa, y corta. */
 const ETAPAS_GUARDAR: Etapa[] = [
-    ...ETAPAS.slice(0, 3),
-    { peso: 0.15, titulo: "Guardando el plan", Icono: Save },
+    { peso: 1, titulo: "Guardando el plan", Icono: Save },
 ];
 
 /** Hasta acá llega sola. El resto lo completa la respuesta. */
@@ -57,7 +55,11 @@ const TECHO = 92;
  * presupuesto de 60s y corta a los 10s de dejar de mejorar, pero además hay que leer
  * las OTs con sus procesos y volcar el resultado, y eso crece con el tamaño del lote.
  */
-function duracionEstimada(cantidadOts: number): number {
+function duracionEstimada(cantidadOts: number, modo: "calcular" | "guardar" = "calcular"): number {
+    // Guardar es una escritura, no un cálculo: desde que dejó de pasar por el solver
+    // son segundos, no minutos. Con la estimación vieja la barra se arrastraba al 3%
+    // mientras la pantalla ya se había cerrado.
+    if (modo === "guardar") return Math.max(2, 1 + cantidadOts * 0.15);
     return Math.min(150, 14 + cantidadOts * 1.6);
 }
 
@@ -86,7 +88,7 @@ export function ProgresoPlanificacion({
             return;
         }
         inicio.current = Date.now();
-        const total = duracionEstimada(cantidadOts) * 1000;
+        const total = duracionEstimada(cantidadOts, modo) * 1000;
 
         const id = window.setInterval(() => {
             const transcurrido = Date.now() - inicio.current;
@@ -98,7 +100,7 @@ export function ProgresoPlanificacion({
         }, 200);
 
         return () => window.clearInterval(id);
-    }, [activo, cantidadOts]);
+    }, [activo, cantidadOts, modo]);
 
     useEffect(() => {
         if (listo) setPct(100);
@@ -117,7 +119,7 @@ export function ProgresoPlanificacion({
         }
     }
     const { Icono } = etapa;
-    const tarda = segundos >= Math.round(duracionEstimada(cantidadOts));
+    const tarda = segundos >= Math.round(duracionEstimada(cantidadOts, modo)) * 3;
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
@@ -150,10 +152,8 @@ export function ProgresoPlanificacion({
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                     {modo === "guardar"
-                        ? "Guardar vuelve a calcular el plan con las decisiones que tomaste, así que tarda lo mismo que la vista previa. No cierres esta pantalla. "
-                        : ""}
-                    El porcentaje es una estimación por tiempo; el cálculo termina cuando
-                    encuentra la mejor combinación o deja de mejorar.
+                        ? "Se guarda el plan tal como lo ves; no se vuelve a calcular."
+                        : "El porcentaje es una estimación por tiempo; el cálculo termina cuando encuentra la mejor combinación o deja de mejorar."}
                 </p>
             </div>
         </div>

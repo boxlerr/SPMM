@@ -24,7 +24,7 @@ import { API_URL } from "@/config";
 import { cn } from "@/lib/utils";
 import {
     Search, RefreshCw, Plus, CalendarClock, FileText, AlertTriangle,
-    ClipboardList, CheckCircle2, CircleDashed, ArrowUpDown,
+    ClipboardList, CheckCircle2, CircleDashed, ArrowUpDown, Ban,
 } from "lucide-react";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -380,13 +380,19 @@ export default function OrdenesPage() {
                                                             <span className="tabular-nums text-[11px]">{o.planos}</span>
                                                         </span>
                                                     ) : o.estado_plano === "no_lleva" ? (
-                                                        <span className="text-[11px] text-gray-400" title="El taller marcó que esta pieza no necesita plano">
-                                                            no lleva
+                                                        /* Escrito y con su cartelito, no un guioncito gris:
+                                                           "no lleva" tiene que leerse sin dudar, si no hay
+                                                           que abrir la OT para saberlo (Lucas, 10/09). */
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                                                              title="El taller marcó que esta pieza no necesita plano: no hay que buscarlo">
+                                                            <Ban className="h-3 w-3" />
+                                                            No lleva
                                                         </span>
                                                     ) : (
-                                                        <span className="text-[11px] font-medium text-amber-700"
-                                                              title="No hay plano cargado y nadie marcó que no lleve: hay que buscarlo">
-                                                            falta
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                                                              title="No hay plano cargado y nadie marcó que no lleve: hay que ir a buscarlo">
+                                                            <AlertTriangle className="h-3 w-3" />
+                                                            Falta
                                                         </span>
                                                     )}
                                                 </td>
