@@ -193,9 +193,18 @@
    está la rueda del mouse, que nadie duda de que existe.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-* {
-  scrollbar-width: thin;                    /* Firefox */
-  scrollbar-color: #94a3b8 #e2e8f0;
+/* OJO CON ESTE ORDEN, QUE ES LA TRAMPA.
+   `scrollbar-width` es la propiedad estándar y la entiende Firefox. Pero Chrome
+   también la entiende desde la 121, y cuando la ve DESCARTA todo el estilo de
+   `::-webkit-scrollbar` — o sea que ponerla en `*` anulaba, ella sola, las quince
+   reglas de abajo. La barra quedaba flotante igual que antes.
+   Por eso la estándar va sólo donde de verdad hace falta: en el navegador que NO
+   entiende el pseudo-elemento. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: #94a3b8 #e2e8f0;
+  }
 }
 
 *::-webkit-scrollbar {
@@ -260,7 +269,9 @@
      ahora la barra se ve en todos lados. No se saca de golpe para no tocar cinco
      pantallas por una clase que no molesta. */
   .scrollbar-horizontal-visible {
-    scrollbar-width: thin;
+    /* Vacía a propósito. Quedó porque la usan cinco archivos y ya no hace falta:
+       la barra se ve en todos lados. Tenía `scrollbar-width`, que es justamente lo
+       que le apagaba el estilo a la barra en Chrome. */
   }
 
   .scrollbar-top {
