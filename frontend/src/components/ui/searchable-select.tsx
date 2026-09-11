@@ -10,7 +10,17 @@ interface SearchableSelectProps {
     value?: string;
     onValueChange: (value: string) => void;
     placeholder?: string;
+    /** Va al ENVOLTORIO: ancho, columnas de grilla, márgenes. */
     className?: string;
+    /**
+     * Va al CONTROL: alto, tamaño de letra, bordes.
+     *
+     * Hacían falta las dos. `className` caía en el div de afuera, así que pasarle
+     * `h-8` no hacía nada —el control tiene su `h-9` adentro— y quedaban selects de
+     * 36px al lado de inputs de 32px en la misma fila. Las alturas mezcladas del modal
+     * salían casi todas de acá.
+     */
+    triggerClassName?: string;
     disabled?: boolean;
     /**
      * Dar de alta lo que se está buscando, cuando no está en la lista.
@@ -59,6 +69,7 @@ export function SearchableSelect({
     onValueChange,
     placeholder = "Seleccionar...",
     className,
+    triggerClassName,
     disabled = false,
     onCreate,
     createLabel = "Crear",
@@ -154,7 +165,8 @@ export function SearchableSelect({
                 className={cn(
                     "flex items-center justify-between w-full h-9 px-3 py-2 border border-gray-200 rounded-md bg-white transition-colors text-sm",
                     disabled ? "bg-gray-100 cursor-not-allowed text-gray-400" : "cursor-pointer hover:border-blue-400",
-                    isOpen && "border-blue-500 ring-2 ring-blue-500/20"
+                    isOpen && "border-blue-500 ring-2 ring-blue-500/20",
+                    triggerClassName
                 )}
                 onClick={() => !disabled && setIsOpen(!isOpen)}
             >

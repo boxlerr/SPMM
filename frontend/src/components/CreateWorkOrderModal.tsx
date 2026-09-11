@@ -6,12 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { cn, capitalizeName } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1304,16 +1305,16 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="prioridad" className="text-[11px] font-bold text-gray-400 uppercase">Prioridad <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" triggerClassName="h-8" />
                                         </div>
 
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="cliente" className="text-[11px] font-bold text-gray-400 uppercase">Cliente <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" triggerClassName="h-8" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="sector" className="text-[11px] font-bold text-gray-400 uppercase">Sector <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" triggerClassName="h-8" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="subsector" className="text-[11px] font-bold text-gray-400 uppercase">SubSector</Label>
@@ -1347,7 +1348,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         {/* Producto: selector (busca por código o descripción) + código separado y copiable */}
                                         <div className="md:col-span-3 space-y-1.5">
                                             <Label htmlFor="articulo" className="text-[11px] font-bold text-gray-400 uppercase">Producto / Artículo <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Buscá por código o descripción" className="h-8" />
+                                            <SearchableSelect disabled={isLegacyOT} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Buscá por código o descripción" triggerClassName="h-8" />
                                         </div>
                                         <div className="md:col-span-1 space-y-1.5">
                                             <Label htmlFor="cod_articulo" className="text-[11px] font-bold text-gray-400 uppercase">Código</Label>
@@ -1701,9 +1702,29 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         <div className="flex items-center justify-between">
                                             <div>
                                                 <h3 className="text-base font-semibold text-gray-900">Materias Primas</h3>
-                                                <p className="text-xs text-gray-500">Administra los materiales necesarios para esta orden</p>
+                                                <p className="text-xs text-gray-500">Los materiales que lleva esta orden</p>
                                             </div>
                                         </div>
+
+                                        {/* Decir la verdad: esta solapa NO guarda.
+                                            Las filas que se cargan acá se juntan en pantalla, salen en
+                                            la hoja de pañol al imprimir… y se pierden al guardar: nunca
+                                            viajaron al backend. Y la tabla la escribe el sync del
+                                            sistema viejo cada 5 minutos, así que hacer que guarde no es
+                                            agregar un campo — es decidir quién es el dueño del dato,
+                                            igual que se decidió con los procesos en julio.
+                                            Hasta que eso se decida, es preferible que la pantalla lo
+                                            diga a que alguien cargue veinte materiales y los pierda. */}
+                                        <Alert className="border-amber-200 bg-amber-50/60">
+                                            <AlertTriangle className="h-4 w-4 text-amber-600" />
+                                            <AlertDescription className="text-xs text-amber-900">
+                                                <strong>Esto todavía no se guarda.</strong> Lo que cargues acá sirve
+                                                para imprimir la hoja de pañol de esta orden, pero al cerrar se
+                                                pierde: las materias primas todavía las maneja el sistema viejo y
+                                                se traen solas cada pocos minutos. Si falta un material, cargalo
+                                                allá.
+                                            </AlertDescription>
+                                        </Alert>
 
                                         {/* Upper Form (oculto si la OT viene del legacy) */}
                                         {!isLegacyOT && (

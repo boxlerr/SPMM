@@ -314,7 +314,8 @@ export function ProcesosEditor({
                                 ]}
                                 placeholder="elegir una persona…"
                                 disabled={disabled}
-                                className="h-8 w-[220px] text-xs"
+                                className="w-[220px]"
+                                triggerClassName="h-8 text-xs"
                             />
                         </div>
                     )}
@@ -569,11 +570,17 @@ export function ProcesosEditor({
              </div>
             </div>
 
-            <p className="text-[11px] text-gray-400 flex items-center gap-1.5">
-                <Lock className="w-3 h-3 text-amber-500" />
-                Elegir máquina o persona fuerza que ese proceso se planifique así (preselección), aunque
-                el rango no se lo habilite. Dejalo en <span className="font-medium">"Sin máquina"</span> y{" "}
-                <span className="font-medium">"Sin asignar"</span> para que el planificador decida.
+            {/* Sin `flex`. Con `flex items-center gap-1.5` en un párrafo, CADA pedazo de
+                texto y cada <span> se vuelve un ítem de flex con separación propia: el
+                renglón se partía en bloques con huecos en el medio y se leía cortado
+                ("Dejalo en    «Sin máquina»    y    «Sin asignar»    para que…").
+                El candado va inline adentro del texto, que es donde corresponde. */}
+            <p className="text-[11px] leading-relaxed text-gray-400">
+                <Lock className="inline w-3 h-3 mr-1 align-[-1px] text-amber-500" />
+                Elegir recurso maquinaria o recurso humano fuerza que ese proceso se planifique
+                así (preselección), aunque el rango no se lo habilite. Dejalo en{" "}
+                <span className="font-medium">«Sin máquina»</span> y{" "}
+                <span className="font-medium">«Sin asignar»</span> para que el planificador decida.
             </p>
         </div>
     );

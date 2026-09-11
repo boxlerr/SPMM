@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "modal-ot-mas-prolijo",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "El modal de la orden quedó más prolijo y dice la verdad sobre las materias primas",
+        detalle:
+            "Tres arreglos. El texto de ayuda del pie de Procesos se veía partido en pedazos con huecos raros: ya se lee como una frase. Los desplegables de la solapa General eran cuatro píxeles más altos que los campos de al lado, así que las filas quedaban desparejas; ahora miden lo mismo. Y la solapa Materias Primas ahora avisa que todavía no guarda: lo que se carga ahí sirve para imprimir la hoja de pañol, pero el dueño de ese dato sigue siendo el sistema viejo, así que si falta un material hay que cargarlo allá. Antes no lo decía y se perdía en silencio.",
+        href: "/operaciones",
+    },
+    {
         id: "ver-lo-planificado-en-los-procesos",
         fecha: "2026-09-11",
         tipo: "arreglo",
