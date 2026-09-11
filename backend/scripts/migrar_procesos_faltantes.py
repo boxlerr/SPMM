@@ -4,45 +4,24 @@ Por qué hace falta: el sync dejó de traer los procesos por OT el 6-jul (acuerd
 cutover: SPMM es el único dueño de los procesos, porque el sync los pisaba cada 5
 minutos). Desde entonces, toda OT nueva creada en el sistema viejo llega SIN procesos.
 
+QUÉ FILA ES UN PROCESO Y CUÁL NO (arreglado el 10/09/2026)
+
+`dbo.otrabajoProceso` no es la lista de procesos de la OT: es el PARTE DE TRABAJO.
+Cada fila tiene `empleado`, `fecha`, `hinicio`, `hfinal` y `REMITO`. Conviven las
+LÍNEAS DE PLAN —sin empleado ni fecha, sólo el estimado, que son los procesos— con
+los PARTES —con empleado y fecha: trabajo ya hecho, casi siempre ya remitado—.
+
+Este script las leía todas. Por eso una OT terminaba con los pasos duplicados: cada
+sesión de trabajo entraba como un proceso más. Ahora se queda con las líneas de
+plan, y si la OT no tiene ninguna, agrupa los partes por proceso sumando los
+tiempos — que es la única lectura posible cuando el trabajo se hizo sin plan
+cargado.
+
 Corre en seco por defecto. Con --aplicar escribe.
 
     venv/bin/python -m backend.scripts.migrar_procesos_faltantes
     venv/bin/python -m backend.scripts.migrar_procesos_faltantes --aplicar
 """
-
-# ---------------------------------------------------------------------------
-# 🚫 FRENADO EL 10/09/2026 — NO CORRER
-#
-# Este script lee `dbo.otrabajoProceso` entera, y esa tabla NO es la lista de
-# procesos de la OT: es el PARTE DE TRABAJO (tiene `empleado`, `fecha`, `hinicio`,
-# `hfinal`, `REMITO`). Mezcla dos cosas:
-#   · líneas de plan  -> sin empleado ni fecha. Esos SÍ son los procesos.
-#   · partes de trabajo -> con empleado y fecha. Trabajo ya hecho, casi siempre ya
-#     remitado. NO son procesos a planificar.
-#
-# Al no distinguirlos, metió partes como si fueran pasos: la OT 13345 pasó de 12
-# procesos a 20 y la 13813 de 3 a 23 sesiones de torno de 2025 ya facturadas. En
-# total, 22 de las 175 OT abiertas quedaron con procesos de más y minutos inflados.
-#
-# Para volver atrás:  backend/scripts/limpiar_partes_de_trabajo.py
-# Para ver el estado: backend/scripts/auditoria_procesos_vs_legacy.py
-#
-# Si alguna vez hace falta reactivarlo, hay que filtrar por línea de plan
-# (`_es_linea_de_plan` en auditoria_procesos_vs_legacy) antes de insertar nada.
-# ---------------------------------------------------------------------------
-import sys as _sys
-
-# Sólo frena si alguien lo EJECUTA. Al importarlo no: `auditoria_procesos_vs_legacy`
-# y `limpiar_partes_de_trabajo` reusan sus helpers de parseo (_minutos, _nombre), que
-# están bien — lo que estaba mal era qué filas leía, no cómo las leía.
-if __name__ == "__main__" and "--sin-freno" not in _sys.argv:
-    print(__doc__.split("\n")[0])
-    print("\n🚫 FRENADO: este script metía los PARTES DE TRABAJO del legacy como si fueran")
-    print("   procesos de la OT. Rompió 22 OT el 31/8. Ver el comentario de arriba.")
-    print("\n   Para ver el estado real:  python -m backend.scripts.auditoria_procesos_vs_legacy --abiertas")
-    print("   Para revertir el daño:    python -m backend.scripts.limpiar_partes_de_trabajo --abiertas")
-    _sys.exit(1)
-
 
 import asyncio, os, re, sys
 import asyncpg
@@ -99,35 +78,38 @@ async def main():
 
         lista = ",".join(str(v) for v in por_vieja)
         crudas = await sync_db._leer(f"""
-            SELECT op.Idot AS idot, op.orden, op.proceso, op.total
+            SELECT op.Idot AS idot, op.orden, op.proceso, op.total,
+                   op.empleado, op.fecha
             FROM dbo.otrabajoProceso op
             WHERE op.Idot IN ({lista})
         """)
 
-        catalogo = {r["nombre"].strip().upper(): r["id"]
+        # Mismo normalizador que usa la comparación (_clave): colapsa los espacios de
+        # adentro. Sin eso, un proceso del catálogo escrito con doble espacio
+        # —'ENSAMBLAJE, PUNTEADO  Y ESCUADRADO', que existe— no machearía nunca y se
+        # contaría como "nombre que no está en el catálogo".
+        from backend.scripts.auditoria_procesos_vs_legacy import _clave
+        catalogo = {_clave(r["nombre"]): r["id"]
                     for r in await c.fetch("select id, nombre from proceso")}
 
-        # UNA FILA POR LÍNEA DEL LEGACY. Hasta el 28/08/2026 acá se agrupaba por
-        # (OT, proceso) sumando los tiempos, porque la PK de orden_trabajo_proceso no
-        # dejaba repetir un proceso dentro de la misma OT. Ya no: la fila tiene id
-        # propio y el legacy carga una fila por PASADA. Si el taller puso TORNO CNC
-        # 13 veces, van las 13 — cómo trabajan es decisión de ellos.
-        # Ver migrations/2026-08-28_proceso_repetido_en_ot.sql.
+        # Sólo las LÍNEAS DE PLAN, y si no hay ninguna, los partes agrupados.
+        # `_procesos_del_legacy` es el mismo criterio que usa la auditoría: una sola
+        # lectura del legacy para los dos, así no se pueden ir separando.
+        from backend.scripts.auditoria_procesos_vs_legacy import _por_ot, _procesos_del_legacy
+
         filas, sin_match = [], {}
-        for r in crudas:
-            nom = _nombre(r["proceso"])
-            if not nom:
-                continue
-            pid = catalogo.get(nom.strip().upper())
-            if pid is None:
-                sin_match[nom] = sin_match.get(nom, 0) + 1
-                continue
-            filas.append({
-                "id_ot": por_vieja[r["idot"]],
-                "id_proceso": pid,
-                "orden": r["orden"] or 1,
-                "minutos": _minutos(r["total"]),
-            })
+        for idot, crudas_ot in _por_ot(crudas).items():
+            for orden, nom, minutos in _procesos_del_legacy(crudas_ot):
+                pid = catalogo.get(nom)
+                if pid is None:
+                    sin_match[nom] = sin_match.get(nom, 0) + 1
+                    continue
+                filas.append({
+                    "id_ot": por_vieja[idot],
+                    "id_proceso": pid,
+                    "orden": orden,
+                    "minutos": minutos,
+                })
 
         filas.sort(key=lambda f: (f["id_ot"], f["orden"]))
         ots_tocadas = {f["id_ot"] for f in filas}

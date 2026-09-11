@@ -31,7 +31,16 @@ Los números son de OT VIEJA (id_otvieja), que es el que se ve en pantalla.
 """
 
 # ---------------------------------------------------------------------------
-# 🚫 FRENADO EL 10/09/2026 — NO CORRER
+# 🚫 OBSOLETO Y FRENADO EL 10/09/2026 — NO CORRER
+#
+# Este script nació de una lectura equivocada de la base vieja, no de un bug: se
+# creyó que el legacy guardaba "una fila por PASADA" del proceso y que la migración
+# de julio se las había comido. No era eso. Lo que el legacy guarda son PARTES DE
+# TRABAJO —quién trabajó, qué día, de qué hora a qué hora, en qué remito se
+# facturó—, y la migración de julio hacía bien en agruparlos.
+#
+# Ya no hace falta arreglarlo: con el criterio correcto, `migrar_procesos_faltantes`
+# hace lo único que había que hacer. Este queda como registro de qué pasó.
 #
 # Este script lee `dbo.otrabajoProceso` entera, y esa tabla NO es la lista de
 # procesos de la OT: es el PARTE DE TRABAJO (tiene `empleado`, `fecha`, `hinicio`,
@@ -46,9 +55,6 @@ Los números son de OT VIEJA (id_otvieja), que es el que se ve en pantalla.
 #
 # Para volver atrás:  backend/scripts/limpiar_partes_de_trabajo.py
 # Para ver el estado: backend/scripts/auditoria_procesos_vs_legacy.py
-#
-# Si alguna vez hace falta reactivarlo, hay que filtrar por línea de plan
-# (`_es_linea_de_plan` en auditoria_procesos_vs_legacy) antes de insertar nada.
 # ---------------------------------------------------------------------------
 import sys as _sys
 
