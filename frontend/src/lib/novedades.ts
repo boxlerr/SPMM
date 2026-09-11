@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "el-formulario-de-la-orden-usa-la-pantalla",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "El formulario de la orden ya usa la pantalla entera",
+        detalle:
+            "Se abría angosto, con cuatro campos apretados en media pantalla: el cliente aparecía cortado («INDUSTRIAS CERAM…»), los rótulos de las solapas también, y había que scrollear para ver la ficha completa. Ahora ocupa el ancho de la pantalla y en la solapa de datos entran seis campos por fila en vez de cuatro. Los mismos campos y los mismos datos: lo que cambió es que se ven.",
+        href: "/operaciones",
+    },
+    {
         id: "acordeon-en-el-listado-de-ot",
         fecha: "2026-09-11",
         tipo: "mejora",
