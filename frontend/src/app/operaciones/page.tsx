@@ -36,7 +36,7 @@ import { PlanningSelectionScreen } from "@/components/planning/PlanningSelection
 import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
 import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
-import type { BorradorPlan } from "@/lib/borradorPlan"
+import type { BorradorPlan, TandaManual } from "@/lib/borradorPlan"
 import { huellaRecursos } from "@/lib/huellaRecursos"
 import {
   Select,
@@ -114,7 +114,18 @@ export default function OperacionesPage() {
   const { registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo, idBorradorEnBase } = useBorradorPlan()
   // Lo que devolvió el solver, para poder recomponer el borrador entero cuando lo
   // único que cambió fue una edición hecha dentro de la vista previa.
-  const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "guardadoEn"> | null>(null)
+  const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "tandasManuales" | "guardadoEn"> | null>(null)
+  /**
+   * Lo último que avisó la vista previa, para poder recomponer el borrador ENTERO
+   * desde cualquiera de los dos avisos.
+   *
+   * Los retoques a mano y lo que se agregó a mano llegan por callbacks distintos y
+   * en momentos distintos. Si cada uno armara el borrador con lo suyo y vacío lo
+   * del otro, el último en hablar le borraría al otro su parte —y el borrador
+   * terminaría sin las pasadas elegidas, que es justo lo que se está arreglando.
+   */
+  const retoquesBorrador = useRef<{ ediciones: Record<string, any>; forzarOrdenIds: number[] }>({ ediciones: {}, forzarOrdenIds: [] })
+  const tandasBorrador = useRef<TandaManual[]>([])
   /** Cuándo se calculó el plan que se está viendo. Al retomar un borrador es la
    *  fecha del borrador, no la de ahora: es lo que permite avisar que la foto de
    *  diagnósticos puede haber quedado vieja. */
@@ -127,6 +138,7 @@ export default function OperacionesPage() {
    *  Con un plan nuevo van vacíos, que es lo que los limpia. */
   const [edicionesIniciales, setEdicionesIniciales] = useState<Record<string, any>>({})
   const [forzarIdsIniciales, setForzarIdsIniciales] = useState<number[]>([])
+  const [tandasIniciales, setTandasIniciales] = useState<TandaManual[]>([])
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -866,12 +878,26 @@ export default function OperacionesPage() {
       const huellaPromesa = huellaRecursos();
       // Con timeout: el 15/08 el servidor murió a mitad de un cálculo y el
       // "Calculando planificación..." quedó clavado para siempre — sin límite,
-      // un request muerto es indistinguible de uno lento. 3 minutos alcanza de
-      // sobra (el solver corta a los 60s) y si no llegó, algo se rompió.
+      // un request muerto es indistinguible de uno lento.
+      //
+      // Los 7 minutos son el número más chico de toda la cadena, así que es ÉSTE el
+      // que decide cuánto se banca una tanda grande: con los 3 que había, una de 60
+      // OT —244 segundos medidos— la cortaba el navegador aunque el servidor la
+      // terminara bien, y el trabajo se perdía entero.
+      //
+      // De dónde sale el 420 y no el 300 que parecía alcanzar. Aquellos 244 segundos
+      // se midieron con el presupuesto del solver ya puesto en 240, así que son
+      // ~240 de solver más una decena de armar y volcar. Con el presupuesto que
+      // ahora calcula el backend por tamaño de lote, el techo sigue siendo 240 —o
+      // sea que el piso de una tanda grande no baja— y todo lo que crezca alrededor
+      // (leer más OTs, más diagnósticos) se suma encima. 300 dejaba 56 segundos de
+      // aire sobre una medición sola; 420 deja casi tres minutos y sigue lejos de
+      // los 600 a los que corta el servidor, que es el tope duro que no conviene
+      // tocar. Es mejor esperar de más una vez que perder una tanda de 60 OT.
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(420_000),
         body: JSON.stringify({
           ordenes_ids: ids,
           preview: true,
@@ -962,14 +988,18 @@ export default function OperacionesPage() {
         huella,
       };
       setHuellaPlan(huella);
-      // Plan nuevo: no hay retoques previos que restaurar.
+      // Plan nuevo: no hay retoques ni nada agregado a mano que restaurar.
       setEdicionesIniciales({});
       setForzarIdsIniciales([]);
+      setTandasIniciales([]);
+      retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
+      tandasBorrador.current = [];
       setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
         ediciones: {},
         forzarOrdenIds: [],
+        tandasManuales: [],
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1053,12 +1083,13 @@ export default function OperacionesPage() {
     setPlanningRange(range);
 
     try {
-      // Igual que en el primer cálculo: la foto de Recursos se pide en paralelo.
+      // Igual que en el primer cálculo: la foto de Recursos se pide en paralelo, y
+      // el mismo tope de 5 minutos (el motivo está escrito en `handlePlanSelection`).
       const huellaPromesa = huellaRecursos();
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(420_000),
         body: JSON.stringify({
           ordenes_ids: ids,
           preview: true,
@@ -1134,10 +1165,16 @@ export default function OperacionesPage() {
       };
       setHuellaPlan(huella);
       setPlanCalculadoEn(new Date().toISOString());
+      // Un recálculo NO empieza de cero: la vista previa se queda con lo agregado a
+      // mano y con los retoques, así que el borrador tiene que guardarlos también.
+      // Escribir vacío acá los borraba de la base sin que nadie hubiera deshecho
+      // nada, y este guardado limpia el debounce, así que tampoco volvían después.
+      // Para cuando llega acá los dos están al día: la vista previa avisa en el
+      // render que sigue al click y esto corre recién cuando contestó el solver.
       void guardarYa({
         ...baseBorrador.current,
-        ediciones: {},
-        forzarOrdenIds: [],
+        ...retoquesBorrador.current,
+        tandasManuales: tandasBorrador.current,
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1165,15 +1202,35 @@ export default function OperacionesPage() {
     }
   };
 
-  /** Cada retoque de la vista previa (máquina, operario, horario, forzar una OT).
-   *  Guarda en el navegador al instante y en la base a los pocos segundos. */
-  const handleEdicionesBorrador = useCallback((ediciones: Record<string, any>, forzarOrdenIds: number[]) => {
+  /** El borrador entero, armado con el plan que devolvió el solver más todo lo que
+   *  la vista previa fue avisando. Guarda en el navegador al instante y en la base
+   *  a los pocos segundos. */
+  const registrarBorrador = useCallback(() => {
     const base = baseBorrador.current;
-    // Sin base no hay plan calculado todavía: el modal dispara este efecto al
-    // montarse con las ediciones vacías, y eso no es un borrador.
+    // Sin base no hay plan calculado todavía: el modal dispara estos avisos al
+    // montarse, con todo vacío, y eso no es un borrador.
     if (!base) return;
-    registrarCambio({ ...base, ediciones, forzarOrdenIds, guardadoEn: new Date().toISOString() });
+    registrarCambio({
+      ...base,
+      ...retoquesBorrador.current,
+      tandasManuales: tandasBorrador.current,
+      guardadoEn: new Date().toISOString(),
+    });
   }, [registrarCambio]);
+
+  /** Cada retoque de la vista previa (máquina, operario, horario, forzar una OT). */
+  const handleEdicionesBorrador = useCallback((ediciones: Record<string, any>, forzarOrdenIds: number[]) => {
+    retoquesBorrador.current = { ediciones, forzarOrdenIds };
+    registrarBorrador();
+  }, [registrarBorrador]);
+
+  /** Cada cambio en lo que se agregó a mano (tandas nuevas, deshacer, quitar una
+   *  OT o una pasada). Sin esto el borrador volvía sin nada agregado a mano y el
+   *  primer recálculo le devolvía a cada OT todos sus procesos. */
+  const handleTandasBorrador = useCallback((tandas: TandaManual[]) => {
+    tandasBorrador.current = tandas;
+    registrarBorrador();
+  }, [registrarBorrador]);
 
   /** Retomar un plan calculado y sin confirmar: se abre tal cual quedó, sin
    *  recalcular. Lo que se pierde recalculando son los minutos del solver y los
@@ -1199,6 +1256,14 @@ export default function OperacionesPage() {
     // el 19/08 pero la vista previa nunca los recibía y se perdían todos.
     setEdicionesIniciales(borrador.ediciones || {});
     setForzarIdsIniciales(borrador.forzarOrdenIds || []);
+    // Lo agregado a mano vuelve con el borrador. Los guardados antes del 11/09 no lo
+    // traen: ésos se abren como se abrían, sin nada marcado, y no se rompe nada.
+    setTandasIniciales(borrador.tandasManuales || []);
+    retoquesBorrador.current = {
+      ediciones: borrador.ediciones || {},
+      forzarOrdenIds: borrador.forzarOrdenIds || [],
+    };
+    tandasBorrador.current = borrador.tandasManuales || [];
     setPlanCalculadoEn(borrador.guardadoEn);
     // El autosave pasa a pisar ESTE borrador en vez de crear uno nuevo.
     adoptar(borrador);
@@ -1221,11 +1286,12 @@ export default function OperacionesPage() {
     try {
       setIsConfirmingPlan(true);
 
-      // Confirmar TAMBIÉN pasa por el solver —vuelve a calcular con las decisiones
-      // tomadas— y en un lote grande eso es un minuto. Hasta ahora no mostraba nada:
-      // el 10/09 Lucas estuvo 62 segundos frente a una pantalla muda y concluyó "se
-      // clavó, ¿no?". Frenaron la planificación por eso. La vista previa sí lo
-      // mostraba; faltaba acá.
+      // Confirmar escribe el plan que está en pantalla y en un lote grande eso
+      // igual son varios segundos de ida y vuelta. Hasta el 10/09 no mostraba nada:
+      // Lucas estuvo 62 segundos frente a una pantalla muda y concluyó "se clavó,
+      // ¿no?". Frenaron la planificación por eso. La vista previa sí lo mostraba;
+      // faltaba acá. (Ese día confirmar todavía volvía a pasar por el solver; ya no,
+      // pero la pantalla muda seguiría estando mal igual.)
       setCalculando({ activo: true, ots: selectedOrderIds.length, listo: false, modo: "guardar" });
 
       // Distinguir entre el caso "manual plan" (array) y el nuevo "decisiones de excedentes" ({forzarOrdenIds})
@@ -1246,10 +1312,14 @@ export default function OperacionesPage() {
         finalOrdenIds = selectedOrderIds.filter(id => !excedentesOrdenIds.has(id) || forzarSet.has(id));
       }
 
+      // Mismo tope de 5 minutos que el cálculo aunque acá no haya solver: es una
+      // escritura de todos los procesos del lote, y cortarla antes de tiempo es
+      // peor que cortar un cálculo —el plan queda sin guardar después de que
+      // alguien ya lo aprobó, y hay que volver a revisarlo entero—.
       const response = await fetch(`${API_URL}/planificar`, {
         method: "POST",
         headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(180_000),
+        signal: AbortSignal.timeout(420_000),
         body: JSON.stringify({
           ordenes_ids: finalOrdenIds,
           preview: false,
@@ -1284,6 +1354,9 @@ export default function OperacionesPage() {
       setHuellaPlan(undefined);
       setEdicionesIniciales({});
       setForzarIdsIniciales([]);
+      setTandasIniciales([]);
+      retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
+      tandasBorrador.current = [];
 
       setCalculando(c => ({ ...c, listo: true }));
 
@@ -1396,6 +1469,7 @@ export default function OperacionesPage() {
               setIsSelectionModalOpen(true);
             }}
             onEdicionesChange={handleEdicionesBorrador}
+            onTandasChange={handleTandasBorrador}
             calculadoEn={planCalculadoEn}
             onConfirm={handleConfirmPlan}
             results={previewResults}
@@ -1413,6 +1487,7 @@ export default function OperacionesPage() {
             huellaAlCalcular={huellaPlan}
             edicionesIniciales={edicionesIniciales}
             forzarIdsIniciales={forzarIdsIniciales}
+            tandasIniciales={tandasIniciales}
           />
         </div>
       ) : (

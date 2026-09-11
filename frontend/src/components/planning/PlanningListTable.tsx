@@ -340,12 +340,38 @@ function _PlanningListTable({
         return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
     };
 
+    /** ¿Lo que se lee en la columna Producto sale de la observación de la ORDEN?
+     *
+     *  Las OT sin artículo (NO-DEF) y las heredadas del viejo no tienen nombre de
+     *  producto: ahí el texto que se ve es la observación de la propia orden. Es la única
+     *  situación en la que escribir en esa celda guarda en el mismo lugar del que la celda
+     *  lee. Con un artículo de verdad lo que se muestra es el nombre del artículo, que
+     *  comparten todas las OT que fabrican esa pieza. */
+    const esOrdenSinArticuloPropio = (item: WorkOrder) =>
+        item.articulo?.cod_articulo === 'NO-DEF' ||
+        !!item.articulo?.descripcion?.toLowerCase().includes('heredado');
+
+    /** ¿Esta celda se puede editar? Sí en las órdenes sin artículo propio: ahí lo que
+     *  se escribe va a las observaciones de la orden, que es de donde la celda lee.
+     *
+     *  OJO CON QUÉ SE PRECARGA EL CAMPO. Mientras la orden todavía no tiene nada
+     *  escrito, la celda muestra el texto genérico del artículo NO-DEF —el mismo para
+     *  todas— y precargar el editor con ESO hacía que un click y un Enter le sembraran
+     *  a la orden una descripción que nadie escribió, como si fuera propia. Por eso el
+     *  editor abre con `valorEditableDeDescripcion`, que en ese caso abre vacío. */
+    const descripcionSaleDeObservaciones = (item: WorkOrder) =>
+        esOrdenSinArticuloPropio(item);
+
     const getEditableProductDescription = (item: WorkOrder) => {
-        if ((item.articulo?.cod_articulo === 'NO-DEF' || item.articulo?.descripcion?.toLowerCase().includes('heredado')) && item.observaciones) {
+        if (descripcionSaleDeObservaciones(item) && item.observaciones) {
             return item.observaciones;
         }
         return item.articulo?.descripcion;
     };
+
+    /** Lo que se le pone al campo al abrirlo: la observación de la orden y nada más.
+     *  Vacía si no hay, para que lo que quede escrito sea lo que escribió la persona. */
+    const valorEditableDeDescripcion = (item: WorkOrder) => item.observaciones || "";
 
 
     const getScheduledStart = (ordenId: number, procesoId: number) => {
@@ -599,6 +625,21 @@ function _PlanningListTable({
     const [deliveryOrder, setDeliveryOrder] = React.useState<{ id: number, total: number, delivered: number } | null>(null);
     const [incidencia, setIncidencia] = React.useState<{ orderId: number, procesoId: number, procesoNombre: string, operarioId: number | null, operarioNombre: string } | null>(null);
 
+    /** El aviso de que la celda se puede editar.
+     *
+     *  Ocho celdas de esta fila se editan con un click y ninguna lo decía: aparecía un
+     *  campo con un tilde y una cruz sin que nada lo hubiera anunciado ("qué es esa
+     *  edición poronga, no entiendo", Julián 10/09). En el detalle ya había una celda que
+     *  sí se entendía —Inicio Estimado— y se entendía por esto: un lápiz tenue que sale
+     *  al pasar el mouse. Al pasar el mouse y no fijo, porque la tabla tiene veinte
+     *  columnas y ocho lápices dibujados todo el tiempo serían ruido, no ayuda.
+     *  Mientras la celda se está editando el lápiz no va: taparía el campo. */
+    const lapizDeCelda = (ordenId: number, campo: string) => (
+        editingOrder?.id === ordenId && editingOrder.field === campo ? null : (
+            <Pencil className="pointer-events-none absolute right-1 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-400 opacity-0 transition-opacity group-hover/edit:opacity-100" />
+        )
+    );
+
     const handleTextClick = (orderId: number, field: string, currentValue: string | undefined | number) => {
         const val = currentValue?.toString() || "";
         setEditingOrder({
@@ -678,7 +719,19 @@ function _PlanningListTable({
         }
     };
 
+    /** Escape estaba cancelando a medias: el campo tiene `onBlur` que guarda, así que si
+     *  el navegador manda el blur al desmontarse el input, el cambio que se quería tirar
+     *  se guardaba igual. La bandera dura lo que dura ese desmonte y se limpia al abrir
+     *  el editor, así no se queda pegada. */
+    const cancelandoInicio = React.useRef(false);
+
+    const cancelarInicioEstimado = () => {
+        cancelandoInicio.current = true;
+        setEditingStartDate(null);
+    };
+
     const handleStartDateClick = (orderId: number, processId: number, currentValue: string) => {
+        cancelandoInicio.current = false;
         if (!planificacion) return;
         const item = planificacion.find(p => p.orden_id === orderId && p.proceso_id === processId);
         if (!item) return;
@@ -710,6 +763,10 @@ function _PlanningListTable({
     };
 
     const handleStartDateSave = async () => {
+        if (cancelandoInicio.current) {
+            cancelandoInicio.current = false;
+            return;
+        }
         if (!editingStartDate) return;
         // console.log("Saving new start date:", editingStartDate.value);
 
@@ -761,8 +818,36 @@ function _PlanningListTable({
     };
 
     const renderDetails = (item: WorkOrder) => (
-        <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
-            <div className="p-2 mb-2">
+        <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner flex flex-col">
+            {/* Los archivos: abajo y PLEGADOS.
+                Arriba la galería se llevaba media pantalla —casi siempre vacía— y empujaba
+                Producción, que es justamente para lo que uno despliega la fila. Mismo
+                criterio que en el otro listado de OT, incluido el cómo: se reordena con
+                `order-*` sobre el contenedor flex y NO moviendo el JSX, porque mover este
+                bloque ya rompió el archivo una vez. `<details>` nativo: ni una línea de
+                estado nueva.
+                Plegado no esconde nada que haga falta para trabajar: adentro sólo hay
+                archivos para mirar. */}
+            <details className="group/extra order-2 border-t border-gray-200">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight text-gray-500 hover:bg-gray-50">
+                    <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open/extra:rotate-90" />
+                    Planos y archivos
+                </summary>
+                <div className="border-t border-gray-100">
+            <div className="px-2 py-2">
+                <OrderFiles orderId={item.id} />
+            </div>
+                </div>
+            </details>
+
+            {/* La barra de entrega NO se pliega, y no es un olvido.
+                Lo que se plegó arriba —la galería de archivos— es de sólo leer. Esta
+                barra HACE algo: se le hace click y se registra una entrega. En la
+                tarjeta de celular es además el ÚNICO camino, porque ahí no está la
+                columna «Entrega» de la fila. Metiéndola adentro del plegable, cargar
+                una entrega desde el teléfono pasaba de dos toques a tres, y el tercero
+                atrás de un rótulo que dice «archivos». */}
+            <div className="order-3 p-2 border-t border-gray-200">
                 <div
                     className="cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all"
                     onClick={(e) => {
@@ -780,10 +865,9 @@ function _PlanningListTable({
                     />
                 </div>
             </div>
-            <div className="px-2 pb-2">
-                <OrderFiles orderId={item.id} />
-            </div>
-            <div className="w-full text-sm">
+
+            {/* Producción primero: `order-1` contra el `order-2` del plegable de arriba. */}
+            <div className="order-1 w-full text-sm">
                 <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[40px_3fr_110px_110px_70px_70px_2fr_2fr] gap-3 px-4 py-2 font-bold border-t border-gray-200">
                     <div>#</div>
                     <div>Proceso</div>
@@ -852,7 +936,7 @@ function _PlanningListTable({
                                             <div
                                                 className="group relative flex items-center justify-center gap-1 text-xs font-medium text-amber-900 bg-amber-50/80 px-2 py-1 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
                                                 onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
-                                                title="Click para editar fecha de inicio estimada"
+                                                title="Click para editar el inicio estimado (Enter guarda, Escape cancela)"
                                             >
                                                 <CalendarClock className="w-3 h-3 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
                                                 {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
@@ -862,7 +946,10 @@ function _PlanningListTable({
                                                         value={editingStartDate.value}
                                                         onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
                                                         onBlur={handleStartDateSave}
-                                                        onKeyDown={(e) => e.key === 'Enter' && handleStartDateSave()}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') handleStartDateSave();
+                                                            if (e.key === 'Escape') cancelarInicioEstimado();
+                                                        }}
                                                         autoFocus
                                                         onClick={(e) => e.stopPropagation()}
                                                     />
@@ -1452,7 +1539,12 @@ function _PlanningListTable({
                                             </td>
                                             <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
                                             <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
-                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrada', item.fecha_entrada); }} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm"
+                                                title="Click para editar la fecha de entrada"
+                                                onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrada', item.fecha_entrada); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrada' ? (
                                                     <input
                                                         type="date"
@@ -1466,10 +1558,38 @@ function _PlanningListTable({
                                                 ) : (
                                                     formatDate(item.fecha_entrada)
                                                 )}
+                                                {lapizDeCelda(item.id, 'fecha_entrada')}
                                             </td>
                                             <td className="px-3 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
                                             <td className="px-3 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>
-                                            <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px] cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'observaciones', getEditableProductDescription(item)); }} onDoubleClick={(e) => e.stopPropagation()}>
+                                            {/* Mostraba una cosa y guardaba en otra: la celda lee la descripción del
+                                                ARTÍCULO y el guardado escribía en la observación de la ORDEN. En
+                                                una OT con artículo de verdad eso daba lo peor de los dos mundos —la
+                                                celda volvía sola al valor viejo, como si no hubiera guardado, y de
+                                                paso le pisaba la observación sin avisar—.
+                                                Queda editable SÓLO donde las dos puntas son la misma cosa: las OT
+                                                sin artículo y las heredadas, donde la observación ES lo que la celda
+                                                muestra. Ahí ya andaba y sigue andando igual.
+                                                Con un artículo cargado la celda pasa a ser de lectura, que es lo que
+                                                de hecho ya era —el cambio nunca se veía—. Hacerla guardar de verdad
+                                                sería cambiarle el nombre al artículo desde una orden, y ese nombre
+                                                lo comparten todas las OT que fabrican la pieza: es otra cosa, y no
+                                                se decide acá. */}
+                                            <td
+                                                className={cn(
+                                                    "px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px]",
+                                                    descripcionSaleDeObservaciones(item) && "group/edit relative cursor-pointer hover:bg-black/5 rounded-sm"
+                                                )}
+                                                title={descripcionSaleDeObservaciones(item)
+                                                    ? `${getEditableProductDescription(item) || "Sin descripción"}\n\nClick para escribir la descripción de ESTA orden`
+                                                    : getEditableProductDescription(item)}
+                                                onClick={descripcionSaleDeObservaciones(item)
+                                                    ? (e) => { e.stopPropagation(); handleTextClick(item.id, 'observaciones', valorEditableDeDescripcion(item)); }
+                                                    : undefined}
+                                                onDoubleClick={descripcionSaleDeObservaciones(item)
+                                                    ? (e) => e.stopPropagation()
+                                                    : undefined}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'observaciones' ? (
                                                     <input
                                                         type="text"
@@ -1481,12 +1601,18 @@ function _PlanningListTable({
                                                         autoFocus
                                                     />
                                                 ) : (
-                                                    <span className="line-clamp-2" title={getEditableProductDescription(item)}>
+                                                    <span className="line-clamp-2">
                                                         {getEditableProductDescription(item) || "-"}
                                                     </span>
                                                 )}
+                                                {descripcionSaleDeObservaciones(item) && lapizDeCelda(item.id, 'observaciones')}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'n_pedido', item.n_pedido || item.n_ped_l); }} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm"
+                                                title="Click para editar el N° de pedido"
+                                                onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'n_pedido', item.n_pedido || item.n_ped_l); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'n_pedido' ? (
                                                     <input
                                                         type="text"
@@ -1500,8 +1626,14 @@ function _PlanningListTable({
                                                 ) : (
                                                     item.n_pedido || item.n_ped_l || "-"
                                                 )}
+                                                {lapizDeCelda(item.id, 'n_pedido')}
                                             </td>
-                                            <td className="px-3 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'unidades', item.unidades); }} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm"
+                                                title="Click para editar la cantidad"
+                                                onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'unidades', item.unidades); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'unidades' ? (
                                                     <input
                                                         type="number"
@@ -1515,6 +1647,7 @@ function _PlanningListTable({
                                                 ) : (
                                                     item.unidades ?? "-"
                                                 )}
+                                                {lapizDeCelda(item.id, 'unidades')}
                                             </td>
                                             <td className="px-3 py-3 text-center">
                                                 <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
@@ -1592,7 +1725,12 @@ function _PlanningListTable({
                                             </td>
 
                                             {/* Editable F. Prometida */}
-                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 font-medium cursor-pointer hover:bg-black/5"
+                                                title="Click para editar la fecha prometida"
+                                                onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_prometida' ? (
                                                     <input
                                                         type="date"
@@ -1606,10 +1744,16 @@ function _PlanningListTable({
                                                 ) : (
                                                     formatDate(item.fecha_prometida)
                                                 )}
+                                                {lapizDeCelda(item.id, 'fecha_prometida')}
                                             </td>
 
                                             {/* Editable F. Entrega */}
-                                            <td className="px-3 py-3 text-gray-500 cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 text-gray-500 cursor-pointer hover:bg-black/5"
+                                                title="Click para editar la fecha de entrega"
+                                                onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrega' ? (
                                                     <input
                                                         type="date"
@@ -1630,8 +1774,14 @@ function _PlanningListTable({
                                                         </div>
                                                     )
                                                 )}
+                                                {lapizDeCelda(item.id, 'fecha_entrega')}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'aprobado_por', item.aprobado_por); }} title={item.aprobado_por || "-"} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm"
+                                                title={`${item.aprobado_por || "Sin cargar"} · click para editar quién aprobó la orden`}
+                                                onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'aprobado_por', item.aprobado_por); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'aprobado_por' ? (
                                                     <input
                                                         type="text"
@@ -1645,8 +1795,14 @@ function _PlanningListTable({
                                                 ) : (
                                                     item.aprobado_por || "-"
                                                 )}
+                                                {lapizDeCelda(item.id, 'aprobado_por')}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'requerido_por', item.requerido_por); }} title={item.requerido_por || "-"} onDoubleClick={(e) => e.stopPropagation()}>
+                                            <td
+                                                className="group/edit relative px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm"
+                                                title={`${item.requerido_por || "Sin cargar"} · click para editar quién pidió la orden`}
+                                                onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'requerido_por', item.requerido_por); }}
+                                                onDoubleClick={(e) => e.stopPropagation()}
+                                            >
                                                 {editingOrder?.id === item.id && editingOrder.field === 'requerido_por' ? (
                                                     <input
                                                         type="text"
@@ -1660,6 +1816,7 @@ function _PlanningListTable({
                                                 ) : (
                                                     item.requerido_por || "-"
                                                 )}
+                                                {lapizDeCelda(item.id, 'requerido_por')}
                                             </td>
                                         </tr>
                                         {isRowExpanded(item.id) && (

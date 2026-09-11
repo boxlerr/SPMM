@@ -27,6 +27,22 @@ const CLAVE_LOCAL = "spmm_borrador_plan";
 /** Cuánto espera la base después del último cambio. */
 export const DEBOUNCE_BASE_MS = 3000;
 
+/**
+ * Una tanda de "Agregar OTs": lo que entró al plan de un saque, a mano.
+ *
+ * Vive acá y no en la vista previa porque es parte del borrador: es lo que
+ * distingue una OT que entró sola de una que alguien puso a dedo, y sobre todo
+ * QUÉ pasadas de esa OT se eligieron. Sin eso, retomar un borrador manda a
+ * planificar la OT entera y devuelve los 13 procesos de los que se habían
+ * elegido 2, sin avisar.
+ */
+export type TandaManual = {
+    /** OTs que se agregaron enteras. */
+    ots: number[];
+    /** Pasadas sueltas (orden_trabajo_proceso.id) por OT. */
+    lineas: Record<number, number[]>;
+};
+
 /** El estado completo de la vista previa: lo que hace falta para reabrirla igual. */
 export type BorradorPlan = {
     /** id en la base. Ausente mientras solo existe en el navegador. */
@@ -41,6 +57,15 @@ export type BorradorPlan = {
     ediciones: Record<string, any>;
     /** OTs excedentes que el usuario decidió forzar. */
     forzarOrdenIds: number[];
+    /**
+     * Lo que se agregó a mano al plan, tanda por tanda.
+     *
+     * Opcional a propósito, igual que `huella`: los borradores guardados antes del
+     * 11/09 no lo tienen y se tienen que poder retomar igual. Cuando falta, el plan
+     * se abre sin nada marcado como agregado a mano —que es exactamente lo que
+     * pasaba antes— y no se rompe nada.
+     */
+    tandasManuales?: TandaManual[];
     /** Cuándo se calculó. Es lo que permite avisar que puede haber quedado viejo. */
     guardadoEn: string;
     /**

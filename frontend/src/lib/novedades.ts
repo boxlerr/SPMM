@@ -47,6 +47,56 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "la-descripcion-del-producto-ya-no-pisa-la-observacion",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Editar el producto de una orden ya no te borra la observación",
+        detalle:
+            "La columna Producto se dejaba editar en cualquier orden, pero lo que escribías no iba a parar ahí: la celda volvía sola al texto anterior —como si no hubieras guardado— y encima te reemplazaba la observación de la orden sin decirte nada. Ahora se edita sólo en las órdenes que no tienen producto cargado y en las heredadas, que son justamente las que muestran ahí el texto de la orden: en esas, lo que escribís es lo que queda. Y si la orden todavía no tiene nada escrito, el campo abre vacío en lugar de traer el texto del producto, así lo que queda es lo que escribiste vos. En el resto la celda es de lectura, porque ese texto es el nombre del producto y lo comparten todas las órdenes que fabrican esa pieza.",
+        href: "/operaciones",
+    },
+    {
+        id: "se-ve-que-celdas-de-la-lista-se-pueden-editar",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Ahora se ve cuáles celdas de la lista se pueden editar con un click",
+        detalle:
+            "Ocho columnas de la lista de órdenes se editan haciendo click encima —las tres fechas, la cantidad, el N° de pedido, quién aprobó, quién pidió, y el producto en las órdenes donde se puede— y nada lo avisaba: aparecía un campo con un tilde y una cruz sin que uno supiera que esa celda se podía tocar. Ahora, al pasar el mouse por una celda editable asoma un lápiz y el cartelito dice qué vas a editar. En el detalle de la orden, además: el inicio estimado ya se cancela con Escape, y la cruz de los minutos cancela de verdad — antes guardaba justo lo que querías descartar. El campo de los minutos ahora se abre en un recuadro propio por encima de la fila: sigue tapando lo que tiene al lado mientras lo estás usando, pero ya no corre las columnas ni deja el campo a medias.",
+        href: "/operaciones",
+    },
+    {
+        id: "el-detalle-abre-en-procesos-en-todas-las-listas",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Al desplegar una orden ves los procesos primero, también al planificar",
+        detalle:
+            "Arriba aparecía la galería de archivos —casi siempre vacía— que se llevaba media pantalla y dejaba los procesos abajo de todo, que es para lo que uno despliega la fila. Ahora los procesos van primeros y los archivos quedan en un renglón plegado abajo, que se abre cuando hace falta. La barra de entrega no se pliega: sigue a la vista, porque es con la que se registra una entrega. Esto ya pasaba en la lista de órdenes sin planificar: ahora también en las solapas de Operaciones y en la pantalla donde elegís qué planificar. En Historial sigue como estaba.",
+        href: "/operaciones",
+    },
+    {
+        id: "el-plan-guardado-conserva-lo-que-agregaste-a-mano",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Planificación",
+        titulo: "Cuando retomás un plan sin confirmar, sigue lo que habías agregado a mano",
+        detalle:
+            "Si agregabas órdenes al plan —o elegías sólo dos procesos de una orden que tiene trece— y después salías, al retomarlo se abría como si no hubieras agregado nada: no estaba el contador de «a mano», ni el botón para deshacerlo, y en cuanto el plan se volvía a calcular la orden regresaba con sus trece procesos sin avisarte. Ahora eso viaja con el plan guardado y vuelve tal cual lo dejaste. Los planes guardados antes de hoy se siguen abriendo igual que siempre.",
+        href: "/operaciones",
+    },
+    {
+        id: "las-tandas-grandes-ya-no-se-cortan-a-los-tres-minutos",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Planificación",
+        titulo: "Planificar muchas órdenes de una ya no se corta a mitad de camino",
+        detalle:
+            "Con una tanda grande —60 órdenes tardan unos cuatro minutos— el cálculo se cortaba solo a los tres y te dejaba sin plan, aunque del otro lado hubiera terminado bien. Ahora espera hasta siete minutos. Y la barra de progreso dejó de prometer un tiempo que no daba: calculaba menos de la mitad de lo que iba a tardar, así que se arrastraba en el ochenta y pico mientras el reloj seguía corriendo — que es justo lo que hace pensar que se colgó.",
+        href: "/operaciones",
+    },
+    {
         id: "material-sin-cargar-ya-no-frena-la-planificacion",
         fecha: "2026-09-11",
         tipo: "arreglo",

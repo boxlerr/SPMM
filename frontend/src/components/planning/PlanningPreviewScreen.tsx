@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { API_URL } from "@/config";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 import { huellaRecursos } from "@/lib/huellaRecursos";
+import type { TandaManual } from "@/lib/borradorPlan";
 import { MaterialChip } from "@/components/common/MaterialChip";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -128,6 +129,12 @@ interface PlanningPreviewScreenProps {
     edicionesIniciales?: Record<string, any>;
     /** OTs excedentes que ya venían forzadas en el borrador. */
     forzarIdsIniciales?: number[];
+    /** Lo que se había agregado a mano en el borrador que se está retomando. */
+    tandasIniciales?: TandaManual[];
+    /** Avisa de cada cambio en lo agregado a mano para que se guarde en el borrador.
+     *  Es lo que hace que las pasadas elegidas de a una sobrevivan a retomar el plan:
+     *  sin ellas el recálculo siguiente le devuelve a la OT todos sus procesos. */
+    onTandasChange?: (tandas: TandaManual[]) => void;
 }
 
 /**
@@ -162,14 +169,6 @@ const pasadasParaAgregar = (procs: any[]) =>
             const paso = Number(p.orden) > 0 ? Number(p.orden) : i + 1;
             return { rel: p, paso, habilitada: paso <= PASO_MAXIMO_A_MANO };
         });
-
-/** Una tanda de "Agregar OTs": lo que entró al plan de un saque, a mano. */
-type TandaManual = {
-    /** OTs que se agregaron enteras. */
-    ots: number[];
-    /** Pasadas sueltas (orden_trabajo_proceso.id) por OT. */
-    lineas: Record<number, number[]>;
-};
 
 /** Todas las OTs que tocaron estas tandas (enteras o por procesos sueltos). */
 const otsDeTandas = (tandas: TandaManual[]) => {
@@ -242,6 +241,8 @@ export function PlanningPreviewScreen({
     huellaAlCalcular,
     edicionesIniciales,
     forzarIdsIniciales,
+    tandasIniciales,
+    onTandasChange,
 }: PlanningPreviewScreenProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -329,8 +330,9 @@ export function PlanningPreviewScreen({
     /**
      * OTs forzadas con procesos que el solver no pudo asignar.
      * El backend puede devolver procesos como `excedente` aun con horizonte=None si:
-     *   - Ningún operario/máquina cumple los requisitos del proceso.
-     *   - El solver agotó su tiempo (60s) sin encontrar asignación.
+     *   - Ningún recurso humano ni recurso maquinaria cumple los requisitos del proceso.
+     *   - El solver agotó su tiempo sin encontrar asignación (el presupuesto ya no es
+     *     un número fijo: crece con el tamaño del lote, así que no vale escribirlo acá).
      * El usuario los completa manualmente en el desplegable de la OT.
      */
     const forcedPartialMap = React.useMemo(() => {
@@ -552,14 +554,44 @@ export function PlanningPreviewScreen({
      * Una OT no puede aparecer en dos tandas: apenas entra al plan desaparece de
      * `addableOrders`, así que cada OT pertenece a lo sumo a una.
      */
-    const [tandasManuales, setTandasManuales] = React.useState<TandaManual[]>([]);
+    const [tandasManuales, setTandasManuales] = React.useState<TandaManual[]>(tandasIniciales ?? []);
 
-    // El plan nuevo empieza sin nada agregado a mano. Va sólo con `isOpen` y no con
-    // `results`: un recálculo NO borra lo que se agregó, es justo lo contrario.
+    /**
+     * Al entrar a la pantalla se retoma lo que traiga el borrador.
+     *
+     * Antes acá se vaciaba siempre, y retomar un borrador pasa por acá: se perdía la
+     * barrita de lo agregado a mano, el botón de deshacer y —lo grave— las pasadas
+     * elegidas de a una. El primer recálculo después de retomar mandaba la OT pelada
+     * y volvía con sus 13 procesos en vez de los 2 que alguien había elegido.
+     *
+     * Un plan nuevo manda la lista vacía, que es lo que la limpia. Va sólo con
+     * `isOpen` y no con `results`: un recálculo NO borra lo que se agregó, es justo
+     * lo contrario.
+     */
     React.useEffect(() => {
         if (!isOpen) return;
-        setTandasManuales([]);
+        const retomadas = tandasIniciales ?? [];
+        setTandasManuales(retomadas);
+        // Retomar NO es agregar. El aviso de "a quién le saltó la carga" se dispara
+        // cuando crece la cantidad de tandas (ver `tandasPreviasRef`, más abajo), y
+        // sin esto abrir un borrador con tandas adentro lo dejaba armado: el primer
+        // cambio de carga posterior —cambiarle el recurso humano a una fila, sin ir
+        // más lejos— salía con el cartel "con lo que acabás de agregar" sin que
+        // nadie hubiera agregado nada. Es el mismo falso positivo que el comentario
+        // de allá abajo explica por qué se evitó.
+        tandasPreviasRef.current = retomadas.length;
+        esperandoSalto.current = null;
+        // Solo al entrar: adentro de la pantalla mandan los cambios del usuario.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
+
+    // Cada cambio de lo agregado a mano sube al borrador, igual que los retoques.
+    // Mismo motivo que allá: entra por demasiados lados (agregar, deshacer, quitar
+    // una OT, quitar una pasada, editar los procesos de una OT) como para que cada
+    // uno se acuerde de avisar.
+    React.useEffect(() => {
+        onTandasChange?.(tandasManuales);
+    }, [tandasManuales, onTandasChange]);
 
     /** OTs que entraron al plan a mano (enteras o por procesos sueltos). */
     const ordenesAMano = React.useMemo(() => otsDeTandas(tandasManuales), [tandasManuales]);

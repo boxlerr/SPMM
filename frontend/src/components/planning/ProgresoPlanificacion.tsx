@@ -51,16 +51,32 @@ const ETAPAS_GUARDAR: Etapa[] = [
 const TECHO = 92;
 
 /**
- * Cuánto suele tardar, en segundos. Sale de las corridas reales: el solver tiene un
- * presupuesto de 60s y corta a los 10s de dejar de mejorar, pero además hay que leer
- * las OTs con sus procesos y volcar el resultado, y eso crece con el tamaño del lote.
+ * Cuánto suele tardar, en segundos. Sale de las corridas reales: hay que leer las
+ * OTs con sus procesos, buscar la combinación y volcar el resultado, y las tres
+ * cosas crecen con el tamaño del lote.
+ *
+ * Los números salen de medir, no de la cuenta del presupuesto del solver: el
+ * presupuesto ya no es fijo —crece con el lote, justamente para que una tanda
+ * grande salga mejor— así que la única referencia honesta es cuánto tardó de
+ * verdad. La medición de 60 OT dio 244 segundos: sacándole los ~14 de leer y
+ * escribir, son casi 4 segundos por OT, y de ahí sale el 3,8.
+ *
+ * Con la estimación vieja (1,6 por OT) esas mismas 60 OT daban 110 segundos, y la
+ * barra se arrastraba en los ochenta y pico mientras el reloj seguía corriendo al
+ * doble de lo prometido: exactamente la sensación de "se colgó" por la que existe
+ * esta pantalla. (No llegaba a clavarse en 92: la curva es exponencial y a los dos
+ * minutos mostraba 86. Lo que se veía mal era el desfasaje con el reloj, no el
+ * techo.)
+ *
+ * El techo de 380 no es un redondeo: el navegador corta el pedido a los 420, así
+ * que una estimación más larga que eso prometería un final que nunca va a llegar.
  */
 function duracionEstimada(cantidadOts: number, modo: "calcular" | "guardar" = "calcular"): number {
     // Guardar es una escritura, no un cálculo: desde que dejó de pasar por el solver
     // son segundos, no minutos. Con la estimación vieja la barra se arrastraba al 3%
     // mientras la pantalla ya se había cerrado.
     if (modo === "guardar") return Math.max(2, 1 + cantidadOts * 0.15);
-    return Math.min(150, 14 + cantidadOts * 1.6);
+    return Math.min(380, 14 + cantidadOts * 3.8);
 }
 
 export function ProgresoPlanificacion({
@@ -119,7 +135,24 @@ export function ProgresoPlanificacion({
         }
     }
     const { Icono } = etapa;
-    const tarda = segundos >= Math.round(duracionEstimada(cantidadOts, modo)) * 3;
+    /**
+     * Cuándo se avisa que está tardando más de la cuenta.
+     *
+     * El triple de la estimación era un número que ya no puede pasar: con una tanda
+     * de 60 OT serían 12 minutos y el navegador corta antes, así que el aviso no
+     * aparecía nunca justo en las corridas largas, que son las únicas en las que
+     * hace falta. Vez y media alcanza para que signifique algo.
+     *
+     * OJO CON PONERLE UN TOPE. La primera versión de esto llevaba `min(240, ...)` y
+     * lo rompía: con 60 OT la estimación es 242 s, vez y media son 363, el tope lo
+     * bajaba a 240 — y la corrida tarda 244. O sea que el cartel "está tardando más
+     * de lo habitual" salía en los últimos segundos de TODA tanda grande, que es
+     * justo cuando todo va bien. Un aviso que aparece siempre deja de avisar.
+     *
+     * Queda sólo el piso de 20 segundos, para que en un lote chico no salte apenas
+     * empezó. Sin techo: si la estimación crece, el umbral crece con ella.
+     */
+    const tarda = segundos >= Math.max(20, Math.round(duracionEstimada(cantidadOts, modo) * 1.5));
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
