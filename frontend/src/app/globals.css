@@ -237,26 +237,41 @@
   background: #e9eef5;
 }
 
-/* Las flechitas de los costados. Sólo en la horizontal: es la que no se ve venir. */
-*::-webkit-scrollbar-button:horizontal:single-button {
-  background-color: #e9eef5;
+/* Las flechitas de los costados. Sólo en la horizontal: es la que no se ve venir.
+
+   EL SELECTOR IMPORTA. `:horizontal:single-button` no dibuja nada en Chrome —probado
+   en producción, la barra salía pelada—; los que funcionan son `:start:decrement` y
+   `:end:increment`, y encima hay que darles `display: block`, porque con la barra ya
+   estilada vienen ocultas. */
+*::-webkit-scrollbar-button:start:decrement,
+*::-webkit-scrollbar-button:end:increment {
+  display: block;
+  width: 18px;
+  height: 14px;
+  background-color: #dbe3ee;
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 7px 9px;
-  width: 16px;
-  height: 14px;
+  background-size: 8px 10px;
 }
 
-*::-webkit-scrollbar-button:horizontal:single-button:hover {
-  background-color: #cbd5e1;
+*::-webkit-scrollbar-button:start:decrement:hover,
+*::-webkit-scrollbar-button:end:increment:hover {
+  background-color: #c3cfe0;
 }
 
-*::-webkit-scrollbar-button:horizontal:single-button:decrement {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 9'><polygon points='7,0 7,9 0,4.5' fill='%23475569'/></svg>");
+*::-webkit-scrollbar-button:start:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'><polygon points='8,0 8,10 0,5' fill='%23334155'/></svg>");
 }
 
-*::-webkit-scrollbar-button:horizontal:single-button:increment {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 9'><polygon points='0,0 0,9 7,4.5' fill='%23475569'/></svg>");
+*::-webkit-scrollbar-button:end:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 10'><polygon points='0,0 0,10 8,5' fill='%23334155'/></svg>");
+}
+
+/* Las de la esquina —las dobles, cuando la barra trae dos flechas del mismo lado—
+   no van: son las que confunden. Una en cada punta y nada más. */
+*::-webkit-scrollbar-button:start:increment,
+*::-webkit-scrollbar-button:end:decrement {
+  display: none;
 }
 
 /* Las verticales no llevan flecha: para arriba y abajo está la rueda. */
