@@ -131,11 +131,11 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, s
             <div className="flex items-start justify-between gap-4 mb-3">
                 <div>
                     <p className="text-sm font-semibold">
-                        Rangos que {tipo === "maquinaria" ? "pueden usar esta máquina" : "habilitan este proceso"}
+                        Rangos que {tipo === "maquinaria" ? "pueden usar este recurso maquinaria" : "habilitan este proceso"}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                         {tipo === "maquinaria"
-                            ? "Sin ningún rango, el planificador no se la asigna a nadie."
+                            ? "Sin ningún rango, el planificador no se lo asigna a nadie."
                             : "Sin ningún rango, el planificador se lo puede asignar a cualquiera."}
                     </p>
                 </div>
@@ -182,8 +182,8 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, s
                             }
                             title={
                                 sinGente
-                                    ? "Ningún operario disponible tiene este rango, así que por sí solo no habilita a nadie."
-                                    : `${c?.operarios} operario(s) lo tienen`
+                                    ? "Ningún recurso humano disponible tiene este rango, así que por sí solo no habilita a nadie."
+                                    : `${c?.operarios} de recurso humano con este rango`
                             }
                         >
                             {r.nombre}
@@ -216,9 +216,9 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, s
                 <div className="mt-3 flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">
                     <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                     <span>
-                        Ninguno de estos rangos lo tiene un operario disponible, así que con esto
-                        {tipo === "maquinaria" ? " la máquina sigue sin poder usarla nadie" : " el proceso sigue sin poder hacerlo nadie"}.
-                        Agregá un rango que sí tenga gente, o asignale uno de estos a quien corresponda en Operarios.
+                        Ninguno de estos rangos lo tiene un recurso humano disponible, así que con esto
+                        {tipo === "maquinaria" ? " el recurso maquinaria sigue sin poder usarlo nadie" : " el proceso sigue sin poder hacerlo nadie"}.
+                        Agregá un rango que sí tenga recurso humano, o asignale uno de estos a quien corresponda en Recurso humano.
                     </span>
                 </div>
             )}

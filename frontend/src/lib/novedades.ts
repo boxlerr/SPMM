@@ -47,6 +47,25 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "vocabulario-parejo-en-todas-las-pantallas",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Todo el sistema",
+        titulo: "Ahora todas las pantallas le dicen igual a las mismas cosas",
+        detalle:
+            "En una pantalla decía «Operario», en otra «Empleado», en otra «Persona»; y «Máquina», «Maquinaria» o «Máquinas y Equipos» según dónde estuvieras. Se unificó en todo el sistema: Recurso humano, Cantidad de recurso humano, Recurso maquinaria y Proceso. Son 145 textos entre encabezados de tabla, formularios de Recursos, avisos del planificador, el tablero y la hoja impresa de la OT. Sólo cambiaron los carteles: ningún dato, ningún filtro y ninguna orden se tocaron.",
+    },
+    {
+        id: "deshacer-todo-lo-agregado-a-mano",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Deshacer puede volver al plan original de una sola vez",
+        detalle:
+            "Al lado de «Deshacer» aparece «todo» cuando agregaste cosas a mano en más de una tanda: saca todas juntas y vuelve al plan que salió del cálculo original, en vez de tener que apretar Deshacer una vez por cada cosa que agregaste. Con una sola tanda no aparece, porque haría exactamente lo mismo que el botón de al lado.",
+        href: "/operaciones",
+    },
+    {
         id: "detalle-de-ot-muestra-produccion",
         fecha: "2026-09-11",
         tipo: "mejora",

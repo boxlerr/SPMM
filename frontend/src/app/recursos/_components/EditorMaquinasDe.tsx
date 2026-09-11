@@ -108,12 +108,12 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
             showToast(
                 seleccion.length === 0
                     ? `${nombre} vuelve a resolverse por el nombre`
-                    : `Máquinas de ${nombre} actualizadas`,
+                    : `Recurso maquinaria de ${nombre} actualizado`,
                 "success"
             );
             onGuardado();
         } catch {
-            showToast("No se pudieron guardar las máquinas", "error");
+            showToast("No se pudo guardar el recurso maquinaria", "error");
         } finally {
             setGuardando(false);
         }
@@ -123,9 +123,9 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
         <div className="p-4 bg-muted/20 border-t">
             <div className="flex items-start justify-between gap-4 mb-3">
                 <div>
-                    <p className="text-sm font-semibold">En qué máquinas se hace este proceso</p>
+                    <p className="text-sm font-semibold">En qué recurso maquinaria se hace este proceso</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                        El planificador reserva una de estas. Si no cargás ninguna, la sigue
+                        El planificador reserva uno de estos. Si no cargás ninguno, lo sigue
                         adivinando por el nombre del proceso, como hasta ahora.
                     </p>
                 </div>
@@ -185,7 +185,7 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
 
                 <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setAbriendo((v) => !v)}>
                     <Plus className="h-3 w-3 mr-1" />
-                    Agregar máquina
+                    Agregar recurso maquinaria
                 </Button>
             </div>
 
@@ -193,7 +193,7 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
                 <div className="mt-3 border rounded-md bg-white p-2">
                     <Input
                         autoFocus
-                        placeholder="Buscar máquina..."
+                        placeholder="Buscar recurso maquinaria..."
                         value={busqueda}
                         onChange={(e) => setBusqueda(e.target.value)}
                         className="h-8 text-xs mb-2"
@@ -218,7 +218,7 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
                         ))}
                         {disponibles.length === 0 && (
                             <p className="text-xs text-muted-foreground italic px-2 py-3">
-                                No quedan máquinas para agregar.
+                                No queda recurso maquinaria para agregar.
                             </p>
                         )}
                     </div>

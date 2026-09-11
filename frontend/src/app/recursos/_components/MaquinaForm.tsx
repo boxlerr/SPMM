@@ -121,7 +121,7 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={!formData.nombre || isSaving}>{isSaving ? "Guardando..." : (editing ? "Guardar Cambios" : "Crear Maquinaria")}</Button>
+          <Button onClick={handleSubmit} disabled={!formData.nombre || isSaving}>{isSaving ? "Guardando..." : (editing ? "Guardar Cambios" : "Crear recurso maquinaria")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -177,7 +177,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
 
             showToast(
                 alcance > 0
-                    ? `${nombreRango} actualizado. Alcanza a ${alcance} operario${alcance === 1 ? "" : "s"}.`
+                    ? `${nombreRango} actualizado. Alcanza a ${alcance} de recurso humano.`
                     : `${nombreRango} actualizado.`,
                 "success"
             );
@@ -226,15 +226,15 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                             {alcance === 1 ? (
                                 <>
                                     Lo que cambies acá aplica a{" "}
-                                    <strong>este operario</strong>. Si querés habilitarlo
-                                    sin tocarle el rango, usá una habilidad manual desde su
-                                    ficha.
+                                    <strong>este recurso humano</strong>. Si querés
+                                    habilitarlo sin tocarle el rango, usá una habilidad
+                                    manual desde su ficha.
                                 </>
                             ) : (
                                 <>
                                     Lo que cambies acá aplica a{" "}
-                                    <strong>estos {alcance} operarios</strong>, no a uno
-                                    solo. Para habilitar a una sola persona usá una
+                                    <strong>{alcance} de recurso humano</strong>, no a uno
+                                    solo. Para habilitar a uno en particular usá una
                                     habilidad manual desde su ficha.
                                 </>
                             )}
@@ -277,7 +277,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                         yaTiene={idsProcesos}
                         etiqueta="Agregar proceso"
                         sustantivo="proceso"
-                        nota="Se lo habilita a todos los operarios con este rango."
+                        nota="Se lo habilita a todo el recurso humano con este rango."
                         onAgregar={(p) => setProcesos((prev) => [...prev, p].sort(porNombre))}
                     />
                 </div>
@@ -314,7 +314,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                 <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                         <Factory className="h-4 w-4 text-muted-foreground" />
-                        <h4 className="text-sm font-semibold">Maquinarias asociadas</h4>
+                        <h4 className="text-sm font-semibold">Recurso maquinaria asociado</h4>
                         <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                             {maquinarias.length}
                         </span>
@@ -322,9 +322,9 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                     <AgregarHabilidad
                         catalogo={catalogoMaquinasParaBuscar}
                         yaTiene={idsMaquinarias}
-                        etiqueta="Agregar maquinaria"
-                        sustantivo="maquinaria"
-                        nota="Queda asociada al rango, no a un operario."
+                        etiqueta="Agregar recurso maquinaria"
+                        sustantivo="recurso maquinaria"
+                        nota="Queda asociado al rango, no a un recurso humano."
                         onAgregar={(m) => {
                             // Se busca el original para no guardar el nombre con el código pegado.
                             const real = catMaquinarias.find((x) => x.id === m.id);
@@ -334,7 +334,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                 </div>
                 {maquinarias.length === 0 ? (
                     <p className="rounded-md border border-dashed px-3 py-3 text-[13px] text-muted-foreground">
-                        Sin maquinarias asociadas.
+                        Sin recurso maquinaria asociado.
                     </p>
                 ) : (
                     <div className="flex flex-wrap gap-1.5">

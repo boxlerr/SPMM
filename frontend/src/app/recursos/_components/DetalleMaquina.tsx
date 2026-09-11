@@ -16,8 +16,8 @@ export default function DetalleMaquina({ maquina, onClose }: DetalleMaquinaProps
     <Dialog open={!!maquina} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Detalles de la Máquina</DialogTitle>
-          <DialogDescription>Información detallada de la maquinaria</DialogDescription>
+          <DialogTitle>Detalles del recurso maquinaria</DialogTitle>
+          <DialogDescription>Información detallada del recurso maquinaria</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center justify-between">

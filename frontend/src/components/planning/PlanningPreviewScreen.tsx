@@ -732,11 +732,14 @@ export function PlanningPreviewScreen({
      * quedan; lo que ya estaba antes no se toca. Se puede seguir apretando hasta
      * volver al plan que salió del cálculo original.
      */
-    const deshacerUltimaTanda = () => {
+    const deshacerTandas = (alcance: "ultima" | "todas" = "ultima") => {
         if (!onRecalculate || tandasManuales.length === 0) return;
-        const ultima = tandasManuales[tandasManuales.length - 1];
-        const restantes = tandasManuales.slice(0, -1);
-        const quitar = otsDeTandas([ultima]);
+        // "Todas" es el mismo camino con otro corte: en vez de la última tanda se
+        // sacan todas, y no queda ninguna. Lucas pidió poder volver al plan original
+        // sin tener que apretar Deshacer una vez por cada cosa que agregó.
+        const aQuitar = alcance === "todas" ? tandasManuales : [tandasManuales[tandasManuales.length - 1]];
+        const restantes = alcance === "todas" ? [] : tandasManuales.slice(0, -1);
+        const quitar = otsDeTandas(aQuitar);
 
         const planned = Array.from(new Set(results.map(r => r.orden_id)));
         const stickyIds = Array.from(new Set(stickyExcedentes.map(e => e.orden_id)));
@@ -762,7 +765,9 @@ export function PlanningPreviewScreen({
         ) as Record<number, number[]>;
 
         toast.info(`Deshecho: ${quitar.size} OT${quitar.size === 1 ? "" : "s"} fuera del plan`, {
-            description: "Recalculando sin lo último que se agregó a mano.",
+            description: alcance === "todas"
+                ? "Recalculando sin nada de lo que se agregó a mano."
+                : "Recalculando sin lo último que se agregó a mano.",
         });
         onRecalculate(
             mergedIds,
@@ -1885,17 +1890,38 @@ export function PlanningPreviewScreen({
                                 </Popover>
                             )}
                             {tandasManuales.length > 0 && onRecalculate && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={deshacerUltimaTanda}
-                                    disabled={isCalculating || isConfirming}
-                                    className="h-8 gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
-                                    title="Saca del plan lo último que agregaste a mano y recalcula"
-                                >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    Deshacer
-                                </Button>
+                                <div className="flex items-center">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => deshacerTandas("ultima")}
+                                        disabled={isCalculating || isConfirming}
+                                        className={cn(
+                                            "h-8 gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300",
+                                            tandasManuales.length > 1 && "rounded-r-none border-r-0"
+                                        )}
+                                        title="Saca del plan lo último que agregaste a mano y recalcula"
+                                    >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                        Deshacer
+                                    </Button>
+                                    {/* "Todo" sólo aparece cuando hay más de una tanda: con una
+                                        sola, los dos botones harían exactamente lo mismo y sobra.
+                                        Lucas pidió poder volver al plan original sin apretar
+                                        Deshacer una vez por cada cosa que agregó. */}
+                                    {tandasManuales.length > 1 && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => deshacerTandas("todas")}
+                                            disabled={isCalculating || isConfirming}
+                                            className="h-8 rounded-l-none border-indigo-200 px-2 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300"
+                                            title={`Saca las ${tandasManuales.length} tandas que agregaste a mano y vuelve al plan original`}
+                                        >
+                                            todo
+                                        </Button>
+                                    )}
+                                </div>
                             )}
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
 

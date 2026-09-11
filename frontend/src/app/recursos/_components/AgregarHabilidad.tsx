@@ -57,7 +57,7 @@ export default function AgregarHabilidad({
     onCrearProceso,
     disabled = false,
     etiqueta = "Agregar habilidad",
-    nota = "Queda solo para este operario, sin tocarle el rango.",
+    nota = "Queda solo para este recurso humano, sin tocarle el rango.",
     sustantivo = "proceso",
 }: Props) {
     const [abierto, setAbierto] = useState(false);
