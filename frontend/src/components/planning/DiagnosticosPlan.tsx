@@ -76,7 +76,7 @@ function conNegritas(texto: string) {
  * resolver, ámbar lo que sale igual.
  */
 const RECURSO: Record<string, { texto: string; icono: LucideIcon }> = {
-    maquina: { texto: "Recurso máquina", icono: Cog },
+    maquina: { texto: "Recurso maquinaria", icono: Cog },
     humano: { texto: "Recurso humano", icono: Users },
 };
 
@@ -1018,7 +1018,7 @@ export function DiagnosticosPlan({
                                                        el que abría la pantalla por primera vez tenía que
                                                        deducirlo del color. */
                                                     title={esBloq
-                                                        ? "Alta: por esto algo del plan salió mal — trabajo sin persona, máquina sin reservar o trabajo que no entró en el período. A veces se arregla cargando un dato en Recursos y a veces es la capacidad real del taller; el aviso te dice cuál de las dos."
+                                                        ? "Alta: por esto algo del plan salió mal — trabajo sin recurso humano, recurso maquinaria sin reservar o trabajo que no entró en el período. A veces se arregla cargando un dato en Recursos y a veces es la capacidad real del taller; el aviso te dice cuál de las dos."
                                                         : "Media: recomendación para afinar. El plan sale igual con el aviso o sin él; lo que falta lo sabe el taller."}
                                                 >
                                                     {esBloq ? "Alta" : "Media"}
@@ -1149,7 +1149,7 @@ export function DiagnosticosPlan({
                                                                 type="button"
                                                                 onClick={() => onVerOT(o.id)}
                                                                 className="shrink-0 rounded bg-slate-100 px-1.5 text-[10px] font-medium leading-[15px] text-slate-600 tabular-nums hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
-                                                                title={`Abrir la OT #${o.numero} en la tabla del plan y asignarle ahí la persona`}
+                                                                title={`Abrir la OT #${o.numero} en la tabla del plan y asignarle ahí el recurso humano`}
                                                             >
                                                                 #{o.numero}
                                                             </button>

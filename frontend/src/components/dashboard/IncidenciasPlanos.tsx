@@ -102,7 +102,7 @@ export default function IncidenciasPlanos() {
                         </div>
                         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
                             <div className="flex items-center gap-2 text-indigo-600 mb-2"><Users className="h-4 w-4" /></div>
-                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Gente extra</p>
+                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Recurso humano extra</p>
                             <p className="text-3xl font-bold text-indigo-600">{extra}</p>
                         </div>
                     </div>
@@ -120,13 +120,13 @@ export default function IncidenciasPlanos() {
                             Incidencias de interpretación de planos
                         </DialogTitle>
                         <DialogDescription>
-                            {total} incidencias · {fmtHoras(minutos)} perdidas · {extra} operarios extra
+                            {total} incidencias · {fmtHoras(minutos)} perdidas · {extra} de recurso humano extra
                         </DialogDescription>
                     </DialogHeader>
 
                     {/* Por operario */}
                     <div className="mt-2">
-                        <h4 className="text-sm font-semibold text-gray-800 mb-2">Por operario</h4>
+                        <h4 className="text-sm font-semibold text-gray-800 mb-2">Por recurso humano</h4>
                         <div className="border rounded-lg overflow-hidden">
                             <table className="w-full text-sm">
                                 <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
@@ -183,7 +183,7 @@ export default function IncidenciasPlanos() {
                                         <span className="text-red-600 font-semibold">{fmtHoras(r.minutos_perdidos)}</span>
                                     </div>
                                     <div className="text-xs text-gray-500">
-                                        {r.operario?.trim() || "Sin operario"} · {new Date(r.fecha_registro).toLocaleDateString()}
+                                        {r.operario?.trim() || "Sin recurso humano"} · {new Date(r.fecha_registro).toLocaleDateString()}
                                     </div>
                                     {r.descripcion && <div className="text-xs text-gray-600 mt-1">{r.descripcion}</div>}
                                 </div>

@@ -71,11 +71,11 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
 
       if (estadoCambio) {
         addNotification(
-          `Operario ${operario.nombre} ${operario.apellido} cambió de estado: ${estadoAnterior} → ${nuevoEstado}`,
+          `Recurso humano ${operario.nombre} ${operario.apellido} cambió de estado: ${estadoAnterior} → ${nuevoEstado}`,
           "operario_updated",
           motivoCambio.trim() || undefined
         );
-        showToast(`Estado del operario ${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)} cambiado a ${nuevoEstado} correctamente`, 'success');
+        showToast(`Estado del recurso humano ${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)} cambiado a ${nuevoEstado} correctamente`, 'success');
       }
 
       onSuccess();
@@ -94,7 +94,7 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
           <DialogTitle>
             Cambiar Estado - {operario.nombre} {operario.apellido}
           </DialogTitle>
-          <DialogDescription>Actualizar el estado laboral del operario</DialogDescription>
+          <DialogDescription>Actualizar el estado laboral del recurso humano</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-2">

@@ -604,7 +604,28 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                 {expandedOrderIds.includes(order.id) && (
                                                     <tr className="bg-gray-50/20 border-b">
                                                         <td colSpan={18} className="px-3 py-3 md:px-6 md:py-4">
-                                                            <div className="flex flex-col gap-4 w-full max-w-[1200px]">
+                                                            {/* Sin `max-w-[1200px]`: la tabla mide 1600px, así que sobraban 400
+                                                                px muertos a la derecha mientras la grilla de procesos iba
+                                                                apretada. */}
+                                                            <div className="flex flex-col gap-3 w-full">
+                                                                {/* Observaciones y archivos: abajo y PLEGADOS.
+                                                                    Arriba se llevaban media pantalla casi vacíos —una caja con
+                                                                    "Sin observaciones." y otra con las miniaturas— y empujaban
+                                                                    Producción, que es para lo que uno abre la fila.
+                                                                    Se reordena con `order-*` sobre el contenedor flex en vez de mover
+                                                                    el JSX: el mismo resultado sin tocar una sola línea de lo que ya
+                                                                    funciona. `<details>` nativo, sin estado nuevo. */}
+                                                                <details className="group/extra order-2 rounded-lg border border-gray-200 bg-white">
+                                                                    <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight text-gray-500 hover:bg-gray-50">
+                                                                        <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open/extra:rotate-90" />
+                                                                        Observaciones y archivos
+                                                                        {(order.observaciones || order.detalle) && (
+                                                                            <span className="rounded bg-amber-50 px-1.5 py-0.5 font-semibold normal-case tracking-normal text-amber-700">
+                                                                                tiene observaciones
+                                                                            </span>
+                                                                        )}
+                                                                    </summary>
+                                                                    <div className="border-t border-gray-100 p-3">
                                                                 {/* Grid layout for meta info - More compact columns */}
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                                                     {/* Observaciones Panel - Smaller min-height, compact header */}
@@ -633,9 +654,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                         </div>
                                                                     </div>
                                                                 </div>
+                                                                    </div>
+                                                                </details>
 
-                                                                {/* Proceso Panel - Tighter headers and rows */}
-                                                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                                                                {/* Producción primero: `order-1` contra el `order-2` del
+                                                                    plegable de arriba. */}
+                                                                <div className="order-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
                                                                     <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
                                                                         <div className="flex items-center gap-2">
                                                                             <Settings className="w-3.5 h-3.5 text-gray-400" />

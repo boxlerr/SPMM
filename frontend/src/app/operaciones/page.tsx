@@ -455,7 +455,7 @@ export default function OperacionesPage() {
         baseDate,
         normalizedBaseDate
       });
-      toast.error("Error al mover la tarea: Fecha inválida");
+      toast.error("Error al mover el proceso: Fecha inválida");
       return;
     }
 
@@ -520,7 +520,7 @@ export default function OperacionesPage() {
       console.error("Error updating task:", error);
       setTasks(oldTasks);
       setRawPlanificacion(oldRawPlanificacion);
-      toast.error("No se pudo mover la tarea. Se revirtió; revisá la conexión e intentá de nuevo.");
+      toast.error("No se pudo mover el proceso. Se revirtió; revisá la conexión e intentá de nuevo.");
     }
   };
 
@@ -584,7 +584,7 @@ export default function OperacionesPage() {
       if (!response.ok) throw new Error("Failed to update operator");
     } catch (error) {
       console.error("Error updating operator:", error);
-      toast.error("No se pudo guardar el cambio de operario. Se revirtió; revisá la conexión e intentá de nuevo.");
+      toast.error("No se pudo guardar el cambio de recurso humano. Se revirtió; revisá la conexión e intentá de nuevo.");
       fetchData();
     }
   };
@@ -672,7 +672,7 @@ export default function OperacionesPage() {
 
     } catch (error) {
       console.error("Error updating machinery:", error);
-      toast.error("Error al actualizar maquinaria");
+      toast.error("Error al actualizar el recurso maquinaria");
       // Revert
       fetchData();
     }
@@ -1550,7 +1550,7 @@ export default function OperacionesPage() {
               <div className="w-full">
                 <div className="flex items-center gap-2 mb-4">
                   <User className="h-5 w-5 text-gray-500" />
-                  <h2 className="text-lg font-semibold">Gestión de Operarios</h2>
+                  <h2 className="text-lg font-semibold">Gestión del recurso humano</h2>
                 </div>
                 <SharedOperatorsList
                   operarios={rawOperarios}

@@ -206,7 +206,7 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                 <Table>
                     <TableHeader className="bg-gray-50 sticky top-0 z-10">
                         <TableRow>
-                            <TableHead className="w-[200px] font-semibold">Empleado</TableHead>
+                            <TableHead className="w-[200px] font-semibold">Recurso humano</TableHead>
                             <TableHead className="w-[150px] font-semibold">Proceso</TableHead>
                             <TableHead className="w-[80px] text-center font-semibold">Orden Proceso</TableHead>
                             <TableHead className="w-[100px] text-center font-semibold">OT</TableHead>

@@ -213,7 +213,7 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                     </div>
                     <div>
                         <h3 className="text-lg font-bold text-gray-900 tracking-tight">
-                            {viewMode === "operario" ? "Planificación por Operario" : "Planificación por Máquina"}
+                            {viewMode === "operario" ? "Planificación por recurso humano" : "Planificación por recurso maquinaria"}
                         </h3>
                         <p className="text-sm text-gray-500 font-medium">Vista Semanal Detallada</p>
                     </div>
@@ -539,12 +539,12 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                     <MoreHorizontal className="h-5 w-5" />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-gray-900">Bandeja de Tareas</h3>
-                                    <p className="text-xs text-gray-500">Arrastra tareas aquí para moverlas entre semanas</p>
+                                    <h3 className="font-bold text-gray-900">Bandeja de procesos</h3>
+                                    <p className="text-xs text-gray-500">Arrastrá los procesos acá para moverlos entre semanas</p>
                                 </div>
                             </div>
                             <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 border-indigo-100">
-                                {trayTasks.length} Tareas
+                                {trayTasks.length} {trayTasks.length === 1 ? "proceso" : "procesos"}
                             </Badge>
                         </div>
 

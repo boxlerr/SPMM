@@ -624,10 +624,10 @@ export function PlanningSelectionScreen({
                                         Son muchas órdenes juntas ({selectedIds.length})
                                     </h4>
                                     <p className="text-xs text-amber-700/90 leading-relaxed max-w-[800px]">
-                                        Se pueden planificar igual, pero el cálculo va a tardar unos minutos: el planificador prueba todas las combinaciones de máquinas, operarios y turnos antes de decidir. Vas a ver una barra con el avance.
+                                        Se pueden planificar igual, pero el cálculo va a tardar unos minutos: el planificador prueba todas las combinaciones de recurso maquinaria, recurso humano y turnos antes de decidir. Vas a ver una barra con el avance.
                                     </p>
                                     <p className="text-xs font-semibold text-amber-800 mt-2">
-                                        Conviene hacerlo en una sola tanda y no en varias: si partís el lote, el segundo cálculo no ve las máquinas que reservó el primero y los dos planes se pisan.
+                                        Conviene hacerlo en una sola tanda y no en varias: si partís el lote, el segundo cálculo no ve el recurso maquinaria que reservó el primero y los dos planes se pisan.
                                     </p>
                                 </div>
                             </div>

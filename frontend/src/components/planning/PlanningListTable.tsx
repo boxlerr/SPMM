@@ -802,7 +802,7 @@ function _PlanningListTable({
                         <>
                             {item.procesos.map((proc, idx) => {
                                 const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
-                                const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Maquinaria no asignada");
+                                const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Recurso maquinaria sin asignar");
 
                                 return (
                                     <div
@@ -825,7 +825,7 @@ function _PlanningListTable({
                                                 {proc.cant_operarios && proc.cant_operarios > 1 && (
                                                     <span
                                                         className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full"
-                                                        title={`Requiere ${proc.cant_operarios} operarios en simultáneo`}
+                                                        title={`Requiere ${proc.cant_operarios} de recurso humano en simultáneo`}
                                                     >
                                                         <Users className="w-3 h-3" />
                                                         {proc.cant_operarios}
@@ -950,7 +950,7 @@ function _PlanningListTable({
 
                                         {/* Maquinaria */}
                                         <div className="flex flex-col md:block w-full md:w-auto">
-                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Maquinaria</span>
+                                            <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Recurso maquinaria</span>
                                             <div>
                                                 {onMachineryChange && maquinarias.length > 0 ? (
                                                     <Select
@@ -961,7 +961,7 @@ function _PlanningListTable({
                                                             <SelectValue placeholder={machineName} />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="0" className="text-gray-400 italic">Maquinaria no asignada</SelectItem>
+                                                            <SelectItem value="0" className="text-gray-400 italic">Recurso maquinaria sin asignar</SelectItem>
                                                             {maquinarias.map((m) => {
                                                                 const limitacion = limitacionDeMaquina(m);
                                                                 return (

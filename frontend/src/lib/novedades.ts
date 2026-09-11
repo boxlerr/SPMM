@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "detalle-de-ot-muestra-produccion",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Al desplegar una orden, lo primero que se ve son los procesos",
+        detalle:
+            "Antes aparecían arriba dos cajas casi vacías —Observaciones y Archivos— que se llevaban media pantalla y empujaban Producción hasta abajo, que es justamente para lo que uno abre la fila. Ahora Producción va primera, y Observaciones y archivos quedan en un renglón plegado abajo que se abre si hace falta; si la orden tiene observaciones cargadas, el renglón lo avisa. El detalle además usa todo el ancho de la tabla en vez de cortarse a la mitad.",
+        href: "/operaciones",
+    },
+    {
+        id: "edicion-de-minutos-se-entiende",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Editar los minutos de un proceso ya se entiende",
+        detalle:
+            "El lápiz y el tacho de cada proceso estaban invisibles hasta pasarles el mouse por encima, así que no había forma de saber que la fila se podía editar salvo tropezársela. Ahora se ven siempre, apenas marcados. Y al editar, la cajita dice «Min.» — antes era un número suelto que aparecía lejos de la columna de minutos y no se entendía qué era. Además salir del campo ahora guarda: antes había que acertarle al tilde y hacer click en otro lado tiraba lo escrito sin avisar.",
+        href: "/operaciones",
+    },
+    {
         id: "todas-las-ordenes-es-una-solapa",
         fecha: "2026-09-11",
         tipo: "mejora",

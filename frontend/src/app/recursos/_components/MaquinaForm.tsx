@@ -77,13 +77,13 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
         // No cerramos el form: el usuario no pierde lo que cargó y puede reintentar.
         const bodyText = await response.text().catch(() => "");
         console.error("Error al guardar maquinaria:", response.status, bodyText);
-        showToast(parseApiError(bodyText) || "No se pudo guardar la máquina. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+        showToast(parseApiError(bodyText) || "No se pudo guardar el recurso maquinaria. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
         return;
       }
       showToast(
         editing && data
-          ? `Máquina '${payload.nombre}' modificada correctamente`
-          : `Máquina '${payload.nombre}' creada correctamente`,
+          ? `Recurso maquinaria '${payload.nombre}' modificado correctamente`
+          : `Recurso maquinaria '${payload.nombre}' creado correctamente`,
         'success'
       );
     } catch (error) {
@@ -100,8 +100,8 @@ export default function MaquinaForm({ open, editing, data, onClose, onSuccess, c
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? "Editar" : "Crear"} Maquinaria</DialogTitle>
-          <DialogDescription>{editing ? "Modifica" : "Completa"} los datos de la maquinaria</DialogDescription>
+          <DialogTitle>{editing ? "Editar" : "Crear"} recurso maquinaria</DialogTitle>
+          <DialogDescription>{editing ? "Modifica" : "Completa"} los datos del recurso maquinaria</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-2">

@@ -94,7 +94,7 @@ export default function RendimientoEstimadoReal() {
                         onClick={() => setTab("operarios")}
                         className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors ${tab === "operarios" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
                     >
-                        <User className="h-3.5 w-3.5" /> Por operario
+                        <User className="h-3.5 w-3.5" /> Por recurso humano
                     </button>
                 </div>
             </div>

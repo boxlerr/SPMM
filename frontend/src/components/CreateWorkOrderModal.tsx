@@ -591,7 +591,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             const item = { id: Number(creado.id), nombre: creado.nombre ?? limpio };
             setProcesosOptions((prev) => [...prev, item as Option]);
             toast.success(`Proceso «${item.nombre}» creado`, {
-                description: "Queda sin categoría ni máquina: completalo en Recursos › Procesos para que el plan lo pueda ubicar.",
+                description: "Queda sin categoría ni recurso maquinaria: completalo en Recursos › Procesos para que el plan lo pueda ubicar.",
                 duration: 7000,
             });
             return item;
@@ -1039,7 +1039,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         const prioridad = prioridades.find(p => p.id.toString() === generalData.prioridad_id)?.nombre || "-";
         const sector = sectores.find(s => s.id.toString() === generalData.sector_id)?.nombre || "-";
         const procName = (id: string) => procesosOptions.find(p => p.id.toString() === id)?.nombre || "-";
-        const maqName = (id: string) => maquinarias.find(m => m.id.toString() === id)?.nombre || "Sin máquina";
+        const maqName = (id: string) => maquinarias.find(m => m.id.toString() === id)?.nombre || "Sin recurso maquinaria";
 
         const procs = processes.filter(p => p.incluido && p.proceso_id);
         // Hoja de procesos (operario): datos planificados + columnas en blanco para
@@ -1065,7 +1065,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             const izq = esPrimero
                 ? `<td class="c">${(i ?? 0) + 1}</td>` +
                   `<td>${esc(procName(p.proceso_id))}</td>` +
-                  `<td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin máquina</span>'}</td>` +
+                  `<td>${p.maquina_id ? esc(maqName(p.maquina_id)) : '<span style="color:#999">Sin recurso maquinaria</span>'}</td>` +
                   `<td class="c">${esc(p.tiempo || 0)}</td>`
                 : `<td class="c"></td><td class="fill"></td><td class="fill"></td><td class="fill"></td>`;
             return `<tr class="${esPrimero ? "proc" : "cont"}">${izq}` +
@@ -1153,17 +1153,17 @@ ${encabezado("Orden de Trabajo — Procesos", `Impreso ${esc(hoy)}`)}
 <div class="cell"><span class="k">F. Prometida</span><span class="v">${fmt(generalData.fecha_prometida)}</span></div>
 </div>
 <h2>Procesos (planificado + carga real)</h2>
-<table class="procesos"><thead><tr><th class="c">#</th><th>Proceso</th><th>Máquina</th><th class="c">Min. plan.</th><th class="c">Día</th><th class="c">Fecha</th><th>Empleado</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th></tr></thead><tbody>${procRows}</tbody></table>
+<table class="procesos"><thead><tr><th class="c">#</th><th>Proceso</th><th>Recurso maquinaria</th><th class="c">Min. plan.</th><th class="c">Día</th><th class="c">Fecha</th><th>Recurso humano</th><th class="c">H. inicio</th><th class="c">H. fin</th><th class="c">Total</th></tr></thead><tbody>${procRows}</tbody></table>
 <p class="ayuda">Cada proceso trae tres renglones, uno por día: no hace falta cargarlo dos veces en el sistema. Si lleva más de tres días, seguí en la Nota de taller.</p>
 <h2>Nota de taller</h2>
 <div class="notas">${esc(detailsData.observaciones || "")}</div>
 ${generalData.descripcion ? `<h2>Descripción</h2><div class="notas">${esc(generalData.descripcion)}</div>` : ""}
 <div class="firmas">
-  <div class="firma">Firma del operario</div>
+  <div class="firma">Firma del recurso humano</div>
   <div class="firma">Control / Calidad</div>
   <div class="firma">Fecha de cierre</div>
 </div>
-<div class="pie">Hoja de PROCESOS — para el operario · Metalúrgica Longchamps</div>
+<div class="pie">Hoja de PROCESOS — para el recurso humano · Metalúrgica Longchamps</div>
 </div>
 
 <div class="page">
@@ -1842,7 +1842,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
                                         <div className="space-y-1">
                                             <p className="text-sm text-gray-500">
-                                                Elegí proceso, máquina, recurso humano, minutos y cuánto recurso humano hace falta. Destildá los que esta vez no van (opcional).
+                                                Elegí proceso, recurso maquinaria, recurso humano, minutos y cuánto recurso humano hace falta. Destildá los que esta vez no van (opcional).
                                             </p>
                                         </div>
                                         {/* Ir y volver a los planos sin apuntarle a la solapa cada vez: los pasos

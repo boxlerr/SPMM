@@ -93,9 +93,9 @@ export function RegistrarIncidenciaModal({
                         Registrar incidencia de plano
                     </DialogTitle>
                     <DialogDescription>
-                        Registrá cuándo se perdió tiempo o hizo falta más gente porque no se interpretó un plano.
+                        Registrá cuándo se perdió tiempo o hizo falta más recurso humano porque no se interpretó un plano.
                         {procesoNombre ? ` Proceso: ${procesoNombre}.` : ""}
-                        {operarioNombre ? ` Operario: ${operarioNombre}.` : ""}
+                        {operarioNombre ? ` Recurso humano: ${operarioNombre}.` : ""}
                     </DialogDescription>
                 </DialogHeader>
 

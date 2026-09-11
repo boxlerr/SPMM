@@ -315,14 +315,14 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                         {/* Operario */}
                         <div>
                             <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
-                                Operario Asignado
+                                Recurso humano asignado
                             </label>
                             <Select
                                 value={localOperator}
                                 onValueChange={setLocalOperator}
                             >
                                 <SelectTrigger className="w-full h-12 text-sm bg-white border-gray-200 hover:border-gray-300 transition-colors">
-                                    <SelectValue placeholder="Seleccionar operario">
+                                    <SelectValue placeholder="Seleccionar recurso humano">
                                         {localOperator && (
                                             <div className="flex items-center gap-3">
                                                 <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white flex items-center justify-center text-xs font-bold shadow-sm">
@@ -336,7 +336,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                                                 </span>
                                             </div>
                                         )}
-                                        {!localOperator && <span className="text-gray-500">Seleccionar operario</span>}
+                                        {!localOperator && <span className="text-gray-500">Seleccionar recurso humano</span>}
                                     </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent className="z-[70]">
@@ -382,7 +382,7 @@ const TaskDetailsModal: React.FC<TaskDetailsModalProps> = ({
                             {/* Maquinaria */}
                             <div>
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 block">
-                                    Maquinaria
+                                    Recurso maquinaria
                                 </label>
                                 {onMachineryChange && maquinarias.length > 0 ? (
                                     <Select

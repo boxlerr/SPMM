@@ -46,7 +46,7 @@ export function SharedOperatorsList({
         return (
             <div className="flex items-center justify-center py-12">
                 <Spinner className="h-8 w-8" />
-                <span className="ml-3 text-muted-foreground">Cargando operarios...</span>
+                <span className="ml-3 text-muted-foreground">Cargando recurso humano...</span>
             </div>
         );
     }
@@ -54,7 +54,7 @@ export function SharedOperatorsList({
     if (operarios.length === 0) {
         return (
             <div className="py-12 text-center text-muted-foreground">
-                <p className="text-lg">No hay operarios disponibles</p>
+                <p className="text-lg">No hay recurso humano disponible</p>
             </div>
         );
     }

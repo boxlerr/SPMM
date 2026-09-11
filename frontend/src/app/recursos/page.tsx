@@ -261,13 +261,13 @@ export default function RecursosPage() {
     if (success) {
       if (itemAEliminar.tipo === "operario") {
         addNotification(
-          `Operario ${itemAEliminar.nombre} ha sido eliminado`,
+          `Recurso humano ${itemAEliminar.nombre} ha sido eliminado`,
           "operario_deleted"
         );
-        showToast(`Operario ${itemAEliminar.nombre} eliminado correctamente`, 'success');
+        showToast(`Recurso humano ${itemAEliminar.nombre} eliminado correctamente`, 'success');
         await fetchOperarios();
       } else if (itemAEliminar.tipo === "maquina") {
-        showToast(`Máquina ${itemAEliminar.nombre} eliminada correctamente`, 'success');
+        showToast(`Recurso maquinaria ${itemAEliminar.nombre} eliminado correctamente`, 'success');
         await fetchMaquinas();
       } else {
         showToast(`Proceso ${itemAEliminar.nombre} eliminado correctamente`, 'success');
@@ -345,7 +345,7 @@ export default function RecursosPage() {
             <>
               <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
                 <Plus className="h-4 w-4 mr-2" />
-                {tabActiva === "operarios" ? "Nuevo Operario" : tabActiva === "maquinas" ? "Nueva Maquinaria" : "Nuevo Proceso"}
+                {tabActiva === "operarios" ? "Nuevo recurso humano" : tabActiva === "maquinas" ? "Nuevo recurso maquinaria" : "Nuevo Proceso"}
               </Button>
               <Button
                 onClick={tabActiva === "operarios" ? fetchOperarios : tabActiva === "maquinas" ? fetchMaquinas : fetchProcesos}
@@ -452,9 +452,9 @@ export default function RecursosPage() {
           <div className="p-4 md:p-6 border-b">
             <div className="flex items-center gap-2">
               <Factory className="h-5 w-5 text-muted-foreground" />
-              <h2 className="text-lg font-semibold">Máquinas y Equipos</h2>
+              <h2 className="text-lg font-semibold">Recurso maquinaria</h2>
             </div>
-            <p className="text-sm text-muted-foreground mt-1">Gestión de maquinaria industrial</p>
+            <p className="text-sm text-muted-foreground mt-1">Gestión del recurso maquinaria</p>
 
             {/* Aviso de las que no puede usar nadie. Va acá arriba porque es el tipo de
                 hueco que no se nota mirando la lista: la máquina existe, está bien
@@ -467,10 +467,10 @@ export default function RecursosPage() {
                 <Alert className="mt-3 border-amber-200 bg-amber-50">
                   <AlertDescription className="text-amber-900 text-sm">
                     <span>
-                      Hay <strong>{sinRango.length} de {maquinas.length} máquinas sin rango cargado</strong>: el
-                      planificador no se las asigna a nadie y el trabajo sale “sin máquina”. Son{" "}
-                      {sinRango.map((m) => m.nombre).join(", ")}. Tocá el aviso de cada una en la
-                      columna Rangos para cargarlo acá mismo.
+                      Hay <strong>{sinRango.length} de recurso maquinaria sin rango cargado</strong>, de{" "}
+                      {maquinas.length} en total: el planificador no se lo asigna a nadie y el trabajo
+                      sale “sin recurso maquinaria”. Son {sinRango.map((m) => m.nombre).join(", ")}.
+                      Tocá el aviso de cada uno en la columna Rangos para cargarlo acá mismo.
                     </span>
                   </AlertDescription>
                 </Alert>
@@ -481,13 +481,13 @@ export default function RecursosPage() {
           {api.loading && (
             <div className="flex items-center justify-center py-12">
               <Spinner className="h-8 w-8" />
-              <span className="ml-3 text-muted-foreground">Cargando maquinarias...</span>
+              <span className="ml-3 text-muted-foreground">Cargando el recurso maquinaria...</span>
             </div>
           )}
 
           {!api.loading && maquinas.length === 0 && (
             <div className="py-12 text-center text-muted-foreground">
-              <p className="text-lg">No hay maquinarias disponibles</p>
+              <p className="text-lg">No hay recurso maquinaria disponible</p>
             </div>
           )}
 
@@ -502,7 +502,7 @@ export default function RecursosPage() {
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Código</th>
                       <th
                         className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground"
-                        title="Quién puede usar la máquina. Sin rango, el planificador no se la asigna a nadie."
+                        title="Quién puede usar el recurso maquinaria. Sin rango, el planificador no se lo asigna a nadie."
                       >
                         Rangos
                       </th>
@@ -530,7 +530,7 @@ export default function RecursosPage() {
                               type="button"
                               onClick={() => setMaquinaAbierta(maquinaAbierta === maquina.id ? null : maquina.id)}
                               className="flex flex-wrap gap-1 hover:opacity-70 transition-opacity"
-                              title="Clic para editar qué rangos pueden usarla"
+                              title="Clic para editar qué rangos pueden usar este recurso maquinaria"
                             >
                               {rangosPorMaquina.get(maquina.id)!.map((r) => (
                                 <Badge key={r.id} variant="outline" className="text-xs font-normal">
@@ -544,7 +544,7 @@ export default function RecursosPage() {
                               size="sm"
                               onClick={() => setMaquinaAbierta(maquinaAbierta === maquina.id ? null : maquina.id)}
                               className="h-6 bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 text-xs font-semibold"
-                              title="Sin rango cargado: el planificador no se la asigna a nadie. Clic para cargarlo acá mismo."
+                              title="Sin rango cargado: el planificador no se lo asigna a nadie. Clic para cargarlo acá mismo."
                             >
                               <AlertTriangle className="h-3 w-3 mr-1" />
                               Sin rango — asignar
@@ -780,7 +780,7 @@ export default function RecursosPage() {
                               size="sm"
                               onClick={() => setProcesoAbierto(procesoAbierto === proceso.id ? null : proceso.id)}
                               className={`h-6 text-xs font-semibold ${enUso ? "bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100" : "text-muted-foreground hover:bg-muted"}`}
-                              title={`Pide ${cob!.rangos.map(r => r.nombre).join(" o ")}, y ningún operario disponible lo tiene.${enUso ? ` Se usa en ${cob!.lineas_abiertas} línea(s) de OTs abiertas.` : " Hoy no se usa en ninguna OT abierta."} Clic para resolverlo acá mismo.`}
+                              title={`Pide ${cob!.rangos.map(r => r.nombre).join(" o ")}, y ningún recurso humano disponible lo tiene.${enUso ? ` Se usa en ${cob!.lineas_abiertas} línea(s) de OTs abiertas.` : " Hoy no se usa en ninguna OT abierta."} Clic para resolverlo acá mismo.`}
                             >
                               {enUso && <AlertTriangle className="h-3 w-3 mr-1" />}
                               No lo puede hacer nadie
@@ -807,7 +807,7 @@ export default function RecursosPage() {
                                 <Badge key={r.id} variant="outline" className="text-xs font-normal">{r.nombre}</Badge>
                               ))}
                               <span className="text-xs text-muted-foreground ml-1">
-                                {cob!.habilitados} {cob!.habilitados === 1 ? "operario" : "operarios"}
+                                {cob!.habilitados} de recurso humano
                                 {cob!.por_habilidad_manual > 0 && ` (${cob!.por_habilidad_manual} a mano)`}
                               </span>
                             </button>
@@ -941,7 +941,7 @@ export default function RecursosPage() {
           resource="rangos"
           singular="Rango"
           titulo="Rangos"
-          descripcion="Clic en un rango para ver y editar qué procesos y máquinas habilita."
+          descripcion="Clic en un rango para ver y editar qué procesos y qué recurso maquinaria habilita."
           icon={<Target className="h-5 w-5 text-muted-foreground" />}
           renderBadge={(rango) => {
             const cob = porRango.get(rango.id);
@@ -954,24 +954,24 @@ export default function RecursosPage() {
                     className="text-xs font-normal"
                     title={cob.maquinas.map((m) => m.nombre).join(", ")}
                   >
-                    {cob.maquinas.length} {cob.maquinas.length === 1 ? "máquina" : "máquinas"}
+                    {cob.maquinas.length} de recurso maquinaria
                   </Badge>
                 ) : (
                   <Badge
                     variant="outline"
                     className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold"
-                    title="Este rango no habilita ninguna máquina. Quien lo tenga solo puede tomar procesos manuales."
+                    title="Este rango no habilita ningún recurso maquinaria. Quien lo tenga solo puede tomar procesos manuales."
                   >
-                    Sin máquinas
+                    Sin recurso maquinaria
                   </Badge>
                 )}
                 {cob.operarios === 0 && (
                   <Badge
                     variant="outline"
                     className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold"
-                    title="Nadie tiene este rango: los procesos y máquinas que solo él habilita quedan sin candidatos."
+                    title="Nadie tiene este rango: los procesos y el recurso maquinaria que solo él habilita quedan sin candidatos."
                   >
-                    Sin operarios
+                    Sin recurso humano
                   </Badge>
                 )}
               </span>

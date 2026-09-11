@@ -303,8 +303,8 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? "Editar" : "Crear"} Operario</DialogTitle>
-          <DialogDescription>{editing ? "Modifica" : "Completa"} los datos del operario</DialogDescription>
+          <DialogTitle>{editing ? "Editar" : "Crear"} recurso humano</DialogTitle>
+          <DialogDescription>{editing ? "Modifica" : "Completa"} los datos del recurso humano</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <div className="space-y-4">
@@ -447,12 +447,12 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
                 <Input type="time" value={formData.hora_fin} onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })} />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">El planificador utilizará estas horas para organizar las tareas de este operario.</p>
+            <p className="text-xs text-muted-foreground mt-1">El planificador utilizará estas horas para organizar los procesos de este recurso humano.</p>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={disabled || isSaving}>{isSaving ? "Guardando..." : (editing ? "Guardar Cambios" : "Crear Operario")}</Button>
+          <Button onClick={handleSubmit} disabled={disabled || isSaving}>{isSaving ? "Guardando..." : (editing ? "Guardar Cambios" : "Crear recurso humano")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -248,7 +248,7 @@ export default function AuditoriaPage() {
                                                     {ok && (
                                                         <p className="text-muted-foreground">
                                                             {it.procesos_planificados != null && `${it.procesos_planificados} procesos planificados`}
-                                                            {(it.sin_asignar ?? 0) > 0 && ` · ${it.sin_asignar} sin operario`}
+                                                            {(it.sin_asignar ?? 0) > 0 && ` · ${it.sin_asignar} sin recurso humano`}
                                                             {(it.diagnosticos_bloqueantes ?? 0) > 0 && ` · ${it.diagnosticos_bloqueantes} traba(s)`}
                                                             {(it.diagnosticos_avisos ?? 0) > 0 && ` · ${it.diagnosticos_avisos} aviso(s)`}
                                                         </p>

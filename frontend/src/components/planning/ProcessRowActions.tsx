@@ -97,6 +97,15 @@ export function ProcessRowActions({
     if (editando) {
         return (
             <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+                {/* El rótulo no es decoración. El input aparece en la columna ACCIONES,
+                    o sea lejos de la columna MIN. EST. que es la que se está editando:
+                    salía una cajita con un número en un lugar que no tiene nada que ver
+                    con minutos, y no se entendía qué era ("qué es esa edición poronga",
+                    Julián 10/09). Mover el editor a su columna es cirugía mayor en tres
+                    tablas; decir qué es cuesta una palabra. */}
+                <span className="text-[10px] font-semibold uppercase tracking-tight text-gray-400">
+                    Min.
+                </span>
                 <Input
                     autoFocus
                     value={valor}
@@ -105,6 +114,10 @@ export function ProcessRowActions({
                         if (e.key === "Enter") guardar();
                         if (e.key === "Escape") setEditando(false);
                     }}
+                    /* Salir del campo guarda, como en el resto de las tablas. Antes había
+                       que acertarle al tilde: hacer click en cualquier otro lado tiraba
+                       lo escrito sin decir nada. */
+                    onBlur={() => { if (!guardando) guardar(); }}
                     className="h-6 w-16 text-[10px] px-1.5 text-center tabular-nums"
                     placeholder="min"
                 />
@@ -112,14 +125,14 @@ export function ProcessRowActions({
                     onClick={guardar}
                     disabled={guardando}
                     className="p-1 rounded text-green-600 hover:bg-green-50 disabled:opacity-50"
-                    title="Guardar los minutos"
+                    title="Guardar los minutos (o apretá Enter)"
                 >
                     {guardando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 </button>
                 <button
                     onClick={() => setEditando(false)}
                     className="p-1 rounded text-gray-400 hover:bg-gray-100"
-                    title="Cancelar"
+                    title="Cancelar (o apretá Escape)"
                 >
                     <X className="w-3.5 h-3.5" />
                 </button>
@@ -140,19 +153,23 @@ export function ProcessRowActions({
                 variant="destructive"
             />
             <div
-                className="flex items-center gap-0.5 justify-end opacity-0 group-hover/proc:opacity-100 transition-opacity"
+                /* Los botones se ven SIEMPRE, apenas marcados. Antes vivían en
+                   `opacity-0` hasta pasar el mouse: no había forma de saber que la fila
+                   era editable salvo tropezársela. Atenuados no hacen ruido, y con el
+                   mouse encima toman color. */
+                className="flex items-center gap-0.5 justify-end text-gray-300 group-hover/proc:text-gray-500 transition-colors"
                 onClick={(e) => e.stopPropagation()}
             >
                 <button
                     onClick={() => setEditando(true)}
-                    className="p-1 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50"
-                    title="Cambiar los minutos de este proceso"
+                    className="p-1 rounded text-current hover:text-blue-600 hover:bg-blue-50"
+                    title="Cambiar los minutos estimados de este proceso"
                 >
                     <Pencil className="w-3.5 h-3.5" />
                 </button>
                 <button
                     onClick={() => setConfirmarBorrado(true)}
-                    className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                    className="p-1 rounded text-current hover:text-red-600 hover:bg-red-50"
                     title="Sacar este proceso de la orden"
                 >
                     <Trash2 className="w-3.5 h-3.5" />

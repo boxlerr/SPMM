@@ -208,10 +208,10 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
 
       if (response.ok) {
         showToast(`Estado actualizado a ${newValue}`, 'success');
-        addNotification(`Operario ${operario.nombre} actualizado a ${newValue}`, 'operario_updated');
+        addNotification(`Recurso humano ${operario.nombre} actualizado a ${newValue}`, 'operario_updated');
         operario.disponible = nuevoEstadoBoolean;
       } else {
-        showToast("Error al actualizar estado del operario", 'error');
+        showToast("Error al actualizar el estado del recurso humano", 'error');
       }
     } catch (error) {
       showToast("Error de conexión", 'error');
@@ -388,11 +388,11 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
       });
 
       if (response.ok) {
-        showToast("Estado de tarea actualizado", 'success');
+        showToast("Estado del proceso actualizado", 'success');
       } else {
         // Revert on failure
         setTasks(previousTasks);
-        showToast("Error al actualizar la tarea", 'error');
+        showToast("Error al actualizar el proceso", 'error');
       }
     } catch (error) {
       setTasks(previousTasks);
@@ -424,8 +424,8 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
         <DialogHeader className="px-5 py-2.5 border-b bg-gray-50/50 flex-shrink-0">
           <div className="flex items-start justify-between">
             <div>
-              <DialogTitle className="text-base">{isEditing ? "Editar Operario" : "Perfil del Operario"}</DialogTitle>
-              <DialogDescription className="text-xs">{isEditing ? "Modifica los datos del operario" : "Detalle de actividad y asignaciones"}</DialogDescription>
+              <DialogTitle className="text-base">{isEditing ? "Editar recurso humano" : "Perfil del recurso humano"}</DialogTitle>
+              <DialogDescription className="text-xs">{isEditing ? "Modifica los datos del recurso humano" : "Detalle de actividad y asignaciones"}</DialogDescription>
             </div>
             {/* Button moved to sidebar */}
           </div>
@@ -559,7 +559,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     <h4 className="font-semibold text-gray-800">Habilidades</h4>
                   </div>
                   <p className="text-[11px] text-muted-foreground px-1 mb-1.5">
-                    Salen de los rangos del operario, más las <strong className="text-amber-700">manuales</strong>{" "}
+                    Salen de los rangos del recurso humano, más las <strong className="text-amber-700">manuales</strong>{" "}
                     que se le hayan cargado en Editar. SKILLS 1 y 2 solo le dicen al
                     planificador a quién preferir; el toggle apaga la habilidad.
                   </p>
@@ -595,7 +595,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   </div>
                   {(operario.skills || []).length === 0 ? (
                     <p className="text-muted-foreground italic text-xs px-2 mb-2">
-                      Sin habilidades: el operario no tiene rangos asignados.
+                      Sin habilidades: el recurso humano no tiene rangos asignados.
                     </p>
                   ) : (
                     <Accordion type="multiple" className="w-full" defaultValue={GRUPOS_SKILL.map(g => g.value)}>
@@ -711,7 +711,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   <span className="flex items-center gap-1.5">
                     <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
                     <span className="text-[13px] font-bold text-slate-800">{totalTasks}</span>
-                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Tareas</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Procesos</span>
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Activity className="h-3.5 w-3.5 text-orange-600 shrink-0" />
@@ -748,7 +748,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     {groupedTasks.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
                         <FileText className="h-12 w-12 mb-3 stroke-1" />
-                        <p>No hay órdenes asignadas para este operario.</p>
+                        <p>No hay órdenes asignadas para este recurso humano.</p>
                       </div>
                     ) : (
                       <div className="space-y-1.5">

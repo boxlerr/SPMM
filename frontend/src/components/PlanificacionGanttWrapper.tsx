@@ -95,7 +95,7 @@ export default function PlanificacionGanttWrapper({
                                 className={`rounded-sm px-3 ${viewMode === "operario" ? "bg-red-100 text-red-800 font-medium" : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"}`}
                                 onClick={() => setViewMode("operario")}
                             >
-                                Operarios
+                                Recurso humano
                             </Button>
                             <Button
                                 variant="ghost"
@@ -103,7 +103,7 @@ export default function PlanificacionGanttWrapper({
                                 className={`rounded-sm px-3 ${viewMode === "maquina" ? "bg-red-100 text-red-800 font-medium" : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"}`}
                                 onClick={() => setViewMode("maquina")}
                             >
-                                Máquinas
+                                Recurso maquinaria
                             </Button>
                         </div>
                     </div>

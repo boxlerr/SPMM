@@ -215,7 +215,7 @@ export function ProcesosEditor({
         })),
     ];
     const maquinaOptions = [
-        { value: "", label: "Sin máquina" },
+        { value: "", label: "Sin recurso maquinaria" },
         ...maquinarias.map((m) => ({
             value: m.id.toString(),
             label: m.cod_maquina ? `${m.cod_maquina} — ${m.nombre}` : m.nombre,
@@ -302,7 +302,7 @@ export function ProcesosEditor({
                                 a la OT entera. Y el valor por defecto —"La reparte el planificador"—
                                 no entraba en 190px y se leía "La reparte el pla…", o sea nada. */}
                             <span className="text-xs text-gray-500 whitespace-nowrap"
-                                  title="Poner la misma persona en todos los pasos de esta orden, de una">
+                                  title="Poner el mismo recurso humano en todos los pasos de esta orden, de una">
                                 Toda la OT la hace
                             </span>
                             <SearchableSelect
@@ -312,7 +312,7 @@ export function ProcesosEditor({
                                     { value: "", label: "Lo decide el planificador" },
                                     ...operarioOptions.filter((o) => o.value !== ""),
                                 ]}
-                                placeholder="elegir una persona…"
+                                placeholder="elegir un recurso humano…"
                                 disabled={disabled}
                                 className="w-[220px]"
                                 triggerClassName="h-8 text-xs"
@@ -360,7 +360,7 @@ export function ProcesosEditor({
                     <div className="text-center">#</div>
                     <div>Proceso</div>
                     <div className="text-center">Minutos</div>
-                    <div>Máquina</div>
+                    <div>Recurso maquinaria</div>
                     <div>Recurso humano</div>
                     <div className="text-center" title="Cantidad de recurso humano que hace falta en simultáneo">Cantidad</div>
                     <div></div>
@@ -483,21 +483,21 @@ export function ProcesosEditor({
                                                                         options={maquinaOptions}
                                                                         value={row.maquina_id}
                                                                         onValueChange={(v) => update(row.id, { maquina_id: v })}
-                                                                        placeholder="Sin máquina"
+                                                                        placeholder="Sin recurso maquinaria"
                                                                         disabled={disabled}
                                                                     />
                                                                 </div>
                                                                 {conMaquina && (
                                                                     <Lock
                                                                         className="w-3.5 h-3.5 shrink-0 text-amber-500"
-                                                                        aria-label="Máquina forzada (preseleccionada)"
+                                                                        aria-label="Recurso maquinaria forzado (preseleccionado)"
                                                                     />
                                                                 )}
                                                             </div>
                                                             <ChipPlanificado
                                                                 texto={plan?.maquinaria}
                                                                 falta={!!plan && plan.sin_maquinaria}
-                                                                faltaTexto="sin máquina reservada"
+                                                                faltaTexto="sin recurso maquinaria reservado"
                                                                 hay={!!plan}
                                                             />
                                                         </div>
@@ -579,7 +579,7 @@ export function ProcesosEditor({
                 <Lock className="inline w-3 h-3 mr-1 align-[-1px] text-amber-500" />
                 Elegir recurso maquinaria o recurso humano fuerza que ese proceso se planifique
                 así (preselección), aunque el rango no se lo habilite. Dejalo en{" "}
-                <span className="font-medium">«Sin máquina»</span> y{" "}
+                <span className="font-medium">«Sin recurso maquinaria»</span> y{" "}
                 <span className="font-medium">«Sin asignar»</span> para que el planificador decida.
             </p>
         </div>

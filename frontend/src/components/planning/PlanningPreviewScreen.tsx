@@ -385,14 +385,14 @@ export function PlanningPreviewScreen({
             return {
                 code: "no_rango",
                 label: "Sin rango configurado",
-                hint: "Este proceso no tiene rango asignado en el sistema. Asignale uno en Recursos → Procesos para que el motor pueda elegir operario.",
+                hint: "Este proceso no tiene rango asignado en el sistema. Asignale uno en Recursos → Procesos para que el motor pueda elegir el recurso humano.",
                 rangos: [],
             };
         }
         return {
             code: "no_match",
-            label: "Sin operario/máquina compatible",
-            hint: `Ningún operario o máquina disponible cumple los requisitos. Rangos requeridos: ${formatRangoIds(rangos)}. Asigná operarios a estos rangos en Recursos → Operarios.`,
+            label: "Sin recurso humano/maquinaria compatible",
+            hint: `Ningún recurso humano ni recurso maquinaria disponible cumple los requisitos. Rangos requeridos: ${formatRangoIds(rangos)}. Asigná recurso humano a estos rangos en Recursos → Recurso humano.`,
             rangos,
         };
     };
@@ -2290,7 +2290,7 @@ export function PlanningPreviewScreen({
                                                 <strong>Hay {allUnfit.length} proceso(s) en OT forzada(s) que el motor no pudo asignar.</strong> Abrí cada OT en la tabla para ver cuáles son y por qué.
                                                 <div className="mt-1 text-blue-800 flex flex-wrap gap-x-3 gap-y-0.5">
                                                     {sinRangoCount > 0 && <span>• <strong>{sinRangoCount}</strong> sin rango configurado en el sistema</span>}
-                                                    {sinMatchCount > 0 && <span>• <strong>{sinMatchCount}</strong> sin operario/máquina compatible</span>}
+                                                    {sinMatchCount > 0 && <span>• <strong>{sinMatchCount}</strong> sin recurso humano/maquinaria compatible</span>}
                                                 </div>
                                                 <div className="mt-1 text-blue-700/90">
                                                     Estos procesos no se van a guardar al confirmar. Para resolverlo: configurá los rangos faltantes en <strong>Recursos → Procesos</strong> y volvé a planificar.
@@ -2320,7 +2320,7 @@ export function PlanningPreviewScreen({
                                                 </div>
                                                 <div className="text-xs text-amber-700/90 mt-1">
                                                     Decidí qué hacer con cada una. Por defecto se <strong>descartan</strong> (quedan disponibles para la próxima planificación).
-                                                    Si la <strong>forzás</strong>, el motor la incluirá aunque eso amplíe el rango o sobrecargue operarios.
+                                                    Si la <strong>forzás</strong>, el motor la incluirá aunque eso amplíe el rango o sobrecargue al recurso humano.
                                                 </div>
                                             </div>
                                         </div>
@@ -2413,7 +2413,7 @@ export function PlanningPreviewScreen({
                                                                         <div className="text-[11px] text-gray-600 leading-relaxed">
                                                                             <strong className="text-gray-700">Cómo resolverlo:</strong> ampliá el rango de fechas
                                                                             (volvé a la selección con "Volver"), subí la prioridad de esta OT en el listado, asegurate
-                                                                            que haya operarios disponibles, o usá <strong className="text-amber-700">Forzar</strong> si
+                                                                            que haya recurso humano disponible, o usá <strong className="text-amber-700">Forzar</strong> si
                                                                             es indispensable que entre.
                                                                         </div>
                                                                     </div>
@@ -2492,8 +2492,8 @@ export function PlanningPreviewScreen({
                                                 </div>
                                                 {([
                                                     ["atrasadas", "Solo las que llegan tarde", "Terminan después de la fecha prometida."],
-                                                    ["sinOperario", "Solo con procesos sin operario", "Sin contar los tercerizados."],
-                                                    ["sinMaquina", "Solo con procesos sin máquina", "Sin contar los que no necesitan."],
+                                                    ["sinOperario", "Solo con procesos sin recurso humano", "Sin contar los tercerizados."],
+                                                    ["sinMaquina", "Solo con procesos sin recurso maquinaria", "Sin contar los que no necesitan."],
                                                     ["forzadas", "Solo las forzadas", "Las que entraron ampliando el rango."],
                                                 ] as const).map(([clave, titulo, ayuda]) => (
                                                     <label key={clave} className="flex items-start gap-2 cursor-pointer">
@@ -2840,7 +2840,7 @@ export function PlanningPreviewScreen({
                                                                     setEditandoProcesosDe({ id: ordenId, visible: firstItem.id_otvieja || ordenId });
                                                                 }}
                                                                 disabled={isCalculating || isConfirming}
-                                                                title="Editar los procesos de esta OT: agregar, sacar, reordenar, elegir máquina y persona"
+                                                                title="Editar los procesos de esta OT: agregar, sacar, reordenar, elegir recurso maquinaria y recurso humano"
                                                             >
                                                                 <ListChecks className="w-4 h-4" />
                                                             </Button>
@@ -2871,7 +2871,7 @@ export function PlanningPreviewScreen({
                                                                                 <div className="px-3 py-1.5 border-b">#</div>
                                                                                 <div className="px-3 py-1.5 border-b">Proceso</div>
                                                                                 <div className="px-3 py-1.5 border-b">Recurso humano</div>
-                                                                                <div className="px-3 py-1.5 border-b">Maquinaria</div>
+                                                                                <div className="px-3 py-1.5 border-b">Recurso maquinaria</div>
                                                                                 <div className="px-3 py-1.5 border-b">Inicio</div>
                                                                             </div>
 
@@ -2920,7 +2920,7 @@ export function PlanningPreviewScreen({
                                                                                                 {effectiveItem.tercerizado && (
                                                                                                     <span
                                                                                                         className="text-xs text-violet-700 bg-violet-50 border border-violet-200 px-1.5 rounded font-medium"
-                                                                                                        title="Lo hace un tercero. Ocupa lugar en la secuencia de la OT, pero no lo hace nadie del taller: por eso va sin operario y sin máquina."
+                                                                                                        title="Lo hace un tercero. Ocupa lugar en la secuencia de la OT, pero no lo hace nadie del taller: por eso va sin recurso humano y sin recurso maquinaria."
                                                                                                     >
                                                                                                         Tercerizado
                                                                                                     </span>
@@ -2938,7 +2938,7 @@ export function PlanningPreviewScreen({
                                                                                                     <div className="mt-1 flex items-start gap-1 text-[11px] text-red-600 leading-tight" title={diag.hint}>
                                                                                                         <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
                                                                                                         <span>
-                                                                                                            Sin operario asignado
+                                                                                                            Sin recurso humano asignado
                                                                                                             {diag.rangos.length > 0
                                                                                                                 ? <span className="text-gray-500"> · requiere rango {formatRangoIds(diag.rangos)}</span>
                                                                                                                 : <span className="text-gray-500"> · el proceso no tiene rango configurado en Recursos</span>}
@@ -2994,7 +2994,7 @@ export function PlanningPreviewScreen({
                                                                                                     )}
                                                                                                     title={[
                                                                                                         effectiveItem.usa_maquina === false
-                                                                                                            ? "Proceso manual: no usa máquina. Podés asignarle una igual si querés."
+                                                                                                            ? "Proceso manual: no usa recurso maquinaria. Podés asignarle uno igual si querés."
                                                                                                             : "",
                                                                                                         limitacionElegida ? `Limitación: ${limitacionElegida}` : "",
                                                                                                     ].filter(Boolean).join(" — ") || undefined}
@@ -3069,7 +3069,7 @@ export function PlanningPreviewScreen({
                                                                                         target="_blank"
                                                                                         rel="noopener noreferrer"
                                                                                         className="text-red-700 hover:text-red-900 underline underline-offset-2"
-                                                                                        title="Configurar rangos/operarios en Recursos"
+                                                                                        title="Configurar rangos y recurso humano en Recursos"
                                                                                     >
                                                                                         Recursos ↗
                                                                                     </a>
@@ -3156,7 +3156,7 @@ export function PlanningPreviewScreen({
                                                                                                     // El verde acá dice "ya lo resolviste": la limitación no se lo pisa, va en el globito.
                                                                                                     title={limitacionU ? `Limitación: ${limitacionU}` : undefined}
                                                                                                 >
-                                                                                                    <SelectValue placeholder="Máquina" />
+                                                                                                    <SelectValue placeholder="Recurso maquinaria" />
                                                                                                 </SelectTrigger>
                                                                                                 <SelectContent>
                                                                                                     <SelectItem value="0" className="text-gray-400 italic">
@@ -3266,7 +3266,7 @@ export function PlanningPreviewScreen({
                             <button
                                 type="button"
                                 onClick={alternarCarga}
-                                title="Mostrar la carga de operarios"
+                                title="Mostrar la carga de recurso humano"
                                 className="flex-1 w-full flex flex-col items-center gap-3 py-3 hover:bg-gray-100 transition-colors"
                             >
                                 <ChevronRight className="w-4 h-4 text-gray-400 rotate-180 shrink-0" />
@@ -3277,7 +3277,7 @@ export function PlanningPreviewScreen({
                                     </span>
                                 )}
                                 <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-500 [writing-mode:vertical-rl]">
-                                    Carga de operarios
+                                    Carga de recurso humano
                                 </span>
                             </button>
                         ) : (
@@ -3286,7 +3286,7 @@ export function PlanningPreviewScreen({
                             <div className="min-w-0 flex-1">
                                 <h3 className="font-bold text-gray-800 flex items-center gap-2 flex-wrap">
                                     <User className="w-4 h-4 text-gray-500" />
-                                    Carga de operarios
+                                    Carga de recurso humano
                                     {sobrecargados > 0 && (
                                         <span className="rounded-full bg-rose-100 text-rose-700 text-[11px] font-bold px-2 py-0.5 tabular-nums">
                                             {sobrecargados} pasados
@@ -3463,7 +3463,7 @@ export function PlanningPreviewScreen({
                             <Sparkles className="w-5 h-5 text-purple-600 animate-pulse" />
                             <div>
                                 <div className="text-sm font-bold text-gray-800">Recalculando planificación</div>
-                                <div className="text-[11px] text-gray-500">El motor está distribuyendo procesos en operarios y horarios disponibles...</div>
+                                <div className="text-[11px] text-gray-500">El motor está distribuyendo los procesos entre el recurso humano y los horarios disponibles...</div>
                             </div>
                         </div>
                     </div>
