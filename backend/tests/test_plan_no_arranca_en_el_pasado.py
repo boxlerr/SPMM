@@ -25,7 +25,7 @@ from backend.application import PlanificacionService as PS
 def _regla():
     """El bloque que decide desde cuándo arranca el plan."""
     fuente = inspect.getsource(PS._resolver_planificacion)
-    ini = fuente.index("ahora = datetime.now()")
+    ini = fuente.index("ahora = _ahora_ar()")
     return fuente[ini:fuente.index("start_date =", ini)]
 
 
@@ -90,4 +90,40 @@ def test_la_regla_sigue_escrita_asi():
     assert "timedelta(days=1)" in regla, "desapareció el salto al día siguiente"
     assert not re.search(r"hour\s*>=\s*17", regla), (
         "volvió el ajuste por hora de cierre, que era el que se perdía en el .date()"
+    )
+
+
+def test_la_hora_es_la_de_argentina_y_no_la_del_servidor():
+    """Cloud Run corre en UTC y el Dockerfile no fija TZ.
+
+    Con `datetime.now()` pelado el planificador cree que son tres horas más tarde, y
+    acá eso no es cosmético: con esa hora se decide si la jornada ya arrancó. Tres
+    horas corren la decisión un día entero — planificar a las 5 de la mañana, antes de
+    que el taller abra, daba «ya empezó, es para mañana» y se perdía el día.
+    """
+    import re
+    # Sin los comentarios: este archivo EXPLICA el bug, así que la frase aparece a
+    # propósito en la prosa. Lo que no puede volver es la llamada de verdad.
+    codigo = "\n".join(
+        re.sub(r"#.*$", "", l) for l in inspect.getsource(PS).split("\n")
+        if not l.strip().startswith("#")
+    )
+    assert not re.search(r"datetime\.now\(\s*\)", codigo), (
+        "volvió un datetime.now() pelado al planificador: en Cloud Run eso es UTC"
+    )
+    assert not re.search(r"utcnow\(", codigo), "utcnow no va en este repo"
+    ahora = PS._ahora_ar()
+    assert ahora.tzinfo is None, "las fechas de esta base van sin zona"
+
+
+def test_el_arranque_y_la_vuelta_a_fecha_usan_la_misma_base():
+    """Si se separan, el plan dice una hora y la tabla muestra otra.
+
+    `_convertir_minutos_a_fecha` traduce los minutos del solver a fechas reales. Si
+    toma una base distinta de la que usó el modelo, todas las fechas del plan se
+    corren. Por eso el llamador le pasa `ahora_ref = inicio_base` explícitamente.
+    """
+    cuerpo = inspect.getsource(PS._resolver_planificacion)
+    assert "ahora_ref = inicio_base" in cuerpo, (
+        "la vuelta a fecha dejó de usar la misma base que el arranque del plan"
     )

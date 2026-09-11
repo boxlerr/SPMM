@@ -2,7 +2,7 @@
 import asyncio
 import os
 from ortools.sat.python import cp_model
-from datetime import datetime, time,date
+from datetime import datetime, time, date, timezone
 
 from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.MaquinariaRepository import MaquinariaRepository
@@ -59,6 +59,21 @@ MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + MIN_LABORAL_SABADO
 
 
 HORA_APERTURA = time(7, 0)
+
+# Hora local de Argentina, sin zona, como TODAS las fechas de esta base.
+#
+# NO ES COSMÉTICO ACÁ. Cloud Run corre en UTC y el Dockerfile no fija TZ, así que
+# `datetime.now()` pelado devuelve tres horas de más: a las 16:27 de Argentina el
+# servidor cree que son las 19:27. Con eso se decide desde cuándo arranca el plan, y
+# tres horas corren la decisión un día entero — planificar a las 5 de la mañana, antes
+# de que el taller abra, daba «la jornada ya empezó, es para mañana» y se perdía el día.
+#
+# Mismo helper que AuditoriaRepository, PlanificacionRepository y OrdenTrabajoRepository.
+_TZ_AR = timezone(timedelta(hours=-3))
+
+
+def _ahora_ar() -> datetime:
+    return datetime.now(_TZ_AR).replace(tzinfo=None)
 
 # Una ventana del horizonte. `ini`/`fin` son minutos del timeline comprimido; el resto
 # ubica la ventana en el calendario para poder cruzarla con el horario de cada persona.
@@ -1289,7 +1304,7 @@ def _agregar_funcion_objetivo(
     y la añade al modelo.
     """
     total_obj = []
-    now = datetime.now()
+    now = _ahora_ar()
 
     # Prioridad DENTRO de las nativas. Todos los candidatos que llegan acá ya son
     # elegibles (tienen la nativa habilitada); esto solo ordena a quién preferir:
@@ -1507,7 +1522,7 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_
     # llamaban: dos lecturas de disco POR FILA del resultado.
     blocked_dates = set(blocked_dates or ())
 
-    ahora = ahora_ref if ahora_ref else datetime.now()
+    ahora = ahora_ref if ahora_ref else _ahora_ar()
     inicio_base = ahora.replace(hour=7, minute=0, second=0, microsecond=0)
     
     def avanzar_a_dia_valido(fecha):
@@ -1899,7 +1914,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # Sólo se planifica para hoy si todavía no abrieron. Es lo que pasa de verdad —
     # el plan se imprime y se reparte, así que no sirve para las horas que ya se
     # fueron— y además hace imposible que el plan vuelva a nacer vencido.
-    ahora = datetime.now()
+    ahora = _ahora_ar()
     if fecha_desde is None or fecha_desde <= ahora.date():
         inicio_base = ahora.replace(hour=HORA_APERTURA.hour, minute=HORA_APERTURA.minute,
                                     second=0, microsecond=0)
