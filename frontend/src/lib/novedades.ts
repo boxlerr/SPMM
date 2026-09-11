@@ -47,6 +47,15 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "las-barras-para-scrollear-de-costado-se-ven-siempre",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Todo el sistema",
+        titulo: "Las barras para correr las tablas hacia el costado ahora se ven siempre",
+        detalle:
+            "Cuando una tabla sigue para la derecha, ahora se ve la barra abajo con sus flechitas en las puntas, y no aparece sólo mientras scrolleás. Antes, en una computadora con mouse no había ninguna señal de que la fila continuaba, así que las columnas de la derecha —la fecha prometida, quién aprobó, el pedido— era como si no existieran. Vale en todas las pantallas, no sólo en las listas de órdenes.",
+    },
+    {
         id: "materias-primas-se-mira-y-se-puede-marcar-que-no-lleva",
         fecha: "2026-09-11",
         tipo: "arreglo",

@@ -154,31 +154,113 @@
  }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAS BARRAS DE SCROLL SE VEN SIEMPRE, EN TODAS LAS PANTALLAS
+
+   Pedido de Julián (11/09): «trabajan en computadoras con mouse, no en MacBooks
+   que podés hacer para el costado con el pad».
+
+   Ahí está el problema entero. Esto se diseñó en una Mac, donde el sistema
+   esconde la barra hasta que scrolleás y la devuelve sola: si la tabla sigue
+   para la derecha, el que la diseñó lo sabe porque desliza dos dedos sin
+   pensarlo. En el taller usan monitor y mouse. Sin barra visible no hay ninguna
+   señal de que la fila continúa, así que las columnas de la derecha —la fecha
+   prometida, quién aprobó, el pedido— simplemente no existen para ellos.
+
+   POR QUÉ VA GLOBAL Y NO COMO UNA CLASE
+
+   Porque la clase ya existía. `.scrollbar-horizontal-visible` estaba escrita
+   desde antes y la usaban 5 de los 37 contenedores que scrollean de costado:
+   hay que acordarse de ponerla, y nadie se acuerda. Es el mismo problema que
+   tuvimos hoy con el ancho de los modales y con la columna de material — la
+   solución existía y no llegaba a donde hacía falta. Puesto acá, vale para la
+   pantalla que se escriba mañana sin que nadie tenga que saber nada.
+
+   LOS TRES DETALLES QUE HACEN QUE FUNCIONE
+
+   1. `-webkit-appearance: none` es lo único que convierte la barra flotante de
+      macOS en una barra clásica que no se esconde. Sin eso, en Mac se sigue
+      escondiendo por más ancho que le pongas.
+   2. Las flechitas de las puntas van a mano (`::-webkit-scrollbar-button`).
+      Apenas le ponés un estilo propio a la barra, Chrome las saca — así que
+      estilarla sin reponerlas le habría SACADO a Windows algo que ya tenía.
+      Son justamente lo que se aprieta cuando no hay dos dedos para deslizar.
+   3. El contraste es más fuerte que el de la clase vieja (un gris apenas más
+      claro que el fondo). Esto se mira desde un metro, en un monitor de taller,
+      no a treinta centímetros de una pantalla retina.
+
+   La vertical también se ve siempre, pero sin flechitas: para arriba y abajo
+   está la rueda del mouse, que nadie duda de que existe.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+* {
+  scrollbar-width: thin;                    /* Firefox */
+  scrollbar-color: #94a3b8 #e2e8f0;
+}
+
+*::-webkit-scrollbar {
+  -webkit-appearance: none;                 /* el que destapa la barra en macOS */
+  width: 12px;
+  height: 14px;                             /* la horizontal, un toque más gruesa */
+}
+
+*::-webkit-scrollbar-track {
+  background: #e9eef5;
+  border-radius: 7px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 7px;
+  border: 3px solid #e9eef5;                /* el aire que lo hace parecer redondeado */
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background-color: #475569;
+}
+
+/* Las esquinas, cuando scrollea para los dos lados a la vez. */
+*::-webkit-scrollbar-corner {
+  background: #e9eef5;
+}
+
+/* Las flechitas de los costados. Sólo en la horizontal: es la que no se ve venir. */
+*::-webkit-scrollbar-button:horizontal:single-button {
+  background-color: #e9eef5;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 7px 9px;
+  width: 16px;
+  height: 14px;
+}
+
+*::-webkit-scrollbar-button:horizontal:single-button:hover {
+  background-color: #cbd5e1;
+}
+
+*::-webkit-scrollbar-button:horizontal:single-button:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 9'><polygon points='7,0 7,9 0,4.5' fill='%23475569'/></svg>");
+}
+
+*::-webkit-scrollbar-button:horizontal:single-button:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 9'><polygon points='0,0 0,9 7,4.5' fill='%23475569'/></svg>");
+}
+
+/* Las verticales no llevan flecha: para arriba y abajo está la rueda. */
+*::-webkit-scrollbar-button:vertical {
+  display: none;
+}
+
 @layer utilities {
+  /* Quedó por compatibilidad: la usan cinco archivos y ya no hace falta, porque
+     ahora la barra se ve en todos lados. No se saca de golpe para no tocar cinco
+     pantallas por una clase que no molesta. */
   .scrollbar-horizontal-visible {
     scrollbar-width: thin;
-    scrollbar-color: #cbd5e1 #f8fafc;
-  }
-
-  .scrollbar-horizontal-visible::-webkit-scrollbar {
-    height: 10px;
-    display: block !important;
-  }
-
-  .scrollbar-horizontal-visible::-webkit-scrollbar-track {
-    background: #f8fafc;
-    border-radius: 4px;
-    margin: 0 10px;
-  }
-
-  .scrollbar-horizontal-visible::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1;
-    border-radius: 4px;
-    border: 2px solid #f8fafc;
-  }
-
-  .scrollbar-horizontal-visible::-webkit-scrollbar-thumb:hover {
-    background-color: #94a3b8;
   }
 
   .scrollbar-top {
