@@ -45,7 +45,10 @@ export default function RootLayout({
             <ToastProvider>
               <LayoutWrapper>
                 {children}
-                <Toaster />
+                {/* Arriba al centro. A la derecha tapaba los botones de Guardar y Planificar
+                    —Lucas, 10/09: "y esto ponémelo para allá, molesta"— y abajo al centro
+                    se pisa con las barras flotantes de acciones en lote. */}
+                <Toaster position="top-center" />
               </LayoutWrapper>
             </ToastProvider>
           </NotificationProvider>

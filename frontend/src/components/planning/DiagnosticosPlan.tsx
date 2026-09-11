@@ -490,12 +490,25 @@ export function DiagnosticosPlan({
     useEffect(() => {
         const ahora = new Set(todos.map((d) => d.id));
         const antes = previos.current;
-        // Solo si ANTES había algo: en el primer render no hay nada resuelto, hay
-        // un plan recién calculado.
-        if (antes.length > 0) {
-            const idos = antes.filter((d) => !ahora.has(d.id));
-            if (idos.length > 0) setResueltos(idos);
-        }
+        setResueltos((prev) => {
+            // Un aviso que VUELVE deja de estar resuelto. Sin esto se quedaba en la
+            // tira verde para siempre: la pantalla lo mostraba tachado arriba Y rojo
+            // abajo al mismo tiempo, o sea la tira verde mentía justo sobre lo único
+            // que tiene que decir. Es la misma limpieza que ya se le hacía a
+            // `marcados` unas líneas más abajo, que al escribirla se pasó por alto acá.
+            const siguen = prev.filter((d) => !ahora.has(d.id));
+
+            // Los que se acaban de ir. En el primer render no hay nada resuelto: hay
+            // un plan recién calculado, y `antes` está vacío.
+            const yaEstan = new Set(siguen.map((d) => d.id));
+            const recien = antes.filter((d) => !ahora.has(d.id) && !yaEstan.has(d.id));
+
+            // Se ACUMULAN entre recálculos. Antes cada cálculo pisaba la lista con los
+            // de esa vuelta, así que arreglar dos cosas de a una dejaba ver sólo la
+            // segunda: la primera desaparecía sin que nadie la hubiera cerrado.
+            if (recien.length === 0 && siguen.length === prev.length) return prev;
+            return [...recien, ...siguen];
+        });
         previos.current = todos;
 
         // Las marcas a mano de avisos que ya no están se tiran: el recálculo dijo

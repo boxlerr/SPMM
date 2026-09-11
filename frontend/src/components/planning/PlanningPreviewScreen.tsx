@@ -792,6 +792,15 @@ export function PlanningPreviewScreen({
             ...t,
             lineas: Object.fromEntries(Object.entries(t.lineas).filter(([oid]) => Number(oid) !== ordenId)),
         })));
+        // Armar el "salto de carga" a mano.
+        //
+        // El aviso de quién saltó de horas se dispara cuando crece `tandasManuales`,
+        // y este camino no agrega ninguna tanda: edita la OT y recalcula. Sin esto,
+        // agregarle a una OT un proceso de seis horas movía la carga de alguien y
+        // nadie se enteraba — que es exactamente el caso de Pablo (8,9 → 15 h) para el
+        // que se hizo el aviso, sólo que por la puerta nueva.
+        esperandoSalto.current = { antes: minutosPorOperario, tandas: tandasManuales.length };
+
         toast.success("Procesos guardados en la OT. Recalculando el plan…");
         if (!onRecalculate) return;
         const forcedArr = Array.from(forzarOrdenIds);

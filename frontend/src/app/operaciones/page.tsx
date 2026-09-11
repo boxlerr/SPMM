@@ -34,6 +34,7 @@ import { PlanningPreviewScreen } from "@/components/planning/PlanningPreviewScre
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
 import { PlanningSelectionScreen } from "@/components/planning/PlanningSelectionScreen"
 import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificacion"
+import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
 import type { BorradorPlan } from "@/lib/borradorPlan"
 import { huellaRecursos } from "@/lib/huellaRecursos"
@@ -1453,6 +1454,12 @@ export default function OperacionesPage() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2 w-full md:w-auto">
+              {/* Retomar un borrador, desde acá y no sólo desde adentro del planificador.
+                  Lucas se fue a mirar otra pantalla y dio el plan por perdido: estaba
+                  guardado, pero la única puerta para volver a abrirlo estaba adentro de
+                  la pantalla de la que se había ido. Se esconde solo cuando no hay
+                  borradores, así que casi todos los días la cabecera queda igual. */}
+              <BorradoresPlan onAbrir={handleAbrirBorrador} />
               <Button
                 variant="outline"
                 size="sm"
