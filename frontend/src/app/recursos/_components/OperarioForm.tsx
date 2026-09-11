@@ -251,10 +251,10 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
 
         if (hasChanges) {
           addNotification(
-            `Operario ${payload.nombre} ${payload.apellido} ha sido modificado`,
+            `Recurso humano ${payload.nombre} ${payload.apellido} ha sido modificado`,
             "operario_updated"
           );
-          showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} modificado correctamente`, 'success');
+          showToast(`Recurso humano ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} modificado correctamente`, 'success');
         }
       } catch (error) {
         console.error("Error de red al guardar operario:", error);
@@ -277,14 +277,14 @@ export default function OperarioForm({ open, editing, data, onClose, onSuccess, 
         if (!response.ok) {
           const bodyText = await response.text().catch(() => "");
           console.error("Error al crear operario:", response.status, bodyText);
-          showToast(parseApiError(bodyText) || "No se pudo crear el operario. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
+          showToast(parseApiError(bodyText) || "No se pudo crear el recurso humano. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
           return;
         }
         addNotification(
-          `Operario ${payload.nombre} ${payload.apellido} ha sido creado`,
+          `Recurso humano ${payload.nombre} ${payload.apellido} ha sido creado`,
           "operario_created"
         );
-        showToast(`Operario ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} creado correctamente`, 'success');
+        showToast(`Recurso humano ${capitalizeName(payload.nombre)} ${capitalizeName(payload.apellido)} creado correctamente`, 'success');
       } catch (error) {
         console.error("Error de red al crear operario:", error);
         showToast("No se pudo conectar con el servidor. Revisá la conexión e intentá de nuevo.", 'error');

@@ -131,6 +131,9 @@ function resumirArchivos(archivos: { tipo_archivo?: string | null }[]): string {
  * Se pliega porque en un notebook el panel le saca 320px al listado y las columnas de
  * máquina, minutos y personas quedan espichadas: el que ya sabe qué va lo cierra.
  */
+/** Dónde se recuerda si el plano va al lado de los procesos o no. */
+const CLAVE_PANEL_PLANOS = "spmm.ot.panelPlanos";
+
 function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
     planos: Plano[];
     cargando: boolean;
@@ -139,14 +142,39 @@ function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
     /** Saltar a la solapa Planos, donde entran todos a la vez y más grandes. */
     onVerTodos: () => void;
 }) {
+    /**
+     * Plegado o no, y SE ACUERDA.
+     *
+     * El panel ya se podía plegar, pero volvía abierto en cada OT — así que para el
+     * que trabaja cargando procesos todo el día no servía de nada. Camilo, del taller
+     * (11/09): "ese cuadro que se ve al lado de los procesos se tendría que poder
+     * sacar... porque no me deja ver el proceso y no tengo forma de correr o agrandar
+     * para leer el proceso. Tengo que mandar a imprimir para ver qué proceso dice".
+     *
+     * Con la preferencia guardada, el que mira planos los deja abiertos y el que carga
+     * procesos los cierra una vez y no los ve nunca más. Si el navegador no deja
+     * escribir (modo privado), simplemente no se acuerda: no es motivo para romper la
+     * pantalla.
+     */
     const [abierto, setAbierto] = useState(true);
+
+    useEffect(() => {
+        try {
+            if (localStorage.getItem(CLAVE_PANEL_PLANOS) === "cerrado") setAbierto(false);
+        } catch { /* nada */ }
+    }, []);
+
+    const cambiarAbierto = (v: boolean) => {
+        setAbierto(v);
+        try { localStorage.setItem(CLAVE_PANEL_PLANOS, v ? "abierto" : "cerrado"); } catch { /* nada */ }
+    };
 
     if (!abierto) {
         return (
             <button
                 type="button"
-                onClick={() => setAbierto(true)}
-                title="Ver el plano del producto"
+                onClick={() => cambiarAbierto(true)}
+                title="Volver a mostrar el plano al lado de los procesos"
                 className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400 hover:border-blue-400 hover:text-blue-600 transition-colors"
             >
                 <Paperclip className="w-3 h-3" />
@@ -161,13 +189,17 @@ function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
     // igual las miniaturas, y "Ver todos los planos" sigue para verlos grandes.
     return (
         <aside className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 w-full lg:w-[260px] relative rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+            {/* Antes era una flechita gris clarito de 14px sin texto: estaba, pero nadie
+                la encontraba — por eso el pedido fue "sacar el cuadro" y no "plegarlo".
+                Ahora dice qué hace y por qué te conviene. */}
             <button
                 type="button"
-                onClick={() => setAbierto(false)}
-                title="Plegar el plano"
-                className="absolute right-2 top-2 z-10 p-1 rounded-md text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                onClick={() => cambiarAbierto(false)}
+                title="Sacar el plano de acá para que se vea entero el nombre del proceso. Queda en la solapa Planos."
+                className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[10px] font-semibold text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
             >
-                <ChevronRight className="w-3.5 h-3.5" />
+                Ocultar
+                <ChevronRight className="w-3 h-3" />
             </button>
             {/* El panel scrollea solo: el modal ya tiene su propio scroll y una lista
                 larga de planos lo empujaría más allá del alto fijo del diálogo. */}

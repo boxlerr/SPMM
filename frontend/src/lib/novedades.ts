@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "el-plano-se-puede-sacar-de-los-procesos",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "El plano ya no te tapa el nombre del proceso",
+        detalle:
+            "Al cargar los procesos de una OT, el cuadro del plano de la derecha se comía el ancho y la columna con el NOMBRE del proceso quedaba en unos pocos píxeles: había que imprimir la orden para saber qué paso era cada uno. Ahora el nombre del proceso tiene su espacio garantizado y, si querés más lugar todavía, el botón «Ocultar» del cuadro lo saca — y se acuerda de tu decisión, así que no hay que cerrarlo en cada orden. El plano sigue entero en la solapa Planos.",
+        href: "/operaciones",
+    },
+    {
+        id: "un-click-despliega-dos-clicks-abren",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Errarle a la flechita ya no te abre la orden entera",
+        detalle:
+            "En los listados, un click ahora despliega el detalle y hacen falta dos para abrir la orden. Antes el mismo click hacía las dos cosas, así que errarle a la flechita por unos píxeles te tiraba la orden completa encima, y al cerrarla quedabas con la fila desplegada sin haberlo pedido. Además la flechita pasó a ocupar toda su columna, así que es mucho más difícil errarle, y ahora también cierra las filas que se abrieron solas al buscar un proceso — antes ahí no respondía.",
+        href: "/operaciones",
+    },
+    {
         id: "deshacer-cambio-de-procesos",
         fecha: "2026-09-10",
         tipo: "nuevo",

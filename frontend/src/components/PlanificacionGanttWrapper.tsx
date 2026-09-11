@@ -47,7 +47,7 @@ export default function PlanificacionGanttWrapper({
                 const targetResource = resources.find(r => r.id === newResourceId);
                 if (targetResource && targetResource.type === "operario") {
                     if (!isOperatorQualified(targetResource.ranges || [], task.allowedRanges || [])) {
-                        toast.error("Este operario no tiene la capacidad para realizar este proceso");
+                        toast.error("Este recurso humano no tiene la capacidad para realizar este proceso");
                         return; // Cancel move
                     }
                 }

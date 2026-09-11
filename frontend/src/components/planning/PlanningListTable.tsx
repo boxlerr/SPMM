@@ -257,12 +257,36 @@ function _PlanningListTable({
     const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
     const [showRightFade, setShowRightFade] = React.useState(true);
 
+    /**
+     * Filas que el usuario cerró A MANO aunque la búsqueda las quiera abiertas.
+     *
+     * Buscar un proceso abre solas las filas que lo tienen (`procesoMatchIds`), y eso
+     * está bien. Lo que estaba mal es que la flechita no podía cerrarlas: `toggleRow`
+     * sólo escribe `expandedOrderIds`, así que sacar el id de ahí no cambiaba nada y
+     * la fila seguía abierta. Clickeabas, no pasaba nada, clickeabas de nuevo y
+     * tampoco — se lee exactamente como "la flechita se buguea".
+     */
+    const [cerradasAMano, setCerradasAMano] = React.useState<Set<number>>(new Set());
+
     const toggleRow = (orderId: number) => {
-        setExpandedOrderIds(prev =>
-            prev.includes(orderId)
-                ? prev.filter(id => id !== orderId)
-                : [...prev, orderId]
-        );
+        const abiertaPorBusqueda = procesoMatchIds.has(orderId);
+        const estaAbierta = expandedOrderIds.includes(orderId)
+            || (abiertaPorBusqueda && !cerradasAMano.has(orderId));
+
+        if (estaAbierta) {
+            setExpandedOrderIds(prev => prev.filter(id => id !== orderId));
+            if (abiertaPorBusqueda) {
+                setCerradasAMano(prev => new Set(prev).add(orderId));
+            }
+            return;
+        }
+        setCerradasAMano(prev => {
+            if (!prev.has(orderId)) return prev;
+            const next = new Set(prev);
+            next.delete(orderId);
+            return next;
+        });
+        setExpandedOrderIds(prev => prev.includes(orderId) ? prev : [...prev, orderId]);
     };
 
     // Cambiar de filtro cierra lo que hubiera quedado abierto (pedido de Lucas,
@@ -272,6 +296,7 @@ function _PlanningListTable({
     React.useEffect(() => {
         if (colapsarFilasKey === undefined) return;
         setExpandedOrderIds(prev => (prev.length === 0 ? prev : []));
+        setCerradasAMano(prev => (prev.size === 0 ? prev : new Set()));
     }, [colapsarFilasKey]);
 
     // El tilde de la cabecera trabaja sobre lo VISIBLE: suma las filas de la lista
@@ -438,9 +463,13 @@ function _PlanningListTable({
     const [pinnedIds, setPinnedIds] = React.useState<Set<number>>(() => new Set(selectedIds));
     React.useEffect(() => {
         if (pinSelectedOnTop) setPinnedIds(new Set(selectedIds));
+        setCerradasAMano(prev => (prev.size === 0 ? prev : new Set()));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchTerm, pinSelectedOnTop]);
-    const isRowExpanded = (id: number) => expandedOrderIds.includes(id) || procesoMatchIds.has(id);
+    // Lo cerrado a mano gana sobre lo que abrió la búsqueda: si alguien la cerró, es
+    // porque no la quiere ver, aunque coincida con lo que buscó.
+    const isRowExpanded = (id: number) =>
+        expandedOrderIds.includes(id) || (procesoMatchIds.has(id) && !cerradasAMano.has(id));
 
     /** Lo tildado, para preguntar por fila sin recorrer el array en cada una: con la
      *  selección acumulada `selectedIds` puede ser bastante más larga que la lista. */
@@ -765,7 +794,7 @@ function _PlanningListTable({
                     <div className="text-center">Min. Est.</div>
                     <div className="text-center text-blue-700">Min. Real</div>
                     <div>Recurso humano</div>
-                    <div>Maquinaria</div>
+                    <div>Recurso maquinaria</div>
                 </div>
 
                 <div>
@@ -1380,7 +1409,7 @@ function _PlanningListTable({
                                                 getRowColor(item)
                                             )}
                                         >
-                                            <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                                            <td className="px-2 py-3" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {onSelectionChange && (
                                                     <label className="flex items-center justify-center w-full h-full py-2 cursor-pointer">
                                                         <Checkbox
@@ -1404,6 +1433,10 @@ function _PlanningListTable({
                                                         e.stopPropagation();
                                                         toggleRow(item.id);
                                                     }}
+                                                    // Dos clicks nerviosos sobre la flechita no pueden terminar
+                                                    // abriendo la OT: `stopPropagation` del click no frena el
+                                                    // dblclick, que es otro evento y burbujea igual.
+                                                    onDoubleClick={(e) => e.stopPropagation()}
                                                     aria-expanded={isRowExpanded(item.id)}
                                                     aria-label={isRowExpanded(item.id)
                                                         ? `Ocultar el detalle de la OT ${item.id_otvieja || item.id}`
@@ -1419,7 +1452,7 @@ function _PlanningListTable({
                                             </td>
                                             <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
                                             <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
-                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrada', item.fecha_entrada); }}>
+                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrada', item.fecha_entrada); }} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrada' ? (
                                                     <input
                                                         type="date"
@@ -1436,7 +1469,7 @@ function _PlanningListTable({
                                             </td>
                                             <td className="px-3 py-3 text-gray-500 italic">{item.cliente?.nombre || "-"}</td>
                                             <td className="px-3 py-3 font-mono text-xs">{item.articulo?.cod_articulo || "-"}</td>
-                                            <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px] cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'observaciones', getEditableProductDescription(item)); }}>
+                                            <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px] cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'observaciones', getEditableProductDescription(item)); }} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'observaciones' ? (
                                                     <input
                                                         type="text"
@@ -1453,7 +1486,7 @@ function _PlanningListTable({
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'n_pedido', item.n_pedido || item.n_ped_l); }}>
+                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'n_pedido', item.n_pedido || item.n_ped_l); }} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'n_pedido' ? (
                                                     <input
                                                         type="text"
@@ -1468,7 +1501,7 @@ function _PlanningListTable({
                                                     item.n_pedido || item.n_ped_l || "-"
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'unidades', item.unidades); }}>
+                                            <td className="px-3 py-3 text-center font-medium cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'unidades', item.unidades); }} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'unidades' ? (
                                                     <input
                                                         type="number"
@@ -1592,7 +1625,7 @@ function _PlanningListTable({
                                             </td>
 
                                             {/* Editable F. Prometida */}
-                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }}>
+                                            <td className="px-3 py-3 font-medium cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_prometida', item.fecha_prometida); }} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_prometida' ? (
                                                     <input
                                                         type="date"
@@ -1609,7 +1642,7 @@ function _PlanningListTable({
                                             </td>
 
                                             {/* Editable F. Entrega */}
-                                            <td className="px-3 py-3 text-gray-500 cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }}>
+                                            <td className="px-3 py-3 text-gray-500 cursor-pointer hover:bg-black/5" onClick={(e) => { e.stopPropagation(); handleDateClick(item.id, 'fecha_entrega', item.fecha_entrega); }} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'fecha_entrega' ? (
                                                     <input
                                                         type="date"
@@ -1631,7 +1664,7 @@ function _PlanningListTable({
                                                     )
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'aprobado_por', item.aprobado_por); }} title={item.aprobado_por || "-"}>
+                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'aprobado_por', item.aprobado_por); }} title={item.aprobado_por || "-"} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'aprobado_por' ? (
                                                     <input
                                                         type="text"
@@ -1646,7 +1679,7 @@ function _PlanningListTable({
                                                     item.aprobado_por || "-"
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'requerido_por', item.requerido_por); }} title={item.requerido_por || "-"}>
+                                            <td className="px-3 py-3 text-xs text-gray-600 cursor-pointer hover:bg-black/5 rounded-sm" onClick={(e) => { e.stopPropagation(); handleTextClick(item.id, 'requerido_por', item.requerido_por); }} title={item.requerido_por || "-"} onDoubleClick={(e) => e.stopPropagation()}>
                                                 {editingOrder?.id === item.id && editingOrder.field === 'requerido_por' ? (
                                                     <input
                                                         type="text"

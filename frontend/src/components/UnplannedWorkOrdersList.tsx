@@ -479,17 +479,34 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     ) : (
                                         sortedOrders.map((order, index) => (
                                             <React.Fragment key={order.id}>
-                                                {/* Doble click en cualquier parte de la fila abre el modal de edición. */}
-                                                <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))} onDoubleClick={() => onEdit(order)}>
-                                                    <td className="px-3 py-3">
+                                                {/* Un click despliega, doble clic abre la OT — igual que en la
+                                                    otra tabla. Esta es la solapa que ABRE POR DEFECTO y se había
+                                                    quedado afuera del arreglo: acá el click simple no hacía nada,
+                                                    así que al errarle a la flechita la reacción natural es volver
+                                                    a clickear enseguida… y eso ES un doble clic, o sea la OT
+                                                    entera encima. `select-none` para que el doble clic no te
+                                                    seleccione media tabla. */}
+                                                <tr
+                                                    className={cn("border-b transition-colors duration-150 cursor-pointer select-none", getWorkOrderRowColor(order))}
+                                                    onClick={() => toggleRow(order.id)}
+                                                    onDoubleClick={() => onEdit(order)}
+                                                    title="Un click para ver el detalle · doble clic para abrir la OT"
+                                                >
+                                                    <td className="p-0">
                                                         <button
+                                                            type="button"
                                                             onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
-                                                            className="p-1 hover:bg-black/10 rounded transition-colors"
+                                                            onDoubleClick={(e) => e.stopPropagation()}
+                                                            aria-expanded={expandedOrderIds.includes(order.id)}
+                                                            aria-label={expandedOrderIds.includes(order.id)
+                                                                ? `Ocultar el detalle de la OT ${order.id_otvieja || order.id}`
+                                                                : `Ver el detalle de la OT ${order.id_otvieja || order.id}`}
+                                                            className="flex h-10 w-full items-center justify-center rounded hover:bg-black/10 active:bg-black/15 transition-colors"
                                                         >
                                                             {expandedOrderIds.includes(order.id) ? (
-                                                                <ChevronDown className="h-4 w-4 text-gray-600" />
+                                                                <ChevronDown className="h-5 w-5 text-gray-700" />
                                                             ) : (
-                                                                <ChevronRight className="h-4 w-4 text-gray-400" />
+                                                                <ChevronRight className="h-5 w-5 text-gray-500" />
                                                             )}
                                                         </button>
                                                     </td>
