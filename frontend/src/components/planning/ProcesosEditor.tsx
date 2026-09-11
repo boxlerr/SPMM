@@ -57,9 +57,57 @@ export interface ProcesoRow {
     incluido: boolean;
 }
 
+/**
+ * Lo que el PLANIFICADOR asignó para una pasada. Informativo: no se guarda ni se edita.
+ *
+ * Es OTRA cosa que la preselección (`maquina_id` / `operario_id` de la fila): la
+ * preselección es lo que alguien fuerza a mano, y una OT planificada normalmente la
+ * tiene vacía. Abrir una OT ya planificada mostraba "Sin máquina" y "Sin asignar" en
+ * todas las filas y parecía que se habían perdido los datos — estaba mirando el campo
+ * equivocado (Julián, 10/09: "si abro una planificada quiero ver lo que está
+ * planificado ya asignado, así no duplico ni hubo errores").
+ */
+export interface PlanificadoDeLinea {
+    operario: string | null;
+    maquinaria: string | null;
+    sin_asignar: boolean;
+    sin_maquinaria: boolean;
+    forzado: boolean;
+    lote: string | null;
+}
+
 export interface ProcesoCatalogoItem { id: number; nombre: string; }
 export interface MaquinaCatalogoItem { id: number; nombre: string; cod_maquina?: string; }
 export interface OperarioCatalogoItem { id: number; nombre: string; apellido?: string; }
+
+/**
+ * La línea de abajo de la celda: lo que el planificador YA asignó.
+ *
+ * Va debajo del selector y no adentro, y en otro color, para que no se confunda con
+ * la preselección: arriba es lo que uno ELIGE y el motor respeta; abajo es lo que el
+ * motor DECIDIÓ. Sin esta separación, una OT planificada se leía como vacía.
+ */
+function ChipPlanificado({ texto, falta, faltaTexto, hay }: {
+    texto?: string | null;
+    falta: boolean;
+    faltaTexto: string;
+    hay: boolean;
+}) {
+    if (!hay) return null;   // la OT no está planificada: no hay nada que contar
+    if (falta || !texto) {
+        return (
+            <div className="mt-0.5 truncate text-[10px] text-amber-700" title={`En el plan quedó ${faltaTexto}`}>
+                ⚠ {faltaTexto}
+            </div>
+        );
+    }
+    return (
+        <div className="mt-0.5 truncate text-[10px] text-emerald-700"
+             title={`El planificador le asignó ${texto}`}>
+            ✓ {texto}
+        </div>
+    );
+}
 
 export function makeEmptyRow(): ProcesoRow {
     return {
@@ -80,6 +128,8 @@ interface ProcesosEditorProps {
     maquinarias: MaquinaCatalogoItem[];
     /** catálogo de personas; si no viene, la columna queda en "Sin asignar" */
     operarios?: OperarioCatalogoItem[];
+    /** Lo que el planificador asignó, por id de pasada (`id_otp`). Sólo se muestra. */
+    planificado?: Record<number, PlanificadoDeLinea>;
     disabled?: boolean;
     /** callback del botón "Traer historial" (opcional; si no viene, no se muestra) */
     onTraerHistorial?: () => void;
@@ -148,6 +198,7 @@ export function ProcesosEditor({
     maquinarias,
     operarios = [],
     disabled = false,
+    planificado,
     onTraerHistorial,
     historialLoading = false,
     onCrearProceso,
@@ -336,6 +387,9 @@ export function ProcesosEditor({
                                 >
                                     {rows.map((row, idx) => {
                                         const conMaquina = !!row.maquina_id;
+                                        // Lo que el planificador asignó a ESTA pasada. Sólo existe
+                                        // si la OT está planificada; si no, no se muestra nada.
+                                        const plan = row.id_otp ? planificado?.[row.id_otp] : undefined;
                                         return (
                                             <Draggable
                                                 key={row.id}
@@ -419,42 +473,59 @@ export function ProcesosEditor({
                                                             />
                                                         </div>
 
-                                                        {/* Máquina (elegir = preseleccionar) */}
-                                                        <div className="min-w-0 flex items-center gap-1">
-                                                            <div className="min-w-0 flex-1">
-                                                                <SearchableSelect
-                                                                    options={maquinaOptions}
-                                                                    value={row.maquina_id}
-                                                                    onValueChange={(v) => update(row.id, { maquina_id: v })}
-                                                                    placeholder="Sin máquina"
-                                                                    disabled={disabled}
-                                                                />
+                                                        {/* Máquina: arriba lo que se ELIGE (preselección),
+                                                            abajo lo que el planificador YA asignó. */}
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-1">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <SearchableSelect
+                                                                        options={maquinaOptions}
+                                                                        value={row.maquina_id}
+                                                                        onValueChange={(v) => update(row.id, { maquina_id: v })}
+                                                                        placeholder="Sin máquina"
+                                                                        disabled={disabled}
+                                                                    />
+                                                                </div>
+                                                                {conMaquina && (
+                                                                    <Lock
+                                                                        className="w-3.5 h-3.5 shrink-0 text-amber-500"
+                                                                        aria-label="Máquina forzada (preseleccionada)"
+                                                                    />
+                                                                )}
                                                             </div>
-                                                            {conMaquina && (
-                                                                <Lock
-                                                                    className="w-3.5 h-3.5 shrink-0 text-amber-500"
-                                                                    aria-label="Máquina forzada (preseleccionada)"
-                                                                />
-                                                            )}
+                                                            <ChipPlanificado
+                                                                texto={plan?.maquinaria}
+                                                                falta={!!plan && plan.sin_maquinaria}
+                                                                faltaTexto="sin máquina reservada"
+                                                                hay={!!plan}
+                                                            />
                                                         </div>
 
-                                                        {/* Persona (elegir = preseleccionar) */}
-                                                        <div className="min-w-0 flex items-center gap-1">
-                                                            <div className="min-w-0 flex-1">
-                                                                <SearchableSelect
-                                                                    options={opcionesDePersonaPara(row.proceso_id)}
-                                                                    value={row.operario_id}
-                                                                    onValueChange={(v) => update(row.id, { operario_id: v })}
-                                                                    placeholder="Sin asignar"
-                                                                    disabled={disabled}
-                                                                />
+                                                        {/* Persona: mismo criterio. */}
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-1">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <SearchableSelect
+                                                                        options={opcionesDePersonaPara(row.proceso_id)}
+                                                                        value={row.operario_id}
+                                                                        onValueChange={(v) => update(row.id, { operario_id: v })}
+                                                                        placeholder="Sin asignar"
+                                                                        disabled={disabled}
+                                                                    />
+                                                                </div>
+                                                                {!!row.operario_id && (
+                                                                    <Lock
+                                                                        className="w-3.5 h-3.5 shrink-0 text-amber-500"
+                                                                        aria-label="Recurso humano forzado (preseleccionado)"
+                                                                    />
+                                                                )}
                                                             </div>
-                                                            {!!row.operario_id && (
-                                                                <Lock
-                                                                    className="w-3.5 h-3.5 shrink-0 text-amber-500"
-                                                                    aria-label="Recurso humano forzado (preseleccionado)"
-                                                                />
-                                                            )}
+                                                            <ChipPlanificado
+                                                                texto={plan?.operario}
+                                                                falta={!!plan && plan.sin_asignar}
+                                                                faltaTexto="nadie asignado"
+                                                                hay={!!plan}
+                                                            />
                                                         </div>
 
                                                         {/* Cantidad de empleados */}

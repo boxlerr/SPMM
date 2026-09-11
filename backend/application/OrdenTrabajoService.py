@@ -274,7 +274,41 @@ class OrdenTrabajoService:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")
 
         dto = OrdenTrabajoResponseDTO.model_validate(orden)
-        return ResponseDTO(status=True, data=jsonable_encoder(dto))
+        salida = jsonable_encoder(dto)
+
+        # Lo que el planificador asignó, pegado a cada pasada.
+        #
+        # Va acá y no en un endpoint nuevo: los dos modales que editan procesos ya
+        # piden esta orden, así que lo reciben gratis y sin un segundo viaje que haría
+        # parpadear "Sin asignar" antes de que lleguen los datos.
+        #
+        # Se ata por `id_orden_trabajo_proceso`, que es la pasada exacta. Los planes
+        # viejos lo tienen en NULL: para esos se reparte por proceso, en orden de
+        # inicio, una fila de plan por cada pasada de ese proceso — la misma regla que
+        # usa `update_processes_full` para machear pasadas repetidas.
+        plan = await self.repository.get_plan_de_orden(id)
+        if plan:
+            por_pasada = {f["id_orden_trabajo_proceso"]: f
+                          for f in plan if f["id_orden_trabajo_proceso"]}
+            sueltas = {}
+            for f in plan:
+                if not f["id_orden_trabajo_proceso"]:
+                    sueltas.setdefault(f["proceso_id"], []).append(f)
+            for proc in salida.get("procesos") or []:
+                asignado = por_pasada.get(proc.get("id"))
+                if asignado is None:
+                    cola = sueltas.get((proc.get("proceso") or {}).get("id"))
+                    asignado = cola.pop(0) if cola else None
+                proc["planificado"] = {
+                    "operario": asignado.get("operario") or None,
+                    "maquinaria": asignado.get("maquinaria") or None,
+                    "sin_asignar": bool(asignado.get("sin_asignar")),
+                    "sin_maquinaria": bool(asignado.get("sin_maquinaria")),
+                    "forzado": bool(asignado.get("forzado_fuera_rango")),
+                    "lote": asignado.get("descripcion_lote"),
+                } if asignado else None
+
+        return ResponseDTO(status=True, data=salida)
 
     async def modificarOrden(self, id: int, dto: OrdenTrabajoUpdateDTO,
                              motivo: str = "edicion", usuario: dict | None = None):

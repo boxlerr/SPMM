@@ -84,6 +84,8 @@ export default function EditarProcesosOTModal({
     ordenId, numeroVisible, procesos, maquinarias, operarios, onClose, onGuardado,
 }: Props) {
     const [rows, setRows] = useState<ProcesoRow[]>([]);
+    /** Lo que el planificador asignó, por id de pasada. */
+    const [planificado, setPlanificado] = useState<Record<number, any>>({});
     const [catalogo, setCatalogo] = useState<ProcesoCatalogoItem[]>(procesos ?? []);
     const [cargando, setCargando] = useState(false);
     const [guardando, setGuardando] = useState(false);
@@ -124,6 +126,11 @@ export default function EditarProcesosOTModal({
                 const json = await r.json();
                 const ot = json?.data ?? json;
                 if (!vivo) return;
+                setPlanificado(Object.fromEntries(
+                    (ot?.procesos || [])
+                        .filter((p: any) => p.id && p.planificado)
+                        .map((p: any) => [p.id, p.planificado])
+                ));
                 setRows((ot?.procesos || []).map((p: any) => ({
                     id: Math.random().toString(36).slice(2),
                     id_otp: p.id,
@@ -244,6 +251,7 @@ export default function EditarProcesosOTModal({
                         procesos={catalogo}
                         maquinarias={maquinarias}
                         operarios={operarios}
+                        planificado={planificado}
                         disabled={guardando}
                     />
                 )}

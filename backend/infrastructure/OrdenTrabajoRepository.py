@@ -1308,3 +1308,39 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en resumen_todas: {e}")
             raise InfrastructureException(
                 motivo_error_db(e, "listar todas las órdenes de trabajo")) from e
+
+    async def get_plan_de_orden(self, id_orden: int):
+        """Lo que el PLANIFICADOR asignó para esta OT, por pasada.
+
+        Es distinto de `orden_trabajo_proceso.id_operario` / `id_maquinaria`, que son
+        la PRESELECCIÓN —lo que alguien fuerza a mano— y casi siempre están vacíos.
+        Al abrir una OT ya planificada, el editor mostraba "Sin máquina" y "Sin
+        asignar" en todas las filas y parecía que se habían perdido los datos: estaba
+        mirando el campo equivocado.
+
+        LEFT JOIN a operario y maquinaria a propósito: las filas sin persona o sin
+        máquina reservada son justo las que hay que poder ver.
+        """
+        try:
+            filas = await self.db.execute(text("""
+                SELECT p.id_orden_trabajo_proceso,
+                       p.proceso_id,
+                       p.inicio_min,
+                       p.sin_asignar,
+                       p.sin_maquinaria,
+                       p.forzado_fuera_rango,
+                       p.descripcion_lote,
+                       TRIM(CONCAT(o.nombre, ' ', COALESCE(o.apellido, ''))) AS operario,
+                       m.nombre AS maquinaria
+                FROM planificacion p
+                LEFT JOIN operario   o ON o.id = p.id_operario
+                LEFT JOIN maquinaria m ON m.id = p.id_maquinaria
+                WHERE p.orden_id = :id
+                ORDER BY p.inicio_min ASC
+            """), {"id": id_orden})
+            return [dict(f._mapping) for f in filas]
+        except Exception as e:
+            # Que no se pueda leer el plan no puede impedir abrir la OT: el editor
+            # simplemente no muestra los chips, como antes.
+            logger.warning(f"Repository - No se pudo leer el plan de la OT {id_orden}: {e}")
+            return []

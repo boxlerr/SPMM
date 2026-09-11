@@ -46,6 +46,14 @@ class OrdenTrabajoProcesoDTO(BaseModel):
     # Máquina preseleccionada (NULL = el planificador elige). El frontend resuelve
     # el nombre desde la lista de maquinarias que ya trae, así evitamos lazy-load async.
     id_maquinaria: Optional[int] = None
+    # Persona PRESELECCIONADA (NULL = el planificador elige).
+    #
+    # FALTABA, y la ausencia borraba datos en silencio: el modal leía la fila sin este
+    # campo, lo tomaba como "sin asignar" y al guardar mandaba `operario_id: null`.
+    # Como `update_processes_full` pisa el valor cuando la clave viene, cada guardado
+    # de una OT le borraba la persona forzada a todos sus procesos — justo el dato que
+    # alguien se tomó el trabajo de poner a mano para que el planificador lo respete.
+    id_operario: Optional[int] = None
     observaciones: Optional[str] = None
     
     # Nested objects

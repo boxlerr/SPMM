@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "ver-lo-planificado-en-los-procesos",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Abrir una orden ya planificada muestra quién y en qué máquina quedó cada paso",
+        detalle:
+            "Hasta ahora, abrir una orden que ya estaba planificada mostraba «Sin máquina» y «Sin asignar» en todos sus procesos, como si se hubiera perdido el plan. No se perdía nada: esas dos casillas son para FORZAR a mano —decir «este paso lo hace sí o sí Fulano»— y normalmente están vacías, porque de eso justamente se encarga el planificador. Ahora, debajo de cada una, aparece en verde lo que el planificador asignó de verdad, y en ámbar si quedó sin nadie o sin máquina reservada. Arriba se elige, abajo se ve lo que salió.",
+        href: "/operaciones",
+    },
+    {
         id: "el-plano-se-puede-sacar-de-los-procesos",
         fecha: "2026-09-11",
         tipo: "arreglo",

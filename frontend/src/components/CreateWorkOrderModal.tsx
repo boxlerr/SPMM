@@ -294,6 +294,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     });
 
     const [processes, setProcesses] = useState<ProcesoRow[]>([]);
+    /** Lo que el planificador asignó, por id de pasada. Lo manda GET /ordenes/{id}. */
+    const [planificado, setPlanificado] = useState<Record<number, any>>({});
     const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrimaItem[]>([]);
     const [files, setFiles] = useState<File[]>([]);
     const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
@@ -399,8 +401,17 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         incluido: true,
                     }));
                     setProcesses(mappedProcesses);
+                    // Lo que el planificador asignó viene pegado a cada proceso en la
+                    // misma respuesta: no hace falta un segundo viaje, y así no parpadea
+                    // "Sin asignar" antes de que lleguen los datos.
+                    setPlanificado(Object.fromEntries(
+                        (orderToEdit.procesos || [])
+                            .filter((p: any) => p.id && p.planificado)
+                            .map((p: any) => [p.id, p.planificado])
+                    ));
                 } else {
                     setProcesses([]);
+                    setPlanificado({});
                 }
 
                 // Fetch existing files
@@ -1828,6 +1839,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 procesos={procesosOptions}
                                                 maquinarias={maquinarias}
                                                 operarios={operarios}
+                                                planificado={planificado}
                                                 disabled={isLegacyOT}
                                                 onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
                                                 historialLoading={historialLoading}
