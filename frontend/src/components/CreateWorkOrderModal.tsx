@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle, History } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle, History, Info } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -288,6 +288,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         email: false,
         tiene_plano: false,
         no_lleva_plano: false,
+        no_lleva_materia_prima: false,
         programada: false,
         en_proceso: false,
     });
@@ -300,12 +301,6 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         nota_3: "",
     });
 
-    const [materiasPrimasForm, setMateriasPrimasForm] = useState({
-        articulo_id: "",
-        cantidad: "",
-        observaciones: "",
-        no_lleva: false
-    });
 
     const [processes, setProcesses] = useState<ProcesoRow[]>([]);
     /** Lo que el planificador asignó, por id de pasada. Lo manda GET /ordenes/{id}. */
@@ -387,6 +382,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     email: orderToEdit.email === 1 || orderToEdit.email === true,
                     tiene_plano: orderToEdit.tiene_plano === 1 || orderToEdit.tiene_plano === true,
                     no_lleva_plano: (orderToEdit as any).no_lleva_plano === 1 || (orderToEdit as any).no_lleva_plano === true,
+                    no_lleva_materia_prima: (orderToEdit as any).no_lleva_materia_prima === 1 || (orderToEdit as any).no_lleva_materia_prima === true,
                     programada: orderToEdit.programada === 1 || orderToEdit.programada === true,
                     en_proceso: orderToEdit.en_proceso === 1 || orderToEdit.en_proceso === true
                 });
@@ -542,37 +538,6 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         }
     };
 
-    const handleAddMateriaPrima = () => {
-        if (!materiasPrimasForm.articulo_id) {
-            toast.error("Seleccione una Materia Prima / Artículo");
-            return;
-        }
-
-        const selectedArt = articulos.find(a => a.id.toString() === materiasPrimasForm.articulo_id);
-
-        const newMP: MateriaPrimaItem = {
-            id: Math.random().toString(36).substr(2, 9),
-            codigo: selectedArt?.cod_articulo || "",
-            descripcion: selectedArt?.descripcion || "",
-            cantidad: materiasPrimasForm.cantidad || "1",
-            unidad: "U", // Default
-            disponible: "-",
-            en_produccion: "-",
-            observaciones: materiasPrimasForm.observaciones,
-            precio: "-",
-            c_usado: "-",
-            utilizado: false,
-            cortes: "Cortes"
-        };
-
-        setMateriasPrimas([...materiasPrimas, newMP]);
-        // Reset mini form
-        setMateriasPrimasForm({ ...materiasPrimasForm, articulo_id: "", cantidad: "", observaciones: "" });
-    };
-
-    const handleRemoveMateriaPrima = (id: string) => {
-        setMateriasPrimas(materiasPrimas.filter(p => p.id !== id));
-    };
 
     /**
      * Crear un proceso que no está en el catálogo, sin salir de la OT.
@@ -847,6 +812,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             email: generalData.email,
             tiene_plano: generalData.tiene_plano,
             no_lleva_plano: generalData.no_lleva_plano,
+            no_lleva_materia_prima: generalData.no_lleva_materia_prima,
             programada: generalData.programada,
             en_proceso: generalData.en_proceso,
 
@@ -971,11 +937,10 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             fecha_entrega: "", cantidad_entregada: "", reclamo: false, finalizadototal: false, finalizadoparcial: false,
             n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
             f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
-            revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false, no_lleva_plano: false,
+            revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false, no_lleva_plano: false, no_lleva_materia_prima: false,
             programada: false, en_proceso: false, id_otvieja: ""
         });
         setDetailsData({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
-        setMateriasPrimasForm({ articulo_id: "", cantidad: "", observaciones: "", no_lleva: false });
         setProcesses([]);
         setMateriasPrimas([]);
         setFiles([]);
@@ -1738,48 +1703,23 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             </div>
                                         </div>
 
-                                        {/* Decir la verdad: esta solapa NO guarda.
-                                            Las filas que se cargan acá se juntan en pantalla, salen en
-                                            la hoja de pañol al imprimir… y se pierden al guardar: nunca
-                                            viajaron al backend. Y la tabla la escribe el sync del
-                                            sistema viejo cada 5 minutos, así que hacer que guarde no es
-                                            agregar un campo — es decidir quién es el dueño del dato,
-                                            igual que se decidió con los procesos en julio.
-                                            Hasta que eso se decida, es preferible que la pantalla lo
-                                            diga a que alguien cargue veinte materiales y los pierda. */}
-                                        <Alert className="border-amber-200 bg-amber-50/60">
-                                            <AlertTriangle className="h-4 w-4 text-amber-600" />
-                                            <AlertDescription className="text-xs text-amber-900">
-                                                <strong>Esto todavía no se guarda.</strong> Lo que cargues acá sirve
-                                                para imprimir la hoja de pañol de esta orden, pero al cerrar se
-                                                pierde: las materias primas todavía las maneja el sistema viejo y
-                                                se traen solas cada pocos minutos. Si falta un material, cargalo
-                                                allá.
+                                        {/* Esta solapa se MIRA, no se carga.
+                                            Decisión de Julián (11/09): el sistema viejo sigue siendo el
+                                            dueño de las materias primas y el sync las sigue trayendo cada
+                                            media hora. Antes acá había un formulario para agregar filas
+                                            que no viajaban a ningún lado: se juntaban en pantalla, salían
+                                            en la hoja de pañol y se perdían al cerrar. Con el viejo como
+                                            dueño, agregar material acá nunca iba a ser correcto, así que
+                                            el formulario se fue y la pantalla dice dónde se carga.
+                                            Lo único que SÍ es nuestro es la casilla de abajo. */}
+                                        <Alert className="border-blue-200 bg-blue-50/60">
+                                            <Info className="h-4 w-4 text-blue-600" />
+                                            <AlertDescription className="text-xs text-blue-900">
+                                                <strong>Las materias primas se cargan en el sistema viejo.</strong> Acá
+                                                se ven, y se actualizan solas cada pocos minutos. Si a esta orden le
+                                                falta un material, cargalo allá y en un rato aparece.
                                             </AlertDescription>
                                         </Alert>
-
-                                        {/* Upper Form (oculto si la OT viene del legacy) */}
-                                        {!isLegacyOT && (
-                                            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-gray-50/50 p-4 rounded-xl border border-gray-100 items-end">
-                                                <div className="md:col-span-5 space-y-1.5">
-                                                    <Label className="text-xs font-semibold text-gray-600">M. Primas</Label>
-                                                    <SearchableSelect options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={materiasPrimasForm.articulo_id} onValueChange={(val) => setMateriasPrimasForm({ ...materiasPrimasForm, articulo_id: val })} placeholder="Seleccione material" />
-                                                </div>
-                                                <div className="md:col-span-2 space-y-1.5">
-                                                    <Label className="text-xs font-semibold text-gray-600">Cantidad</Label>
-                                                    <Input type="number" value={materiasPrimasForm.cantidad} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, cantidad: e.target.value })} className="h-9" placeholder="1" />
-                                                </div>
-                                                <div className="md:col-span-4 space-y-1.5">
-                                                    <Label className="text-xs font-semibold text-gray-600">Obs.</Label>
-                                                    <Input value={materiasPrimasForm.observaciones} onChange={(e) => setMateriasPrimasForm({ ...materiasPrimasForm, observaciones: e.target.value })} className="h-9" placeholder="Observaciones..." />
-                                                </div>
-                                                <div className="md:col-span-1">
-                                                    <Button type="button" onClick={handleAddMateriaPrima} className="w-full h-9 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200">
-                                                        Agregar
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        )}
 
                                         {/* Table */}
                                         <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
@@ -1798,14 +1738,17 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                         <th className="px-3 py-2">C. Usado</th>
                                                         <th className="px-3 py-2 text-center">Utiliz.</th>
                                                         <th className="px-3 py-2 text-center">Cortes</th>
-                                                        <th className="px-2 py-2 text-center"></th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {materiasPrimas.length === 0 ? (
                                                         <tr>
-                                                            <td colSpan={13} className="px-4 py-8 text-center text-gray-400">
-                                                                No se agregaron materias primas.
+                                                            <td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500">
+                                                                Esta orden no tiene materias primas cargadas en el sistema viejo.
+                                                                <br />
+                                                                <span className="text-xs text-gray-400">
+                                                                    Si no lleva material, marcalo abajo — así deja de figurar como que falta cargarla.
+                                                                </span>
                                                             </td>
                                                         </tr>
                                                     ) : (
@@ -1821,26 +1764,15 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                                 <td className="px-3 py-2 truncate max-w-[100px] text-gray-500" title={mp.observaciones}>{mp.observaciones}</td>
                                                                 <td className="px-3 py-2 text-gray-500">{mp.precio}</td>
                                                                 <td className="px-3 py-2 text-gray-500">{mp.c_usado}</td>
-                                                                <td className="px-3 py-2 text-center">
-                                                                    <Checkbox disabled={isLegacyOT} checked={mp.utilizado} onCheckedChange={(c) => {
-                                                                        const copy = [...materiasPrimas];
-                                                                        copy[index].utilizado = !!c;
-                                                                        setMateriasPrimas(copy);
-                                                                    }} />
+                                                                {/* Utilizado y Cortes eran una casilla y un campo que no
+                                                                    guardaban nada: se tildaban, se cerraba el modal y no
+                                                                    quedaba rastro. Ahora muestran lo que dice el sistema
+                                                                    viejo, que es de donde salen. */}
+                                                                <td className="px-3 py-2 text-center text-gray-500">
+                                                                    {mp.utilizado ? "Sí" : "—"}
                                                                 </td>
-                                                                <td className="px-3 py-2">
-                                                                    <Input disabled={isLegacyOT} className="h-7 w-20 text-xs text-center" value={mp.cortes} onChange={(e) => {
-                                                                        const copy = [...materiasPrimas];
-                                                                        copy[index].cortes = e.target.value;
-                                                                        setMateriasPrimas(copy);
-                                                                    }} />
-                                                                </td>
-                                                                <td className="px-2 py-2 text-center">
-                                                                    {!isLegacyOT && (
-                                                                        <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveMateriaPrima(mp.id)} className="h-7 w-7 p-0 text-gray-400 hover:text-red-500">
-                                                                            <Trash2 className="w-4 h-4" />
-                                                                        </Button>
-                                                                    )}
+                                                                <td className="px-3 py-2 text-center text-gray-500 tabular-nums">
+                                                                    {mp.cortes || "—"}
                                                                 </td>
                                                             </tr>
                                                         ))
@@ -1849,11 +1781,30 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             </table>
                                         </div>
 
-                                        {/* Bottom Control */}
-                                        <div className="flex items-center space-x-2 pt-3 border-t border-gray-100">
-                                            <Checkbox id="no_lleva_mp" disabled={isLegacyOT} checked={materiasPrimasForm.no_lleva} onCheckedChange={(c) => setMateriasPrimasForm({ ...materiasPrimasForm, no_lleva: !!c })} />
-                                            <Label htmlFor="no_lleva_mp" className="text-sm font-medium text-gray-700 cursor-pointer uppercase">NO LLEVA MATERIAS PRIMAS</Label>
-                                        </div>
+                                        {/* Lo único de esta solapa que SÍ se guarda, y es de SPMM: el
+                                            sync no lo mira ni lo pisa. Hace falta porque sin esto «no
+                                            lleva material» y «nadie cargó la lista» se ven iguales —las
+                                            dos sin piezas— y son cosas opuestas: una hay que saltearla y
+                                            la otra hay que ir a cargarla. Mismo caso que «no lleva plano».
+                                            Antes esta casilla se tildaba y no quedaba en ningún lado. */}
+                                        <label
+                                            htmlFor="no_lleva_mp"
+                                            className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50/50 p-3 hover:bg-gray-50"
+                                        >
+                                            <Checkbox
+                                                id="no_lleva_mp"
+                                                className="mt-0.5"
+                                                checked={generalData.no_lleva_materia_prima}
+                                                onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_materia_prima: !!c })}
+                                            />
+                                            <span className="text-sm">
+                                                <span className="font-semibold text-gray-800">Esta orden no lleva materia prima</span>
+                                                <span className="block text-xs text-gray-500">
+                                                    Marcala y la columna Material deja de decir «Sin cargar»: pasa a decir
+                                                    «No lleva», que es otra cosa.
+                                                </span>
+                                            </span>
+                                        </label>
                                     </div>
                                 </TabsContent>
 

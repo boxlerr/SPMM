@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "materias-primas-se-mira-y-se-puede-marcar-que-no-lleva",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Órdenes de Trabajo",
+        titulo: "La solapa de Materias Primas dejó de perder lo que cargabas, y podés marcar que una orden no lleva",
+        detalle:
+            "Tenía un formulario para agregar materiales que no guardaba en ningún lado: los juntaba en pantalla, salían en la hoja de pañol y se perdían al cerrar. Las materias primas las maneja el sistema viejo y vienen solas cada pocos minutos, así que cargarlas acá nunca iba a funcionar: el formulario se fue y la pantalla ahora dice dónde se cargan. Lo mismo con «Utilizado» y «Cortes», que se tildaban y no quedaban. Y la casilla «no lleva materias primas» ahora sí se guarda: marcala y la columna Material deja de decir «Sin cargar» y pasa a decir «No lleva», que es otra cosa — una hay que ir a cargarla y la otra hay que saltearla. Es lo mismo que ya se hizo con «no lleva plano».",
+        href: "/operaciones",
+    },
+    {
         id: "la-descripcion-del-producto-ya-no-pisa-la-observacion",
         fecha: "2026-09-11",
         tipo: "arreglo",

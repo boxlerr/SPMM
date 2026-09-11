@@ -390,7 +390,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                                         </Badge>
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
-                                                        <MaterialChip estado={order.estado_material} />
+                                                        <MaterialChip estado={order.estado_material} noLleva={order.no_lleva_materia_prima} />
                                                     </td>
                                                     {/* Proceso: Sí (verde) si tenía procesos cargados. */}
                                                     <td className="px-3 py-3 text-center">

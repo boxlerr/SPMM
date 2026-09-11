@@ -87,6 +87,19 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON orden_trabajo (modificado_en DESC) WHERE modificado_en IS NOT NULL",
         ],
     ),
+    (
+        "2026-09-11_no_lleva_materia_prima",
+        [
+            "ALTER TABLE orden_trabajo "
+            "ADD COLUMN IF NOT EXISTS no_lleva_materia_prima SMALLINT NOT NULL DEFAULT 0",
+            "COMMENT ON COLUMN orden_trabajo.no_lleva_materia_prima IS "
+            "'El taller marcó que esta orden NO necesita materia prima. Distinto de no tener '"
+            "'ninguna fila en orden_trabajo_pieza, que sólo dice que nadie cargó la lista. '"
+            "'La escribe SPMM; el sync del sistema viejo no la toca.'",
+            "CREATE INDEX IF NOT EXISTS ix_orden_trabajo_falta_material "
+            "ON orden_trabajo (id) WHERE COALESCE(no_lleva_materia_prima, 0) = 0",
+        ],
+    ),
 ]
 
 

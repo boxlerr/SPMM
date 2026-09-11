@@ -98,7 +98,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
     );
 
     /** Diccionarios de etiquetas para mapear value → label legible. */
-    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin stock", SIN_DATOS: "Sin cargar" };
+    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin stock", SIN_DATOS: "Sin cargar", NO_LLEVA: "No lleva" };
     const PROMISED_LABELS: Record<string, string> = { ALL: "Todas", THIS_WEEK: "Esta semana", NEXT_2_WEEKS: "Próx. 2 semanas", THIS_MONTH: "Este mes" };
     const BATCH_LABELS: Record<string, string> = { ALL: "Todos", SMALL: "Pequeño", MEDIUM: "Mediano", LARGE: "Grande" };
 
@@ -312,6 +312,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
                             no tiene cargada la lista de material. Antes caía adentro de «Sin stock»
                             y por eso ese filtro traía 17 órdenes de las que 0 tenían falta real. */}
                         <SelectItem value="SIN_DATOS" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-400" />Sin cargar</div></SelectItem>
+                        <SelectItem value="NO_LLEVA" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-slate-300" />No lleva</div></SelectItem>
                     </SelectContent>
                 </Select>
 
@@ -438,11 +439,12 @@ export function applyWorkOrderFilters(orders: WorkOrder[], filters: WorkOrderFil
 
         // Material Status Filter
         if (filters.material !== 'ALL') {
-            const estado = claveMaterial(order.estado_material)
+            const estado = claveMaterial(order.estado_material, order.no_lleva_materia_prima)
             if (filters.material === 'OK' && estado !== 'ok') return false
             if (filters.material === 'PEDIDO' && estado !== 'pedido') return false
             if (filters.material === 'SIN_STOCK' && estado !== 'sin_stock') return false
             if (filters.material === 'SIN_DATOS' && estado !== 'sin_datos') return false
+            if (filters.material === 'NO_LLEVA' && estado !== 'no_lleva') return false
         }
 
         // Promised Date Filter

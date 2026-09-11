@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock, HelpCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, HelpCircle, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { resumirMaterial } from "@/lib/materialOT";
@@ -8,6 +8,7 @@ const ICONOS = {
     reloj: Clock,
     alerta: AlertTriangle,
     interrogante: HelpCircle,
+    nada: Minus,
 } as const;
 
 /**
@@ -20,12 +21,15 @@ const ICONOS = {
  */
 export function MaterialChip({
     estado,
+    noLleva,
     className,
 }: {
     estado?: string | null;
+    /** La casilla «no lleva materia prima» de la orden. Gana sobre `estado`. */
+    noLleva?: boolean | number | null;
     className?: string;
 }) {
-    const m = resumirMaterial(estado);
+    const m = resumirMaterial(estado, noLleva);
     const Icono = ICONOS[m.icono];
 
     return (

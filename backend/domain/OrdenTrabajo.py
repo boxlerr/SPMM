@@ -45,6 +45,11 @@ class OrdenTrabajo(Base):
     # Con tiene_plano=0 las dos cosas se veían iguales y el que revisa no sabía cuál
     # ir a buscar. Ver migrations/2026-09-10_tipo_trabajo_y_sin_plano.sql.
     no_lleva_plano = Column(Integer, nullable=False, default=0)
+    # El taller marcó que esta orden no necesita material. Distinto de no tener ninguna
+    # fila en orden_trabajo_pieza, que sólo dice que nadie cargó la lista: una hay que
+    # saltearla y la otra hay que ir a cargarla. La escribe SPMM; el sync no la toca.
+    # Ver migrations/2026-09-11_no_lleva_materia_prima.sql.
+    no_lleva_materia_prima = Column(Integer, nullable=False, default=0)
     programada = Column(Integer, nullable=True, default=0)
     en_proceso = Column(Integer, nullable=True, default=0)
 

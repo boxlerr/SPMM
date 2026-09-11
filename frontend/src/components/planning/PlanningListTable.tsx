@@ -536,7 +536,7 @@ function _PlanningListTable({
                 case 'n_pedido': return String(item.n_pedido || item.n_ped_l || "");
                 case 'unidades': return item.unidades || 0;
                 case 'prioridad': return item.id_prioridad || 0;
-                case 'material': return materialRank(item.estado_material);
+                case 'material': return materialRank(item.estado_material, item.no_lleva_materia_prima);
                 case 'proceso': return procesoRank(item);
                 case 'plano': return rankPlano(estadoPlano(item.id, item.tiene_plano, ordenesConPlano, planosDisponibles));
                 case 'estado': return getOrderStatus(item);
@@ -1228,11 +1228,11 @@ function _PlanningListTable({
                                             {/* Mismo criterio que la tabla de escritorio, pero sin chip: en la
                                                 tarjeta de celular el rótulo va suelto para no comerse el ancho. */}
                                             <span className={cn("font-medium",
-                                                resumirMaterial(item.estado_material).faltaMaterial ? "text-red-600" :
+                                                resumirMaterial(item.estado_material, item.no_lleva_materia_prima).faltaMaterial ? "text-red-600" :
                                                     item.estado_material === 'ok' ? "text-green-600" :
                                                         "text-gray-600"
-                                            )} title={resumirMaterial(item.estado_material).titulo}>
-                                                {resumirMaterial(item.estado_material).rotulo}
+                                            )} title={resumirMaterial(item.estado_material, item.no_lleva_materia_prima).titulo}>
+                                                {resumirMaterial(item.estado_material, item.no_lleva_materia_prima).rotulo}
                                             </span>
                                         </div>
                                         <div>
@@ -1655,7 +1655,7 @@ function _PlanningListTable({
                                                 </Badge>
                                             </td>
                                             <td className="px-3 py-3 text-center">
-                                                <MaterialChip estado={item.estado_material} />
+                                                <MaterialChip estado={item.estado_material} noLleva={item.no_lleva_materia_prima} />
                                             </td>
                                             {/* Proceso: Sí (verde) si tiene procesos cargados + cuántos terminados
                                                 (ese x/y es justamente el criterio con el que ordena la columna). */}

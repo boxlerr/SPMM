@@ -542,7 +542,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                         </Badge>
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
-                                                        <MaterialChip estado={order.estado_material} />
+                                                        <MaterialChip estado={order.estado_material} noLleva={order.no_lleva_materia_prima} />
                                                     </td>
                                                     {/* Proceso: Sí (verde) si tiene al menos un proceso cargado, No (gris) si no. */}
                                                     <td className="px-3 py-3 text-center">

@@ -1387,6 +1387,7 @@ class OrdenTrabajoRepository:
                        ot.reparacion,
                        ot.tiene_plano,
                        ot.no_lleva_plano,
+                       ot.no_lleva_materia_prima,
                        p.descripcion                  as prioridad,
                        coalesce(proc.procesos, 0)             as procesos,
                        coalesce(proc.procesos_finalizados, 0) as procesos_finalizados,

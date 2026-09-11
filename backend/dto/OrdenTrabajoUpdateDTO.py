@@ -34,6 +34,7 @@ class OrdenTrabajoUpdateDTO(BaseModel):
     email: Optional[bool] = None
     tiene_plano: Optional[bool] = None
     no_lleva_plano: Optional[bool] = None
+    no_lleva_materia_prima: Optional[bool] = None
     programada: Optional[bool] = None
     en_proceso: Optional[bool] = None
     

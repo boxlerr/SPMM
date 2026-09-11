@@ -2794,7 +2794,7 @@ export function PlanningPreviewScreen({
                                                         )}
                                                         {ve("material") && (
                                                         <td className="px-4 py-3 text-center">
-                                                            <MaterialChip estado={firstItem.estado_material} />
+                                                            <MaterialChip estado={firstItem.estado_material} noLleva={(firstItem as any).no_lleva_materia_prima} />
                                                         </td>
                                                         )}
                                                         {ve("progreso") && (

@@ -211,7 +211,7 @@ export function PlanningSelectionScreen({
         // «pedido» se planifica: el material está encargado. «sin cargar» también, que
         // no es falta de material sino falta de dato — ver lib/materialOT. Lo único que
         // se avisa acá es la falta de verdad: falta y nadie la pidió.
-        return resumirMaterial(o.estado_material).faltaMaterial
+        return resumirMaterial(o.estado_material, o.no_lleva_materia_prima).faltaMaterial
     })
 
     const sacarLasSinMaterial = () => {
@@ -561,7 +561,7 @@ export function PlanningSelectionScreen({
                             // intención, y si el material no llega se replanifica. Frenar, en
                             // cambio, dejaba trabajo afuera sin que nadie lo decidiera.
                             const sinStockReal = selectedOrders.filter(
-                                o => resumirMaterial(o.estado_material).faltaMaterial
+                                o => resumirMaterial(o.estado_material, o.no_lleva_materia_prima).faltaMaterial
                             );
 
                             if (sinStockReal.length > 0) {
