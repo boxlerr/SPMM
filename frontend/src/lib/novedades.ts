@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "acordeon-en-el-listado-de-ot",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Órdenes de Trabajo",
+        titulo: "Al abrir una orden se cierra la anterior",
+        detalle:
+            "El detalle de una orden mide media pantalla, así que con dos o tres abiertas la lista dejaba de ser una lista y había que scrollear a ciegas para encontrar la siguiente. Ahora se mantiene una sola abierta por vez. Si necesitás comparar varias órdenes, la solapa Todas las muestra de a una fila.",
+        href: "/operaciones",
+    },
+    {
         id: "vocabulario-parejo-en-todas-las-pantallas",
         fecha: "2026-09-11",
         tipo: "mejora",

@@ -100,12 +100,19 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
         direction: 'asc' | 'desc' | null;
     }>({ key: null, direction: null });
 
+    /**
+     * Acordeón: al abrir una OT se cierra la que estaba abierta.
+     *
+     * Lucas, 1/09: "abre una banda, después hace un quilombo, no entienden nada". El
+     * detalle de una OT mide media pantalla, así que con dos o tres abiertas la lista
+     * deja de ser una lista y hay que scrollear a ciegas para encontrar la siguiente.
+     *
+     * No es lo mismo que plegar todo al cambiar de filtro (eso ya estaba): esto es al
+     * ABRIR otra. Se deja una sola abierta a propósito — si alguien quiere comparar
+     * dos OT, para eso está la solapa Todas, que muestra una fila por orden.
+     */
     const toggleRow = (orderId: number) => {
-        setExpandedOrderIds(prev =>
-            prev.includes(orderId)
-                ? prev.filter(id => id !== orderId)
-                : [...prev, orderId]
-        );
+        setExpandedOrderIds(prev => (prev.includes(orderId) ? [] : [orderId]));
     };
 
     const handleSort = (key: typeof sortConfig.key) => {
