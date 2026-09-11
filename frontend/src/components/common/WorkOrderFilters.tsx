@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown, Search, Info, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { WorkOrder } from "@/lib/types";
+import { claveMaterial } from "@/lib/materialOT";
 
 export interface WorkOrderFilterState {
     priority: string[];
@@ -97,7 +98,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
     );
 
     /** Diccionarios de etiquetas para mapear value → label legible. */
-    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin Stock" };
+    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin stock", SIN_DATOS: "Sin cargar" };
     const PROMISED_LABELS: Record<string, string> = { ALL: "Todas", THIS_WEEK: "Esta semana", NEXT_2_WEEKS: "Próx. 2 semanas", THIS_MONTH: "Este mes" };
     const BATCH_LABELS: Record<string, string> = { ALL: "Todos", SMALL: "Pequeño", MEDIUM: "Mediano", LARGE: "Grande" };
 
@@ -306,7 +307,11 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
                         <SelectItem value="ALL" className="text-xs">Todos</SelectItem>
                         <SelectItem value="OK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-500" />Disponible</div></SelectItem>
                         <SelectItem value="PEDIDO" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" />Pedido</div></SelectItem>
-                        <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />Sin Stock</div></SelectItem>
+                        <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />Sin stock</div></SelectItem>
+                        {/* «Sin cargar» no es un problema de compras sino de escritorio: la orden
+                            no tiene cargada la lista de material. Antes caía adentro de «Sin stock»
+                            y por eso ese filtro traía 17 órdenes de las que 0 tenían falta real. */}
+                        <SelectItem value="SIN_DATOS" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-400" />Sin cargar</div></SelectItem>
                     </SelectContent>
                 </Select>
 
@@ -433,10 +438,11 @@ export function applyWorkOrderFilters(orders: WorkOrder[], filters: WorkOrderFil
 
         // Material Status Filter
         if (filters.material !== 'ALL') {
-            const estado = order.estado_material || 'sin_datos'
+            const estado = claveMaterial(order.estado_material)
             if (filters.material === 'OK' && estado !== 'ok') return false
             if (filters.material === 'PEDIDO' && estado !== 'pedido') return false
-            if (filters.material === 'SIN_STOCK' && estado !== 'sin_stock' && estado !== 'sin_datos') return false
+            if (filters.material === 'SIN_STOCK' && estado !== 'sin_stock') return false
+            if (filters.material === 'SIN_DATOS' && estado !== 'sin_datos') return false
         }
 
         // Promised Date Filter

@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { API_URL } from "@/config";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 import { huellaRecursos } from "@/lib/huellaRecursos";
+import { MaterialChip } from "@/components/common/MaterialChip";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -2761,15 +2762,7 @@ export function PlanningPreviewScreen({
                                                         )}
                                                         {ve("material") && (
                                                         <td className="px-4 py-3 text-center">
-                                                            {firstItem.estado_material === 'sin_stock' ? (
-                                                                <Badge className="bg-red-100 text-red-700 border-red-200 hover:bg-red-200">Sin Stock</Badge>
-                                                            ) : firstItem.estado_material === 'pedido' ? (
-                                                                <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100">Pedido</Badge>
-                                                            ) : firstItem.estado_material === 'ok' ? (
-                                                                <Badge className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100">OK</Badge>
-                                                            ) : (
-                                                                <span className="text-gray-400">-</span>
-                                                            )}
+                                                            <MaterialChip estado={firstItem.estado_material} />
                                                         </td>
                                                         )}
                                                         {ve("progreso") && (

@@ -52,6 +52,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { addWorkMinutes, calculateWorkingMinutes } from "@/lib/gantt-utils";
 import { limitacionDeMaquina } from "@/lib/maquinas";
 import { API_URL } from "@/config";
+import { MaterialChip } from "@/components/common/MaterialChip";
+import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -102,14 +104,10 @@ type SortColumn =
     | 'estado' | 'entrega' | 'fecha_prometida' | 'fecha_entrega'
     | 'aprobado_por' | 'requerido_por';
 
-/** Ranking del estado de material: peor primero (asc = "qué me falta"). */
-const materialRank = (estado?: string | null) => {
-    switch (estado) {
-        case 'ok': return 2;
-        case 'pedido': return 1;
-        default: return 0; // sin_stock / sin datos
-    }
-};
+/** Ranking del estado de material: peor primero (asc = "qué me falta"). Vive en
+ *  lib/materialOT junto con el resto de la definición, porque antes esta función
+ *  metía «sin stock» y «sin cargar» en el mismo cajón. */
+const materialRank = rankMaterial;
 
 /** Ranking de la columna Proceso: manda la CANTIDAD de procesos de la OT (una OT
  *  de 6 procesos antes que una de 2), y entre OTs con la misma cantidad desempata
@@ -1140,12 +1138,14 @@ function _PlanningListTable({
                                         </div>
                                         <div>
                                             <span className="text-gray-500 block text-[10px] uppercase">Material</span>
+                                            {/* Mismo criterio que la tabla de escritorio, pero sin chip: en la
+                                                tarjeta de celular el rótulo va suelto para no comerse el ancho. */}
                                             <span className={cn("font-medium",
-                                                item.estado_material === 'sin_stock' ? "text-red-600" :
+                                                resumirMaterial(item.estado_material).faltaMaterial ? "text-red-600" :
                                                     item.estado_material === 'ok' ? "text-green-600" :
                                                         "text-gray-600"
-                                            )}>
-                                                {item.estado_material === 'ok' ? 'OK' : item.estado_material === 'pedido' ? 'Pedido' : 'Sin Stock'}
+                                            )} title={resumirMaterial(item.estado_material).titulo}>
+                                                {resumirMaterial(item.estado_material).rotulo}
                                             </span>
                                         </div>
                                         <div>
@@ -1522,40 +1522,7 @@ function _PlanningListTable({
                                                 </Badge>
                                             </td>
                                             <td className="px-3 py-3 text-center">
-                                                {item.estado_material === 'sin_stock' ? (
-                                                    <Badge
-                                                        variant="destructive"
-                                                        className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
-                                                        title="Material no disponible y no pedido al proveedor"
-                                                    >
-                                                        <AlertTriangle className="h-3 w-3" /> Sin Stock
-                                                    </Badge>
-                                                ) : item.estado_material === 'pedido' ? (
-                                                    <Badge
-                                                        variant="outline"
-                                                        className="bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
-                                                        title="Material pedido al proveedor, esperando entrega"
-                                                    >
-                                                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                                                        Pedido
-                                                    </Badge>
-                                                ) : item.estado_material === 'ok' ? (
-                                                    <Badge
-                                                        variant="outline"
-                                                        className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
-                                                        title="Material disponible para producción"
-                                                    >
-                                                        <CheckCircle2 className="h-3 w-3" /> OK
-                                                    </Badge>
-                                                ) : (
-                                                    <Badge
-                                                        variant="destructive"
-                                                        className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold cursor-help"
-                                                        title="No hay datos de materiales cargados - Verificar disponibilidad"
-                                                    >
-                                                        <AlertTriangle className="h-3 w-3" /> Sin Stock
-                                                    </Badge>
-                                                )}
+                                                <MaterialChip estado={item.estado_material} />
                                             </td>
                                             {/* Proceso: Sí (verde) si tiene procesos cargados + cuántos terminados
                                                 (ese x/y es justamente el criterio con el que ordena la columna). */}

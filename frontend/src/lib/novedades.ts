@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "material-sin-cargar-ya-no-frena-la-planificacion",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Planificación",
+        titulo: "Ya no te frena para planificar una orden que no tiene cargada la lista de material",
+        detalle:
+            "Si tildabas una orden sin material, el botón Planificar no avanzaba: el único camino era «Sacarlas y planificar», que las dejaba afuera. Y casi nunca era falta de material de verdad — la columna decía «Sin Stock» en rojo tanto para la que no tiene material como para la que simplemente no tiene cargada la lista, que son cosas opuestas. Hoy son 17 órdenes sin cargar y ninguna sin material, así que todo ese freno era por un dato que falta, no por una pieza que falta. Ahora la columna las distingue: «Sin stock» en rojo es falta real y «Sin cargar» en gris es que nadie cargó la lista. Sólo la primera te avisa al planificar, y ese aviso ya no frena nada: si querés dejarlas afuera, el cartel trae el botón para sacarlas.",
+        href: "/operaciones",
+    },
+    {
         id: "el-formulario-de-la-orden-usa-la-pantalla",
         fecha: "2026-09-11",
         tipo: "arreglo",

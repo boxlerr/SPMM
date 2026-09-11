@@ -116,7 +116,10 @@ export function getWorkOrderRowColor(order: any): string {
         return "bg-yellow-100 hover:bg-yellow-200/80";
     }
 
-    // 6. GRIS: Completa para pedir Materiales ("sin_stock" o por defecto)
+    // 6. GRIS: falta material ("sin_stock") o nadie cargó la lista ("sin_datos").
+    //    Las dos van al mismo gris a propósito: el color de fila habla de en qué etapa
+    //    está la OT, y en las dos está en la misma. La diferencia entre una y otra la
+    //    cuenta la columna Material — ver lib/materialOT.
     return "bg-gray-100 hover:bg-gray-200/80"; 
 }
 /**

@@ -31,6 +31,7 @@ import { ProcessRowActions } from "@/components/planning/ProcessRowActions";
 import { AddProcessRow } from "./planning/AddProcessRow";
 import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 import { PlanoDeOrden } from "./common/PlanoDeOrden";
+import { MaterialChip } from "@/components/common/MaterialChip";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -541,23 +542,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                         </Badge>
                                                     </td>
                                                     <td className="px-3 py-3 text-center">
-                                                        {order.estado_material === 'sin_stock' ? (
-                                                            <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold">
-                                                                <AlertTriangle className="h-3 w-3" /> Sin Stock
-                                                            </Badge>
-                                                        ) : order.estado_material === 'pedido' ? (
-                                                            <Badge variant="outline" className="bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200 gap-1 pl-1.5 shadow-none font-semibold">
-                                                                Pedido
-                                                            </Badge>
-                                                        ) : order.estado_material === 'ok' ? (
-                                                            <Badge variant="outline" className="bg-green-50 text-green-700 hover:bg-green-100 border-green-200 gap-1 pl-1.5 shadow-none font-semibold">
-                                                                <CheckCircle2 className="h-3 w-3" /> OK
-                                                            </Badge>
-                                                        ) : (
-                                                            <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200 gap-1 pl-1.5 shadow-none font-semibold">
-                                                                <AlertTriangle className="h-3 w-3" /> Sin Stock
-                                                            </Badge>
-                                                        )}
+                                                        <MaterialChip estado={order.estado_material} />
                                                     </td>
                                                     {/* Proceso: Sí (verde) si tiene al menos un proceso cargado, No (gris) si no. */}
                                                     <td className="px-3 py-3 text-center">

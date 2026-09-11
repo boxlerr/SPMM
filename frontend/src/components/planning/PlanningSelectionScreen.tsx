@@ -3,6 +3,7 @@ import { PantallaPlanificador } from "./PantallaPlanificador"
 import { Button } from "@/components/ui/button"
 import { PlanningListTable } from "./PlanningListTable"
 import { WorkOrder } from "@/lib/types"
+import { resumirMaterial } from "@/lib/materialOT"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -200,16 +201,17 @@ export function PlanningSelectionScreen({
      * que acordarse—. Esto no bloquea ni destilda solo: avisa cuántas son y las saca de
      * un click, que es lo que él venía haciendo con el mouse.
      *
-     * El criterio es el mismo que usa la columna Material de las tres listas de órdenes:
-     * 'ok' es el único que cuenta como material puesto. Sin dato es sin stock — es lo
-     * que se ve en pantalla y no podíamos decir una cosa acá y otra allá.
+     * El criterio es el mismo que usa la columna Material, y desde el 11/9 ese criterio
+     * cambió: «sin cargar» dejó de contar como falta de material. Antes esta cuenta
+     * juntaba las dos y el botón ofrecía sacar 17 órdenes de las que ninguna tenía
+     * falta real — ver lib/materialOT, que ahora es el único lugar donde se decide.
      */
     const sinMaterial = unplannedOrders.filter(o => {
         if (!selectedIds.includes(o.id)) return false
-        const estado = o.estado_material || 'sin_datos'
-        // Mismo criterio que el corte de abajo: «pedido» sí se planifica, el material
-        // está encargado. Sin stock y sin datos, no.
-        return estado === 'sin_stock' || estado === 'sin_datos'
+        // «pedido» se planifica: el material está encargado. «sin cargar» también, que
+        // no es falta de material sino falta de dato — ver lib/materialOT. Lo único que
+        // se avisa acá es la falta de verdad: falta y nadie la pidió.
+        return resumirMaterial(o.estado_material).faltaMaterial
     })
 
     const sacarLasSinMaterial = () => {
@@ -541,32 +543,44 @@ export function PlanningSelectionScreen({
                                 return;
                             }
 
-                            // 2. Check for missing stock
-                            const noStockOrders = selectedOrders.filter(o => {
-                                const estado = o.estado_material || 'sin_datos';
-                                return estado === 'sin_stock' || estado === 'sin_datos';
-                            });
+                            // 2. Material: avisar, NUNCA frenar.
+                            //
+                            // Acá había un `return` y dejaba 14 órdenes sin poder planificarse.
+                            // El comentario que estaba puesto decía «avisar, no bloquear» y el
+                            // código hacía lo contrario: la única salida del cartel era «Sacarlas
+                            // y planificar», que las sacaba. No existía un «planificar igual».
+                            //
+                            // Y lo que frenaba casi nunca era falta de material. El corte metía
+                            // en la misma bolsa `sin_stock` (falta y no se pidió) con `sin_datos`
+                            // (nadie cargó la lista). De las 175 órdenes abiertas, 17 estaban en
+                            // el segundo caso y NINGUNA en el primero: todo el freno venía de un
+                            // dato que además no se puede cargar, porque la solapa de Materias
+                            // Primas todavía no guarda.
+                            //
+                            // Planificar una orden sin material no rompe nada: el plan es una
+                            // intención, y si el material no llega se replanifica. Frenar, en
+                            // cambio, dejaba trabajo afuera sin que nadie lo decidiera.
+                            const sinStockReal = selectedOrders.filter(
+                                o => resumirMaterial(o.estado_material).faltaMaterial
+                            );
 
-                            if (noStockOrders.length > 0) {
-                                // Antes esto frenaba y te mandaba a mirar la columna Material:
-                                // el trabajo de sacarlas quedaba para vos, de a una. Ahora el
-                                // aviso trae la salida puesta — avisar, no bloquear.
-                                const orderIds = noStockOrders.map(nro).join(", ");
+                            if (sinStockReal.length > 0) {
+                                const orderIds = sinStockReal.map(nro).join(", ");
                                 const restantes = selectedIds.filter(
-                                    id => !noStockOrders.some(o => o.id === id)
+                                    id => !sinStockReal.some(o => o.id === id)
                                 );
-                                toast.error(
-                                    noStockOrders.length === 1
-                                        ? `La orden ${orderIds} no tiene material.`
-                                        : `${noStockOrders.length} órdenes no tienen material: ${orderIds}.`,
+                                toast.warning(
+                                    sinStockReal.length === 1
+                                        ? `La orden ${orderIds} no tiene material y no está pedido.`
+                                        : `${sinStockReal.length} órdenes no tienen material y no está pedido: ${orderIds}.`,
                                     {
                                         duration: 8000,
                                         description: restantes.length > 0
-                                            ? `Podés sacarlas y planificar las otras ${restantes.length}.`
-                                            : "Son todas las que tildaste, así que no queda nada para planificar.",
+                                            ? "Se van a planificar igual. Si preferís dejarlas afuera, sacalas."
+                                            : "Se van a planificar igual.",
                                         action: restantes.length > 0
                                             ? {
-                                                label: "Sacarlas y planificar",
+                                                label: "Sacarlas",
                                                 onClick: () => {
                                                     setSelectedIds(restantes);
                                                     setSoloTildadas(prev =>
@@ -580,7 +594,7 @@ export function PlanningSelectionScreen({
                                             : undefined,
                                     }
                                 );
-                                return;
+                                // Sin return: el aviso sale y la planificación sigue.
                             }
 
                             const range: PlanningRange = {
