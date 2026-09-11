@@ -114,7 +114,22 @@ interface ProcesosEditorProps {
     quienPuede?: Record<string, number[]>;
 }
 
-const GRID = "grid grid-cols-[24px_36px_36px_minmax(0,1fr)_96px_minmax(0,180px)_minmax(0,180px)_90px_40px] gap-2 items-center";
+/**
+ * Las columnas del listado.
+ *
+ * PROCESO tiene un MÍNIMO de verdad (220px) y no `minmax(0,1fr)`.
+ *
+ * Con `0` de mínimo era la única columna elástica, así que absorbía todo el faltante
+ * de ancho: adentro del modal de la OT —1200px menos el panel de planos— le quedaban
+ * unos 60px y el nombre del proceso directamente no se veía. Quedaba una tabla donde
+ * se editan minutos, máquina y persona de un paso que no se sabe cuál es, que es
+ * justo lo que hay que mirar (Julián, 10/09: "tampoco se ve el proceso").
+ *
+ * Con un mínimo real, cuando no entra el que cede es el contenedor: la lista
+ * scrollea de costado. Un scroll molesta; una columna invisible hace inservible la
+ * pantalla.
+ */
+const GRID = "grid grid-cols-[24px_32px_32px_minmax(220px,1.4fr)_88px_minmax(150px,1fr)_minmax(150px,1fr)_76px_36px] gap-2 items-center";
 
 /**
  * Mantiene sólo el desplazamiento vertical del drag (bloquea el eje X). Sin esto,
@@ -232,17 +247,23 @@ export function ProcesosEditor({
                     {/* Sale sólo con dos procesos o más: con uno la pregunta no existe. */}
                     {incluidos > 1 && operarios.length > 0 && (
                         <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-gray-500 whitespace-nowrap">La hace</span>
+                            {/* "La hace" no decía qué: parecía referirse a la fila de al lado y no
+                                a la OT entera. Y el valor por defecto —"La reparte el planificador"—
+                                no entraba en 190px y se leía "La reparte el pla…", o sea nada. */}
+                            <span className="text-xs text-gray-500 whitespace-nowrap"
+                                  title="Poner la misma persona en todos los pasos de esta orden, de una">
+                                Toda la OT la hace
+                            </span>
                             <SearchableSelect
                                 value={yaSonTodosLaMisma}
                                 onValueChange={asignarATodos}
                                 options={[
-                                    { value: "", label: "La reparte el planificador" },
+                                    { value: "", label: "Lo decide el planificador" },
                                     ...operarioOptions.filter((o) => o.value !== ""),
                                 ]}
-                                placeholder="una sola persona…"
+                                placeholder="elegir una persona…"
                                 disabled={disabled}
-                                className="h-8 w-[190px] text-xs"
+                                className="h-8 w-[220px] text-xs"
                             />
                         </div>
                     )}
@@ -273,8 +294,13 @@ export function ProcesosEditor({
                 </div>
             </div>
 
-            {/* Listado */}
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            {/* Listado.
+                `overflow-x-auto` con `min-w-max` adentro: si el ancho no alcanza, se
+                scrollea de costado y las columnas mantienen su tamaño. Antes el
+                contenedor no cedía nunca y el aplastón se lo comía la columna del
+                nombre del proceso. */}
+            <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white shadow-sm">
+             <div className="min-w-max">
                 {/* Header */}
                 <div className={cn(GRID, "px-3 py-2 bg-gray-50/80 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-gray-500")}>
                     <div></div>
@@ -469,6 +495,7 @@ export function ProcesosEditor({
                         </Droppable>
                     </DragDropContext>
                 )}
+             </div>
             </div>
 
             <p className="text-[11px] text-gray-400 flex items-center gap-1.5">

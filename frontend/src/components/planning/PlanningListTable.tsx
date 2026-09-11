@@ -1358,10 +1358,25 @@ function _PlanningListTable({
                             ) : (
                                 sortedData.map((item, index) => (
                                     <React.Fragment key={item.id}>
+                                        {/* Un click DESPLIEGA. Dos clicks abren la OT.
+                                            Antes el mismo click hacía las dos cosas —desplegaba Y
+                                            abría el modal—, así que errarle a la flechita por unos
+                                            píxeles te tiraba la OT entera encima sin haberla pedido
+                                            (Julián, 10/09: "si le erro al click de la flechita me
+                                            abre la OT entera y me buguea"). Y cerrar el modal te
+                                            dejaba con la fila desplegada de arriba, que era el
+                                            "bug" que veía.
+
+                                            El doble clic no necesita compensar nada: son dos
+                                            toggles, así que la fila queda como estaba y encima se
+                                            abre la OT. Cierra de paso el pedido del 28/08 de abrir
+                                            la OT con doble clic. */}
                                         <tr
-                                            onClick={() => { toggleRow(item.id); onRowClick(item); }}
+                                            onClick={() => toggleRow(item.id)}
+                                            onDoubleClick={() => onRowClick(item)}
+                                            title="Un click para ver el detalle · doble clic para abrir la OT"
                                             className={cn(
-                                                "border-b transition-colors duration-150 cursor-pointer hover:opacity-80",
+                                                "border-b transition-colors duration-150 cursor-pointer hover:opacity-80 select-none",
                                                 getRowColor(item)
                                             )}
                                         >
@@ -1376,18 +1391,29 @@ function _PlanningListTable({
                                                     </label>
                                                 )}
                                             </td>
-                                            <td className="px-3 py-3">
+                                            {/* El blanco es la celda entera, no el ícono: antes eran
+                                                24px de lado (un `p-1` alrededor de un ícono de 16) y
+                                                por eso se le erraba. Ahora son 40 de alto y todo el
+                                                ancho de la columna. El ícono crece a 20px y el
+                                                desplegado se marca con color, no sólo con la
+                                                rotación. */}
+                                            <td className="p-0">
                                                 <button
+                                                    type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         toggleRow(item.id);
                                                     }}
-                                                    className="p-1 hover:bg-black/10 rounded transition-colors"
+                                                    aria-expanded={isRowExpanded(item.id)}
+                                                    aria-label={isRowExpanded(item.id)
+                                                        ? `Ocultar el detalle de la OT ${item.id_otvieja || item.id}`
+                                                        : `Ver el detalle de la OT ${item.id_otvieja || item.id}`}
+                                                    className="flex h-10 w-full items-center justify-center rounded hover:bg-black/10 active:bg-black/15 transition-colors"
                                                 >
                                                     {isRowExpanded(item.id) ? (
-                                                        <ChevronDown className="h-4 w-4 text-gray-600" />
+                                                        <ChevronDown className="h-5 w-5 text-gray-700" />
                                                     ) : (
-                                                        <ChevronRight className="h-4 w-4 text-gray-400" />
+                                                        <ChevronRight className="h-5 w-5 text-gray-500" />
                                                     )}
                                                 </button>
                                             </td>

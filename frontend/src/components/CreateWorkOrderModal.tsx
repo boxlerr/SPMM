@@ -156,8 +156,11 @@ function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
         );
     }
 
+    // 330px acá eran 330px menos para la tabla de procesos, y la que los pagaba era la
+    // columna del nombre del proceso. El plano se mira, no se edita: con 260 entran
+    // igual las miniaturas, y "Ver todos los planos" sigue para verlos grandes.
     return (
-        <aside className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 w-full lg:w-[330px] relative rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+        <aside className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 w-full lg:w-[260px] relative rounded-xl border border-gray-200 bg-gray-50/60 p-3">
             <button
                 type="button"
                 onClick={() => setAbierto(false)}
