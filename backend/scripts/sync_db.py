@@ -19,7 +19,7 @@ existe y se actualiza sólo lo que cambió.
 import asyncio
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import quote_plus
 
@@ -394,10 +394,104 @@ async def run_sync():
             logger.info(f"  -> materias primas: {n} nuevas, {u} actualizadas")
 
             await session.commit()
+
+            # 9. Avisar del desfasaje con el sistema viejo. NO lo arregla: lo cuenta.
+            await _avisar_desfasaje(session)
+
             logger.info("Sincronización completada exitosamente.")
         except Exception as e:
             await session.rollback()
             logger.error(f"Error durante la sincronización: {e}")
+
+
+# El "sin fecha" del legacy. Mismo criterio que cerrar_ot_entregadas_en_legacy.
+_SIN_FECHA_LEGACY = "1950-01-01"
+
+# Hora local de Argentina y sin zona, como TODAS las fechas de esta base. Cloud Run
+# corre en UTC y el Dockerfile no fija TZ, así que `datetime.now()` pelado guardaría
+# tres horas adelantado. Mismo helper que AuditoriaRepository y PlanificacionRepository.
+_TZ_AR = timezone(timedelta(hours=-3))
+
+
+def _ahora_ar():
+    return datetime.now(_TZ_AR).replace(tzinfo=None)
+
+_Q_YA_ENTREGADAS = """
+SELECT v.idot
+FROM dbo.otrabajo v
+WHERE v.idot IN ({ids})
+  AND (v.fechaentrega <> '{sin_fecha}' OR ISNULL(v.fc, 0) = 1)
+"""
+
+
+async def _avisar_desfasaje(session):
+    """Cuenta las OT que el sistema viejo ya entregó y acá siguen abiertas, y avisa.
+
+    POR QUÉ AVISA EN VEZ DE ARREGLAR
+
+    El 2/9 se decidió que SPMM es el dueño de las órdenes y el sync dejó de tocarlas.
+    Eso está bien, pero dejó dos agujeros que se tapan con scripts a mano
+    (`migrar_ot_faltantes` para las que faltan, `cerrar_ot_entregadas_en_legacy` para
+    las que allá ya se entregaron) y nadie se acuerda de correrlos.
+
+    Lo que cuesta se midió el 11/9: el plan confirmado de la noche anterior tenía 4.815
+    de sus 13.535 minutos —el 36%— reservados para trabajo que ya había salido por la
+    puerta. Una de esas órdenes se había entregado ESE MISMO DÍA. Nadie podía saberlo:
+    el dato estaba en la otra base y en SPMM no se veía por ningún lado.
+
+    Así que esto NO cierra nada: eso sigue siendo decisión de una persona, con el script
+    que ya existe. Lo único que hace es que el desfasaje deje de ser invisible.
+
+    Nunca levanta: si el sistema viejo no contesta, el sync no se cae por un aviso.
+    """
+    try:
+        res = await session.execute(text(
+            "SELECT id_otvieja FROM orden_trabajo "
+            " WHERE id_otvieja IS NOT NULL AND COALESCE(finalizadototal, 0) = 0 "
+            "   AND fecha_entrega IS NULL"))
+        abiertas = [r[0] for r in res]
+        if not abiertas:
+            return
+
+        filas = await _leer(_Q_YA_ENTREGADAS.format(
+            sin_fecha=_SIN_FECHA_LEGACY, ids=",".join(str(i) for i in abiertas)))
+        cuantas = len(filas)
+        if not cuantas:
+            logger.info("  -> desfasaje con el viejo: ninguna OT entregada allá sigue abierta acá")
+            return
+
+        ots = ", ".join(f"#{f['idot']}" for f in sorted(filas, key=lambda x: x["idot"])[:8])
+        if cuantas > 8:
+            ots += f" y {cuantas - 8} más"
+        mensaje = (f"{cuantas} órdenes ya entregadas en el sistema viejo siguen abiertas acá"
+                   if cuantas > 1 else
+                   f"1 orden ya entregada en el sistema viejo sigue abierta acá")
+        motivo = (f"{ots}. Mientras sigan abiertas, el planificador les hace lugar: reserva "
+                  f"máquina y gente para trabajo que ya salió. Se cierran corriendo "
+                  f"`cerrar_ot_entregadas_en_legacy --aplicar`.")
+
+        # Una sola por vez: esto corre cada pocos minutos y un aviso repetido deja de
+        # leerse. Mientras el de antes siga sin leer, se actualiza el número en vez de
+        # apilar uno nuevo.
+        previo = (await session.execute(text(
+            "SELECT id_notificacion FROM notificacion "
+            " WHERE tipo = 'desfasaje_legacy' AND NOT leida "
+            " ORDER BY fecha_creacion DESC LIMIT 1"))).first()
+        if previo:
+            await session.execute(text(
+                "UPDATE notificacion SET mensaje = :m, motivo = :mo, fecha_creacion = :f "
+                " WHERE id_notificacion = :id"),
+                {"m": mensaje, "mo": motivo, "f": _ahora_ar(), "id": previo[0]})
+        else:
+            await session.execute(text(
+                "INSERT INTO notificacion (mensaje, tipo, leida, motivo, fecha_creacion) "
+                "VALUES (:m, 'desfasaje_legacy', false, :mo, :f)"),
+                {"m": mensaje, "mo": motivo, "f": _ahora_ar()})
+        await session.commit()
+        logger.info(f"  -> desfasaje con el viejo: {cuantas} OT entregadas allá siguen abiertas acá")
+    except Exception as e:
+        # Un aviso que falla no puede tumbar la sincronización.
+        logger.warning(f"  -> no se pudo revisar el desfasaje con el sistema viejo: {e}")
 
 
 async def main():

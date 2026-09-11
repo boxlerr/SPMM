@@ -6,7 +6,16 @@ from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+# Hora local de Argentina y sin zona, como TODAS las fechas de esta base. Con utcnow()
+# las notificaciones quedaban tres horas adelantadas: la campana decía que algo había
+# pasado a una hora que todavía no llegó. Mismo helper que el resto del repo.
+_TZ_AR = timezone(timedelta(hours=-3))
+
+
+def _ahora_ar():
+    return datetime.now(_TZ_AR).replace(tzinfo=None)
 
 
 class NotificacionService:
@@ -30,7 +39,7 @@ class NotificacionService:
                 leida=False,
                 motivo=notificacion_dto.motivo,
                 id_usuario_creador=notificacion_dto.id_usuario_creador,
-                fecha_creacion=datetime.utcnow()
+                fecha_creacion=_ahora_ar()
             )
 
             notificacion_creada = await self.repository.save(notificacion)
