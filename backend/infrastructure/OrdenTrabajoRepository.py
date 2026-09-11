@@ -1,4 +1,4 @@
-from sqlalchemy import select, inspect
+from sqlalchemy import select, inspect, text
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import func, case
 from backend.domain.OrdenTrabajo import OrdenTrabajo
@@ -808,7 +808,74 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error obteniendo planificaciones (Raw): {e}")
             return []
 
-    async def update_processes_full(self, id_orden: int, new_processes_data: list[dict]):
+    async def _guardar_version_procesos(self, id_orden: int, procesos, motivo: str,
+                                        usuario: dict | None = None):
+        """Deja una foto de los procesos ANTES de tocarlos, para poder deshacer.
+
+        Nunca levanta: que el historial falle no puede impedirle a alguien guardar
+        una OT. Se avisa en el log y se sigue — es lo mismo que hace la auditoría de
+        planificación, y por la misma razón.
+        """
+        import json
+        from backend.infrastructure.AuditoriaRepository import nombre_de
+        try:
+            await self.db.execute(text("""
+                CREATE TABLE IF NOT EXISTS orden_trabajo_proceso_version (
+                    id BIGSERIAL PRIMARY KEY,
+                    id_orden_trabajo INTEGER NOT NULL,
+                    creado_en TIMESTAMP NOT NULL,
+                    id_usuario INTEGER,
+                    usuario VARCHAR(120),
+                    motivo VARCHAR(60),
+                    procesos JSONB NOT NULL
+                )"""))
+            foto = [{
+                "id": p.id, "id_proceso": p.id_proceso, "orden": p.orden,
+                "tiempo_proceso": p.tiempo_proceso, "cant_operarios": p.cant_operarios,
+                "id_maquinaria": p.id_maquinaria, "id_operario": p.id_operario,
+                "id_estado": p.id_estado, "observaciones": p.observaciones,
+            } for p in procesos]
+            await self.db.execute(text("""
+                INSERT INTO orden_trabajo_proceso_version
+                    (id_orden_trabajo, creado_en, id_usuario, usuario, motivo, procesos)
+                VALUES (:ot, :creado, :id_usuario, :usuario, :motivo, CAST(:procesos AS JSONB))
+            """), {
+                "ot": id_orden, "creado": sin_zona(datetime.now()),
+                "id_usuario": (usuario or {}).get("id_usuario"),
+                "usuario": nombre_de(usuario), "motivo": motivo[:60],
+                "procesos": json.dumps(foto),
+            })
+            await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.warning(f"Repository - No se pudo guardar la versión de procesos "
+                           f"de la OT {id_orden}: {e}")
+
+    async def listar_versiones_procesos(self, id_orden: int, limite: int = 20):
+        """Las fotos de esta OT, de la más nueva a la más vieja."""
+        try:
+            filas = await self.db.execute(text("""
+                SELECT id, creado_en, usuario, motivo,
+                       jsonb_array_length(procesos) AS cantidad
+                FROM orden_trabajo_proceso_version
+                WHERE id_orden_trabajo = :ot
+                ORDER BY creado_en DESC
+                LIMIT :lim
+            """), {"ot": id_orden, "lim": limite})
+            return [dict(f._mapping) for f in filas]
+        except Exception:
+            return []  # la tabla se crea recién en el primer cambio
+
+    async def obtener_version_procesos(self, id_version: int):
+        filas = await self.db.execute(text("""
+            SELECT id, id_orden_trabajo, creado_en, usuario, motivo, procesos
+            FROM orden_trabajo_proceso_version WHERE id = :id
+        """), {"id": id_version})
+        fila = filas.first()
+        return dict(fila._mapping) if fila else None
+
+    async def update_processes_full(self, id_orden: int, new_processes_data: list[dict],
+                                    motivo: str = "edicion", usuario: dict | None = None):
         """
         Actualiza la lista completa de procesos de una orden, preservando estados de los existentes.
         """
@@ -819,6 +886,13 @@ class OrdenTrabajoRepository:
             stmt = select(OrdenTrabajoProceso).where(OrdenTrabajoProceso.id_orden_trabajo == id_orden)
             result = await self.db.execute(stmt)
             current_processes = result.scalars().all()
+
+            # La foto va ANTES de tocar nada, y con los procesos que ya leímos: es la
+            # única forma de poder deshacer. Va en su propia transacción (hace commit),
+            # así que si el guardado de abajo falla, la foto queda igual — sobra una
+            # versión idéntica a lo que hay, que no molesta a nadie.
+            if current_processes:
+                await self._guardar_version_procesos(id_orden, current_processes, motivo, usuario)
             
             # El mismo proceso puede estar varias veces en la OT, así que no se puede
             # mapear por id_proceso (colapsaría las pasadas en una). Se machea por id
@@ -875,17 +949,30 @@ class OrdenTrabajoRepository:
                         existing_proc.id_maquinaria = id_maquinaria
                     if _has_op:
                         existing_proc.id_operario = id_operario
+                    # Mismo criterio que arriba: sólo el deshacer las manda, y sólo
+                    # el deshacer tiene por qué pisar el avance de una fila viva.
+                    if 'id_estado' in item and item['id_estado']:
+                        existing_proc.id_estado = item['id_estado']
+                    if 'observaciones' in item:
+                        existing_proc.observaciones = item['observaciones']
                 else:
-                    # CREATE new
+                    # CREATE new.
+                    #
+                    # `id_estado` y `observaciones` normalmente NO vienen: una línea
+                    # nueva nace Pendiente y sin observaciones, y así fue siempre. Las
+                    # manda solamente el DESHACER, y sin eso no sería un deshacer: una
+                    # fila que se borró por error volvía en Pendiente y con el avance
+                    # del taller perdido, que es justo lo que uno quiere recuperar.
                     new_proc = OrdenTrabajoProceso(
                         id_orden_trabajo=id_orden,
                         id_proceso=pid,
                         orden=index + 1,
-                        id_estado=1, # Default Nuevo
+                        id_estado=item.get('id_estado') or 1,
                         tiempo_proceso=minutes or 0,
                         cant_operarios=cant_ops or 1,
                         id_maquinaria=id_maquinaria,
                         id_operario=id_operario,
+                        observaciones=item.get('observaciones'),
                     )
                     self.db.add(new_proc)
             

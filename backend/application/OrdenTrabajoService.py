@@ -276,7 +276,8 @@ class OrdenTrabajoService:
         dto = OrdenTrabajoResponseDTO.model_validate(orden)
         return ResponseDTO(status=True, data=jsonable_encoder(dto))
 
-    async def modificarOrden(self, id: int, dto: OrdenTrabajoUpdateDTO):
+    async def modificarOrden(self, id: int, dto: OrdenTrabajoUpdateDTO,
+                             motivo: str = "edicion", usuario: dict | None = None):
         logger.info(f"Service - Modificar orden de trabajo ID: {id}")
         
         nueva_data = dto.model_dump(exclude_unset=True)
@@ -336,7 +337,8 @@ class OrdenTrabajoService:
         # Update processes intelligently. Con lista vacía, update_processes_full no
         # conserva ninguna y las borra todas, que es justo lo que se pidió.
         if procesos_data is not None:
-             await self.repository.update_processes_full(id, procesos_data)
+             await self.repository.update_processes_full(
+                 id, procesos_data, motivo=motivo, usuario=usuario)
              # Reload to return full object including new processes
              orden_actualizada = await self.repository.find_by_id(id)
 
@@ -544,6 +546,59 @@ class OrdenTrabajoService:
              
         return ResponseDTO(status=True, data={"updated": True})
 
+
+    async def listarVersionesProcesos(self, id_orden: int):
+        """Las fotos de los procesos de esta OT, para el botón de deshacer."""
+        logger.info(f"Service - Versiones de procesos de la OT {id_orden}")
+        return ResponseDTO(status=True, data=jsonable_encoder(
+            await self.repository.listar_versiones_procesos(id_orden)))
+
+    async def restaurarProcesos(self, id_orden: int, id_version: int, usuario: dict | None = None):
+        """Vuelve los procesos de la OT a como estaban en esa foto.
+
+        Se restaura por el MISMO camino que un guardado normal
+        (`update_processes_full`), no metiendo las filas viejas de vuelta a mano. Dos
+        razones: las filas que siguen existiendo conservan su id —y con él su avance
+        y el plan que las apunta—, y la restauración deja su propia foto, así que
+        deshacer también se puede deshacer.
+        """
+        version = await self.repository.obtener_version_procesos(id_version)
+        if not version:
+            raise NotFoundException(f"No existe la versión {id_version}.")
+        if version["id_orden_trabajo"] != id_orden:
+            # Sin esto, un id de versión de otra OT le escribiría los procesos de una
+            # orden ajena a esta.
+            raise ApplicationException(
+                f"La versión {id_version} es de otra orden de trabajo.")
+
+        procesos = version["procesos"]
+        if isinstance(procesos, str):
+            import json
+            procesos = json.loads(procesos)
+
+        # `id_estado` y `observaciones` viajan a propósito: un deshacer que devuelve
+        # los procesos pero los deja a todos en Pendiente no es un deshacer. Las filas
+        # que nunca se borraron conservan su id y sólo se les repone lo que tenían; las
+        # que sí se borraron vuelven con su avance en vez de nacer en cero.
+        payload = [{
+            "proceso_id": p["id_proceso"],
+            "id_otp": p.get("id"),
+            "tiempo_proceso": p.get("tiempo_proceso") or 0,
+            "cant_operarios": p.get("cant_operarios") or 1,
+            "maquinaria_id": p.get("id_maquinaria"),
+            "operario_id": p.get("id_operario"),
+            "id_estado": p.get("id_estado") or 1,
+            "observaciones": p.get("observaciones"),
+        } for p in sorted(procesos, key=lambda x: (x.get("orden") or 0, x.get("id") or 0))]
+
+        logger.info(f"Service - Restaurando {len(payload)} procesos en la OT {id_orden} "
+                    f"desde la versión {id_version}")
+        await self.repository.update_processes_full(
+            id_orden, payload, motivo="restaurar", usuario=usuario)
+        return ResponseDTO(status=True, data={
+            "restaurados": len(payload),
+            "desde": jsonable_encoder(version["creado_en"]),
+        })
 
     async def resumenTodas(self):
         """Todas las OT en una lista, con el corte planificada / sin planificar.

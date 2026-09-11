@@ -36,12 +36,30 @@ import {
     ProcesoCatalogoItem, MaquinaCatalogoItem, OperarioCatalogoItem,
 } from "@/components/planning/ProcesosEditor";
 import { API_URL } from "@/config";
-import { AlertTriangle, Save } from "lucide-react";
+import { AlertTriangle, Save, Undo2 } from "lucide-react";
+
+/** "hoy 15:33" si es de hoy, "10/09 15:33" si no. Lo que se lee en un tooltip. */
+const fechaHora = (iso: string) => {
+    const d = new Date(iso);
+    const hora = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+    const hoy = new Date();
+    const mismoDia = d.toDateString() === hoy.toDateString();
+    return mismoDia ? `hoy ${hora}`
+        : `${d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${hora}`;
+};
 
 const getAuthHeaders = (): HeadersInit => {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     return token ? { Authorization: `Bearer ${token}` } : {};
 };
+
+interface Version {
+    id: number;
+    creado_en: string;
+    usuario: string | null;
+    motivo: string | null;
+    cantidad: number;
+}
 
 interface Props {
     /** id interno de la OT. null = cerrado. */
@@ -70,6 +88,8 @@ export default function EditarProcesosOTModal({
     const [cargando, setCargando] = useState(false);
     const [guardando, setGuardando] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [versiones, setVersiones] = useState<Version[]>([]);
+    const [deshaciendo, setDeshaciendo] = useState(false);
     const cleanUrl = API_URL.replace(/\/$/, "");
 
     // El catálogo se pide una sola vez y queda: abrir el modal para tres OT
@@ -114,6 +134,10 @@ export default function EditarProcesosOTModal({
                     operario_id: p.id_operario ? String(p.id_operario) : "",
                     incluido: true,
                 })));
+                const rv = await fetch(`${cleanUrl}/ordenes/${ordenId}/procesos/versiones`,
+                    { headers: getAuthHeaders() });
+                const jv = await rv.json();
+                if (vivo) setVersiones(jv?.data ?? []);
             } catch (e: any) {
                 if (vivo) setError(e?.message || "No se pudieron traer los procesos de la OT.");
             } finally {
@@ -123,6 +147,35 @@ export default function EditarProcesosOTModal({
         return () => { vivo = false; };
     }, [ordenId, cleanUrl]);
 
+    /**
+     * Volver a como estaban antes del último cambio.
+     *
+     * Hasta hoy esto no existía: guardar pisaba la lista y lo que no venía se borraba,
+     * sin historial. Se aguantaba mientras editar procesos era raro; desde que se
+     * edita desde la planificación, no.
+     *
+     * Devuelve también el avance: una fila que se borró por error vuelve como estaba,
+     * no en Pendiente. Y la restauración deja su propia versión, así que deshacer
+     * también se puede deshacer.
+     */
+    const deshacer = useCallback(async () => {
+        if (!ordenId || !versiones.length) return;
+        setDeshaciendo(true);
+        setError(null);
+        try {
+            const r = await fetch(
+                `${cleanUrl}/ordenes/${ordenId}/procesos/restaurar/${versiones[0].id}`,
+                { method: "POST", headers: getAuthHeaders() });
+            if (!r.ok) throw new Error((await r.text().catch(() => "")) || `Error ${r.status}`);
+            onGuardado(ordenId);
+            onClose();
+        } catch (e: any) {
+            setError(e?.message || "No se pudo deshacer el último cambio.");
+        } finally {
+            setDeshaciendo(false);
+        }
+    }, [ordenId, versiones, cleanUrl, onGuardado, onClose]);
+
     const guardar = useCallback(async () => {
         if (!ordenId) return;
         setGuardando(true);
@@ -131,7 +184,7 @@ export default function EditarProcesosOTModal({
             // Sólo `procesos`: el DTO usa exclude_unset, así que la cabecera de la OT
             // —cliente, fechas, prioridad— no se toca. Mandar el objeto entero desde
             // acá sería arriesgar pisar campos que esta pantalla ni muestra.
-            const r = await fetch(`${cleanUrl}/ordenes/${ordenId}`, {
+            const r = await fetch(`${cleanUrl}/ordenes/${ordenId}?motivo=planificacion`, {
                 method: "PUT",
                 headers: { ...(getAuthHeaders() as Record<string, string>), "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -168,6 +221,10 @@ export default function EditarProcesosOTModal({
                     </DialogTitle>
                     <p className="text-sm text-gray-500">
                         Se guardan en la orden, no sólo en este plan. Al cerrar, el plan se vuelve a calcular.
+                        {versiones.length > 0 && (
+                            <> Si algo sale mal, <strong>Deshacer</strong> los devuelve a como estaban
+                            {versiones[0].usuario ? <> antes del cambio de {versiones[0].usuario}</> : null}.</>
+                        )}
                     </p>
                 </DialogHeader>
 
@@ -205,13 +262,31 @@ export default function EditarProcesosOTModal({
                 )}
 
                 <div className="flex justify-between items-center gap-2 pt-2 border-t">
-                    <Button
-                        variant="ghost"
-                        onClick={() => setRows(rs => [...rs, makeEmptyRow()])}
-                        disabled={cargando || guardando}
-                    >
-                        Agregar proceso
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="ghost"
+                            onClick={() => setRows(rs => [...rs, makeEmptyRow()])}
+                            disabled={cargando || guardando || deshaciendo}
+                        >
+                            Agregar proceso
+                        </Button>
+                        {versiones.length > 0 && (
+                            <Button
+                                variant="ghost"
+                                onClick={deshacer}
+                                disabled={cargando || guardando || deshaciendo}
+                                className="text-amber-800 hover:bg-amber-50 hover:text-amber-900"
+                                title={`Volver a los ${versiones[0].cantidad} procesos que tenía `
+                                    + `antes del cambio del ${fechaHora(versiones[0].creado_en)}`
+                                    + (versiones[0].usuario ? ` (lo cambió ${versiones[0].usuario})` : "")}
+                            >
+                                {deshaciendo
+                                    ? <Spinner className="h-4 w-4 mr-2" />
+                                    : <Undo2 className="h-4 w-4 mr-2" />}
+                                Deshacer el último cambio
+                            </Button>
+                        )}
+                    </div>
                     <div className="flex gap-2">
                         <Button variant="outline" onClick={onClose} disabled={guardando}>
                             Cancelar

@@ -73,9 +73,35 @@ async def obtener_orden(id: int, db=Depends(get_db)):
 
 # 🔹 Modificar orden
 @router.put("/ordenes/{id}")
-async def modificar_orden(id: int, dto: OrdenTrabajoUpdateDTO, db=Depends(get_db)):
+async def modificar_orden(
+    id: int,
+    dto: OrdenTrabajoUpdateDTO,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    # De dónde salió el cambio, para el historial: el modal de la OT o la pantalla de
+    # planificación. Lo manda el front como query param.
+    motivo: str = "edicion",
+):
     service = OrdenTrabajoService(db)
-    return await service.modificarOrden(id, dto)
+    return await service.modificarOrden(id, dto, motivo=motivo, usuario=current_user)
+
+
+# 🔹 Deshacer un cambio de procesos.
+#
+# Editar los procesos de una OT era definitivo: la lista completa pisa lo que había y
+# lo que no viene se borra. Se aguantaba mientras editar procesos era raro; desde que
+# se edita DESDE la planificación —donde más se toca y más apurado se trabaja— no.
+@router.get("/ordenes/{id_orden}/procesos/versiones")
+async def listar_versiones_procesos(id_orden: int, db=Depends(get_db),
+                                    _u: dict = Depends(get_current_user)):
+    return await OrdenTrabajoService(db).listarVersionesProcesos(id_orden)
+
+
+@router.post("/ordenes/{id_orden}/procesos/restaurar/{id_version}")
+async def restaurar_procesos(id_orden: int, id_version: int, db=Depends(get_db),
+                             current_user: dict = Depends(get_current_user)):
+    return await OrdenTrabajoService(db).restaurarProcesos(
+        id_orden, id_version, usuario=current_user)
 
 # 🔹 Eliminar orden
 @router.delete("/ordenes/{id}")

@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "deshacer-cambio-de-procesos",
+        fecha: "2026-09-10",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Si te equivocás editando los procesos de una OT, ahora se puede deshacer",
+        detalle:
+            "Antes, guardar los procesos de una orden era definitivo: la lista que mandabas pisaba lo que había y lo que no estaba se borraba, sin forma de volver. Ahora, antes de cada cambio se guarda una copia, y en el editor hay un botón «Deshacer el último cambio» que deja la orden como estaba — con el avance incluido, así que un proceso que ya estaba terminado no vuelve en Pendiente. El deshacer también deja su copia, o sea que se puede deshacer el deshacer. El botón dice quién hizo el cambio y cuándo.",
+        href: "/operaciones",
+    },
+    {
         id: "reparacion-fabricacion-y-sin-plano",
         fecha: "2026-09-10",
         tipo: "nuevo",
