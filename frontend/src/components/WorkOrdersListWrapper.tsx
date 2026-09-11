@@ -7,6 +7,7 @@ import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { toast } from "sonner";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
+import TodasLasOrdenes from "@/app/operaciones/_components/TodasLasOrdenes";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { API_URL } from "@/config";
@@ -135,6 +136,13 @@ export default function WorkOrdersListWrapper({
                         <TabsTrigger value="historial" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-sm">
                             Historial ({completedOrders.length})
                         </TabsTrigger>
+                        {/* La cuarta: TODAS juntas. Las otras tres parten el trabajo y en
+                            ninguna se ve el total, así que una OT que se planifica
+                            desaparece de la lista donde uno la estaba mirando y se lee
+                            como perdida. Acá está siempre, diga lo que diga su estado. */}
+                        <TabsTrigger value="todas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-sm">
+                            Todas ({orders.length})
+                        </TabsTrigger>
                     </TabsList>
                     <div className="flex items-center gap-2">
                         <ZoomControl value={zoom} onChange={setZoom} />
@@ -186,6 +194,10 @@ export default function WorkOrdersListWrapper({
                         onEdit={handleEditOrder}
                         tableZoom={zoom}
                     />
+                </TabsContent>
+
+                <TabsContent value="todas" className="mt-0">
+                    <TodasLasOrdenes onRefresh={onRefresh} />
                 </TabsContent>
             </Tabs>
 

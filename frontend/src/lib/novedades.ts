@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "todas-las-ordenes-es-una-solapa",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "«Todas» es una solapa más, al lado de No Planificadas y Planificadas",
+        detalle:
+            "La lista con todas las órdenes juntas estaba como una sección aparte del menú, y quedaban dos cosas llamadas «Órdenes de Trabajo» en lugares distintos. Ahora es la cuarta solapa, donde uno la busca: No Planificadas · Planificadas · Historial · Todas. Sirve para lo mismo de siempre — que una orden no desaparezca de la vista al planificarla y se pueda comprobar dónde quedó — con los contadores arriba haciendo de filtro.",
+        href: "/operaciones",
+    },
+    {
+        id: "modal-ot-entra-mas",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Órdenes de Trabajo",
+        titulo: "En la orden entran más procesos sin scrollear",
+        detalle:
+            "El modal era más chico que la pantalla: quedaban cientos de píxeles muertos a los costados mientras la lista de procesos scrolleaba a las cuatro filas. Ahora ocupa hasta el 95% del ancho y casi todo el alto. Además la cabecera se achicó y se sacó un título que estaba repetido dos veces seguidas —«Procesos de la Orden» y abajo «Procesos de la orden (7 activos de 7)»—, que eran dos renglones enteros justo arriba de lo que uno quiere mirar.",
+        href: "/operaciones",
+    },
+    {
         id: "modal-ot-mas-prolijo",
         fecha: "2026-09-11",
         tipo: "arreglo",

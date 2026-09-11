@@ -36,15 +36,6 @@ const sidebarItems: SidebarItem[] = [
     icon: BarChart3
   },
   {
-    // Órdenes de Trabajo antes que Operaciones, a pedido de Lucas (28/08): primero
-    // se ve TODO lo que hay —lo que entró al plan y lo que quedó afuera— y recién
-    // después se entra a planificar. Es también la puerta del alta de OT, que la usa
-    // Carolina y no tiene por qué pasar por la pantalla de planificación.
-    name: "Órdenes de Trabajo",
-    href: "/ordenes",
-    icon: ClipboardList
-  },
-  {
     name: "Operaciones",
     href: "/operaciones",
     icon: ArrowLeftRight

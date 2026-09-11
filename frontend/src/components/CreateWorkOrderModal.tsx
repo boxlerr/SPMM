@@ -189,7 +189,7 @@ function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
     // columna del nombre del proceso. El plano se mira, no se edita: con 260 entran
     // igual las miniaturas, y "Ver todos los planos" sigue para verlos grandes.
     return (
-        <aside className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 w-full lg:w-[260px] relative rounded-xl border border-gray-200 bg-gray-50/60 p-3">
+        <aside className="order-1 lg:order-2 lg:sticky lg:top-14 flex-shrink-0 w-full lg:w-[280px] relative rounded-xl border border-gray-200 bg-gray-50/60 p-3">
             {/* Antes era una flechita gris clarito de 14px sin texto: estaba, pero nadie
                 la encontraba — por eso el pedido fue "sacar el cuadro" y no "plegarlo".
                 Ahora dice qué hace y por qué te conviene. */}
@@ -204,7 +204,7 @@ function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
             </button>
             {/* El panel scrollea solo: el modal ya tiene su propio scroll y una lista
                 larga de planos lo empujaría más allá del alto fijo del diálogo. */}
-            <div className="max-h-[46vh] overflow-y-auto pr-1">
+            <div className="max-h-[52vh] overflow-y-auto pr-1">
                 <PlanoPanel
                     planos={planos}
                     cargando={cargando}
@@ -1228,23 +1228,29 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
             <Dialog open={isOpen} onOpenChange={(open) => !open && handleAttemptClose()}>
 
-                <DialogContent className="sm:max-w-[95vw] md:max-w-[1200px] bg-white rounded-xl shadow-2xl border-0 h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
-                    <DialogHeader className="p-6 pb-4 border-b bg-white flex-shrink-0">
-                        <DialogTitle className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-                            <div className="p-2.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg shadow-blue-500/20">
-                                <CalendarIcon className="h-6 w-6 text-white" />
+                {/* Ancho y alto de verdad.
+                    Estaba topado en 1200px y 85vh: en un monitor de taller quedaban
+                    cientos de píxeles muertos a los costados mientras la lista de
+                    procesos scrolleaba a las cuatro filas. Ahora usa hasta 1600px —o el
+                    95% de la pantalla, lo que sea menor— y 92vh de alto, así entra el
+                    doble de pasos sin tocar la rueda del mouse. El tope sigue existiendo
+                    a propósito: una tabla de 2000px de ancho se vuelve incómoda de leer. */}
+                <DialogContent className="max-w-[min(1600px,95vw)] bg-white rounded-xl shadow-2xl border-0 h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
+                    {/* La cabecera se lleva alto que le falta a la lista de abajo. El ícono
+                        baja de 24 a 20px, el título de 2xl a xl, y la bajada —"Modifica la
+                        información de la OT existente"— se va: no dice nada que el título no
+                        diga ya. Son unos 40px que pasan a ser dos filas más de proceso. */}
+                    <DialogHeader className="px-6 py-3 border-b bg-white flex-shrink-0">
+                        <DialogTitle className="text-xl font-bold text-gray-900 flex items-center gap-2.5">
+                            <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-md shadow-blue-500/20">
+                                <CalendarIcon className="h-5 w-5 text-white" />
                             </div>
-                            <div className="flex flex-col">
-                                <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id_otvieja || orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
-                                <span className="text-sm font-normal text-gray-500 mt-0.5">
-                                    {orderToEdit ? "Modifica la información de la OT existente" : "Completa la información para crear una nueva OT"}
-                                </span>
-                            </div>
+                            <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id_otvieja || orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
                         </DialogTitle>
                     </DialogHeader>
 
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-                        <div className="flex-1 overflow-y-auto px-6 py-4 relative">
+                        <div className="flex-1 overflow-y-auto px-6 py-3 relative">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                                 {/* Los rótulos se acortan abajo de lg y no se dejan enteros.
                                     El TabsTrigger es `whitespace-nowrap` y la columna del grid mide
@@ -1827,9 +1833,14 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                 {/* Tab: Procesos */}
                                 <TabsContent value="procesos" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
+                                    {/* El título estaba dos veces, uno arriba del otro: acá
+                                        "Procesos de la Orden" y tres renglones más abajo
+                                        "Procesos de la orden (7 activos de 7)" con la barra de
+                                        botones. Dos renglones enteros de alto para decir lo mismo,
+                                        justo arriba de la lista que uno quiere ver. Queda el de
+                                        abajo, que además cuenta cuántos hay. */}
                                     <div className="flex items-start justify-between gap-3 flex-wrap mb-1">
                                         <div className="space-y-1">
-                                            <h3 className="text-lg font-semibold text-gray-900">Procesos de la Orden</h3>
                                             <p className="text-sm text-gray-500">
                                                 Elegí proceso, máquina, recurso humano, minutos y cuánto recurso humano hace falta. Destildá los que esta vez no van (opcional).
                                             </p>
