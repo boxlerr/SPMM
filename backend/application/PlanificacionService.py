@@ -1881,19 +1881,33 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
 
-    # Determine start date
+    # ---- Desde cuándo arranca el plan ----
+    #
+    # EL PLAN NUNCA EMPIEZA EN EL PASADO, y eso no es obvio en este código.
+    #
+    # Abajo, `start_date` se queda con la FECHA y tira la hora, porque el modelo
+    # mapea T=0 a las 07:00 de ese día. La versión anterior calculaba una hora con
+    # cuidado —si eran las 16, dejaba las 16— y después la perdía en `.date()`. O
+    # sea que planificar un jueves a las 16 armaba el plan desde las 07:00 de ESE
+    # jueves: las primeras nueve horas del plan ya habían pasado cuando se imprimía.
+    #
+    # Julián lo vio el 11/9: «planificamos ayer jueves a las 16hs y el planificador
+    # puso horarios de jueves a las 10am del mismo día, no tiene sentido; tiene que
+    # ser para el otro día teniendo en cuenta las horas en las que trabajan ellos».
+    #
+    # La regla es la del taller: si la jornada ya arrancó, el plan es para mañana.
+    # Sólo se planifica para hoy si todavía no abrieron. Es lo que pasa de verdad —
+    # el plan se imprime y se reparte, así que no sirve para las horas que ya se
+    # fueron— y además hace imposible que el plan vuelva a nacer vencido.
     ahora = datetime.now()
     if fecha_desde is None or fecha_desde <= ahora.date():
-        # Default: hoy con ajuste por hora
-        inicio_base = ahora
-        if inicio_base.hour < 7:
-            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
-        elif inicio_base.hour >= 17:
-            inicio_base = inicio_base + timedelta(days=1)
-            inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+        inicio_base = ahora.replace(hour=HORA_APERTURA.hour, minute=HORA_APERTURA.minute,
+                                    second=0, microsecond=0)
+        if ahora.time() >= HORA_APERTURA:
+            inicio_base += timedelta(days=1)
     else:
-        # fecha_desde futura: arrancar 07:00 de ese día
-        inicio_base = datetime.combine(fecha_desde, time(7, 0))
+        # Una fecha pedida a futuro manda: arranca a la apertura de ese día.
+        inicio_base = datetime.combine(fecha_desde, HORA_APERTURA)
 
     # Saltar fin de semana y días bloqueados desde el candidato
     blocked_set = set(blocked_dates)

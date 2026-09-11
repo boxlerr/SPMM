@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "el-plan-ya-no-arranca-en-horas-que-ya-pasaron",
+        fecha: "2026-09-11",
+        tipo: "arreglo",
+        seccion: "Planificación",
+        titulo: "El plan ya no empieza en horas que ya pasaron",
+        detalle:
+            "Si planificabas un jueves a las cuatro de la tarde, el plan te ponía trabajos a las diez de la mañana de ESE jueves: media jornada del plan ya había pasado antes de imprimirlo. Ahora, si la jornada ya arrancó, el plan es para el día siguiente — y sólo se planifica para hoy si todavía no abrieron. El viernes a la tarde salta el fin de semana y arranca el lunes.",
+        href: "/operaciones",
+    },
+    {
+        id: "guardar-la-planificacion-es-instantaneo",
+        fecha: "2026-09-11",
+        tipo: "mejora",
+        seccion: "Planificación",
+        titulo: "Confirmar la planificación es instantáneo",
+        detalle:
+            "Al confirmar quedabas varios segundos frente al cartel de «guardando» cuando el plan ya estaba guardado: lo que faltaba era volver a traer las órdenes y los recursos para refrescar las listas. Ahora el cartel se va apenas el plan queda escrito y las listas se actualizan solas, sin taparte la pantalla ni hacerte esperar.",
+        href: "/operaciones",
+    },
+    {
         id: "hoja-del-panol-el-plan-en-papel-dia-por-dia",
         fecha: "2026-09-11",
         tipo: "nuevo",

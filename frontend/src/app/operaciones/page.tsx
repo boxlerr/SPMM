@@ -1358,14 +1358,31 @@ export default function OperacionesPage() {
       retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
       tandasBorrador.current = [];
 
-      setCalculando(c => ({ ...c, listo: true }));
+      // GUARDAR TERMINA ACÁ. El plan ya está escrito.
+      //
+      // Antes se seguía esperando `fetchData()` con el cartel arriba, y eso son
+      // varios segundos más: vuelve a traer los operarios, las 1267 órdenes y la
+      // planificación entera. O sea que el plan estaba guardado y la pantalla
+      // seguía diciendo «guardando», por trabajo que no cambia nada de lo que se
+      // acaba de hacer.
+      //
+      // Julián (11/9): «el guardado tiene que ser instantáneo al terminar la
+      // planificación y quede planificada».
+      //
+      // Así que el cartel se va y las listas se refrescan solas, por su cuenta.
+      // No se pierde nada: `fetchData` prende su propio `isLoading` y cada lista
+      // muestra que se está actualizando, sin tapar la pantalla ni hacer esperar.
+      setIsConfirmingPlan(false);
+      setCalculando({ activo: false, ots: 0, listo: false, modo: "calcular" });
 
-      // Refresh data
-      await fetchData();
+      void fetchData();
+      return;
 
     } catch (error) {
       toast.error("Error al guardar la planificación");
     } finally {
+      // Sólo corre si algo falló antes del return de arriba: en el camino feliz
+      // esto ya se apagó y el usuario está de vuelta en Operaciones.
       setIsConfirmingPlan(false);
       setCalculando({ activo: false, ots: 0, listo: false, modo: "calcular" });
     }
