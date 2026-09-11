@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle, History } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -227,6 +227,19 @@ function PanelDePlanos({ planos, cargando, vacioTexto, titulo, onVerTodos }: {
         </aside>
     );
 }
+
+/** «11/09 a las 15:42». Día y hora, sin año: el rastro sirve para "¿lo tocaron
+ *  recién?", y el año sólo ocupa lugar salvo que sea muy viejo, donde sí va. */
+const formatearMomento = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const esteAnio = d.getFullYear() === new Date().getFullYear();
+    const fecha = d.toLocaleDateString("es-AR", esteAnio
+        ? { day: "2-digit", month: "2-digit" }
+        : { day: "2-digit", month: "2-digit", year: "numeric" });
+    const hora = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+    return `${fecha} a las ${hora}`;
+};
 
 export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
     const [loading, setLoading] = useState(false);
@@ -1246,6 +1259,19 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                 <CalendarIcon className="h-5 w-5 text-white" />
                             </div>
                             <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id_otvieja || orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
+                            {/* Quién la tocó por última vez y cuándo.
+                                Va en la cabecera y no en una solapa porque la pregunta se
+                                hace ANTES de mirar nada: "¿esto lo cambió alguien?". Si no
+                                dice nada es que nunca se editó desde acá —es el caso de
+                                todas las que trajo el sistema viejo— y eso también es una
+                                respuesta, así que no se pone ningún cartel. */}
+                            {orderToEdit?.modificado_en && (
+                                <span className="ml-auto flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-500">
+                                    <History className="h-3 w-3 shrink-0" />
+                                    Modificada el {formatearMomento(orderToEdit.modificado_en)}
+                                    {orderToEdit.modificado_por ? ` por ${capitalizeName(orderToEdit.modificado_por)}` : ""}
+                                </span>
+                            )}
                         </DialogTitle>
                     </DialogHeader>
 

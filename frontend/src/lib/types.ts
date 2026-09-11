@@ -69,6 +69,10 @@ export interface WorkOrder {
     fecha_entrega?: string;
     reclamo?: number | boolean;
     estado_material?: 'ok' | 'pedido' | 'sin_stock' | 'sin_datos';
+    /** Último rastro de edición desde SPMM. Los dos en null significan «nunca se tocó
+     *  acá» —las órdenes que trajo el sistema viejo—, no «no se sabe». */
+    modificado_en?: string | null;
+    modificado_por?: string | null;
 
     // 🔹 Nuevos campos "Pronto"
     n_ped_l?: string;
