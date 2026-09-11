@@ -9,8 +9,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp,
-} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import EditarProcesosOTModal from "@/components/planning/EditarProcesosOTModal";
 import { Input } from "@/components/ui/input";
@@ -1453,6 +1452,136 @@ export function PlanningPreviewScreen({
         };
     }, [isOpen]);
 
+    /**
+     * La hoja del pañol: el plan en papel, día por día.
+     *
+     * Pedido de la reunión del 10/09. Mientras no esté decidido cómo se finaliza una
+     * OT —programada → en proceso → controlado → cerrada—, lo que el pañol necesita
+     * para trabajar es más simple: saber qué se va a hacer mañana para tener el
+     * material y las herramientas listas cuando el operario llegue a buscarlos.
+     *
+     * POR DÍA Y NO POR OT, que es lo que la diferencia de la hoja que ya existe.
+     *
+     * La hoja de la OT (el botón Imprimir del modal) sirve para seguir UNA orden de
+     * principio a fin: la lleva el que la fabrica. El pañol trabaja al revés — no le
+     * importa la orden, le importa el día: «el martes salen estas ocho cosas, y para
+     * eso tengo que tener esto preparado». Imprimir el plan agrupado por OT lo
+     * obligaría a leer veinte hojas y armar el martes a mano.
+     *
+     * Va del plan que está EN PANTALLA, con los retoques hechos a mano incluidos, no
+     * del que está guardado: es la misma regla que el botón de guardar.
+     */
+    const imprimirParaPanol = () => {
+        const esc = (v: unknown) => String(v ?? "")
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+        // Una fila por proceso, con los retoques de la persona ya aplicados.
+        const filas = results.map(r => getEffectiveItem(r));
+
+        // Agrupar por día. Sin fecha van al final: son las que el plan no ubicó.
+        const porDia = new Map<string, any[]>();
+        for (const f of filas) {
+            const dia = (f.fecha_inicio_estimada || "").slice(0, 10) || "sin-fecha";
+            if (!porDia.has(dia)) porDia.set(dia, []);
+            porDia.get(dia)!.push(f);
+        }
+        const dias = [...porDia.keys()].sort((a, b) =>
+            a === "sin-fecha" ? 1 : b === "sin-fecha" ? -1 : a.localeCompare(b));
+
+        const nombreDia = (iso: string) => {
+            if (iso === "sin-fecha") return "Sin fecha asignada";
+            // Se parte a mano en vez de `new Date(iso)`: con una fecha sola el
+            // navegador la lee como UTC y en Argentina muestra el día anterior.
+            const [a, m, d] = iso.split("-").map(Number);
+            const f = new Date(a, m - 1, d);
+            const texto = f.toLocaleDateString("es-AR",
+                { weekday: "long", day: "numeric", month: "long" });
+            return texto.charAt(0).toUpperCase() + texto.slice(1);
+        };
+
+        const hhmm = (iso?: string) => (iso && iso.includes("T")) ? iso.slice(11, 16) : "";
+
+        const bloques = dias.map(dia => {
+            const delDia = porDia.get(dia)!.sort((x, y) =>
+                (x.fecha_inicio_estimada || "").localeCompare(y.fecha_inicio_estimada || ""));
+            const minutos = delDia.reduce((t, f) => t + (f.duracion_min || 0), 0);
+            const ots = new Set(delDia.map(f => f.orden_id)).size;
+
+            const filasHtml = delDia.map(f => `<tr>
+  <td class="c">${esc(hhmm(f.fecha_inicio_estimada))}</td>
+  <td class="c"><b>${esc(f.id_otvieja ?? f.orden_id)}</b></td>
+  <td>${esc((f.cliente || "").slice(0, 26))}</td>
+  <td>${esc(f.nombre_proceso)}</td>
+  <td>${f.maquinaria_nombre ? esc(f.maquinaria_nombre) : '<span class="gris">a mano</span>'}</td>
+  <td>${f.operario_nombre ? esc(f.operario_nombre) : '<span class="gris">sin asignar</span>'}</td>
+  <td class="c">${esc(f.duracion_min || 0)}</td>
+  <td class="fill c"></td>
+</tr>`).join("");
+
+            return `<div class="dia">
+  <h2>${esc(nombreDia(dia))}
+    <span class="resumen">${ots} ${ots === 1 ? "orden" : "órdenes"} · ${delDia.length} trabajos · ${Math.round(minutos / 60)} h</span>
+  </h2>
+  <table><thead><tr>
+    <th class="c">Hora</th><th class="c">OT</th><th>Cliente</th><th>Trabajo</th>
+    <th>Recurso maquinaria</th><th>Recurso humano</th><th class="c">Min.</th><th class="c">Preparado</th>
+  </tr></thead><tbody>${filasHtml}</tbody></table>
+</div>`;
+        }).join("");
+
+        const hoy = new Date().toLocaleDateString("es-AR");
+        const logoUrl = `${window.location.origin}/longchamps_logo.png`;
+        const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Plan para el pañol</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;color:#111}
+.page{padding:10mm 11mm}
+.head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1e3a5f;padding-bottom:8px;margin-bottom:14px}
+.logo{height:34px;object-fit:contain}
+.marca{width:34px;height:34px;border:2px solid #DC143C;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:bold;color:#DC143C}
+.head-c{flex:1}
+.empresa{font-weight:bold;font-size:13px}
+.doc{font-size:16px;font-weight:bold;color:#1e3a5f}
+.head-r{text-align:right;font-size:10px;color:#666}
+.dia{margin-bottom:18px;break-inside:avoid}
+h2{font-size:13px;color:#1e3a5f;margin:0 0 5px;border-bottom:1px solid #cbd5e1;padding-bottom:3px;
+   display:flex;justify-content:space-between;align-items:baseline}
+.resumen{font-size:9.5px;color:#666;font-weight:normal}
+table{width:100%;border-collapse:collapse;font-size:10.5px}
+th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}
+th{background:#1e3a5f;color:#fff;text-transform:uppercase;font-size:8px;letter-spacing:.4px}
+td.c,th.c{text-align:center}
+td.fill{height:20px;background:#fff;width:66px}
+.gris{color:#999}
+.pie{margin-top:10px;font-size:9px;color:#888;text-align:center;border-top:1px solid #ddd;padding-top:5px}
+@media print{
+  .page{padding:8mm 9mm}
+  th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style></head><body><div class="page">
+<div class="head">
+  <img class="logo" src="${logoUrl}" alt="Metalúrgica Longchamps"
+       onerror="this.outerHTML='<div class=\\'marca\\'>ML</div>'">
+  <div class="head-c"><div class="empresa">Metalúrgica Longchamps</div>
+    <div class="doc">Plan de trabajo — para el pañol</div></div>
+  <div class="head-r"><div>Impreso ${esc(hoy)}</div>
+    <div>${esc(filas.length)} trabajos · ${esc(dias.filter(d => d !== "sin-fecha").length)} días</div></div>
+</div>
+${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
+<div class="pie">Tildá «Preparado» cuando el material y las herramientas del trabajo estén listos · Metalúrgica Longchamps</div>
+</div></body></html>`;
+
+        const w = window.open("", "_blank", "width=1000,height=760");
+        if (!w) {
+            toast.error("Habilitá las ventanas emergentes para poder imprimir el plan.");
+            return;
+        }
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        setTimeout(() => w.print(), 250);
+    };
+
     // ---------- Filtros y columnas de la tabla del plan ----------
 
     /**
@@ -1956,6 +2085,22 @@ export function PlanningPreviewScreen({
                                     )}
                                 </div>
                             )}
+                            {/* La hoja del pañol. Va acá arriba y no en el pie porque se
+                                imprime ANTES de confirmar: el pañol prepara con el plan que
+                                se está mirando, no con uno que ya se guardó. */}
+                            {results.length > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={imprimirParaPanol}
+                                    className="h-8 gap-1.5"
+                                    title="Imprime el plan día por día, para que el pañol prepare el material"
+                                >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Hoja del pañol
+                                </Button>
+                            )}
+
                             {/* Botón Agregar OTs (abre popover con OTs disponibles) */}
 
                             {unplannedOrders.length > 0 && onRecalculate && (

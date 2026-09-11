@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "hoja-del-panol-el-plan-en-papel-dia-por-dia",
+        fecha: "2026-09-11",
+        tipo: "nuevo",
+        seccion: "Planificación",
+        titulo: "Podés imprimir el plan para el pañol, día por día",
+        detalle:
+            "En la vista previa del plan hay un botón nuevo, «Hoja del pañol». Saca el plan en papel agrupado por día: qué órdenes salen cada jornada, qué trabajo, en qué máquina, quién lo hace y cuántos minutos, con una columna para tildar «Preparado» cuando el material y las herramientas ya están listos. Es distinta de la hoja de la orden, que sirve para seguir UNA orden de principio a fin: el pañol no trabaja por orden, trabaja por día. Se imprime el plan que estás mirando, con los cambios que hiciste a mano, sin necesidad de confirmarlo primero.",
+        href: "/operaciones",
+    },
+    {
         id: "las-barras-para-scrollear-de-costado-se-ven-siempre",
         fecha: "2026-09-11",
         tipo: "mejora",
