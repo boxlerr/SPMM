@@ -1289,9 +1289,9 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                 {/* Tab: General */}
                                 <TabsContent value="general" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-left-2 duration-300">
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-x-4 gap-y-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-6 gap-x-4 gap-y-2">
                                         {/* Section: Identification */}
-                                        <div className="md:col-span-4 flex items-center gap-2 mb-1">
+                                        <div className="md:col-span-4 xl:col-span-6 flex items-center gap-2 mb-1">
                                             <div className="h-px flex-1 bg-gray-100"></div>
                                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Identificación</span>
                                             <div className="h-px flex-1 bg-gray-100"></div>
@@ -1328,7 +1328,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </div>
 
                                         {/* Section: Logistics & Quantities */}
-                                        <div className="md:col-span-4 flex items-center gap-2 mb-1 mt-1">
+                                        <div className="md:col-span-4 xl:col-span-6 flex items-center gap-2 mb-1 mt-1">
                                             <div className="h-px flex-1 bg-gray-100"></div>
                                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Logística y Cantidades</span>
                                             <div className="h-px flex-1 bg-gray-100"></div>
@@ -1372,7 +1372,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </div>
 
                                         {/* Section: Dates */}
-                                        <div className="md:col-span-4 flex items-center gap-2 mb-1 mt-1">
+                                        <div className="md:col-span-4 xl:col-span-6 flex items-center gap-2 mb-1 mt-1">
                                             <div className="h-px flex-1 bg-gray-100"></div>
                                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Fechas Clave</span>
                                             <div className="h-px flex-1 bg-gray-100"></div>
@@ -1405,7 +1405,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </div>
 
                                         {/* Section: Flags (Compact) */}
-                                        <div className="md:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-2 p-2.5 border border-gray-100 rounded-xl bg-gray-50/30 mt-1">
+                                        <div className="md:col-span-4 xl:col-span-6 grid grid-cols-2 md:grid-cols-4 gap-2 p-2.5 border border-gray-100 rounded-xl bg-gray-50/30 mt-1">
                                             {/* Reparación o fabricación: UNA elección, no dos casillas.
                                                 Pedido de Lucas (10/09) para poder filtrar de un vistazo. En la
                                                 base siguen siendo dos banderas del legacy —que las escribe el
@@ -1482,7 +1482,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </div>
 
                                         {/* Status block (Row 7) */}
-                                        <div className="md:col-span-4 flex items-center justify-between gap-4 py-2 border-t border-gray-100 mt-1">
+                                        <div className="md:col-span-4 xl:col-span-6 flex items-center justify-between gap-4 py-2 border-t border-gray-100 mt-1">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
                                                 <Checkbox id="tiene_plano" disabled={isLegacyOT} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c, no_lleva_plano: c ? false : generalData.no_lleva_plano })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Tiene Plano</span>
@@ -1518,7 +1518,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             <Textarea id="nota_taller" disabled={isLegacyOT} value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
                                         </div>
                                         
-                                        <div className="md:col-span-4 grid grid-cols-3 gap-3">
+                                        <div className="md:col-span-4 xl:col-span-6 grid grid-cols-3 gap-3">
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_1" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 1</Label>
                                                 <Input id="nota_1" disabled={isLegacyOT} value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />

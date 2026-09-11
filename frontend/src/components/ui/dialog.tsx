@@ -54,13 +54,27 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // El ancho por defecto (`sm:max-w-lg`, 512px) vive DETRÁS de una media query, y
+  // ahí estaba la trampa: el que abre un diálogo escribe `max-w-5xl` sin prefijo,
+  // tailwind-merge no las toma como la misma clase porque el prefijo las separa, y
+  // de 640px para arriba gana el default. Resultado: modales pedidos de 1600px que
+  // se dibujaban de 512 y adentro reventaban —cuatro columnas metidas en media
+  // pantalla, los rótulos cortados, scroll infinito— sin un solo error en consola.
+  //
+  // Se cayeron así los cinco diálogos del sistema, incluido el de editar una OT.
+  //
+  // Ahora el default sólo se pone cuando el llamador NO trajo un ancho propio. El
+  // `:` en el patrón hace que `sm:max-w-4xl` también cuente como ancho propio.
+  const traeAnchoPropio = /(?:^|\s|:)max-w-/.test(className ?? "")
+
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200",
+          !traeAnchoPropio && "sm:max-w-lg",
           className
         )}
         {...props}
