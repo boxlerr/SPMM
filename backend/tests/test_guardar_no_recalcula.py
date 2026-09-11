@@ -20,7 +20,7 @@ class _RepoPlanificacion:
     def __init__(self):
         self.recibido = None
 
-    async def insertar_planificacion_lote(self, resultados):
+    async def insertar_planificacion_lote(self, resultados, inicio_base=None):
         self.recibido = resultados
         return {"mensaje": f"Planificación guardada ({len(resultados)} registros)",
                 "id_planificacion_lote": "lote-de-prueba",

@@ -14,6 +14,7 @@ armar el modelo entero para leer una fecha es caro y frágil. Lo que se cuida es
 regla, que es donde estuvo el error.
 """
 import inspect
+import pathlib
 import re
 from datetime import date, datetime, time, timedelta
 
@@ -23,10 +24,8 @@ from backend.application import PlanificacionService as PS
 
 
 def _regla():
-    """El bloque que decide desde cuándo arranca el plan."""
-    fuente = inspect.getsource(PS._resolver_planificacion)
-    ini = fuente.index("ahora = _ahora_ar()")
-    return fuente[ini:fuente.index("start_date =", ini)]
+    """La función que decide desde cuándo arranca el plan."""
+    return inspect.getsource(PS.inicio_del_plan)
 
 
 def _arranque(ahora: datetime, fecha_desde: date | None = None) -> datetime:
@@ -126,4 +125,11 @@ def test_el_arranque_y_la_vuelta_a_fecha_usan_la_misma_base():
     cuerpo = inspect.getsource(PS._resolver_planificacion)
     assert "ahora_ref = inicio_base" in cuerpo, (
         "la vuelta a fecha dejó de usar la misma base que el arranque del plan"
+    )
+    # Y al LEER un plan guardado, cada uno con el suyo: si acá vuelve un `None`, las
+    # fechas se recalculan desde hoy y el plan se mueve solo todos los días.
+    api = (pathlib.Path(__file__).resolve().parent.parent
+           / "presentation" / "PlanificacionAPI.py").read_text()
+    assert "inicio_base" in api and "base_del_plan" in api, (
+        "el endpoint dejó de leer cada plan con su propio arranque"
     )

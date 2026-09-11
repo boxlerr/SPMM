@@ -1889,6 +1889,44 @@ def presupuesto_solver(cant_procesos: int, techo_seg: int | None = None) -> tupl
 # Solver principal (refactorizado)
 # ------------------------------------------------------------
 
+def inicio_del_plan(ahora: datetime, fecha_desde: date | None = None,
+                    blocked_dates=()) -> datetime:
+    """Desde cuándo arranca un plan: el T=0 del modelo.
+
+    EL PLAN NUNCA EMPIEZA EN EL PASADO.
+
+    El modelo cuenta minutos desde acá, así que esta fecha es la que decide TODAS las
+    fechas del plan. La regla es la del taller: si la jornada ya arrancó, el plan es
+    para mañana; sólo se planifica para hoy si todavía no abrieron. Después salta fines
+    de semana y feriados.
+
+    Julián lo reportó el 11/9: «planificamos ayer jueves a las 16hs y el planificador
+    puso horarios de jueves a las 10am del mismo día, no tiene sentido; tiene que ser
+    para el otro día teniendo en cuenta las horas en las que trabajan ellos».
+
+    ESTÁ ACÁ AFUERA A PROPÓSITO. La usan dos lados que tienen que coincidir: el solver,
+    al armar el plan, y la vuelta de minutos a fecha, al mostrarlo. Cuando la regla
+    vivía adentro del solver, el que mostraba el plan la calculaba por su cuenta desde
+    `ahora` — así que un plan guardado el viernes se leía el lunes con fechas de lunes.
+    Las fechas del plan se movían solas todos los días.
+    """
+    if fecha_desde is None or fecha_desde <= ahora.date():
+        inicio = ahora.replace(hour=HORA_APERTURA.hour, minute=HORA_APERTURA.minute,
+                               second=0, microsecond=0)
+        if ahora.time() >= HORA_APERTURA:
+            inicio += timedelta(days=1)
+    else:
+        # Una fecha pedida a futuro manda: arranca a la apertura de ese día.
+        inicio = datetime.combine(fecha_desde, HORA_APERTURA)
+
+    bloqueados = set(blocked_dates or ())
+    while inicio.weekday() >= 5 or inicio.strftime("%Y-%m-%d") in bloqueados:
+        inicio += timedelta(days=1)
+        inicio = inicio.replace(hour=HORA_APERTURA.hour, minute=HORA_APERTURA.minute,
+                                second=0, microsecond=0)
+    return inicio
+
+
 def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None):
     model = cp_model.CpModel()
 
@@ -1896,39 +1934,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
 
-    # ---- Desde cuándo arranca el plan ----
-    #
-    # EL PLAN NUNCA EMPIEZA EN EL PASADO, y eso no es obvio en este código.
-    #
-    # Abajo, `start_date` se queda con la FECHA y tira la hora, porque el modelo
-    # mapea T=0 a las 07:00 de ese día. La versión anterior calculaba una hora con
-    # cuidado —si eran las 16, dejaba las 16— y después la perdía en `.date()`. O
-    # sea que planificar un jueves a las 16 armaba el plan desde las 07:00 de ESE
-    # jueves: las primeras nueve horas del plan ya habían pasado cuando se imprimía.
-    #
-    # Julián lo vio el 11/9: «planificamos ayer jueves a las 16hs y el planificador
-    # puso horarios de jueves a las 10am del mismo día, no tiene sentido; tiene que
-    # ser para el otro día teniendo en cuenta las horas en las que trabajan ellos».
-    #
-    # La regla es la del taller: si la jornada ya arrancó, el plan es para mañana.
-    # Sólo se planifica para hoy si todavía no abrieron. Es lo que pasa de verdad —
-    # el plan se imprime y se reparte, así que no sirve para las horas que ya se
-    # fueron— y además hace imposible que el plan vuelva a nacer vencido.
-    ahora = _ahora_ar()
-    if fecha_desde is None or fecha_desde <= ahora.date():
-        inicio_base = ahora.replace(hour=HORA_APERTURA.hour, minute=HORA_APERTURA.minute,
-                                    second=0, microsecond=0)
-        if ahora.time() >= HORA_APERTURA:
-            inicio_base += timedelta(days=1)
-    else:
-        # Una fecha pedida a futuro manda: arranca a la apertura de ese día.
-        inicio_base = datetime.combine(fecha_desde, HORA_APERTURA)
-
-    # Saltar fin de semana y días bloqueados desde el candidato
-    blocked_set = set(blocked_dates)
-    while inicio_base.weekday() >= 5 or inicio_base.strftime("%Y-%m-%d") in blocked_set:
-        inicio_base += timedelta(days=1)
-        inicio_base = inicio_base.replace(hour=7, minute=0, second=0, microsecond=0)
+    inicio_base = inicio_del_plan(_ahora_ar(), fecha_desde, blocked_dates)
 
     start_date = inicio_base.date()
     logger.info(f"PLANIFICADOR: start_date efectivo = {start_date} (fecha_desde solicitada = {fecha_desde})")
@@ -2481,7 +2487,11 @@ async def planificar(
     # campo venía vacío — los guardados quedaban registrados sin lote.
     if not preview and plan:
         logger.info(f"Service - Guardando plan ya armado ({len(plan)} items), sin solver")
-        guardado = await repo_planificacion.insertar_planificacion_lote(plan)
+        # El mismo arranque con el que se armó lo que se está guardando. Se calcula
+        # igual que en el solver —misma función— así que las fechas que vio la persona
+        # en la vista previa son EXACTAMENTE las que van a quedar.
+        guardado = await repo_planificacion.insertar_planificacion_lote(
+            plan, inicio_base=inicio_del_plan(_ahora_ar(), fecha_desde))
         return {"planificados": guardado, "excedentes": [], "diagnosticos": []}
 
     forzar_set = set(forzar_ordenes_ids or [])

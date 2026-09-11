@@ -153,7 +153,7 @@ class PlanificacionRepository:
             await self.db.rollback()
             logger.warning(f"Repository - No se pudo registrar el borrado ({alcance}, lote={id_lote}): {e}")
 
-    async def insertar_planificacion_lote(self, resultados: list):
+    async def insertar_planificacion_lote(self, resultados: list, inicio_base=None):
         """
         Inserta múltiples registros de planificación dentro de un mismo lote.
         Genera un ID único y una descripción automática del lote.
@@ -175,19 +175,24 @@ class PlanificacionRepository:
                 orden_id, proceso_id, id_orden_trabajo_proceso, id_operario, id_rango_operario,
                 id_maquinaria, sin_maquinaria, inicio_min, fin_min, duracion_min, prioridad_peso,
                 fecha_prometida, sin_asignar, nombre_proceso, rangos_permitidos,
-                id_planificacion_lote, descripcion_lote, creado_en, forzado_fuera_rango
+                id_planificacion_lote, descripcion_lote, creado_en, forzado_fuera_rango,
+                inicio_base
             )
             VALUES (
                 :orden_id, :proceso_id, :id_orden_trabajo_proceso, :id_operario, :id_rango_operario,
                 :id_maquinaria, :sin_maquinaria, :inicio_min, :fin_min, :duracion_min, :prioridad_peso,
                 :fecha_prometida, :sin_asignar, :nombre_proceso, :rangos_permitidos,
-                :id_planificacion_lote, :descripcion_lote, :creado_en, :forzado_fuera_rango
+                :id_planificacion_lote, :descripcion_lote, :creado_en, :forzado_fuera_rango,
+                :inicio_base
             )
         """)
 
         try:
             for r in resultados:
                 params = {
+                    # El T=0 del plan. Va guardado y no se recalcula al leer: sin esto
+                    # las fechas del plan se movían solas todos los días.
+                    "inicio_base": inicio_base,
                     "orden_id": r["orden_id"],
                     "proceso_id": r["proceso_id"],
                     # Qué PASADA de la OT es. El mismo proceso puede ir varias veces en

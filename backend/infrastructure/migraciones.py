@@ -100,6 +100,16 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON orden_trabajo (id) WHERE COALESCE(no_lleva_materia_prima, 0) = 0",
         ],
     ),
+    (
+        "2026-09-11_inicio_base_del_plan",
+        [
+            "ALTER TABLE planificacion ADD COLUMN IF NOT EXISTS inicio_base TIMESTAMP",
+            "COMMENT ON COLUMN planificacion.inicio_base IS "
+            "'El T=0 del plan: a qué momento corresponde inicio_min = 0. Sin esto las fechas '"
+            "'del plan se recalculaban desde \"ahora\" en cada lectura y se movían todos los '"
+            "'días. NULL = plan anterior al 11/09/2026; para esos se deduce de creado_en.'",
+        ],
+    ),
 ]
 
 

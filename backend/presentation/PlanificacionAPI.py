@@ -272,25 +272,42 @@ async def obtener_planificacion(db = Depends(get_db)):
     # al calendario había que acordarse de hacerla en dos lugares —y la copia ya se
     # había quedado atrás—. Es la MISMA función que usa el planificador al armar el
     # plan, con lo cual el Gantt y la vista previa no se pueden contradecir.
-    from backend.application.PlanificacionService import _convertir_minutos_a_fecha
+    from backend.application.PlanificacionService import (
+        _convertir_minutos_a_fecha, _ahora_ar, inicio_del_plan)
     from backend.infrastructure.DiaBloqueadoRepository import DiaBloqueadoRepository
 
     # Una sola lectura por request: antes se abría el archivo de feriados dos veces
     # por cada fila del resultado.
     blocked_dates = await DiaBloqueadoRepository(db).listar()
 
-    def convertir_minutos_a_fecha(minutos_acumulados: int):
-        return _convertir_minutos_a_fecha(minutos_acumulados, None, blocked_dates)
+    # CADA PLAN SE LEE CON SU PROPIO ARRANQUE, no con el de hoy.
+    #
+    # Acá se pasaba `None`, así que la fecha de cada trabajo se recalculaba desde AHORA
+    # en cada lectura: el mismo plan guardado un viernes se leía el lunes con fechas de
+    # lunes. Las fechas se movían solas todos los días y por pantalla siempre parecían
+    # coherentes, que es lo que lo hacía invisible.
+    #
+    # Los planes anteriores al 11/09/2026 no tienen `inicio_base` guardado: para esos se
+    # deduce del `creado_en` de la fila con la misma regla, que es lo más cerca que se
+    # puede estar del momento en que se planificó.
+    def base_del_plan(item):
+        guardado = item.get("inicio_base")
+        if guardado:
+            return guardado
+        creado = item.get("creado_en")
+        return inicio_del_plan(creado or _ahora_ar(), blocked_dates=blocked_dates)
 
     results = []
     for row in rows:
         item = dict(row._mapping)
-        # Calculate derived dates based on inicio_min and fin_min
+        base = base_del_plan(item)
         if item.get('inicio_min') is not None:
-            item['fecha_inicio_estimada'] = convertir_minutos_a_fecha(item['inicio_min'])
+            item['fecha_inicio_estimada'] = _convertir_minutos_a_fecha(
+                item['inicio_min'], base, blocked_dates)
         if item.get('fin_min') is not None:
-             item['fecha_fin_estimada'] = convertir_minutos_a_fecha(item['fin_min'])
-             
+            item['fecha_fin_estimada'] = _convertir_minutos_a_fecha(
+                item['fin_min'], base, blocked_dates)
+
         results.append(item)
 
     return results
