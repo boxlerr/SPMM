@@ -1023,6 +1023,18 @@ class OrdenTrabajoRepository:
                     cola = pendientes_por_proceso.get(pid, [])
                     existing_proc = cola.pop(0) if cola else None
 
+                # Si en esa fila eligieron OTRO proceso, no es la misma pasada: es otra.
+                #
+                # Antes se reusaba la fila y la rama de UPDATE de abajo nunca asignaba
+                # `id_proceso`, así que el cambio se perdía en silencio — quedaba el
+                # proceso viejo con los minutos nuevos. Pisarle `id_proceso` a la fila
+                # tampoco sirve: arrastraría el avance y la planificación de un trabajo
+                # a otro que no tiene nada que ver. Se deja caer al CREATE de abajo y la
+                # vieja se borra en el paso 3 (la planificación que colgaba de ella se va
+                # con el ON DELETE CASCADE, que es lo correcto: ese plan ya no aplica).
+                if existing_proc is not None and existing_proc.id_proceso != pid:
+                    existing_proc = None
+
                 if existing_proc is not None:
                     # UPDATE existing
                     conservadas.add(existing_proc.id)
@@ -1385,6 +1397,10 @@ class OrdenTrabajoRepository:
                        ot.suspendida,
                        ot.fabricacion,
                        ot.reparacion,
+                       -- Sin Cargo es la tercera opción del mismo grupo en el sistema
+                       -- viejo, y faltaba: sin esta columna la lista nunca la podría
+                       -- mostrar, por más que se cargue en la OT (Camilo, 14/09).
+                       ot.sin_cargo,
                        ot.tiene_plano,
                        ot.no_lleva_plano,
                        ot.no_lleva_materia_prima,

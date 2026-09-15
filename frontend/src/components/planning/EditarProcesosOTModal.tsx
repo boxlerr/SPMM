@@ -131,7 +131,12 @@ export default function EditarProcesosOTModal({
                         .filter((p: any) => p.id && p.planificado)
                         .map((p: any) => [p.id, p.planificado])
                 ));
-                setRows((ot?.procesos || []).map((p: any) => ({
+                // Mismo orden que el modal de la OT: por paso guardado, desempatando por
+                // id. Ver el comentario largo en CreateWorkOrderModal.
+                setRows([...(ot?.procesos || [])]
+                    .sort((a: any, b: any) =>
+                        (a.orden ?? 0) - (b.orden ?? 0) || (a.id ?? 0) - (b.id ?? 0))
+                    .map((p: any) => ({
                     id: Math.random().toString(36).slice(2),
                     id_otp: p.id,
                     proceso_id: String(p.proceso?.id ?? p.id_proceso ?? ""),

@@ -82,7 +82,22 @@ class OrdenTrabajo(Base):
     modificado_por = Column(String(120), nullable=True)
 
     # Relaciones
-    procesos = relationship("OrdenTrabajoProceso", back_populates="orden_trabajo")
+    #
+    # `order_by` NO es cosmético: sin él SQLAlchemy emite el SELECT de los procesos sin
+    # ORDER BY y Postgres los devuelve en orden físico (≈ el de inserción, o el del
+    # último UPDATE). Camilo cargó 15 OT con su paso 1,2,3… y al reabrirlas le salían
+    # bailadas — 791 de 1080 OT con procesos volvían así. Y era peor que visual: la
+    # pantalla renumera por posición y al guardar el backend escribe `orden = index+1`,
+    # así que el desorden con el que se abría se PERSISTÍA en el próximo guardado.
+    #
+    # El desempate por `id` es obligatorio: hay 531 filas que comparten `orden` con otra
+    # de la misma OT (dato del cliente, ver OrdenTrabajoProceso.orden). Sin él esas OT
+    # seguirían cambiando de orden entre aperturas.
+    procesos = relationship(
+        "OrdenTrabajoProceso",
+        back_populates="orden_trabajo",
+        order_by="(OrdenTrabajoProceso.orden, OrdenTrabajoProceso.id)",
+    )
     prioridad = relationship("Prioridad")
     sector = relationship("Sector")
     articulo = relationship("Articulo")

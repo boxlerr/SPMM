@@ -397,7 +397,23 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
                 // Populate processes if they exist
                 if (orderToEdit.procesos && orderToEdit.procesos.length > 0) {
-                    const mappedProcesses: ProcesoRow[] = orderToEdit.procesos.map(p => ({
+                    // Ordenar por el PASO guardado, no por como vengan en el JSON.
+                    //
+                    // La API manda `orden` desde siempre y acá nunca se leía: las filas se
+                    // pintaban en el orden crudo del array, que es el orden físico de la
+                    // tabla. Camilo ordenó 15 OT a mano y al reabrirlas le salían bailadas.
+                    // Y como la pantalla numera por posición y el backend guarda
+                    // `orden = posición`, el próximo guardado escribía ese desorden en la
+                    // base. El backend también ordena ahora (OrdenTrabajo.procesos), pero
+                    // se deploya a mano: esto sale por Vercel y arregla el taller ya.
+                    //
+                    // Desempate por id: hay 531 filas que comparten paso con otra de la
+                    // misma OT y sin esto seguirían bailando entre aperturas.
+                    const mappedProcesses: ProcesoRow[] = [...orderToEdit.procesos]
+                        .sort((a, b) =>
+                            ((a as any).orden ?? 0) - ((b as any).orden ?? 0) ||
+                            ((a as any).id ?? 0) - ((b as any).id ?? 0))
+                        .map(p => ({
                         id: Math.random().toString(36).substr(2, 9), // Temp UI ID
                         // La pasada real, para que al guardar se actualice ESTA fila y
                         // no otra del mismo proceso (una OT puede repetirlo).
