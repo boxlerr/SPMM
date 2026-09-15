@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import AuthGuard from "./AuthGuard";
+import AvisoAlEntrar from "./AvisoAlEntrar";
 import { PanelProvider } from "@/contexts/PanelContext";
 
 interface LayoutWrapperProps {
@@ -56,6 +57,10 @@ export default function LayoutWrapper({ children }: LayoutWrapperProps) {
             <div className="p-6">
               {children}
             </div>
+            {/* El cartel de novedades al entrar. Va acá adentro y no en el layout raíz
+                a propósito: así no puede salir en el login, que es la única pantalla
+                donde todavía no se sabe quién es el que entra. */}
+            <AvisoAlEntrar />
           </main>
         </div>
       </PanelProvider>

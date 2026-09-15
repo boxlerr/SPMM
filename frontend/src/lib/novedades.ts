@@ -1331,3 +1331,79 @@ export const TIPO_META: Record<NovedadTipo, { label: string; cls: string; dot: s
     mejora: { label: "Mejora", cls: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-500" },
     arreglo: { label: "Arreglo", cls: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
 };
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * EL AVISO QUE SALE AL ENTRAR
+ *
+ * Un cartel que se abre solo la primera vez que alguien entra después de un
+ * cambio grande, y no vuelve a salir. Nace de la semana del 11 al 15/09/2026:
+ * el taller frenó el uso del sistema porque los procesos se le veían
+ * desordenados, y avisar eso por WhatsApp no alcanza — el que abre el sistema
+ * un lunes a la mañana no leyó el grupo.
+ *
+ * Para cambiarlo: se edita el texto de acá y SE CAMBIA EL `id`. El id es lo que
+ * decide si a alguien ya se le mostró (se guarda en el navegador), así que
+ * cambiar el texto sin cambiar el id no se lo muestra a nadie que ya lo cerró.
+ *
+ * Para apagarlo: `export const AVISO_AL_ENTRAR = null;`
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type AvisoBloque = {
+    /** Título del bloque. */
+    titulo: string;
+    /** Una línea por cosa. Sin nombres internos, igual que las novedades. */
+    puntos: string[];
+    /** Aclaración al pie del bloque, cuando hace falta explicar el porqué. */
+    nota?: string;
+};
+
+export type AvisoAlEntrar = {
+    /** Cambiarlo hace que el cartel vuelva a salirle a todos. */
+    id: string;
+    fecha: string;
+    titulo: string;
+    bajada: string;
+    bloques: AvisoBloque[];
+    /** Texto del botón que cierra. */
+    cerrar: string;
+};
+
+export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
+    id: "2026-09-15-orden-procesos-y-tipo-de-trabajo",
+    fecha: "2026-09-15",
+    titulo: "Lo que se arregló",
+    bajada:
+        "Esto sale una sola vez. Después queda todo en Novedades, en el menú de la izquierda.",
+    bloques: [
+        {
+            titulo: "Ya está resuelto",
+            puntos: [
+                "**El orden de los procesos ya queda como lo dejan.** Aclaración importante: nunca se perdió nada. El orden que cargó Camilo siempre estuvo bien guardado — lo que estaba mal era cómo lo mostraba la pantalla.",
+                "**Se puede escribir el número de paso** para mover un proceso, no hace falta arrastrar.",
+                "**Al abrir la OT ahora dice si es Fabricación, Reparación o Sin Cargo**, arriba al lado del número. Se agregó «Sin Cargo», que faltaba, y se trajo el dato de las 1.246 OT que vinieron del programa viejo: 850 de fabricación, 368 de reparación y 28 sin cargo.",
+                "**Cambiar el proceso de una fila ya se guarda.** Antes quedaba el proceso viejo con los minutos nuevos, sin avisar.",
+                "**Se cargaron las 41 respuestas del Excel.** La soldadora TIG y la limadora ya las puede usar un medio oficial (eran 26 OT que frenaban el plan), los tornos CNC y la rectificadora ahora las puede usar un oficial, y se cerró la 13813.",
+            ],
+        },
+        {
+            titulo: "Las 25 preguntas que quedaron",
+            puntos: [
+                "**No es un cuestionario nuevo: 24 de esas 25 ya las contestaron ustedes.** La cuenta es 41 respuestas − 17 que se pudieron cargar + 1 nueva = 25.",
+                "No se cargaron porque esas respuestas **no son un dato que entre en el sistema**: son decisiones para tomar juntos (el enderezado, el equipo de oxicorte, el de pintura, eliminar «Soldadura 2»), cosas que al sistema le faltan (la especialidad de cada oficial no tiene dónde guardarse), o respuestas que no cambian nada porque ya estaba así (los dos tornos — ahí el error fue mío, la lista que les di no excluía la opción que ya tenían).",
+                "**8 de las 25 son las órdenes viejas, y ésas ya están resueltas:** ustedes contestaron «falta trabajo de verdad», así que siguen abiertas a propósito. La pregunta vuelve a aparecer nada más porque el sistema sigue mirando las órdenes de 2025 que están abiertas.",
+                "**De las 25, una sola frena el trabajo: PRENSA**, y toca 2 órdenes. Las otras 24 no frenan nada — el plan sale igual.",
+            ],
+            nota:
+                "Ojo con una diferencia que importa: que un trabajo no tenga máquina cargada **no impide planificar**. Lo que pasa es que ese trabajo entra al plan sin RESERVAR la máquina, así que otra orden puede caer encima a la misma hora. El plan sale, pero es menos preciso.",
+        },
+        {
+            titulo: "Las 8 órdenes viejas, en números",
+            puntos: [
+                "Las 8 juntas se llevan **11.320 minutos** (188 horas) de los 91.134 que hay cargados en las 172 órdenes abiertas: el **12,4% del taller con el 4,7% de las órdenes**.",
+                "Las 4 de Cerámica Cañuelas solas son 9.140 de esos minutos, y la **13348 es la orden más grande de todo el taller** (3.685 minutos).",
+                "No es un error, es lo que pidieron. Pero vale saber cuánto pesan cuando el plan parece lleno.",
+            ],
+        },
+    ],
+    cerrar: "Entendido",
+};
