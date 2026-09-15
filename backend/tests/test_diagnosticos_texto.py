@@ -460,10 +460,14 @@ def test_resumen_maquina_rango_nombra_los_dos_lados():
         "recurso": "maquina", "subtipo": "rango",
         "tiene": "OPERARIO CALIFICADO", "pide": "AYUDANTE o INGRESANTE",
     })
-    assert resumen == ("La máquina solo la puede usar un operario calificado. "
-                       "«Prensa» lo tiene que hacer un ayudante o ingresante.")
+    assert resumen == ("La máquina la usa un operario calificado. "
+                       "El trabajo lo hace un ayudante o ingresante.")
     # Una frase para leer, no un formulario: sin negritas ni la palabra "rango".
     assert "**" not in resumen and "rango" not in resumen.lower()
+    # Julián, 15/09: «que le complica leer tanto texto». El nombre del proceso ya está
+    # en el título justo arriba; repetirlo acá era la mitad del renglón.
+    assert "Prensa" not in resumen and "«" not in resumen
+    assert len(resumen) <= 90, f"{len(resumen)} caracteres es un párrafo, no una frase"
 
 
 def test_resumen_humano_rango_dice_quien_no_llega():
@@ -472,8 +476,8 @@ def test_resumen_humano_rango_dice_quien_no_llega():
         "recurso": "humano", "subtipo": "rango",
         "tiene": "OFICIAL", "pide": "MEDIO OFICIAL",
     })
-    assert resumen == ("«Soldadura con MIG» lo hace un oficial, pero la máquina solo "
-                       "la puede usar un medio oficial.")
+    assert resumen == ("El trabajo lo hace un oficial. La máquina la usa un medio oficial.")
+    assert len(resumen) <= 90
 
 
 def test_resumen_sin_dos_lados_cae_al_problema_del_titulo():
@@ -482,7 +486,7 @@ def test_resumen_sin_dos_lados_cae_al_problema_del_titulo():
     assert _resumen_corto({
         "titulo": "Control de medidas: hoy no lo puede hacer nadie",
         "recurso": "humano", "subtipo": "skill",
-    }) == "Nadie tiene cargado que sepa hacer «Control de medidas»."
+    }) == "Nadie sabe hacer este trabajo."
     assert _resumen_corto({
         "titulo": "Embalado: se lo puede llevar cualquiera, sepa o no",
     }) == "Se lo puede llevar cualquiera, sepa o no"
@@ -498,4 +502,7 @@ def test_todos_los_diagnosticos_traen_resumen_y_es_corto():
     assert diags
     for d in diags:
         assert d["resumen"], f"{d['tipo']} salió sin resumen"
+        # El tope es el pedido del 15/09 hecho test: si un aviso se va de largo, vuelve
+        # el párrafo que nadie lee.
+        assert len(d["resumen"]) <= 90, f"{d['tipo']}: «{d['resumen']}» ({len(d['resumen'])})"
         assert len(d["resumen"]) <= 160, f"{d['tipo']}: {len(d['resumen'])} caracteres"

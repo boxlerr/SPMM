@@ -279,7 +279,16 @@ def construir_diagnosticos(
 
 
 def _resumen_corto(d) -> str:
-    """Una frase. Es lo que se lee con el aviso cerrado.
+    """Una frase corta. Es lo único que se lee con el aviso cerrado.
+
+    Julián, 15/09: «hacelos más simples, que le complica leer tanto texto; tiene que
+    ser bien sencillo». Por eso acá NO va el nombre del proceso ni el de la máquina:
+    los dos ya están en el título, justo arriba, y repetirlos era la mitad del
+    renglón. Tampoco van las comillas angulares — con el título arriba no hace falta
+    marcar de qué se habla, y en un texto de diez palabras los signos pesan.
+
+    La frase quedó en dos mitades simétricas que se leen de un vistazo: una dice lo
+    que HAY, la otra lo que HACE FALTA. Sin verbos raros, sin «rango», sin «skill».
 
     Lucas, 10/09: «hay que hacer más sencillas las trabas, que las entienda
     cualquiera; más sencilla, cortita y al pie». El `detalle` largo no se va —tiene
@@ -306,21 +315,19 @@ def _resumen_corto(d) -> str:
         # El malentendido de la reunión del 10/09 se arregla acá: el título decía
         # «sus 3 máquinas no aceptan el rango que pide» y Lucas leía que el problema
         # era el proceso. Nombrar los dos lados y quién es cada uno lo cierra.
-        return (f"La máquina solo la puede usar un {_min(tiene)}. "
-                f"«{sujeto}» lo tiene que hacer un {_min(pide)}.")
+        return f"La máquina la usa un {_min(tiene)}. El trabajo lo hace un {_min(pide)}."
 
     if recurso == HUMANO and subtipo == RANGO and tiene and pide:
-        return (f"«{sujeto}» lo hace un {_min(tiene)}, "
-                f"pero la máquina solo la puede usar un {_min(pide)}.")
+        return f"El trabajo lo hace un {_min(tiene)}. La máquina la usa un {_min(pide)}."
 
     if recurso == HUMANO and subtipo == SKILL:
-        return f"Nadie tiene cargado que sepa hacer «{sujeto}»."
+        return "Nadie sabe hacer este trabajo."
 
     if recurso == MAQUINA and subtipo == CAPACIDAD:
-        return f"No hay máquina libre para todo el «{sujeto}» que entró al plan."
+        return "No alcanzan las máquinas para todo este trabajo."
 
     if tiene and pide:
-        return f"«{sujeto}»: tiene {_min(tiene)} y necesita {_min(pide)}."
+        return f"Tiene {_min(tiene)}. Necesita {_min(pide)}."
 
     # Sin dos lados que comparar no hay frase que armar: queda el problema del
     # título, que ya es corto.
