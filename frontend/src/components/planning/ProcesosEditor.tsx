@@ -18,8 +18,10 @@
  *  - `incluido` (tilde): por defecto TRUE. Los procesos destildados NO se guardan.
  *    Pensado para el flujo "Traer historial": se trae la lista completa tildada y
  *    se destilda lo que esta vez no va.
- *  - `orden`: la secuencia = la posición en la lista (el backend recalcula el orden
- *    real como max(orden)+1). Acá se muestra como #n informativo.
+ *  - `orden`: la secuencia = la posición en la lista. Se puede reacomodar de dos
+ *    formas, las dos equivalentes: arrastrando la manija o escribiendo el número de
+ *    paso en la columna «#». No viaja como dato al guardar — el backend escribe
+ *    `orden = posición en la lista`.
  *  - `maquina_id`: '' = sin máquina preseleccionada (el planificador elige). Elegir
  *    una máquina ES la "preselección": se fuerza ese proceso a esa máquina.
  *  - `operario_id`: lo mismo para la persona (pedido de Lucas, 26-ago-2026: "al crear
@@ -179,7 +181,10 @@ interface ProcesosEditorProps {
  * scrollea de costado. Un scroll molesta; una columna invisible hace inservible la
  * pantalla.
  */
-const GRID = "grid grid-cols-[24px_32px_32px_minmax(220px,1.4fr)_88px_minmax(150px,1fr)_minmax(150px,1fr)_76px_36px] gap-2 items-center";
+// La columna "#" pasó de 32 a 40px: dejó de ser un cartelito y ahora es un casillero
+// donde se escribe el paso (pedido de Camilo, 11/09: «si se podría poner un editor de
+// posiciones»). Con 32px un número de dos dígitos quedaba pegado a los bordes.
+const GRID = "grid grid-cols-[24px_32px_40px_minmax(220px,1.4fr)_88px_minmax(150px,1fr)_minmax(150px,1fr)_76px_36px] gap-2 items-center";
 
 /**
  * Mantiene sólo el desplazamiento vertical del drag (bloquea el eje X). Sin esto,
@@ -229,16 +234,45 @@ export function ProcesosEditor({
 
     const addRow = () => onChange([...rows, makeEmptyRow()]);
 
+    /** Mueve una fila de una posición a otra (0-based) y renumera sola por posición. */
+    const moverFila = (desde: number, hasta: number) => {
+        if (desde === hasta || desde < 0 || hasta < 0) return;
+        const next = Array.from(rows);
+        const [moved] = next.splice(desde, 1);
+        next.splice(hasta, 0, moved);
+        onChange(next);
+    };
+
     // Reordenar por drag & drop: la posición en la lista = la secuencia del proceso.
     const onDragEnd = (result: DropResult) => {
         if (disabled || !result.destination) return;
-        const from = result.source.index;
-        const to = result.destination.index;
-        if (from === to) return;
-        const next = Array.from(rows);
-        const [moved] = next.splice(from, 1);
-        next.splice(to, 0, moved);
-        onChange(next);
+        moverFila(result.source.index, result.destination.index);
+    };
+
+    /**
+     * Escribir el número de paso, como alternativa a arrastrar.
+     *
+     * Camilo cargó 15 OT de 8 pasos cada una y arrastrar fila por fila para acomodarlas
+     * es media mañana; encima el arrastre no anda con teclado. Se escribe el número y la
+     * fila se va a esa posición — el resto se corre solo. Lo que se guarda no cambia: el
+     * backend sigue leyendo la posición en la lista.
+     *
+     * El valor tipeado vive acá y no en la fila: mientras se escribe "1" para llegar a
+     * "12" la fila no tiene que saltar a la posición 1.
+     */
+    const [posTipeada, setPosTipeada] = useState<{ id: string; valor: string } | null>(null);
+
+    const confirmarPosicion = (id: string) => {
+        if (!posTipeada || posTipeada.id !== id) return;
+        const crudo = posTipeada.valor.trim();
+        setPosTipeada(null);
+        const n = parseInt(crudo, 10);
+        if (!crudo || Number.isNaN(n)) return;      // vacío o basura: se descarta y vuelve el número real
+        const desde = rows.findIndex((r) => r.id === id);
+        // Fuera de rango se lleva al extremo más cercano en vez de no hacer nada: quien
+        // escribe "99" en una lista de 8 quiere mandarla al final.
+        const hasta = Math.min(Math.max(n, 1), rows.length) - 1;
+        moverFila(desde, hasta);
     };
 
     /**
@@ -357,7 +391,7 @@ export function ProcesosEditor({
                 <div className={cn(GRID, "px-3 py-2 bg-gray-50/80 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-gray-500")}>
                     <div></div>
                     <div className="text-center" title="Incluir este proceso en la orden">Va</div>
-                    <div className="text-center">#</div>
+                    <div className="text-center" title="Paso. Se puede escribir el número para mover el proceso, o arrastrar la manija">#</div>
                     <div>Proceso</div>
                     <div className="text-center">Minutos</div>
                     <div>Recurso maquinaria</div>
@@ -432,11 +466,25 @@ export function ProcesosEditor({
                                                             />
                                                         </div>
 
-                                                        {/* Orden (posición) */}
+                                                        {/* Paso: se escribe el número y la fila se muda a esa posición. */}
                                                         <div className="flex justify-center">
-                                                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-600 text-[11px] font-bold">
-                                                                {idx + 1}
-                                                            </span>
+                                                            <Input
+                                                                type="text"
+                                                                inputMode="numeric"
+                                                                disabled={disabled}
+                                                                aria-label={`Paso ${idx + 1}. Escribí otro número para mover este proceso.`}
+                                                                title="Paso dentro de la orden. Escribí el número y el proceso se mueve ahí."
+                                                                value={posTipeada?.id === row.id ? posTipeada.valor : String(idx + 1)}
+                                                                onChange={(e) => setPosTipeada({ id: row.id, valor: e.target.value })}
+                                                                onFocus={(e) => e.currentTarget.select()}
+                                                                onBlur={() => confirmarPosicion(row.id)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                                                                    // Escape descarta lo tipeado y deja el paso como estaba.
+                                                                    if (e.key === "Escape") { setPosTipeada(null); e.currentTarget.blur(); }
+                                                                }}
+                                                                className="w-9 h-7 px-0 text-center text-[11px] font-bold tabular-nums rounded-full bg-gray-100 border-gray-200 text-gray-700 focus-visible:bg-white"
+                                                            />
                                                         </div>
 
                                                         {/* Proceso. Si lo que buscás no está, se crea desde acá. */}
