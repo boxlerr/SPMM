@@ -35,22 +35,16 @@ async def crear_operario(operario_dto: OperarioRequestDTO, db=Depends(get_db)):
 
 # 🔹 DELETE /operarios/{id}
 @router.delete("/operarios/{id}")
-async def eliminar_operario(id: int, db=Depends(get_db)):
-    try:
-        logger.info(f"API - Inicio DELETE /operarios/{id}")
-        service = OperarioService(db)
-        ok = await service.eliminarOperario(id)
+async def eliminar_operario(id: int, forzar: bool = False, db=Depends(get_db)):
+    """Borra una persona.
 
-        if not ok.status:
-            return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
-
-        return ResponseDTO(status=True, data={"deleted": id})
-
-    except InfrastructureException as e:
-        logger.error(f"API - Error al eliminar operario: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    Si tiene categorías, habilidades o pasos elegidos a mano, sin `forzar` responde
+    409 con el motivo en vez de borrar; con `forzar=true` la borra igual. Mismo
+    contrato que DELETE /procesos/{id}.
+    """
+    logger.info(f"API - Inicio DELETE /operarios/{id} (forzar={forzar})")
+    service = OperarioService(db)
+    return await service.eliminarOperario(id, forzar=forzar)
 
 
 # 🔹 GET /operarios

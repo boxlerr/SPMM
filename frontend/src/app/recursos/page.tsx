@@ -77,6 +77,16 @@ export default function RecursosPage() {
     cambiarEstado: false,
   });
   const [itemAEliminar, setItemAEliminar] = useState<{ tipo: "operario" | "maquina" | "proceso"; id: number; nombre: string } | null>(null);
+  /**
+   * Qué se lleva puesto el borrado, si el backend lo contestó.
+   *
+   * null = todavía no se preguntó. Con texto = el backend dijo 409 («está en 3 OT»,
+   * «tiene 2 categorías») y el botón pasa a «Eliminar igual». Antes ese motivo se
+   * perdía y el cartel decía que se había caído la base de datos — mandando a esperar
+   * a que se arreglara algo que no estaba roto.
+   */
+  const [motivoBorrado, setMotivoBorrado] = useState<string | null>(null);
+  const [borrando, setBorrando] = useState(false);
   const [itemAEditar, setItemAEditar] = useState<Operario | Maquina | Proceso | null>(null);
   const [operarioCambiarEstado, setOperarioCambiarEstado] = useState<Operario | null>(null);
 
@@ -257,24 +267,55 @@ export default function RecursosPage() {
         ? `${cleanUrl}/maquinarias/${itemAEliminar.id}`
         : `${cleanUrl}/procesos/${itemAEliminar.id}`;
 
-    const success = await api.executeOperation(url, "DELETE");
+    // Se pide con fetch y no con executeOperation porque hay que LEER el cuerpo del
+    // 409: executeOperation devuelve un booleano y el motivo se pierde.
+    const forzar = motivoBorrado !== null;
+    setBorrando(true);
+    let success = false;
+    let aviso = "";
+    try {
+      const res = await fetch(`${url}${forzar ? "?forzar=true" : ""}`,
+        { method: "DELETE", headers: getAuthHeaders() });
+      if (res.status === 409) {
+        const cuerpo = await res.json().catch(() => ({}));
+        setMotivoBorrado(cuerpo?.detail || cuerpo?.errorDescription ||
+          "Algo está usando esto.");
+        setBorrando(false);
+        return;   // el cartel queda abierto con el motivo y el botón «Eliminar igual»
+      }
+      if (!res.ok) {
+        const cuerpo = await res.json().catch(() => ({}));
+        showToast(cuerpo?.detail || "No se pudo eliminar.", "error");
+        setBorrando(false);
+        setMostrarDialogo({ ...mostrarDialogo, eliminar: false });
+        setItemAEliminar(null);
+        setMotivoBorrado(null);
+        return;
+      }
+      const cuerpo = await res.json().catch(() => ({}));
+      aviso = typeof cuerpo?.data?.aviso === "string" && cuerpo.data.aviso
+        ? ` ${cuerpo.data.aviso}` : "";
+      success = true;
+    } catch {
+      showToast("No se pudo eliminar: no hubo respuesta del servidor.", "error");
+    }
+    setBorrando(false);
+    setMotivoBorrado(null);
     if (success) {
       if (itemAEliminar.tipo === "operario") {
         addNotification(
           `Recurso humano ${itemAEliminar.nombre} ha sido eliminado`,
           "operario_deleted"
         );
-        showToast(`Recurso humano ${itemAEliminar.nombre} eliminado correctamente`, 'success');
+        showToast(`Recurso humano ${itemAEliminar.nombre} eliminado correctamente.${aviso}`, 'success');
         await fetchOperarios();
       } else if (itemAEliminar.tipo === "maquina") {
-        showToast(`Recurso maquinaria ${itemAEliminar.nombre} eliminado correctamente`, 'success');
+        showToast(`Recurso maquinaria ${itemAEliminar.nombre} eliminado correctamente.${aviso}`, 'success');
         await fetchMaquinas();
       } else {
-        showToast(`Proceso ${itemAEliminar.nombre} eliminado correctamente`, 'success');
+        showToast(`Proceso ${itemAEliminar.nombre} eliminado correctamente.${aviso}`, 'success');
         await fetchProcesos();
       }
-    } else {
-      showToast("No se pudo eliminar. Puede que la base de datos se haya desconectado; esperá unos segundos e intentá de nuevo.", 'error');
     }
     setMostrarDialogo({ ...mostrarDialogo, eliminar: false });
     setItemAEliminar(null);
@@ -1018,17 +1059,42 @@ export default function RecursosPage() {
       )}
 
       {/* DIÁLOGOS */}
-      <Dialog open={mostrarDialogo.eliminar} onOpenChange={(open) => setMostrarDialogo({ ...mostrarDialogo, eliminar: open })}>
+      {/* Borrar en dos pasos: la primera pasada pregunta y el backend contesta QUÉ se
+          lleva puesto; la segunda ejecuta. Es el mismo trato que ya tenían los rangos
+          y los sectores en CatalogoSimple, que acá faltaba. */}
+      <Dialog
+        open={mostrarDialogo.eliminar}
+        onOpenChange={(open) => {
+          setMostrarDialogo({ ...mostrarDialogo, eliminar: open });
+          if (!open) { setMotivoBorrado(null); setItemAEliminar(null); }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirmar Eliminación</DialogTitle>
+            <DialogTitle>
+              {motivoBorrado ? "¿Eliminar igual?" : "Confirmar eliminación"}
+            </DialogTitle>
             <DialogDescription>
-              ¿Estás seguro de que deseas eliminar <strong>{itemAEliminar?.nombre}</strong>? Esta acción no se puede deshacer.
+              ¿Eliminar <strong>{itemAEliminar?.nombre}</strong>? Esta acción no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
+          {motivoBorrado && (
+            <Alert className="border-amber-200 bg-amber-50">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-amber-900">{motivoBorrado}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMostrarDialogo({ ...mostrarDialogo, eliminar: false })}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleEliminar}>Eliminar</Button>
+            <Button
+              variant="outline"
+              disabled={borrando}
+              onClick={() => { setMostrarDialogo({ ...mostrarDialogo, eliminar: false }); setMotivoBorrado(null); }}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" disabled={borrando} onClick={handleEliminar}>
+              {borrando ? "Eliminando…" : motivoBorrado ? "Eliminar igual" : "Eliminar"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

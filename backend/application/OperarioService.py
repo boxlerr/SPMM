@@ -361,18 +361,83 @@ class OperarioService:
         )
 
     # 🔹 Eliminar Operario
-    async def eliminarOperario(self, id: int):
-        try:
-            logger.info(f"Service - Eliminando Operario id={id}")
-            ok = await self.repository.delete(id)
+    async def eliminarOperario(self, id: int, forzar: bool = False):
+        """Borra una persona, avisando primero qué se lleva puesto.
 
+        ESTO ESTABA ROTO, y de la peor forma: `operario_rango` es NO ACTION y TODA
+        persona tiene al menos una categoría, así que el borrado reventaba SIEMPRE con
+        un error de constraint — y en pantalla se leía «puede que la base de datos se
+        haya desconectado; esperá unos segundos e intentá de nuevo». O sea que la
+        función nunca funcionó y el mensaje mandaba a esperar a que se arreglara algo
+        que no estaba roto.
+
+        Ahora es el mismo trato que los procesos: la primera pasada NO borra y contesta
+        409 con el motivo; con `forzar` sí. Avisar, no bloquear.
+
+        Ojo con el criterio: dar de baja a alguien casi nunca es borrarlo. Si la
+        persona se fue del taller, lo correcto es marcarla como NO disponible — así el
+        planificador deja de darle trabajo pero no se pierde de quién fue cada cosa que
+        ya está hecha. El motivo del cartel lo dice.
+        """
+        from sqlalchemy import text as _text
+        from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
+
+        logger.info(f"Service - Eliminando Operario id={id} (forzar={forzar})")
+        db = self.repository.db
+
+        op = await self.repository.find_by_id(id)
+        if not op:
+            return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
+        nombre = " ".join(x for x in [getattr(op, "nombre", ""), getattr(op, "apellido", "")] if x).strip() or f"#{id}"
+
+        rangos = (await db.execute(_text(
+            "SELECT COUNT(*) FROM operario_rango WHERE id_operario = :o"), {"o": id})).scalar() or 0
+        skills = (await db.execute(_text(
+            "SELECT COUNT(*) FROM operario_proceso_skill WHERE id_operario = :o"), {"o": id})).scalar() or 0
+        pasos = (await db.execute(_text(
+            "SELECT COUNT(*) FROM orden_trabajo_proceso WHERE id_operario = :o"), {"o": id})).scalar() or 0
+
+        if (rangos or skills or pasos) and not forzar:
+            partes = []
+            if pasos:
+                partes.append(f"{pasos} {'paso lo tiene' if pasos == 1 else 'pasos lo tienen'} "
+                              f"elegido a mano en una orden")
+            if rangos:
+                partes.append(f"{rangos} {'categoría' if rangos == 1 else 'categorías'}")
+            if skills:
+                partes.append(f"{skills} habilidades cargadas")
+            raise ConfirmacionRequeridaException(
+                f"{nombre} tiene " + ", ".join(partes) +
+                ". Si se fue del taller conviene marcarlo como NO disponible en vez de "
+                "borrarlo: así deja de recibir trabajo pero no se pierde quién hizo qué."
+            )
+
+        try:
+            # A mano y en la misma transacción: estas tres FK son NO ACTION. Sin esto
+            # el borrado revienta con un error de constraint que en pantalla se lee
+            # como un problema de conexión.
+            await db.execute(_text(
+                "UPDATE orden_trabajo_proceso SET id_operario = NULL WHERE id_operario = :o"), {"o": id})
+            await db.execute(_text("DELETE FROM operario_rango WHERE id_operario = :o"), {"o": id})
+            await db.execute(_text("DELETE FROM incidencia_proceso WHERE id_operario = :o"), {"o": id})
+            # Sin esto el borrado falla aunque las filas hijas YA no estén: SQLAlchemy
+            # sigue teniendo los objetos viejos en memoria y, al borrar el padre,
+            # intenta ponerles la FK en NULL — sobre una PK, que no se puede. El error
+            # («tried to blank-out primary key column») no tiene nada que ver con la
+            # base y en pantalla se veía como un problema de conexión.
+            db.expire_all()
+            ok = await self.repository.delete(id)
             if not ok:
                 return ResponseDTO(status=False, data={}, errorDescription="Operario no encontrado")
-
-            return ResponseDTO(status=True, data={"deleted": id}, errorDescription="")
+            await db.commit()
         except Exception as e:
+            await db.rollback()
             logger.error(f"Service - Error al eliminar Operario: {e}")
             raise InfrastructureException("Error al eliminar el Operario.") from e
+
+        aviso = (f"{pasos} {'paso quedó' if pasos == 1 else 'pasos quedaron'} sin persona elegida."
+                 if pasos else "")
+        return ResponseDTO(status=True, data={"deleted": id, "aviso": aviso}, errorDescription="")
 
     # 🔹 Listar Operarios
     async def listarOperarios(self):

@@ -47,18 +47,74 @@ class MaquinariaService:
             raise InfrastructureException("Error al guardar la Maquinaria.") from e
 
     # Eliminar Maquinaria
-    async def eliminarMaquinaria(self, id: int):
-        try:
-            logger.info(f"Service - Eliminando Maquinaria id={id}")
-            ok = await self.repository.delete(id)
+    async def eliminarMaquinaria(self, id: int, forzar: bool = False):
+        """Borra una máquina, avisando primero qué se lleva puesto.
 
+        Antes borraba de una y, si alguna fila la apuntaba, reventaba con un error de
+        constraint que en pantalla se leía «puede que la base de datos se haya
+        desconectado» — culpando a la conexión por un problema de datos. El que
+        borraba no tenía ni con qué decidir ni cómo seguir.
+
+        Ahora es el mismo trato que los procesos y los rangos: la primera pasada NO
+        borra y contesta 409 con el motivo; con `forzar` sí. Avisar, no bloquear.
+        """
+        from sqlalchemy import text as _text
+        from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
+
+        logger.info(f"Service - Eliminando Maquinaria id={id} (forzar={forzar})")
+        db = self.repository.db
+
+        maq = await self.repository.find_by_id(id)
+        if not maq:
+            return ResponseDTO(status=False, data={}, errorDescription="Maquinaria no encontrada")
+
+        procesos = (await db.execute(_text(
+            "SELECT COUNT(*) FROM proceso_maquinaria WHERE id_maquinaria = :m"), {"m": id})).scalar() or 0
+        rangos = (await db.execute(_text(
+            "SELECT COUNT(*) FROM rango_maquinaria WHERE id_maquinaria = :m"), {"m": id})).scalar() or 0
+        # Las preselecciones son lo más caro: alguien eligió a mano esta máquina para
+        # un paso de una OT, y eso se pierde sin dejar rastro.
+        pasos = (await db.execute(_text(
+            "SELECT COUNT(*) FROM orden_trabajo_proceso WHERE id_maquinaria = :m"), {"m": id})).scalar() or 0
+
+        if (procesos or rangos or pasos) and not forzar:
+            partes = []
+            if pasos:
+                partes.append(f"{pasos} {'paso' if pasos == 1 else 'pasos'} de órdenes "
+                              f"{'la tiene' if pasos == 1 else 'la tienen'} elegida a mano")
+            if procesos:
+                partes.append(f"{procesos} {'trabajo' if procesos == 1 else 'trabajos'} se "
+                              f"{'hace' if procesos == 1 else 'hacen'} en ella")
+            if rangos:
+                partes.append(f"{rangos} {'categoría' if rangos == 1 else 'categorías'} "
+                              f"{'la puede' if rangos == 1 else 'la pueden'} usar")
+            raise ConfirmacionRequeridaException(
+                f"«{maq.nombre}» está en uso: " + ", ".join(partes) +
+                ". Si la eliminás, esos pasos quedan sin máquina y el planificador "
+                "les va a buscar otra."
+            )
+
+        try:
+            # A mano y en la misma transacción: `orden_trabajo_proceso.id_maquinaria`
+            # es NO ACTION, así que sin esto el borrado revienta con un error de
+            # constraint. Las otras dos son CASCADE y se van solas.
+            await db.execute(_text(
+                "UPDATE orden_trabajo_proceso SET id_maquinaria = NULL WHERE id_maquinaria = :m"), {"m": id})
+            # Ver el comentario del mismo `expire_all` en OperarioService: sin esto
+            # SQLAlchemy intenta blanquear la FK de las filas hijas que ya borramos.
+            db.expire_all()
+            ok = await self.repository.delete(id)
             if not ok:
                 return ResponseDTO(status=False, data={}, errorDescription="Maquinaria no encontrada")
-
-            return ResponseDTO(status=True, data={"deleted": id}, errorDescription="")
+            await db.commit()
         except Exception as e:
+            await db.rollback()
             logger.error(f"Service - Error al eliminar Maquinaria: {e}")
             raise InfrastructureException("Error al eliminar la Maquinaria.") from e
+
+        aviso = (f"{pasos} {'paso quedó' if pasos == 1 else 'pasos quedaron'} sin máquina elegida."
+                 if pasos else "")
+        return ResponseDTO(status=True, data={"deleted": id, "aviso": aviso}, errorDescription="")
 
     # Listar Maquinarias
     async def listarMaquinarias(self):

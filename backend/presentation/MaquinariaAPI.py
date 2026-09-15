@@ -70,21 +70,19 @@ async def modificar_maquinaria(id: int, maquinaria_dto: MaquinariaRequestDTO, db
 
 # 🔹 DELETE /maquinarias/{id}
 @router.delete("/maquinarias/{id}")
-async def eliminar_maquinaria(id: int, db=Depends(get_db)):
-    """Elimina una Maquinaria por ID."""
-    try:
-        logger.info(f"API - Inicio DELETE /maquinarias/{id}")
-        service = MaquinariaService(db)
-        ok = await service.eliminarMaquinaria(id)
+async def eliminar_maquinaria(id: int, forzar: bool = False, db=Depends(get_db)):
+    """Borra una máquina.
 
-        if not ok.status:
-            return ResponseDTO(status=False, data={}, errorDescription="Maquinaria no encontrada")
-
-        return ResponseDTO(status=True, data={"deleted": id})
-    except InfrastructureException as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    Si algo la está usando, sin `forzar` responde 409 con el motivo (qué se lleva
+    puesto) en vez de borrar; con `forzar=true` la borra igual. Mismo contrato que
+    DELETE /procesos/{id}.
+    """
+    logger.info(f"API - Inicio DELETE /maquinarias/{id} (forzar={forzar})")
+    # El 409 lo arma el service y lo traduce el handler global de
+    # ConfirmacionRequeridaException: atraparlo acá con un `except Exception` lo
+    # convertía en un 500 y el motivo se perdía.
+    service = MaquinariaService(db)
+    return await service.eliminarMaquinaria(id, forzar=forzar)
 
 
 # 🔹 Registrar rutas
