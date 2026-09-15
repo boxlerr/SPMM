@@ -319,6 +319,8 @@ def test_toda_ruta_de_escritura_de_la_app_queda_auditada():
     esperadas = {
         "POST /auth/login", "POST /auth/logout", "POST /auth/refresh",
         "PUT /notificaciones/leer-todas", "PUT /notificaciones/{id}/leida",
+        # El cron del sync: no lo llama una persona y son 48 por día.
+        "POST /internal/sync",
     }
     assert set(sin_auditar) <= esperadas, (
         f"estas escrituras quedaron fuera del registro sin motivo: "
@@ -335,3 +337,16 @@ def test_toda_entidad_del_diccionario_se_lee_como_la_nombra_el_taller():
         # editó ...»). Adentro puede haber una sigla, que es como se dice acá.
         assert nombre[0] == nombre[0].lower(), (
             f"«{nombre}» va en minúscula: se lee en el medio de una frase")
+
+
+def test_el_cron_del_sync_no_ensucia_el_registro():
+    """48 renglones por día de «alguien creó internal › sync» taparían lo que se busca.
+
+    Cloud Scheduler le pega a `POST /internal/sync` cada 30 minutos. No lo llama una
+    persona, así que el renglón sale sin nombre y no contesta «quién tocó esto»; y el
+    sync ya se loguea solo en Cloud Run con sus propios números. A las tres horas de
+    estar en producción, 7 de las 9 filas del registro eran el cron.
+    """
+    assert not auditoria.se_audita("POST", "/internal/sync")
+    # Pero una escritura de verdad sigue entrando.
+    assert auditoria.se_audita("POST", "/ordenes")

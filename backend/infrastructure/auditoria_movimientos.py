@@ -232,6 +232,13 @@ def describir(metodo: str, ruta: str, estado: int, usuario: str | None,
 # Entrar y salir no se registran: `usuario.ultimo_login` ya lo dice y el cuerpo del
 # login es una contraseña. Marcar una notificación como leída tampoco: sería la mitad
 # del registro sin contar nada.
+#
+# Y lo que se pega el servidor a sí mismo tampoco. Cloud Scheduler llama a
+# `POST /internal/sync` cada 30 minutos: son 48 renglones por día que dicen «alguien
+# creó internal › sync» —sin persona, porque no hay ninguna— y en una semana serían
+# más de 300, tapando lo que este registro viene a contestar. El sync ya se loguea
+# solo, con sus números, en Cloud Run. Descubierto el mismo día que salió esto: a las
+# tres horas de vida, 7 de las 9 filas eran el cron.
 SIN_AUDITAR = (
     ("POST", "/auth/login"),
     ("POST", "/auth/logout"),
@@ -239,6 +246,7 @@ SIN_AUDITAR = (
     ("POST", "/auth/token"),
     ("PUT", "/notificaciones/leer-todas"),
     ("PUT", "/notificaciones/"),   # /notificaciones/{id}/leida
+    ("POST", "/internal/"),        # el cron del sync, cada 30 minutos
 )
 
 # Caminos donde el cuerpo NO se lee: el de un plano ES el archivo, y copiarlo al
