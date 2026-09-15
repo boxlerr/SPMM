@@ -69,3 +69,33 @@ async def test_uno_nuevo_se_crea_limpio(session):
     assert r.status is True
     assert r.data["nombre"] == "PREPARACION DE PRENSA"
     assert await session.get(Proceso, r.data["id"]) is not None
+
+
+# ─────────────────── un proceso sin nombre no entra ───────────────────
+
+def test_un_alta_sin_nombre_no_pasa():
+    """`POST /procesos` con el cuerpo vacío devolvía 200 y creaba un proceso en blanco.
+
+    Todos los controles del validador arrancaban con `if dto.nombre`, y `""` y `None`
+    son falsos: no chocaba con ninguno. En un desplegable de 415 opciones un renglón
+    vacío es peor que un error — alguien lo elige sin querer y queda enganchado a una
+    OT. Salió a la luz el 15/09 mandando el cuerpo vacío contra producción.
+    """
+    from backend.application.validators.ProcesoValidator import procesoValidator
+    from backend.dto.ProcesoRequestDTO import ProcesoRequestDTO
+
+    assert procesoValidator(ProcesoRequestDTO(), creando=True) == ["Ponele un nombre al proceso."]
+    assert procesoValidator(ProcesoRequestDTO(nombre="   "), creando=True) == [
+        "Ponele un nombre al proceso."]
+    assert procesoValidator(ProcesoRequestDTO(nombre="TORNEADO"), creando=True) == []
+
+
+def test_editando_se_puede_no_mandar_el_nombre_pero_no_mandarlo_en_blanco():
+    """En una edición no mandar el campo significa «dejalo como está»; mandarlo vacío
+    significa «borrámelo», y eso sí es un error. El DTO representa a los dos como
+    None, así que la diferencia la sabe pydantic y no el valor."""
+    from backend.application.validators.ProcesoValidator import procesoValidator
+    from backend.dto.ProcesoRequestDTO import ProcesoRequestDTO
+
+    assert procesoValidator(ProcesoRequestDTO(descripcion="otra cosa")) == []
+    assert procesoValidator(ProcesoRequestDTO(nombre="")) == ["El nombre no puede quedar vacío."]

@@ -34,8 +34,9 @@ class ProcesoService:
         try:
             logger.info("Service - Crear proceso.")
 
-            # Validación de negocio
-            errores = procesoValidator(proceso_dto)
+            # Validación de negocio. `creando=True` exige el nombre: en un alta no
+            # mandarlo no es "dejalo como está", es un proceso sin nombre.
+            errores = procesoValidator(proceso_dto, creando=True)
             if errores:
                 raise BusinessException("; ".join(errores))
 

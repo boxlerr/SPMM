@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "no-se-puede-crear-un-proceso-sin-nombre",
+        fecha: "2026-09-15",
+        tipo: "arreglo",
+        seccion: "Recursos",
+        titulo: "Ya no se puede crear un proceso sin nombre",
+        detalle:
+            "Si guardabas un proceso con el nombre vacío, se creaba igual y quedaba en el listado como un renglón en blanco, entre los otros 415. Cualquiera lo podía elegir sin querer al cargar una orden y ahí ya quedaba enganchado. Ahora te avisa que le pongas un nombre.",
+        href: "/procesos",
+    },
+    {
         id: "auditoria-de-todo",
         fecha: "2026-09-15",
         tipo: "nuevo",
