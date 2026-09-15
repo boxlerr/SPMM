@@ -47,6 +47,46 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "el-orden-de-los-procesos-queda-como-lo-dejaste",
+        fecha: "2026-09-15",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "El orden de los procesos queda como lo dejaste",
+        detalle:
+            "Cargabas los pasos 1, 2, 3 de una orden, guardabas, y al volver a abrirla aparecían en cualquier orden. Los datos nunca se perdieron —el orden que pusiste siempre estuvo guardado—, pero la pantalla los mostraba mal y te hacía dudar de todo lo demás. Ya se ven en el orden correcto en las 152 órdenes que tienen procesos.",
+        href: "/operaciones",
+    },
+    {
+        id: "escribir-el-numero-de-paso",
+        fecha: "2026-09-15",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Podés escribir el número de paso para mover un proceso",
+        detalle:
+            "En la columna «#» de los procesos ahora se escribe el número: ponés 3 y ese proceso se va al paso 3, y los demás se corren solos. Antes la única forma era arrastrar la fila de a una, que con ocho pasos es un rato largo. La manija de arrastrar sigue estando.",
+        href: "/operaciones",
+    },
+    {
+        id: "la-ot-dice-si-es-fabricacion-reparacion-o-sin-cargo",
+        fecha: "2026-09-15",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Al abrir una orden ya dice si es Fabricación, Reparación o Sin Cargo",
+        detalle:
+            "Está arriba de todo, al lado del número de OT. Faltaba la opción «Sin Cargo», y además el dato no venía del sistema viejo: las órdenes se veían todas en blanco. Se trajo el tipo de las 1.246 órdenes que vinieron de allá — quedaron 850 de fabricación, 368 de reparación y 28 sin cargo.",
+        href: "/operaciones",
+    },
+    {
+        id: "cambiar-el-proceso-de-una-fila-se-guarda",
+        fecha: "2026-09-15",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Cambiar el proceso de una fila ya se guarda",
+        detalle:
+            "Si en una orden ya cargada le cambiabas el proceso a una fila y guardabas, quedaba el proceso viejo con los minutos nuevos, sin avisar nada.",
+        href: "/operaciones",
+    },
+    {
         id: "el-plan-ya-no-arranca-en-horas-que-ya-pasaron",
         fecha: "2026-09-11",
         tipo: "arreglo",
