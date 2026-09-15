@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-    ProcesosEditor, ProcesoRow, makeEmptyRow, SIN_MAQUINA,
+    ProcesosEditor, ProcesoRow, makeEmptyRow, SIN_MAQUINA, pasosSinMinutos,
     ProcesoCatalogoItem, MaquinaCatalogoItem, OperarioCatalogoItem,
 } from "@/components/planning/ProcesosEditor";
 import { API_URL } from "@/config";
@@ -194,6 +194,23 @@ export default function EditarProcesosOTModal({
 
     const guardar = useCallback(async () => {
         if (!ordenId) return;
+        // Esta pantalla no controlaba los minutos en absoluto: un paso en cero se
+        // guardaba y el planificador lo agenda como 1 minuto, así que el plan queda
+        // más corto de lo que el taller va a tardar. Ver `tieneMinutos` en
+        // ProcesosEditor — la regla es la misma en las tres pantallas.
+        const sinMinutos = pasosSinMinutos(rows);
+        if (sinMinutos.length > 0) {
+            const nombreDe = (id: string) =>
+                catalogo.find((c) => c.id.toString() === id)?.nombre || "un paso";
+            const cuales = sinMinutos.slice(0, 3).map((p) => `«${nombreDe(p.proceso_id)}»`).join(", ");
+            setError(
+                sinMinutos.length === 1
+                    ? `Falta cargarle los minutos a ${cuales}.`
+                    : `Faltan los minutos de ${sinMinutos.length} pasos: ${cuales}` +
+                      (sinMinutos.length > 3 ? " y otros." : ".")
+            );
+            return;
+        }
         setGuardando(true);
         setError(null);
         try {
@@ -225,7 +242,7 @@ export default function EditarProcesosOTModal({
         } finally {
             setGuardando(false);
         }
-    }, [ordenId, rows, cleanUrl, onGuardado, onClose]);
+    }, [ordenId, rows, catalogo, cleanUrl, onGuardado, onClose]);
 
     const quedanSinProcesos = rows.filter(p => p.incluido && p.proceso_id).length === 0;
 

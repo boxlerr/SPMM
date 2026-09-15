@@ -4,7 +4,7 @@ import { PlusCircle, X, Save, Paperclip, ChevronLeft, ChevronRight } from "lucid
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { API_URL } from "@/config";
-import { ProcesosEditor, ProcesoRow, makeEmptyRow } from "@/components/planning/ProcesosEditor";
+import { tieneMinutos, ProcesosEditor, ProcesoRow, makeEmptyRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeOrden } from "@/hooks/usePlanos";
 import type { Plano } from "@/lib/planos";
@@ -117,7 +117,9 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
 
     const handleBatchSave = async () => {
         // Sólo se guardan los procesos tildados ("Va") con proceso elegido y minutos.
-        const validItems = rows.filter(r => r.incluido && r.proceso_id && r.tiempo);
+        // `r.tiempo` a secas dejaba pasar el "0": un paso en cero minutos se guardaba y
+        // el planificador lo agenda como 1 minuto. Ver `tieneMinutos` en ProcesosEditor.
+        const validItems = rows.filter(r => r.incluido && r.proceso_id && tieneMinutos(r.tiempo));
         if (validItems.length === 0) return;
 
         setLoading(true);

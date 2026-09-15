@@ -125,6 +125,30 @@ function ChipPlanificado({ texto, falta, faltaTexto, hay }: {
     );
 }
 
+/**
+ * ¿Este paso tiene minutos cargados de verdad?
+ *
+ * Existe porque las tres pantallas que guardan procesos hacían el control con
+ * `if (!fila.tiempo)`, y en JavaScript **el string "0" es verdadero**: un paso con
+ * cero minutos pasaba el control y se guardaba. Medido en producción el 15/09: 82
+ * pasos de las órdenes abiertas quedaron en 0, nueve de ellos en una sola OT.
+ *
+ * Y no es inofensivo: el planificador hace `dur_min = tiempo_proceso or 1`, así que
+ * un paso en cero entra al plan como UN MINUTO de trabajo. Ocupa a una persona y una
+ * máquina por un minuto, sale impreso en la hoja del pañol sin tiempo, y el plan
+ * queda más corto de lo que el taller va a tardar de verdad — sin que nada avise.
+ *
+ * Vive acá, al lado de ProcesoRow, para que las tres pantallas usen la misma regla.
+ */
+export const tieneMinutos = (tiempo: string): boolean => {
+    const n = Number(String(tiempo ?? "").trim());
+    return Number.isFinite(n) && n > 0;
+};
+
+/** Los pasos que van a guardarse y NO tienen minutos. Vacío = está todo bien. */
+export const pasosSinMinutos = (rows: ProcesoRow[]): ProcesoRow[] =>
+    rows.filter((r) => r.incluido && r.proceso_id && !tieneMinutos(r.tiempo));
+
 export function makeEmptyRow(): ProcesoRow {
     return {
         id: Math.random().toString(36).slice(2),

@@ -20,7 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
-import { ProcesosEditor, SIN_MAQUINA, ProcesoRow } from "@/components/planning/ProcesosEditor";
+import { ProcesosEditor, pasosSinMinutos, SIN_MAQUINA, ProcesoRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeArticulo, usePlanosDeOrden } from "@/hooks/usePlanos";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
@@ -683,12 +683,28 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         // que quedó sin pasos lo da la confirmación, que no bloquea.
         const incluidos = processes.filter(p => p.incluido);
 
-        for (const p of incluidos) {
-            if (!p.proceso_id || !p.tiempo) {
-                toast.error("Por favor completa la información de todos los procesos (incluyendo minutos)");
-                setActiveTab("procesos");
-                return false;
-            }
+        const sinProceso = incluidos.find(p => !p.proceso_id);
+        if (sinProceso) {
+            toast.error("Hay un paso sin proceso elegido.");
+            setActiveTab("procesos");
+            return false;
+        }
+        // `!p.tiempo` no alcanzaba: "0" es un string verdadero, así que un paso en cero
+        // minutos pasaba el control. El planificador después lo agenda como 1 minuto y
+        // el plan queda más corto de lo que el taller va a tardar. Ver `tieneMinutos`.
+        const sinMinutos = pasosSinMinutos(incluidos);
+        if (sinMinutos.length > 0) {
+            const nombreDe = (id: string) =>
+                procesosOptions.find(o => o.id.toString() === id)?.nombre || "un paso";
+            const cuales = sinMinutos.slice(0, 3).map(p => `«${nombreDe(p.proceso_id)}»`).join(", ");
+            toast.error(
+                sinMinutos.length === 1
+                    ? `Falta cargarle los minutos a ${cuales}.`
+                    : `Faltan los minutos de ${sinMinutos.length} pasos: ${cuales}` +
+                      (sinMinutos.length > 3 ? " y otros." : ".")
+            );
+            setActiveTab("procesos");
+            return false;
         }
         return true;
     };
