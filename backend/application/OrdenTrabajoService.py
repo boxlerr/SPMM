@@ -663,13 +663,15 @@ class OrdenTrabajoService:
 
         for o in ordenes:
             o["entregada"] = entregada(o)
-            # Reparación o fabricación, en una sola palabra. En la base son dos
-            # banderas del legacy que pueden estar las dos o ninguna; la pantalla
+            # Fabricación, reparación o sin cargo, en una sola palabra. En la base son
+            # tres banderas del legacy que pueden estar varias o ninguna; la pantalla
             # muestra UNA cosa, que es como se lee y como lo pidió Lucas.
             fab, rep = o.get("fabricacion") == 1, o.get("reparacion") == 1
-            o["tipo_trabajo"] = ("ambas" if fab and rep else
+            sc = o.get("sin_cargo") == 1
+            o["tipo_trabajo"] = ("ambas" if sum((fab, rep, sc)) > 1 else
                                  "fabricacion" if fab else
-                                 "reparacion" if rep else None)
+                                 "reparacion" if rep else
+                                 "sin_cargo" if sc else None)
             # Tres estados y no dos: hay plano, no lleva, o falta y hay que buscarlo.
             o["estado_plano"] = ("tiene" if (o.get("planos") or 0) > 0 or o.get("tiene_plano") == 1
                                  else "no_lleva" if o.get("no_lleva_plano") == 1

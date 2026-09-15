@@ -27,6 +27,7 @@ import { useToast } from "@/components/ui/toast";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { API_URL } from "@/config";
 import { cn } from "@/lib/utils";
+import { TipoTrabajoBadge, type TipoTrabajo } from "@/components/common/TipoTrabajoBadge";
 import {
     Search, RefreshCw, Plus, CalendarClock, FileText, AlertTriangle,
     ClipboardList, CheckCircle2, CircleDashed, ArrowUpDown, Ban,
@@ -58,7 +59,7 @@ interface OrdenResumen {
     no_lleva_plano: number | null;
     prioridad: string | null;
     /** "fabricacion" | "reparacion" | "ambas" | null — lo arma el backend. */
-    tipo_trabajo: "fabricacion" | "reparacion" | "ambas" | null;
+    tipo_trabajo: TipoTrabajo;
     /** "tiene" | "no_lleva" | "falta". Tres estados: el que falta hay que ir a buscarlo. */
     estado_plano: "tiene" | "no_lleva" | "falta";
     procesos: number;
@@ -342,21 +343,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                                                     )}
                                                 </td>
                                                 <td className="px-3 py-2 whitespace-nowrap">
-                                                    {o.tipo_trabajo ? (
-                                                        <span className={cn(
-                                                            "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                                                            o.tipo_trabajo === "reparacion"
-                                                                ? "bg-violet-100 text-violet-800"
-                                                                : o.tipo_trabajo === "fabricacion"
-                                                                    ? "bg-sky-100 text-sky-800"
-                                                                    : "bg-gray-100 text-gray-600"
-                                                        )}>
-                                                            {o.tipo_trabajo === "ambas" ? "Las dos"
-                                                                : o.tipo_trabajo === "reparacion" ? "Reparación" : "Fabricación"}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-gray-300">—</span>
-                                                    )}
+                                                    <TipoTrabajoBadge tipo={o.tipo_trabajo} />
                                                 </td>
                                                 <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{o.prioridad || "—"}</td>
                                                 <td className="px-3 py-2 text-center">

@@ -1240,6 +1240,24 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                 <CalendarIcon className="h-5 w-5 text-white" />
                             </div>
                             <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id_otvieja || orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
+                            {/* Qué clase de trabajo es, arriba de todo.
+                                Camilo, 14/09: "cuando abrís la OT no dice si es fabricación
+                                o reparación o sin cargo. Eso me ayuda de mucho al momento de
+                                poner los procesos". Es lo primero que se mira, así que va al
+                                lado del número y no enterrado entre las tildes de abajo.
+                                Si no está cargado no se pone nada: "no sé" también es una
+                                respuesta y un cartel gris de más sólo hace ruido. */}
+                            {(() => {
+                                const tipo = generalData.fabricacion ? { t: "Fabricación", c: "bg-sky-50 text-sky-700 ring-sky-200" }
+                                    : generalData.reparacion ? { t: "Reparación", c: "bg-violet-50 text-violet-700 ring-violet-200" }
+                                    : generalData.sin_cargo ? { t: "Sin Cargo", c: "bg-amber-50 text-amber-700 ring-amber-200" }
+                                    : null;
+                                return tipo ? (
+                                    <span className={cn("rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ring-1", tipo.c)}>
+                                        {tipo.t}
+                                    </span>
+                                ) : null;
+                            })()}
                             {/* Quién la tocó por última vez y cuándo.
                                 Va en la cabecera y no en una solapa porque la pregunta se
                                 hace ANTES de mirar nada: "¿esto lo cambió alguien?". Si no
@@ -1413,17 +1431,21 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                         {/* Section: Flags (Compact) */}
                                         <div className="md:col-span-4 xl:col-span-6 grid grid-cols-2 md:grid-cols-4 gap-2 p-2.5 border border-gray-100 rounded-xl bg-gray-50/30 mt-1">
-                                            {/* Reparación o fabricación: UNA elección, no dos casillas.
+                                            {/* Fabricación, reparación o sin cargo: UNA elección, no tres casillas.
                                                 Pedido de Lucas (10/09) para poder filtrar de un vistazo. En la
-                                                base siguen siendo dos banderas del legacy —que las escribe el
-                                                sync—, pero acá se eligen como lo que son: excluyentes. */}
-                                            <div className="col-span-2 md:col-span-2 flex items-center gap-1 px-2 py-1 h-8">
+                                                base siguen siendo tres banderas del legacy, pero acá se eligen
+                                                como lo que son: excluyentes.
+                                                «Sin Cargo» faltaba y el taller la usa (Camilo, 14/09: "y lo de
+                                                sin cargo no está"): en el sistema viejo es la tercera opción del
+                                                mismo grupo de radios, junto a Fabricación y Reparación. */}
+                                            <div className="col-span-2 md:col-span-3 flex items-center gap-1 px-2 py-1 h-8">
                                                 <span className="text-xs text-gray-500 font-medium tracking-tight mr-1 shrink-0">Trabajo:</span>
                                                 {([
                                                     ["fabricacion", "Fabricación"],
                                                     ["reparacion", "Reparación"],
+                                                    ["sin_cargo", "Sin Cargo"],
                                                 ] as const).map(([clave, texto]) => {
-                                                    const activo = clave === "fabricacion" ? generalData.fabricacion : generalData.reparacion;
+                                                    const activo = generalData[clave];
                                                     return (
                                                         <button
                                                             key={clave}
@@ -1435,6 +1457,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                                 ...generalData,
                                                                 fabricacion: clave === "fabricacion" ? !activo : false,
                                                                 reparacion: clave === "reparacion" ? !activo : false,
+                                                                sin_cargo: clave === "sin_cargo" ? !activo : false,
                                                             })}
                                                             className={cn(
                                                                 "text-xs font-medium px-2 py-1 rounded border transition-colors",

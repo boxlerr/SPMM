@@ -224,8 +224,30 @@ SELECT
   ISNULL(v.requerido, '') AS requerido_por, ISNULL(v.aprobado, '') AS aprobado_por,
   ISNULL(v.remitosalida, '') AS remitos_salida,
   CASE WHEN v.fmaterial = '1950-01-01' THEN NULL ELSE v.fmaterial END AS f_disp_material,
-  ISNULL(v.afabricar, 0) AS fabricacion,
-  0 AS reparacion, 0 AS sin_cargo, 0 AS stock, 0 AS interno,
+  -- Qué clase de trabajo es. En el legacy NO hay una columna por tipo: es UN grupo de
+  -- radios guardado en `v.forma`, y el índice sigue el orden en que están puestos en la
+  -- pantalla (columna por columna):
+  --     0 Fabricación · 1 Reparación · 2 Sin Cargo · 3 Stock · 4 Interno
+  -- Medido contra la base real (15/09/2026): forma 0→4814, 1→2128, 2→62, 3→0, 4→3.
+  -- Lo que fija el mapeo, y no es una corazonada:
+  --   · `dbo.otrabajoStock` —la tabla donde el legacy guarda las órdenes de stock— tiene
+  --     forma=3 en sus filas. Eso clava el 3 y con él todo el orden.
+  --   · de las 2128 con forma=1, 380 dicen «REPARA…» en el texto (contra 18 de las 4814
+  --     con forma=0), y son trabajos de reparar: «pelar y vulcanizar», «enderezar».
+  --   · la OT 15187, forma=2, dice «En garantía:» — que es exactamente sin cargo.
+  --   · la OT 15713, que el taller mandó fotografiada con «Fabricación» tildado, es forma=0.
+  --
+  -- ANTES ACÁ DECÍA `ISNULL(v.afabricar, 0) AS fabricacion`, y estaba mal de raíz:
+  -- `afabricar` es la CANTIDAD a fabricar (el casillero "a Fabricar:" del programa viejo),
+  -- no un sí/no. Metía números adentro de una bandera 0/1 —quedaron OT con fabricacion =
+  -- 20, 30, 110, 160— y todo el resto del sistema compara con `= 1`, así que el taller
+  -- veía TODAS las OT sin tipo. Es el «no lo está tomando que es del programa viejo» de
+  -- Camilo (14/09).
+  CASE WHEN ISNULL(v.forma, 0) = 0 THEN 1 ELSE 0 END AS fabricacion,
+  CASE WHEN v.forma = 1 THEN 1 ELSE 0 END AS reparacion,
+  CASE WHEN v.forma = 2 THEN 1 ELSE 0 END AS sin_cargo,
+  CASE WHEN v.forma = 3 THEN 1 ELSE 0 END AS stock,
+  CASE WHEN v.forma = 4 THEN 1 ELSE 0 END AS interno,
   ISNULL(v.ttotal, 0) AS tercerizado_total,
   ISNULL(v.tparcial, 0) AS tercerizado_parcial,
   ISNULL(v.fc, 0) AS fc, ISNULL(v.ttt1, 0) AS ttt1
