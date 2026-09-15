@@ -17,6 +17,17 @@ from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateCha
 from backend.application.event_bus import EventBus
 from typing import Optional
 
+def _es_numero_de_ot_repetido(e: Exception) -> bool:
+    """¿El error es «ese número de OT ya está»?
+
+    Se mira el nombre del índice y no el tipo de excepción: entre asyncpg, SQLAlchemy y
+    el reintento de db_retry, la excepción original llega envuelta en tres capas y el
+    tipo cambia según por dónde pasó. El nombre del índice, en cambio, viaja en el texto
+    y es de acá — no puede confundirse con ninguna otra violación de unicidad.
+    """
+    return "ux_orden_trabajo_id_otvieja" in str(e).lower()
+
+
 class OrdenTrabajoService:
     def __init__(self, db_session, event_bus: Optional[EventBus] = None):
         self.repository = OrdenTrabajoRepository(db_session)
@@ -137,7 +148,32 @@ class OrdenTrabajoService:
             return orden
 
         try:
-            orden_creada = await run_with_db_retry(db, _guardar, label="crearOrdenTrabajo")
+            # El número de OT se genera con max()+1 y hay un índice único que lo cuida
+            # (migrations/2026-09-15_numero_de_ot_unico.sql). Si dos personas crean una
+            # orden al mismo tiempo —Camilo y Lucas a la mañana, que es el caso real—
+            # las dos leen el mismo máximo y la segunda choca. Reintentar es lo correcto
+            # y no lo ve nadie: `_guardar` recalcula el máximo en cada intento, así que
+            # el segundo se lleva el número siguiente.
+            #
+            # Sólo se reintenta cuando el número lo puso el sistema. Si la persona lo
+            # escribió a mano y ya existe, reintentar le daría OTRO número distinto del
+            # que pidió, en silencio: eso hay que decírselo, no taparlo.
+            intentos = 3 if (not dto.id_otvieja or dto.id_otvieja == 0) else 1
+            for intento in range(1, intentos + 1):
+                try:
+                    orden_creada = await run_with_db_retry(db, _guardar, label="crearOrdenTrabajo")
+                    break
+                except Exception as e:
+                    if intento >= intentos or not _es_numero_de_ot_repetido(e):
+                        raise
+                    logger.warning(
+                        f"Service - El número de OT que se generó ya existía "
+                        f"(intento {intento}/{intentos}); se recalcula y se reintenta."
+                    )
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
         except Exception as e:
             try:
                 await db.rollback()

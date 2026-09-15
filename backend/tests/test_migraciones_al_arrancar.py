@@ -40,7 +40,10 @@ def _firmas(sql: str) -> set[str]:
         firmas.add(f"columna:{col}")
     for obj in re.findall(r"comment on column ([\w.]+)", t):
         firmas.add(f"comentario:{obj}")
-    for idx in re.findall(r"create index if not exists (\w+)", t):
+    # `unique` opcional: sin esto un CREATE UNIQUE INDEX no se reconocía como DDL y el
+    # test daba por buena una migración que el módulo no estuviera aplicando — justo el
+    # agujero que este archivo viene a tapar. Lo destapó la del 15/09.
+    for idx in re.findall(r"create (?:unique )?index if not exists (\w+)", t):
         firmas.add(f"indice:{idx}")
     return firmas
 

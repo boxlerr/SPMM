@@ -101,6 +101,13 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "2026-09-15_numero_de_ot_unico",
+        [
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_orden_trabajo_id_otvieja "
+            "ON orden_trabajo (id_otvieja) WHERE id_otvieja IS NOT NULL",
+        ],
+    ),
+    (
         "2026-09-15_proceso_no_lleva_maquina",
         [
             "ALTER TABLE orden_trabajo_proceso "

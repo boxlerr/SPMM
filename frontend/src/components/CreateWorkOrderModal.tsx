@@ -245,6 +245,18 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [historialLoading, setHistorialLoading] = useState(false);
+    /**
+     * Los procesos que trajo el historial, esperando confirmación.
+     *
+     * «Traer historial» REEMPLAZA la lista entera, y el botón está al lado de
+     * «Agregar proceso»: tocarlo después de cargar ocho pasos a mano se los llevaba
+     * todos, sin aviso y sin forma de volver atrás — el modal no tiene deshacer. Es
+     * la misma forma del problema que hizo que el taller dejara de usar el sistema
+     * («perdió toda la mañana de procesos»), así que acá se pregunta antes.
+     *
+     * null = no hay nada pendiente. Con lista = el cartel está abierto.
+     */
+    const [historialPendiente, setHistorialPendiente] = useState<ProcesoRow[] | null>(null);
     const [activeTab, setActiveTab] = useState("general");
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
     const [showConfirmCancel, setShowConfirmCancel] = useState(false);
@@ -1016,6 +1028,13 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 operario_id: it.id_operario ? it.id_operario.toString() : "",
                 incluido: true,
             }));
+            // Si ya hay procesos cargados, no se pisan sin preguntar: se muestra qué
+            // se pierde y decide la persona.
+            const yaCargados = processes.filter((p) => p.proceso_id).length;
+            if (yaCargados > 0) {
+                setHistorialPendiente(nuevos);
+                return;
+            }
             setProcesses(nuevos);
             toast.success(`Se trajeron ${nuevos.length} procesos del historial. Destildá los que esta vez no van.`);
         } catch (e) {
@@ -2053,6 +2072,40 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                     </form>
                 </DialogContent>
             </Dialog >
+
+            {/* «Traer historial» reemplaza la lista entera. Antes lo hacía sin avisar y
+                el modal no tiene deshacer: ocho pasos cargados a mano se iban de una.
+                Avisar, no bloquear — se dice qué se pierde y el botón lo hace igual. */}
+            <Dialog open={historialPendiente !== null} onOpenChange={(v) => { if (!v) setHistorialPendiente(null); }}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Ya tenés procesos cargados</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-gray-600 leading-relaxed">
+                        Esta orden tiene{" "}
+                        <strong>{processes.filter((p) => p.proceso_id).length} procesos</strong>{" "}
+                        cargados. Traer el historial los <strong>reemplaza</strong> por los{" "}
+                        <strong>{historialPendiente?.length ?? 0}</strong> del último trabajo de
+                        este producto. Lo que cargaste a mano se pierde.
+                    </p>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setHistorialPendiente(null)}>
+                            Dejar los que tengo
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => {
+                                const nuevos = historialPendiente ?? [];
+                                setProcesses(nuevos);
+                                setHistorialPendiente(null);
+                                toast.success(`Se trajeron ${nuevos.length} procesos del historial. Destildá los que esta vez no van.`);
+                            }}
+                        >
+                            Reemplazar por el historial
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }
