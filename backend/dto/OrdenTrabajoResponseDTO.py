@@ -54,6 +54,9 @@ class OrdenTrabajoProcesoDTO(BaseModel):
     # de una OT le borraba la persona forzada a todos sus procesos — justo el dato que
     # alguien se tomó el trabajo de poner a mano para que el planificador lo respete.
     id_operario: Optional[int] = None
+    # "Va a mano". Tiene que viajar o la pantalla lo muestra como «Sin recurso
+    # maquinaria» —que es otra cosa— y al guardar se pierde la marca.
+    no_lleva_maquina: Optional[int] = None
     observaciones: Optional[str] = None
     
     # Nested objects

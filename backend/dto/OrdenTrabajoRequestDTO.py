@@ -15,6 +15,10 @@ class OrdenTrabajoProcesoCreateDTO(BaseModel):
     # de las repetidas es cuál y se pierde el estado/avance al guardar. Vacío = línea
     # nueva.
     id_otp: Optional[int] = None
+    # "Este paso va a mano": el planificador no le busca máquina. Distinto de mandar
+    # maquinaria_id vacío, que significa "que elija el planificador". Opcional para no
+    # romper a un cliente viejo que todavía no lo mande.
+    no_lleva_maquina: Optional[bool] = None
 
 class OrdenTrabajoRequestDTO(BaseModel):
     id_otvieja: int # Este es el numero visible

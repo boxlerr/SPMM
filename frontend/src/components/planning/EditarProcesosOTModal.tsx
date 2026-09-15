@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-    ProcesosEditor, ProcesoRow, makeEmptyRow,
+    ProcesosEditor, ProcesoRow, makeEmptyRow, SIN_MAQUINA,
     ProcesoCatalogoItem, MaquinaCatalogoItem, OperarioCatalogoItem,
 } from "@/components/planning/ProcesosEditor";
 import { API_URL } from "@/config";
@@ -142,7 +142,11 @@ export default function EditarProcesosOTModal({
                     proceso_id: String(p.proceso?.id ?? p.id_proceso ?? ""),
                     tiempo: p.tiempo_proceso != null ? String(p.tiempo_proceso) : "",
                     cant_operarios: p.cant_operarios != null ? String(p.cant_operarios) : "1",
-                    maquina_id: p.id_maquinaria ? String(p.id_maquinaria) : "",
+                    // Ver el comentario del mismo mapeo en CreateWorkOrderModal: la
+                    // marca «va a mano» gana sobre el id de máquina.
+                    maquina_id: p.no_lleva_maquina
+                        ? SIN_MAQUINA
+                        : (p.id_maquinaria ? String(p.id_maquinaria) : ""),
                     operario_id: p.id_operario ? String(p.id_operario) : "",
                     incluido: true,
                 })));
@@ -207,7 +211,8 @@ export default function EditarProcesosOTModal({
                             id_otp: p.id_otp,
                             tiempo_proceso: parseInt(p.tiempo) || 0,
                             cant_operarios: parseInt(p.cant_operarios) || 1,
-                            maquinaria_id: p.maquina_id ? p.maquina_id : null,
+                            maquinaria_id: p.maquina_id && p.maquina_id !== SIN_MAQUINA ? p.maquina_id : null,
+                            no_lleva_maquina: p.maquina_id === SIN_MAQUINA,
                             operario_id: p.operario_id ? p.operario_id : null,
                         })),
                 }),

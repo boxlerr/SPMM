@@ -101,6 +101,20 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "2026-09-15_proceso_no_lleva_maquina",
+        [
+            "ALTER TABLE orden_trabajo_proceso "
+            "ADD COLUMN IF NOT EXISTS no_lleva_maquina SMALLINT NOT NULL DEFAULT 0",
+            "COMMENT ON COLUMN orden_trabajo_proceso.no_lleva_maquina IS "
+            "'El que cargó la OT marcó que este paso se hace a mano y NO usa máquina. Distinto '"
+            "'de id_maquinaria NULL, que significa \"que elija el planificador\" y hace que salga '"
+            "'a buscar una. Con esto en 1 el paso entra al plan sin reservar ninguna máquina.'",
+            "CREATE INDEX IF NOT EXISTS ix_otp_no_lleva_maquina "
+            "ON orden_trabajo_proceso (id_orden_trabajo) "
+            "WHERE COALESCE(no_lleva_maquina, 0) = 1",
+        ],
+    ),
+    (
         "2026-09-11_inicio_base_del_plan",
         [
             "ALTER TABLE planificacion ADD COLUMN IF NOT EXISTS inicio_base TIMESTAMP",

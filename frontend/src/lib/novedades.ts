@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "un-proceso-puede-ir-a-mano",
+        fecha: "2026-09-15",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Un paso puede ir «a mano»: ahora se puede decir que no lleva máquina",
+        detalle:
+            "En la columna de recurso maquinaria apareció la opción «No lleva máquina (a mano)». No es lo mismo que dejarlo vacío: vacío significa que lo decide el planificador, y le buscaba una máquina igual — por eso el enderezado o el oxicorte aparecían siempre como trabajos a los que les faltaba una máquina. Ya quedaron marcados así los 16 pasos de las órdenes abiertas donde el taller había contestado que van a mano.",
+        href: "/operaciones",
+    },
+    {
         id: "el-orden-de-los-procesos-queda-como-lo-dejaste",
         fecha: "2026-09-15",
         tipo: "arreglo",
@@ -1369,7 +1379,7 @@ export type AvisoAlEntrar = {
 };
 
 export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
-    id: "2026-09-15-orden-procesos-y-tipo-de-trabajo",
+    id: "2026-09-15b-orden-tipo-y-trabajos-a-mano",
     fecha: "2026-09-15",
     titulo: "Lo que se arregló",
     bajada:
@@ -1386,12 +1396,24 @@ export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
             ],
         },
         {
-            titulo: "Las 25 preguntas que quedaron",
+            titulo: "Y las preguntas abiertas bajaron de 41 a 10",
+            puntos: [
+                "**Ahora se puede decir que un paso va a mano.** En la columna de recurso maquinaria está la opción «No lleva máquina (a mano)». No es lo mismo que dejarlo vacío: vacío significa que lo decide el planificador, y le buscaba una máquina igual.",
+                "Con eso se resolvieron solas las que ustedes ya habían contestado: **enderezado, oxicorte, preparación de equipo de oxicorte, preparación de pintura y los dos de dispositivo** quedaron marcados como que van a mano (16 pasos en las órdenes abiertas). Cuando alguno sí vaya en máquina, se elige al cargar esa orden.",
+                "**El torno 5 y el torno 6 ahora los puede usar un oficial.** Estaban muertos en el plan: los 135 trabajos de torno de las órdenes abiertas piden oficial y esas dos máquinas sólo aceptaban medio oficial, que hoy es una sola persona. Entraban en cero trabajos.",
+                "**Se sacó «Soldadura 2» de la OT 15755**, como pidieron. Tenía cero minutos y esa orden ya tiene sus tres soldaduras de verdad.",
+                "**A cada oficial se lo prefiere en lo suyo.** Con lo que contestaron, el plan ahora le da la fresadora al fresador, el torno al tornero y la plegadora al plegador. Nadie queda bloqueado: si el especialista no está, el trabajo sale igual con otro.",
+            ],
+            nota:
+                "Quedan **10 preguntas**, y 8 de ellas son las órdenes viejas que ustedes ya contestaron que siguen abiertas a propósito. O sea: **2 preguntas de verdad**, y una sola frena trabajo (la prensa, 2 órdenes).",
+        },
+        {
+            titulo: "Por qué no se resolvían con el Excel",
             puntos: [
                 "**No es un cuestionario nuevo: 24 de esas 25 ya las contestaron ustedes.** La cuenta es 41 respuestas − 17 que se pudieron cargar + 1 nueva = 25.",
                 "No se cargaron porque esas respuestas **no son un dato que entre en el sistema**: son decisiones para tomar juntos (el enderezado, el equipo de oxicorte, el de pintura, eliminar «Soldadura 2»), cosas que al sistema le faltan (la especialidad de cada oficial no tiene dónde guardarse), o respuestas que no cambian nada porque ya estaba así (los dos tornos — ahí el error fue mío, la lista que les di no excluía la opción que ya tenían).",
                 "**8 de las 25 son las órdenes viejas, y ésas ya están resueltas:** ustedes contestaron «falta trabajo de verdad», así que siguen abiertas a propósito. La pregunta vuelve a aparecer nada más porque el sistema sigue mirando las órdenes de 2025 que están abiertas.",
-                "**De las 25, una sola frena el trabajo: PRENSA**, y toca 2 órdenes. Las otras 24 no frenan nada — el plan sale igual.",
+                "**Una sola frena el trabajo: PRENSA**, y toca 2 órdenes. Ninguna de las otras frena nada — el plan sale igual.",
             ],
             nota:
                 "Ojo con una diferencia que importa: que un trabajo no tenga máquina cargada **no impide planificar**. Lo que pasa es que ese trabajo entra al plan sin RESERVAR la máquina, así que otra orden puede caer encima a la misma hora. El plan sale, pero es menos preciso.",

@@ -913,6 +913,7 @@ class OrdenTrabajoRepository:
                 "id": p.id, "id_proceso": p.id_proceso, "orden": p.orden,
                 "tiempo_proceso": p.tiempo_proceso, "cant_operarios": p.cant_operarios,
                 "id_maquinaria": p.id_maquinaria, "id_operario": p.id_operario,
+                "no_lleva_maquina": p.no_lleva_maquina,
                 "id_estado": p.id_estado, "observaciones": p.observaciones,
             } for p in procesos]
             await self.db.execute(text("""
@@ -1013,6 +1014,11 @@ class OrdenTrabajoRepository:
                 _has_op = 'operario_id' in item
                 _op_raw = item.get('operario_id')
                 id_operario = int(_op_raw) if (_op_raw not in (None, "", "0")) else None
+                # "Va a mano". Mismo contrato que los dos de arriba: si la clave no
+                # viene, no se toca lo que ya estaba guardado — así un cliente viejo que
+                # todavía no la manda no le borra la marca a nadie.
+                _has_sin_maq = 'no_lleva_maquina' in item
+                sin_maquina = 1 if item.get('no_lleva_maquina') else 0
 
                 _otp = item.get('id_otp')
                 if _otp is not None:
@@ -1047,6 +1053,8 @@ class OrdenTrabajoRepository:
                         existing_proc.id_maquinaria = id_maquinaria
                     if _has_op:
                         existing_proc.id_operario = id_operario
+                    if _has_sin_maq:
+                        existing_proc.no_lleva_maquina = sin_maquina
                     # Mismo criterio que arriba: sólo el deshacer las manda, y sólo
                     # el deshacer tiene por qué pisar el avance de una fila viva.
                     if 'id_estado' in item and item['id_estado']:
@@ -1070,6 +1078,7 @@ class OrdenTrabajoRepository:
                         cant_operarios=cant_ops or 1,
                         id_maquinaria=id_maquinaria,
                         id_operario=id_operario,
+                        no_lleva_maquina=sin_maquina,
                         observaciones=item.get('observaciones'),
                     )
                     self.db.add(new_proc)

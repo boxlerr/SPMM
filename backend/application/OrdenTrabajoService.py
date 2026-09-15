@@ -119,6 +119,7 @@ class OrdenTrabajoService:
                     cant_operarios=proc_dto.cant_operarios or 1,
                     id_maquinaria=id_maquinaria,
                     id_operario=id_operario,
+                    no_lleva_maquina=1 if getattr(proc_dto, "no_lleva_maquina", None) else 0,
                 ))
 
             # Planos (archivos ya leídos arriba).
@@ -631,6 +632,7 @@ class OrdenTrabajoService:
             "cant_operarios": p.get("cant_operarios") or 1,
             "maquinaria_id": p.get("id_maquinaria"),
             "operario_id": p.get("id_operario"),
+            "no_lleva_maquina": bool(p.get("no_lleva_maquina")),
             "id_estado": p.get("id_estado") or 1,
             "observaciones": p.get("observaciones"),
         } for p in sorted(procesos, key=lambda x: (x.get("orden") or 0, x.get("id") or 0))]

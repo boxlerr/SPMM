@@ -22,8 +22,13 @@
  *    formas, las dos equivalentes: arrastrando la manija o escribiendo el número de
  *    paso en la columna «#». No viaja como dato al guardar — el backend escribe
  *    `orden = posición en la lista`.
- *  - `maquina_id`: '' = sin máquina preseleccionada (el planificador elige). Elegir
- *    una máquina ES la "preselección": se fuerza ese proceso a esa máquina.
+ *  - `maquina_id`: tiene TRES valores, y la diferencia importa:
+ *      ''            = no se eligió: que el planificador decida (y decide: deduce la
+ *                      máquina del nombre del proceso y se la reserva).
+ *      SIN_MAQUINA   = este paso va A MANO. No lleva ninguna y no hay que buscarle.
+ *      <id>          = "preselección": se fuerza ese proceso a esa máquina.
+ *    Los dos primeros se veían iguales hasta el 15/09 y por eso trabajos como el
+ *    oxicorte o el enderezado salían siempre a buscar una máquina que no usan.
  *  - `operario_id`: lo mismo para la persona (pedido de Lucas, 26-ago-2026: "al crear
  *    trabajo falta persona en proceso"). '' = el planificador elige. Elegir a alguien
  *    lo fuerza, y pisa el filtro por rango: es una decisión de quien carga la OT.
@@ -37,6 +42,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Plus, Trash2, History, Lock, Settings, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+/**
+ * El valor del desplegable de máquina que significa «va a mano».
+ *
+ * Es un centinela y no un booleano aparte a propósito: en la pantalla es UNA elección
+ * —o una máquina, o que elija el planificador, o ninguna—, así que tiene que ser un
+ * solo control. Al guardar se traduce a `no_lleva_maquina`.
+ */
+export const SIN_MAQUINA = "no_lleva";
 
 export interface ProcesoRow {
     /** id temporal de UI (no es el id de proceso) */
@@ -221,6 +235,10 @@ export function ProcesosEditor({
     ];
     const maquinaOptions = [
         { value: "", label: "Sin recurso maquinaria" },
+        // «A mano» NO es lo mismo que dejarlo vacío, y es la diferencia que faltaba:
+        // vacío quiere decir «que elija el planificador», y elige — deduce la máquina
+        // del nombre del proceso y se la reserva. Esto dice que no lleva ninguna.
+        { value: SIN_MAQUINA, label: "No lleva máquina (a mano)" },
         ...maquinarias.map((m) => ({
             value: m.id.toString(),
             label: m.cod_maquina ? `${m.cod_maquina} — ${m.nombre}` : m.nombre,
@@ -421,7 +439,7 @@ export function ProcesosEditor({
                                     className="divide-y divide-gray-100"
                                 >
                                     {rows.map((row, idx) => {
-                                        const conMaquina = !!row.maquina_id;
+                                        const conMaquina = !!row.maquina_id && row.maquina_id !== SIN_MAQUINA;
                                         // Lo que el planificador asignó a ESTA pasada. Sólo existe
                                         // si la OT está planificada; si no, no se muestra nada.
                                         const plan = row.id_otp ? planificado?.[row.id_otp] : undefined;
@@ -629,6 +647,13 @@ export function ProcesosEditor({
                 así (preselección), aunque el rango no se lo habilite. Dejalo en{" "}
                 <span className="font-medium">«Sin recurso maquinaria»</span> y{" "}
                 <span className="font-medium">«Sin asignar»</span> para que el planificador decida.
+            </p>
+            <p className="text-[11px] leading-relaxed text-gray-400 mt-1">
+                <Lock className="inline w-3 h-3 mr-1 align-[-1px] text-gray-400" />
+                Si ese paso se hace a mano, elegí{" "}
+                <span className="font-medium">«No lleva máquina (a mano)»</span>: no es lo mismo que
+                dejarlo vacío. Vacío significa que lo decide el planificador, y le va a reservar una
+                máquina igual.
             </p>
         </div>
     );

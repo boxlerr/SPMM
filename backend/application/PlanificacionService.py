@@ -2601,11 +2601,16 @@ async def planificar(
             # también si el trabajo se manda afuera.
             rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
 
-            # Clasificar si usa máquina
+            # Clasificar si usa máquina.
+            #
+            # La marca de la PASADA le gana a la deducción por nombre: si el que cargó
+            # la OT dijo que ese paso va a mano, no hay máquina que buscar por más que
+            # el proceso se llame OXICORTE. Antes esto no se podía decir —vacío quería
+            # decir "elegila vos"— y el planificador le reservaba una igual.
             usa_maquina = proceso_usa_maquina(
                 nombre_proceso,
                 es_tercerizado=bool(ids_rango_tercerizado & set(rangos_validos)),
-            )
+            ) and not getattr(rel, "no_lleva_maquina", 0)
             #esto funciona
             familia_req = familia_requerida_from_proceso(nombre_proceso) if usa_maquina else ""
 

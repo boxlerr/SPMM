@@ -20,7 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { WorkOrder } from "@/lib/types";
 import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
-import { ProcesosEditor, ProcesoRow } from "@/components/planning/ProcesosEditor";
+import { ProcesosEditor, SIN_MAQUINA, ProcesoRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeArticulo, usePlanosDeOrden } from "@/hooks/usePlanos";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
@@ -422,7 +422,11 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         tiempo: p.tiempo_proceso ? p.tiempo_proceso.toString() : "",
                         cant_operarios: p.cant_operarios ? p.cant_operarios.toString() : "1",
                         // id_maquinaria puede no estar en el tipo TS todavía; lo leemos defensivo.
-                        maquina_id: (p as any).id_maquinaria ? (p as any).id_maquinaria.toString() : "",
+                        // La marca «va a mano» gana: si está, el desplegable muestra eso
+                        // y no «Sin recurso maquinaria», que significa otra cosa.
+                        maquina_id: (p as any).no_lleva_maquina
+                            ? SIN_MAQUINA
+                            : ((p as any).id_maquinaria ? (p as any).id_maquinaria.toString() : ""),
                         operario_id: (p as any).id_operario ? (p as any).id_operario.toString() : "",
                         incluido: true,
                     }));
@@ -841,7 +845,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     id_otp: p.id_otp,
                     tiempo_proceso: parseInt(p.tiempo) || 0,
                     cant_operarios: parseInt(p.cant_operarios) || 1,
-                    maquinaria_id: p.maquina_id ? p.maquina_id : null,
+                    maquinaria_id: p.maquina_id && p.maquina_id !== SIN_MAQUINA ? p.maquina_id : null,
+                    no_lleva_maquina: p.maquina_id === SIN_MAQUINA,
                     operario_id: p.operario_id ? p.operario_id : null,
                 }))
         };

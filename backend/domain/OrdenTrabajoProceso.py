@@ -45,6 +45,23 @@ class OrdenTrabajoProceso(Base):
     # La columna ya existe en la base (cant_operarios, NOT NULL default 1).
     cant_operarios = Column(Integer, nullable=False, default=1)
 
+    # Este paso se hace A MANO: no usa máquina y el planificador no tiene que buscarle
+    # ninguna.
+    #
+    # NO es lo mismo que `id_maquinaria = NULL`. Vacío quiere decir "que elija el
+    # planificador", y elige: deduce la familia del nombre del proceso y le reserva una
+    # máquina igual. Sin esta columna, un trabajo que esta vez va a mano no se podía
+    # expresar — el planificador clasifica por el NOMBRE del proceso, así que OXICORTE
+    # o ENDEREZADO salían a buscar máquina aunque el que cargó la OT supiera que no.
+    #
+    # Va por PASADA y no en el catálogo de procesos a propósito: el mismo ENDEREZADO va
+    # en prensa en una orden y a mano en la siguiente. Es una decisión por trabajo.
+    #
+    # Mismo patrón que orden_trabajo.no_lleva_plano y .no_lleva_materia_prima: en los
+    # tres casos el cero tapaba "falta cargarlo" y "no lleva", que son cosas opuestas.
+    # Requiere migrations/2026-09-15_proceso_no_lleva_maquina.sql.
+    no_lleva_maquina = Column(Integer, nullable=False, default=0)
+
     # Máquina PRESELECCIONADA para este proceso (pedido reunión Metlo 2-jul-2026).
     #   - NULL  = sin preselección: el planificador elige la máquina.
     #   - <id>  = preselección: se fuerza ese proceso a esa máquina.

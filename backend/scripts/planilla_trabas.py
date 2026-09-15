@@ -85,8 +85,14 @@ with abiertas as (
       and (fecha_entrega is null or extract(year from fecha_entrega) <= 1950)
 ),
 usados as (
+    -- Las pasadas marcadas «va a mano» NO cuentan: el que cargó la OT ya dijo que ese
+    -- paso no usa máquina, así que preguntarle en qué máquina se hace es volver a
+    -- preguntar algo contestado. Si TODAS las pasadas abiertas de un proceso están
+    -- marcadas, el proceso desaparece de la planilla entero — que es el punto.
+    -- Ver migrations/2026-09-15_proceso_no_lleva_maquina.sql.
     select p.id_proceso, count(*) as veces, count(distinct p.id_orden_trabajo) as ots
     from orden_trabajo_proceso p join abiertas a on a.id = p.id_orden_trabajo
+    where coalesce(p.no_lleva_maquina, 0) = 0
     group by 1
 )
 select pr.id, pr.nombre, u.veces, u.ots,
@@ -156,6 +162,14 @@ select o.id, o.nombre || ' ' || coalesce(o.apellido, '') as quien
   join operario_rango orr on orr.id_operario = o.id
   join rango r on r.id = orr.id_rango
  where o.disponible and r.nombre = 'OFICIAL'
+   -- Los que ya tienen una especialidad registrada no se vuelven a preguntar. Hoy eso
+   -- se expresa con habilidades de preferencia 1 (nivel 1), que es lo que el
+   -- planificador usa para darle a cada uno lo suyo primero. Ver
+   -- backend/scripts/resolver_trabas_20260915.py: no hay un campo «especialidad», así
+   -- que la preferencia cargada ES la respuesta.
+   and not exists (
+        select 1 from operario_proceso_skill s
+         where s.id_operario = o.id and s.nivel = 1 and s.habilitado is true)
  order by 2
 """
 
