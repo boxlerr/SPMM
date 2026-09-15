@@ -461,7 +461,7 @@ def test_resumen_maquina_rango_nombra_los_dos_lados():
         "tiene": "OPERARIO CALIFICADO", "pide": "AYUDANTE o INGRESANTE",
     })
     assert resumen == ("La máquina la usa un operario calificado. "
-                       "El trabajo lo hace un ayudante o ingresante.")
+                       "El trabajo lo hace un ayudante (y 1 más).")
     # Una frase para leer, no un formulario: sin negritas ni la palabra "rango".
     assert "**" not in resumen and "rango" not in resumen.lower()
     # Julián, 15/09: «que le complica leer tanto texto». El nombre del proceso ya está
@@ -476,7 +476,26 @@ def test_resumen_humano_rango_dice_quien_no_llega():
         "recurso": "humano", "subtipo": "rango",
         "tiene": "OFICIAL", "pide": "MEDIO OFICIAL",
     })
-    assert resumen == ("El trabajo lo hace un oficial. La máquina la usa un medio oficial.")
+    # NO se nombran las dos listas: con datos reales se pisan y el aviso se lee como
+    # que no hay ningún problema («el trabajo lo hace un oficial especializado… la
+    # máquina la usa un oficial especializado»). El que no llega es una PERSONA, y su
+    # nombre está en el detalle.
+    assert resumen == "La gente que hace este trabajo no puede usar esa máquina."
+
+
+def test_resumen_no_se_va_de_largo_con_listas_de_categorias_reales():
+    """El tope de 90 se rompía con datos de producción, no con los del test.
+
+    El aviso «Preparación de torno» del plan del 15/09 salía de 117 caracteres porque
+    las dos listas traían tres categorías cada una. Se nombra la primera y se cuentan
+    las demás; el listado completo sigue en el chip «qué tiene → qué pide» de al lado.
+    """
+    resumen = _resumen_corto({
+        "titulo": "Torno: sus máquinas no aceptan el rango que pide",
+        "recurso": "maquina", "subtipo": "rango",
+        "tiene": "OFICIAL, OFICIAL ESPECIALIZADO o TÉCNICO", "pide": "MEDIO OFICIAL",
+    })
+    assert resumen == "La máquina la usa un oficial (y 2 más). El trabajo lo hace un medio oficial."
     assert len(resumen) <= 90
 
 

@@ -315,10 +315,17 @@ def _resumen_corto(d) -> str:
         # El malentendido de la reunión del 10/09 se arregla acá: el título decía
         # «sus 3 máquinas no aceptan el rango que pide» y Lucas leía que el problema
         # era el proceso. Nombrar los dos lados y quién es cada uno lo cierra.
-        return f"La máquina la usa un {_min(tiene)}. El trabajo lo hace un {_min(pide)}."
+        return f"La máquina la usa un {_una_categoria(tiene)}. El trabajo lo hace un {_una_categoria(pide)}."
 
-    if recurso == HUMANO and subtipo == RANGO and tiene and pide:
-        return f"El trabajo lo hace un {_min(tiene)}. La máquina la usa un {_min(pide)}."
+    if recurso == HUMANO and subtipo == RANGO:
+        # Acá NO se nombran las dos listas, y no es por brevedad: se contradecían.
+        # Con datos reales salía «El trabajo lo hace un oficial especializado o técnico.
+        # La máquina la usa un oficial, oficial especializado o técnico» — las dos
+        # listas se pisan y se lee como que no hay ningún problema. Y no lo hay entre
+        # las LISTAS: el que no llega es una persona concreta, cuya categoría no está
+        # entre las que la máquina acepta. Los nombres están en el detalle, que es
+        # donde sirven.
+        return "La gente que hace este trabajo no puede usar esa máquina."
 
     if recurso == HUMANO and subtipo == SKILL:
         return "Nadie sabe hacer este trabajo."
@@ -332,6 +339,20 @@ def _resumen_corto(d) -> str:
     # Sin dos lados que comparar no hay frase que armar: queda el problema del
     # título, que ya es corto.
     return d["titulo"].split(":", 1)[-1].strip().capitalize() or d["titulo"]
+
+
+def _una_categoria(texto: str) -> str:
+    """De una lista de categorías, la primera y cuántas más hay.
+
+    Con datos reales estas listas se van de largo («oficial, oficial especializado o
+    técnico») y el aviso pasaba de una frase a un renglón y medio. Para decidir qué
+    hacer alcanza con saber de qué categoría se habla; el listado completo sigue
+    entero en el chip «qué tiene → qué pide» que está al lado, y en el detalle.
+    """
+    partes = [p.strip() for p in texto.replace(" o ", ", ").split(",") if p.strip()]
+    if len(partes) <= 1:
+        return _min(texto)
+    return f"{_min(partes[0])} (y {len(partes) - 1} más)"
 
 
 def _min(texto: str) -> str:
