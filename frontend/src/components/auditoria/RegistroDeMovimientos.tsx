@@ -63,10 +63,12 @@ const COLOR: Record<string, string> = {
     "eliminó": "text-rose-600",
 };
 
+// Reloj de 24 horas a propósito: con `hour12` el es-AR escribe «12:10 p. m.», que en
+// una columna angosta se parte en dos renglones y desalinea la lista entera.
 const fmtFecha = (iso: string | null) => {
     if (!iso) return "—";
     return new Date(iso).toLocaleString("es-AR", {
-        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     });
 };
 
@@ -302,7 +304,7 @@ export function RegistroDeMovimientos() {
                                         )}
                                     >
                                         <Icono className={cn("h-4 w-4 shrink-0", COLOR[m.accion] ?? "text-muted-foreground")} />
-                                        <span className="text-sm tabular-nums text-muted-foreground shrink-0 w-24">
+                                        <span className="text-sm tabular-nums text-muted-foreground shrink-0 w-[5.5rem]">
                                             {fmtFecha(m.cuando)}
                                         </span>
                                         {/* La frase entera, que es lo único que hay que leer. */}
@@ -313,9 +315,11 @@ export function RegistroDeMovimientos() {
                                             {m.descripcion}
                                         </span>
                                         <span className="flex-1" />
+                                        {/* La frase ya dice «no se pudo»; el cartel agrega
+                                            el código, que es lo único que ella no tiene. */}
                                         {!m.salio_bien && (
                                             <Badge variant="outline" className="text-xs font-normal shrink-0 border-rose-200 text-rose-700">
-                                                no se pudo
+                                                error {m.estado}
                                             </Badge>
                                         )}
                                         {m.duracion_ms != null && m.duracion_ms > 3000 && (

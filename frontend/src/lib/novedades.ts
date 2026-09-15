@@ -1399,7 +1399,7 @@ export type AvisoAlEntrar = {
 };
 
 export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
-    id: "2026-09-15b-orden-tipo-y-trabajos-a-mano",
+    id: "2026-09-15c-orden-tipo-trabajos-a-mano-y-auditoria",
     fecha: "2026-09-15",
     titulo: "Lo que se arregló",
     bajada:
@@ -1437,6 +1437,16 @@ export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
             ],
             nota:
                 "Ojo con una diferencia que importa: que un trabajo no tenga máquina cargada **no impide planificar**. Lo que pasa es que ese trabajo entra al plan sin RESERVAR la máquina, así que otra orden puede caer encima a la misma hora. El plan sale, pero es menos preciso.",
+        },
+        {
+            titulo: "Y desde hoy queda registrado todo lo que se hace",
+            puntos: [
+                "En **Auditoría** (menú de la izquierda) hay un renglón por cada cosa que alguien carga, cambia o borra: «Lucas eliminó persona #5», «Matías creó orden de trabajo — 15762». Con quién fue, a qué hora y qué datos mandó.",
+                "Se puede filtrar por persona, por tipo de cosa, o buscar un nombre o un número de OT.",
+                "**Lo que alguien intentó y no se pudo también queda.** Si le dan a guardar y no pasa nada, ahora se puede ver qué fue.",
+            ],
+            nota:
+                "Antes esto existía sólo para las planificaciones: si alguien borraba una máquina o le cambiaba los minutos a un proceso, no quedaba rastro en ningún lado. Las contraseñas y los archivos nunca se guardan ahí.",
         },
         {
             titulo: "Las 8 órdenes viejas, en números",
