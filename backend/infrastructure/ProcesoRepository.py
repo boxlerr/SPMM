@@ -5,9 +5,57 @@ from backend.commons.exceptions.InfrastructureException import InfrastructureExc
 
 from backend.commons.loggers.logger import logger
 
+def _sin_espacios_de_mas(nombre: str) -> str:
+    """La misma cuenta que hace el SQL de al lado, del lado de Python.
+
+    Va acá y no sólo en el service para que este método sea correcto lo llame quien lo
+    llame: buscar «corte  con   amoladora» tiene que encontrar «CORTE CON AMOLADORA»
+    aunque el que preguntó no haya limpiado el texto antes.
+    """
+    import re as _re
+    return _re.sub(r"\s+", " ", (nombre or "").strip())
+
+
 class ProcesoRepository:
     def __init__(self, db):
         self.db = db
+
+    async def buscar_por_nombre_normalizado(self, nombre: str):
+        """El proceso que ya existe con ese nombre, mirando sin espacios de más ni
+        mayúsculas. None si no hay ninguno.
+
+        Va en dos pasos —filtro en SQL, confirmación en Python— y eso es a propósito:
+
+        · La comparación de verdad (colapsar cualquier corrida de espacios) necesitaría
+          `regexp_replace`, que Postgres tiene y SQLite no. Y SQLite es la base de los
+          tests: con un `regexp_replace` acá, el chequeo se caía en los tests, el
+          método devolvía None y el duplicado entraba igual — o sea que la protección
+          no se podía probar. Un control que no se puede probar no es un control.
+        · `replace(nombre,' ','')` sí existe en las dos. Saca TODOS los espacios, que es
+          un filtro más ancho que el que buscamos —trae también «CORTECON AMOLADORA»—
+          pero eso no importa: trae poquitas filas y la decisión la toma Python abajo,
+          con la misma cuenta que usa el service al guardar.
+        """
+        from sqlalchemy import func
+        try:
+            objetivo = _sin_espacios_de_mas(nombre).lower()
+            sin_espacios = objetivo.replace(" ", "")
+            if not sin_espacios:
+                return None
+            res = await self.db.execute(
+                select(Proceso).where(
+                    func.lower(func.replace(Proceso.nombre, " ", "")) == sin_espacios
+                )
+            )
+            for p in res.scalars().all():
+                if _sin_espacios_de_mas(p.nombre).lower() == objetivo:
+                    return p
+            return None
+        except Exception as e:
+            # Que no se pueda chequear no puede impedir crear un proceso: en el peor
+            # caso entra un duplicado, que es lo que pasaba siempre hasta ahora.
+            logger.warning(f"Repository - No se pudo buscar el proceso por nombre: {e}")
+            return None
 
     async def save(self, proceso: Proceso):
         try:

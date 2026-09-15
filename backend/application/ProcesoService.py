@@ -15,6 +15,17 @@ from backend.commons.exceptions.ConfirmacionRequeridaException import Confirmaci
 
 from backend.commons.loggers.logger import logger
 
+def _limpiar_nombre(nombre: str) -> str:
+    """Un nombre de proceso, sin espacios de más.
+
+    Colapsa cualquier corrida de espacios/tabs en uno solo y saca los de las puntas.
+    NO toca mayúsculas ni acentos: «TORNO CNC» y «Torno CNC» son el mismo trabajo para
+    la comparación (que va en minúsculas), pero cómo se escribe lo decide el taller.
+    """
+    import re as _re
+    return _re.sub(r"\s+", " ", (nombre or "").strip())
+
+
 class ProcesoService:
     def __init__(self, db_session):
         self.repository = ProcesoRepository(db_session)
@@ -28,8 +39,32 @@ class ProcesoService:
             if errores:
                 raise BusinessException("; ".join(errores))
 
+            # El nombre se guarda LIMPIO: sin espacios de más adentro ni en las puntas.
+            #
+            # Sin esto el catálogo se llena de gemelos que sólo se distinguen por un
+            # espacio doble, y nadie los ve en un desplegable de 415 opciones. Medido
+            # el 15/09: 14 pares repetidos, entre ellos «CORTE CON  AMOLADORA» contra
+            # «CORTE CON AMOLADORA» —usados 31 veces entre los dos— con categorías
+            # DISTINTAS, así que el mismo trabajo se planificaba distinto según cuál
+            # de los dos le tocara al que cargó la orden.
+            nombre = _limpiar_nombre(proceso_dto.nombre)
+
+            # Si ya existe uno igual, se devuelve ESE en vez de crear otro. La pantalla
+            # usa lo que devuelve esta llamada para dejarlo elegido en la fila, así que
+            # para el que carga el resultado es el mismo —el proceso queda puesto— y el
+            # catálogo no crece con un duplicado. Avisar, no bloquear: no se le tira un
+            # error por algo que sabemos resolver.
+            ya = await self.repository.buscar_por_nombre_normalizado(nombre)
+            if ya is not None:
+                logger.info(f"Service - «{nombre}» ya existe (id {ya.id}); se devuelve ese.")
+                return ResponseDTO(
+                    status=True,
+                    data=jsonable_encoder(ya),
+                    errorDescription="",
+                )
+
             proceso = Proceso(
-                nombre=proceso_dto.nombre,
+                nombre=nombre,
                 descripcion=proceso_dto.descripcion
             )
 
