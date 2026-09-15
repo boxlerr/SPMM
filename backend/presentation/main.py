@@ -1,6 +1,7 @@
 from fastapi import FastAPI,HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 # Routers de presentación
 from backend.presentation.ProcesoAPI import router as proceso_router
 from backend.presentation.OperarioAPI import router as operario_router
@@ -16,6 +17,7 @@ from backend.presentation.DashboardAPI import router as dashboard_router
 from backend.presentation.PlanoAPI import router as plano_router
 from backend.presentation.IncidenciaProcesoAPI import router as incidencia_router
 from backend.presentation.ClienteAPI import router as cliente_router
+from backend.presentation.AuditoriaAPI import router as auditoria_router
 
 
 from backend.presentation.ConfigAPI import router as config_router
@@ -29,13 +31,17 @@ from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateCha
 import asyncio
 from backend.scripts.sync_db import main as sync_main, run_sync as run_sync_once
 from backend.infrastructure.migraciones import aplicar_migraciones
+from backend.infrastructure import auditoria_movimientos as auditoria_mov
+from backend.infrastructure.db import SessionLocal
+import json
 import os
+import time
 from datetime import datetime
 
 
 import logging
 
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, decode_access_token
 
 
 from backend.commons.handlers.exception_handlers import registrar_exception_handlers
@@ -55,6 +61,100 @@ app.add_middleware(
 # Comprime respuestas > 500 bytes. Reduce el payload de /ordenes (~1.5MB) a ~150-250KB,
 # que sobre la conexión DuckDNS (upload limitado) es el cuello principal de descarga.
 app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
+# 🔹 Auditoría: quién creó, editó o eliminó qué.
+#
+# Se agrega ÚLTIMO a propósito: Starlette envuelve del último al primero, así que
+# éste queda por fuera de todo y ve el estado que realmente recibió el navegador.
+#
+# Está acá, y no repartido por los servicios, porque son 78 endpoints de escritura y
+# el próximo que alguien agregue no llevaría la llamada — que es exactamente cómo la
+# única auditoría que había (los intentos de planificar) quedó sola durante un año.
+# El porqué completo y qué se guarda y qué no: infrastructure/auditoria_movimientos.py
+#
+# Se registra con add_middleware y no con el decorador @app.middleware("http") porque
+# ese decorador está deprecado en Starlette y sale con warning; además así la función
+# queda suelta y los tests la pueden montar en una app de juguete.
+async def auditar_movimientos(request: Request, call_next):
+    metodo = request.method
+    ruta = request.url.path
+
+    if not auditoria_mov.se_audita(metodo, ruta):
+        return await call_next(request)
+
+    # El cuerpo se lee ANTES de que lo lea el endpoint. Starlette lo cachea y se lo
+    # reentrega al handler (_CachedRequest), así que leerlo acá no lo consume — pero
+    # de un plano no se lee nada: el cuerpo es el PDF entero.
+    cuerpo = None
+    try:
+        if auditoria_mov.se_lee_el_cuerpo(
+            ruta,
+            request.headers.get("content-type", ""),
+            int(request.headers.get("content-length") or 0),
+        ):
+            crudo = await request.body()
+            if crudo:
+                cuerpo = json.loads(crudo)
+    except Exception:
+        # Un cuerpo ilegible es problema del endpoint, no de la auditoría: la fila se
+        # guarda igual, sin el detalle.
+        cuerpo = None
+
+    arranque = time.monotonic()
+    try:
+        respuesta = await call_next(request)
+        estado = respuesta.status_code
+    except Exception:
+        # Lo que explota sin handler termina en un 500: queda registrado igual, que es
+        # justo lo que se busca cuando alguien pregunta "guardé y no pasó nada".
+        await _guardar_movimiento(request, metodo, ruta, 500, arranque, cuerpo)
+        raise
+
+    await _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo)
+    return respuesta
+
+
+async def _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo):
+    """Sesión propia y corta: la del endpoint ya se cerró, y si el pedido terminó en
+    rollback esa sesión está envenenada — escribir ahí sería perder la fila justo en
+    el caso que más interesa. Nada de esto puede levantar."""
+    try:
+        async with SessionLocal() as sesion:
+            await auditoria_mov.registrar(
+                sesion,
+                usuario=_quien_es(request),
+                metodo=metodo,
+                ruta=ruta,
+                estado=estado,
+                duracion_ms=int((time.monotonic() - arranque) * 1000),
+                cuerpo=cuerpo,
+                parametros=dict(request.query_params) or None,
+            )
+    except Exception as e:
+        logging.getLogger("uvicorn").warning(f"Auditoría: no se pudo guardar {metodo} {ruta}: {e}")
+
+
+def _quien_es(request) -> dict | None:
+    """El usuario del token, o None. El middleware corre antes que las dependencias,
+    así que el token lo lee él mismo. Un token vencido no es un error acá: que la
+    llamada se rechace es trabajo de get_current_user."""
+    cabecera = request.headers.get("authorization") or ""
+    if not cabecera.lower().startswith("bearer "):
+        return None
+    try:
+        datos = decode_access_token(cabecera[7:])
+        return {
+            "username": datos.get("sub"),
+            "id_usuario": datos.get("id_usuario"),
+            "nombre": datos.get("nombre"),
+            "apellido": datos.get("apellido"),
+        }
+    except Exception:
+        return None
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=auditar_movimientos)
 
 # 🔹 Registrar todos los routers
 # Auth queda público (sus endpoints protegidos lo manejan internamente)
@@ -109,6 +209,7 @@ app.include_router(config_router, tags=["configuracion"], dependencies=protected
 app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
 app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)
 app.include_router(rango_router, tags=["rangos"], dependencies=protected_deps)
+app.include_router(auditoria_router, tags=["auditoria"], dependencies=protected_deps)
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion.
 # La lista vive en exception_handlers.py, al lado de los handlers: tenerla acá fue lo

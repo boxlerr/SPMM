@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "auditoria-de-todo",
+        fecha: "2026-09-15",
+        tipo: "nuevo",
+        seccion: "Auditoría",
+        titulo: "Ahora queda registrado todo lo que se carga, se cambia y se borra",
+        detalle:
+            "En Auditoría hay una pestaña nueva, «Todo lo que se hizo», con un renglón por cada cosa que alguien hace en el sistema: «Lucas eliminó persona #5», «Julián editó orden de trabajo #1081». Se puede filtrar por quién lo hizo, por qué tipo de cosa tocó, o buscar un nombre o un número de OT. Antes esto sólo existía para las planificaciones: si alguien borraba una máquina o le cambiaba los minutos a un proceso, no quedaba rastro en ninguna parte. Lo que alguien intentó y no se pudo también queda — es lo primero que se busca cuando «le di a guardar y no pasó nada».",
+        href: "/auditoria",
+    },
+    {
         id: "un-proceso-puede-ir-a-mano",
         fecha: "2026-09-15",
         tipo: "nuevo",

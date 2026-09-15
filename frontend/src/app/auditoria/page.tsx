@@ -1,15 +1,25 @@
 "use client";
 
 /**
- * Auditoría de planificaciones.
+ * Auditoría: quién hizo qué.
  *
- * Cada intento de planificar queda registrado, salga bien o mal: qué OTs se
- * pidieron (por su número visible), si fue vista previa o confirmación, cuánto
- * tardó, qué dio y —si falló— el error textual. Y abajo, el historial de borrados.
+ * Nació el 15/08, cuando un intento de planificar murió en el servidor y otro tardó
+ * un minuto y no había NINGÚN lugar en la app donde ver qué se intentó ni qué pasó:
+ * la única evidencia estaba en los logs de Cloud Run, que el equipo no ve.
  *
- * Existe porque el 15/08 un intento murió en el servidor y otro tardó un minuto,
- * y no había NINGÚN lugar en la app donde ver qué se intentó y qué pasó: la única
- * evidencia estaba en los logs de Cloud Run, que el equipo no ve.
+ * El 15/09 pasó a cubrir TODO, no sólo planificar. Hasta ese día borrar una persona,
+ * cambiarle los minutos a un proceso o tocar una OT no dejaba rastro en ningún lado,
+ * y con el taller ya cargando los datos de verdad «¿quién cambió esto?» no tenía
+ * respuesta. De ahí las dos pestañas:
+ *
+ *   · Todo lo que se hizo — cada alta, edición y borrado del sistema entero, que
+ *     escribe el middleware del backend (infrastructure/auditoria_movimientos.py).
+ *   · Planificaciones — el historial viejo, que sigue aparte porque un intento de
+ *     planificar guarda cosas que no significan nada para «editó la máquina 12»:
+ *     cuántas OT entraron, cuántos procesos, qué dijo el solver.
+ *
+ * La primera va primero y es la que abre por defecto: es la pregunta que se hace
+ * todos los días.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -19,6 +29,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RegistroDeMovimientos } from "@/components/auditoria/RegistroDeMovimientos";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
@@ -143,7 +155,8 @@ export default function AuditoriaPage() {
                         Auditoría
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
-                        Cada intento de planificación y cada borrado, con su resultado. Lo que falla también queda.
+                        Todo lo que se carga, se cambia y se borra queda registrado: quién, cuándo y qué.
+                        Lo que falla también.
                     </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={cargar} disabled={cargando}>
@@ -151,6 +164,18 @@ export default function AuditoriaPage() {
                     Actualizar
                 </Button>
             </div>
+
+            <Tabs defaultValue="todo">
+                <TabsList className="mb-4">
+                    <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>
+                    <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="todo">
+                    <RegistroDeMovimientos />
+                </TabsContent>
+
+                <TabsContent value="planificacion">
 
             {error && (
                 <div className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
@@ -305,6 +330,8 @@ export default function AuditoriaPage() {
                     </section>
                 </>
             )}
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }

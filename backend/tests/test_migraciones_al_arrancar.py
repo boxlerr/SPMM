@@ -45,6 +45,11 @@ def _firmas(sql: str) -> set[str]:
     # agujero que este archivo viene a tapar. Lo destapó la del 15/09.
     for idx in re.findall(r"create (?:unique )?index if not exists (\w+)", t):
         firmas.add(f"indice:{idx}")
+    # Una migración puede crear una tabla entera y no tocar ninguna columna existente
+    # (la de auditoría, 15/09). Sin esto el test la daba por "sin DDL reconocible" y
+    # fallaba pidiendo un ADD COLUMN que esa migración no tiene por qué tener.
+    for tabla in re.findall(r"create table if not exists (\w+)", t):
+        firmas.add(f"tabla:{tabla}")
     return firmas
 
 
@@ -78,6 +83,8 @@ def test_todo_el_ddl_es_idempotente():
                 assert "if not exists" in bajo, f"{nombre}: ADD COLUMN sin IF NOT EXISTS"
             if "create index" in bajo:
                 assert "if not exists" in bajo, f"{nombre}: CREATE INDEX sin IF NOT EXISTS"
+            if "create table" in bajo:
+                assert "if not exists" in bajo, f"{nombre}: CREATE TABLE sin IF NOT EXISTS"
             # COMMENT ON siempre se puede repetir, no necesita guarda.
 
 

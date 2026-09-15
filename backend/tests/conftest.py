@@ -4,6 +4,7 @@ conexión entre create_all y la sesión) para no tocar la base real SMPP.
 """
 from datetime import time
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -63,6 +64,32 @@ TEST_TABLES = [
     Cliente.__table__,
     Planificacion.__table__,
 ]
+
+
+@pytest.fixture(autouse=True)
+def auditoria_no_escribe_en_produccion(monkeypatch):
+    """Ningún test puede escribir una fila de auditoría en Supabase.
+
+    El middleware de `main.py` audita TODA escritura, y para hacerlo abre su propia
+    sesión con el `SessionLocal` del módulo — el de PRODUCCIÓN, que se arma al
+    importar db.py. Los tests que manejan la app real (test_primer_ingreso_password,
+    por ejemplo) pisan la dependencia `get_db` del endpoint, pero esa sesión aparte no
+    la ve nadie: sin esto, correr los tests le mete filas a la base del cliente.
+
+    Es el mismo agujero que ya documenta test_migraciones_al_arrancar, y acá se tapa
+    de una vez para todos: se reemplaza por una sesión que se traga lo que le den. El
+    test que SÍ quiera mirar lo auditado pisa `main.SessionLocal` por su cuenta, y esa
+    vuelta gana porque se aplica después.
+    """
+    class _SesionQueNoGuarda:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_): return False
+        def add(self, _): pass
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    from backend.presentation import main
+    monkeypatch.setattr(main, "SessionLocal", lambda: _SesionQueNoGuarda())
 
 
 @pytest_asyncio.fixture

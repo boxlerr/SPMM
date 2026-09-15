@@ -122,6 +122,29 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "2026-09-15_auditoria_movimiento",
+        [
+            "CREATE TABLE IF NOT EXISTS auditoria_movimiento ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "creado_en TIMESTAMP NOT NULL, "
+            "id_usuario INTEGER, "
+            "usuario VARCHAR(120), "
+            "accion VARCHAR(20) NOT NULL, "
+            "entidad VARCHAR(80) NOT NULL, "
+            "id_entidad VARCHAR(40), "
+            "descripcion TEXT NOT NULL, "
+            "metodo VARCHAR(10) NOT NULL, "
+            "ruta VARCHAR(300) NOT NULL, "
+            "estado SMALLINT, "
+            "duracion_ms INTEGER, "
+            "detalle TEXT)",
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_mov_creado_en "
+            "ON auditoria_movimiento (creado_en DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_mov_entidad "
+            "ON auditoria_movimiento (entidad, id_entidad)",
+        ],
+    ),
+    (
         "2026-09-11_inicio_base_del_plan",
         [
             "ALTER TABLE planificacion ADD COLUMN IF NOT EXISTS inicio_base TIMESTAMP",
