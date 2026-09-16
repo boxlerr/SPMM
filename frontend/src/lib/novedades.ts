@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "salir-del-planificador-con-la-x",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "El planificador se cierra con una X, y desde la vista previa se vuelve atrás sin buscar",
+        detalle:
+            "Salir estaba, pero perdido al final de una fila de controles, del mismo tamaño y color que el zoom y los filtros. Ahora hay una X arriba a la derecha, separada del resto, en los dos pasos y también al re-planificar. Y en la vista previa apareció «Volver a elegir OTs» arriba: antes ese botón sólo estaba abajo de todo y decía «Volver» a secas, así que no se sabía si volvía al paso anterior o se iba del planificador.",
+        href: "/operaciones",
+    },
+    {
         id: "acciones-sobre-las-ot-tildadas",
         fecha: "2026-09-16",
         tipo: "nuevo",

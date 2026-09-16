@@ -486,7 +486,28 @@ export function PlanningSelectionScreen({
                                 title="Volver a Operaciones. Todavía no armaste ningún plan: la próxima vez arrancás de cero."
                             >
                                 <LogOut className="w-3.5 h-3.5" />
-                                Salir
+                                <span className="hidden sm:inline">Salir</span>
+                            </Button>
+                            {/* LA X DE CERRAR.
+
+                                Había una salida —"Salir", con su ícono de puerta— pero
+                                perdida al final de una fila de seis controles, del mismo
+                                tamaño y color que el zoom y los filtros. Julián, 16/09:
+                                «falta un botón de x para cerrar, que sea más intuitivo o
+                                algo para volver atrás». La X es el gesto que todo el mundo
+                                busca primero, y va separada del resto por una línea para
+                                que se lea como "esto cierra la pantalla" y no como un
+                                control más de la barra. */}
+                            <div className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden />
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={salirDelPlanificador}
+                                className="h-8 w-8 shrink-0 rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                                aria-label="Cerrar el planificador"
+                                title="Cerrar y volver a Operaciones"
+                            >
+                                <X className="h-4 w-4" />
                             </Button>
                         </div>
                     </div>

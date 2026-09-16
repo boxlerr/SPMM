@@ -9,7 +9,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, X, ArrowLeft} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import EditarProcesosOTModal from "@/components/planning/EditarProcesosOTModal";
 import { Input } from "@/components/ui/input";
@@ -2322,6 +2322,23 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             {/* Salida del planificador. Ya no cierra un modal: deja la
                                 pantalla y vuelve a Operaciones. El borrador se guarda,
                                 así que no es un "descartar" y no tiene por qué asustar. */}
+                            {/* Volver AL PASO ANTERIOR, arriba y no sólo escondido en el
+                                pie: son dos salidas distintas —una vuelve a elegir OTs y la
+                                otra se va del planificador— y tenerlas juntas es lo que hace
+                                obvio cuál es cuál. */}
+                            {onBack && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 gap-1.5 text-gray-500 hover:text-gray-800"
+                                    onClick={onBack}
+                                    disabled={isConfirming || isCalculating}
+                                    title="Volver al paso anterior para cambiar qué OTs entran en el plan"
+                                >
+                                    <ArrowLeft className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline">Volver a elegir OTs</span>
+                                </Button>
+                            )}
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -2331,7 +2348,29 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 title="Volver a Operaciones. El plan queda guardado como borrador."
                             >
                                 <LogOut className="w-3.5 h-3.5" />
-                                Salir
+                                <span className="hidden sm:inline">Salir</span>
+                            </Button>
+                            {/* LA X DE CERRAR.
+
+                                Había una salida —"Salir", con su ícono de puerta— pero
+                                perdida al final de una fila de seis controles, del mismo
+                                tamaño y color que el zoom y los filtros. Julián, 16/09:
+                                «falta un botón de x para cerrar, que sea más intuitivo o
+                                algo para volver atrás». La X es el gesto que todo el mundo
+                                busca primero, y va separada del resto por una línea para
+                                que se lea como "esto cierra la pantalla" y no como un
+                                control más de la barra. */}
+                            <div className="mx-0.5 h-6 w-px bg-gray-200" aria-hidden />
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={onClose}
+                                disabled={isConfirming || isCalculating}
+                                className="h-8 w-8 shrink-0 rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                                aria-label="Cerrar el planificador"
+                                title="Cerrar el planificador. El plan queda guardado como borrador."
+                            >
+                                <X className="h-4 w-4" />
                             </Button>
                         </div>
                     </div>
