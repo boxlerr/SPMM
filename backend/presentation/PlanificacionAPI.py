@@ -49,6 +49,7 @@ async def planificar_endpoint(
     procesos_por_orden = body.procesos_por_orden if body else None
     lineas_por_orden = body.lineas_por_orden if body else None
     borrador_id = body.borrador_id if body else None
+    inicio_base = body.inicio_base if body else None
 
     # Cada intento queda auditado, salga bien o mal. Antes un intento fallado no
     # dejaba rastro en la app: el 15/08 uno murió por memoria y la única evidencia
@@ -74,6 +75,7 @@ async def planificar_endpoint(
             forzar_ordenes_ids=forzar_ordenes_ids,
             procesos_por_orden=procesos_por_orden,
             lineas_por_orden=lineas_por_orden,
+            inicio_base=inicio_base,
         )
         await auditoria.registrar_intento(
             tipo, ordenes_ids, "ok",
@@ -305,8 +307,10 @@ async def obtener_planificacion(db = Depends(get_db)):
             item['fecha_inicio_estimada'] = _convertir_minutos_a_fecha(
                 item['inicio_min'], base, blocked_dates)
         if item.get('fin_min') is not None:
+            # `es_fin`: un proceso que cierra la jornada termina hoy a las 16:00, no
+            # mañana a las 07:00. Sin esto se colaba un día de más en la vista Diaria.
             item['fecha_fin_estimada'] = _convertir_minutos_a_fecha(
-                item['fin_min'], base, blocked_dates)
+                item['fin_min'], base, blocked_dates, es_fin=True)
 
         results.append(item)
 

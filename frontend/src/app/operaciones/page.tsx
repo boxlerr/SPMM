@@ -28,7 +28,8 @@ import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
 import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
 import { toast } from "sonner"
-import { convertPlanificacionToGanttTasks, calculateWorkingMinutes, addWorkMinutes } from "@/lib/gantt-utils"
+import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils"
+import { baseDelPlan, finDeLaFila, inicioDeLaFila, minutosDesdeFecha } from "@/lib/plan-fechas"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
 import { PlanningPreviewScreen } from "@/components/planning/PlanningPreviewScreen"
 import { AvailabilityConfigModal } from "@/components/planning/AvailabilityConfigModal"
@@ -55,10 +56,16 @@ const getAuthHeaders = (): HeadersInit => {
   return token ? { 'Authorization': `Bearer ${token}` } : {};
 };
 
+/** Valor especial del desplegable de planificaciones: no es un lote, es una acción. */
+const LIMPIAR_VIEJAS = "__limpiar_viejas__";
+
 export default function OperacionesPage() {
   // Operaciones abre SIEMPRE en "Órdenes de Trabajo": es la pantalla desde la que se
   // arranca el día (ver qué entró y qué falta planificar), no la planificación ya hecha.
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "lista_planificacion" | "operarios" | "materia_prima" | "carga">("work_orders")
+  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "operarios" | "materia_prima" | "carga">("work_orders")
+  /** Qué solapa de Órdenes de Trabajo está abierta. Vive acá —y no adentro de la
+   *  lista— porque al confirmar un plan hay que caer en «Planificadas». */
+  const [otSubTab, setOtSubTab] = useState("no_planificadas")
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   /** OT pre-seleccionada para editar (viene del query param `?edit_ot=ID` desde
    *  el link "Editar OT ↗" de la vista previa, o de otra parte del sistema). */
@@ -87,6 +94,35 @@ export default function OperacionesPage() {
   // (vistas Semanal/Diaria). Si está seteada, gana sobre "hoy" y sobre "lote".
   // Si es null, se usa la lógica vieja (lote seleccionado → fecha del lote, o hoy).
   const [customRefDate, setCustomRefDate] = useState<Date | null>(null)
+
+  /**
+   * EL DÍA QUE SE ESTÁ MIRANDO en Semanal y en Diaria. Por defecto, HOY.
+   *
+   * Antes, si había una planificación elegida arriba, el día de referencia era el día
+   * en que se armó ESA planificación. Julián, 16/09/2026: «en diarias y semanal no me
+   * aparecen las que tengo para hoy». Con la planificación de mayo elegida, Semanal
+   * mostraba la semana del 4 al 10 de mayo y Diaria el 7 de mayo — cuatro meses atrás.
+   *
+   * Y no era sólo por planes viejos: el día en que se aprieta "Planificar" es
+   * justamente el día en que el plan NUNCA empieza (si la jornada ya arrancó, el plan
+   * es para mañana; ver lib/plan-fechas). O sea que "Diaria según lote" caía siempre
+   * en un día vacío, para cualquier plan, incluso el recién hecho.
+   *
+   * Elegir QUÉ PLAN mirar y elegir QUÉ DÍA mirar son dos preguntas distintas y ahora
+   * tienen cada una su control: el desplegable de arriba y el calendario.
+   */
+  const fechaReferencia = customRefDate ?? new Date();
+  const mirandoHoy = !customRefDate
+    || customRefDate.toDateString() === new Date().toDateString();
+  /**
+   * El mismo día, como texto. Es lo que va en las dependencias de los `useMemo` que
+   * filtran por fecha: `fechaReferencia` es un objeto `Date` NUEVO en cada render
+   * cuando no hay fecha elegida a mano, así que ponerlo de dependencia recalcula las
+   * listas enteras en cada render —con 1267 órdenes y la planificación completa, eso
+   * se siente—. El día cambia una vez por día; la identidad del objeto, cien veces por
+   * minuto.
+   */
+  const diaDeReferencia = `${fechaReferencia.getFullYear()}-${fechaReferencia.getMonth()}-${fechaReferencia.getDate()}`;
 
   // Zoom (%) compartido entre todas las vistas de Operaciones (Planificación,
   // No Planificadas, Historial, Modal Planificar y Vista Previa). Persistido en
@@ -152,7 +188,19 @@ export default function OperacionesPage() {
 
   // Delete Planning Batch State
   const [isDeleteLoteDialogOpen, setIsDeleteLoteDialogOpen] = useState(false)
+  /**
+   * Los días que el taller no trabaja (feriados, mantenimiento). Se cargan desde
+   * Disponibilidad y el planificador los saltea.
+   *
+   * Hacen falta ACÁ porque la vuelta de fecha a minutos —arrastrar un proceso en el
+   * Gantt, escribirle otro horario— tiene que contar los mismos días que contó el
+   * backend al armar la fecha. Sin ellos, la ida y la vuelta dejan de ser la misma
+   * cuenta y cada feriado en el medio corre el proceso un día de trabajo entero.
+   */
+  const [feriados, setFeriados] = useState<string[]>([])
   const [isDeletingLote, setIsDeletingLote] = useState(false)
+  const [isLimpiarViejasOpen, setIsLimpiarViejasOpen] = useState(false)
+  const [limpiandoViejas, setLimpiandoViejas] = useState(false)
 
   // Sub-tab activa dentro de Planificación (Planificadas / Semanal / ... ).
   // Es controlada para poder limpiar la selección de OTs al cambiar de pestaña
@@ -187,7 +235,14 @@ export default function OperacionesPage() {
   };
 
   // Fetch data
-  const fetchData = async () => {
+  /**
+   * Refresca todo. Devuelve las filas de planificación que llegó a traer —vacío si el
+   * GET falló—, para que quien lo llama pueda saber si el refresco sirvió: los errores
+   * se tragan a propósito (esto corre de fondo y no puede voltear la pantalla), así
+   * que sin el valor de vuelta no hay forma de distinguir "no hay nada" de "no llegó".
+   */
+  const fetchData = async (): Promise<PlanificacionItem[]> => {
+    let filasDelPlan: PlanificacionItem[] = [];
     try {
       setIsLoading(true);
 
@@ -195,10 +250,17 @@ export default function OperacionesPage() {
 
       // 1. Fetch Operarios
       try {
+        // Los días no laborables, para que la vuelta de fecha a minutos cuente igual
+        // que el backend. Si falla, se sigue sin ellos: es peor no mostrar el plan.
+        fetch(`${API_URL}/config/availability`, { headers: getAuthHeaders() })
+          .then(r => r.ok ? r.json() : { blocked_dates: [] })
+          .then(d => setFeriados(d?.blocked_dates || []))
+          .catch(() => { /* sin feriados, como antes */ });
+
         const opResponse = await fetch(`${API_URL}/operarios`, { headers: getAuthHeaders() });
         if (opResponse.status === 401) {
           if (typeof window !== "undefined") window.location.href = "/login";
-          return;
+          return filasDelPlan;
         }
 
         if (opResponse.ok) {
@@ -213,8 +275,8 @@ export default function OperacionesPage() {
             type: "operario",
             skills: [],
             ranges: op.rangos ? op.rangos.map((r: any) => (typeof r === "object" ? r.id : r)) : [],
-            hora_inicio: op.hora_inicio || "09:00",
-            hora_fin: op.hora_fin || "18:00",
+            hora_inicio: op.hora_inicio || "07:00",
+            hora_fin: op.hora_fin || "16:00",
           }));
           setResources(mappedResources);
         } else {
@@ -229,7 +291,7 @@ export default function OperacionesPage() {
         const planResponse = await fetch(`${API_URL}/planificacion`, { headers: getAuthHeaders() });
         if (planResponse.status === 401) {
           if (typeof window !== "undefined") window.location.href = "/login";
-          return;
+          return filasDelPlan;
         }
         if (planResponse.ok) {
           const planData: PlanificacionItem[] = await planResponse.json();
@@ -264,6 +326,7 @@ export default function OperacionesPage() {
           });
 
           setRawPlanificacion(parsedPlanData);
+          filasDelPlan = parsedPlanData;
           const ganttTasks = convertPlanificacionToGanttTasks(parsedPlanData, mappedResources);
           setTasks(ganttTasks);
         } else {
@@ -278,7 +341,7 @@ export default function OperacionesPage() {
         const maqResponse = await fetch(`${API_URL}/maquinarias`, { headers: getAuthHeaders() });
         if (maqResponse.status === 401) {
           if (typeof window !== "undefined") window.location.href = "/login";
-          return;
+          return filasDelPlan;
         }
         if (maqResponse.ok) {
           const maqData = await maqResponse.json();
@@ -294,7 +357,7 @@ export default function OperacionesPage() {
         const ordenesResponse = await fetch(`${API_URL}/ordenes`, { headers: getAuthHeaders() });
         if (ordenesResponse.status === 401) {
           if (typeof window !== "undefined") window.location.href = "/login";
-          return;
+          return filasDelPlan;
         }
         if (ordenesResponse.ok) {
           const ordenesData = await ordenesResponse.json();
@@ -309,6 +372,7 @@ export default function OperacionesPage() {
     } finally {
       setIsLoading(false);
     }
+    return filasDelPlan;
   };
 
   useEffect(() => {
@@ -362,6 +426,32 @@ export default function OperacionesPage() {
     return Array.from(lotes.values()).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [rawPlanificacion]);
 
+  /** Filas de plan viejas que no tienen planificación asignada: el desplegable las
+   *  saltea, así que sólo se ven con "Todas". Si existen, no se elige una
+   *  planificación sola al entrar: esconderlas sería perder trabajo de vista. */
+  const hayPlanSinLote = React.useMemo(
+    () => rawPlanificacion.some(p => !p.id_planificacion_lote),
+    [rawPlanificacion]);
+
+  /**
+   * AL ENTRAR SE MUESTRA LA PLANIFICACIÓN QUE ESTÁ CORRIENDO, no todas juntas.
+   *
+   * Arrancaba en "Todas las Planificaciones" y sólo se movía con un click, así que
+   * quedaba clavada donde la habían dejado. El 16/09/2026, tres minutos después de
+   * planificar, la pantalla seguía mostrando la de mayo — y con ella, trabajo de hace
+   * cuatro meses ya entregado.
+   *
+   * Es a propósito que NO se guarde en el navegador: recordar la elegida es justamente
+   * lo que producía la pantalla clavada. Se recalcula en cada entrada, que es barato y
+   * siempre dice la verdad. Sólo la primera vez: después manda lo que elija la persona.
+   */
+  const yaSeEligioLote = React.useRef(false);
+  React.useEffect(() => {
+    if (yaSeEligioLote.current || hayPlanSinLote || uniqueLotes.length === 0) return;
+    yaSeEligioLote.current = true;
+    setSelectedLoteId(uniqueLotes[0].id);
+  }, [uniqueLotes, hayPlanSinLote]);
+
   const filteredPlanificacion = React.useMemo(() => {
     if (selectedLoteId === "all") return rawPlanificacion;
     return rawPlanificacion.filter(p => p.id_planificacion_lote === selectedLoteId);
@@ -380,16 +470,119 @@ export default function OperacionesPage() {
   /** Planificadas ya completadas (entregadas) — van a su propia pestaña. */
   const completedPlannedOrdenes = plannedOrdenes.filter(isOrderCompleted);
 
+  /**
+   * LAS CUATRO LISTAS DE LA PANTALLA, cada una en un solo lugar.
+   *
+   * Estaban escritas a mano adentro del JSX, una por solapa, y por eso se habían ido
+   * separando: "Planificadas" descartaba las entregadas y "Semanal" no, así que una OT
+   * ya entregada se caía de una lista y reaparecía en la otra, mirando el mismo plan.
+   * Acá arriba se ven las cuatro juntas y se nota si alguna se desalinea. Además son
+   * las que alimentan los contadores de las solapas: el número y la lista no pueden
+   * decir cosas distintas.
+   */
+  const estaTerminadaEnElTaller = (order: WorkOrder) =>
+    !!order.procesos && order.procesos.length > 0
+    && order.procesos.every(p => p.estado_proceso.id === 3);
+
+  /** Lo que falta hacer de la planificación elegida. */
+  const otsPendientes = React.useMemo(
+    () => plannedOrdenes.filter(o => !estaTerminadaEnElTaller(o) && !isOrderCompleted(o)),
+    [plannedOrdenes]);
+
+  /** De lo que falta hacer, lo que cae en la semana que se está mirando. */
+  const otsDeLaSemana = React.useMemo(() => {
+    const dia = fechaReferencia.getDay();
+    const lunes = new Date(fechaReferencia);
+    lunes.setDate(fechaReferencia.getDate() - dia + (dia === 0 ? -6 : 1));
+    lunes.setHours(0, 0, 0, 0);
+    const domingo = new Date(lunes);
+    domingo.setDate(lunes.getDate() + 6);
+    domingo.setHours(23, 59, 59, 999);
+    return otsPendientes.filter(order => {
+      const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
+      return procesos.some(p => {
+        const inicio = inicioDeLaFila(p);
+        return !!inicio && inicio >= lunes && inicio <= domingo;
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ver `diaDeReferencia`
+  }, [otsPendientes, filteredPlanificacion, diaDeReferencia]);
+
+  /** De lo que falta hacer, lo que se toca el día que se está mirando. */
+  const otsDelDia = React.useMemo(() => {
+    const desde = new Date(fechaReferencia);
+    desde.setHours(0, 0, 0, 0);
+    const hasta = new Date(fechaReferencia);
+    hasta.setHours(23, 59, 59, 999);
+    return otsPendientes.filter(order => {
+      const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
+      return procesos.some(p => {
+        const inicio = inicioDeLaFila(p);
+        const fin = finDeLaFila(p);
+        // Se cruza con el día: empieza antes de que termine y termina después de que empieza.
+        return !!inicio && !!fin && inicio <= hasta && fin >= desde;
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ver `diaDeReferencia`
+  }, [otsPendientes, filteredPlanificacion, diaDeReferencia]);
+
+  /**
+   * El primer día con trabajo de la planificación elegida, de hoy en adelante.
+   *
+   * Es el seguro de que la pantalla abra en HOY: si planificás a las 11, el plan
+   * arranca mañana a las 07:00 y la Diaria de hoy sale vacía POR DISEÑO. Sin decirlo,
+   * esa pantalla en blanco se lee como «no se guardó» o «se perdió el plan».
+   */
+  /** Las filas del plan de las OT que todavía tienen trabajo. Es lo que miran las
+   *  listas, así que el calendario y el aviso tienen que mirar lo mismo: si no, el
+   *  botón "arranca el jue 17" lleva a un día donde la lista sale vacía igual. */
+  const filasPendientes = React.useMemo(() => {
+    const ids = new Set(otsPendientes.map(o => o.id));
+    return filteredPlanificacion.filter(p => ids.has(p.orden_id));
+  }, [filteredPlanificacion, otsPendientes]);
+
+  const primerDiaConTrabajo = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    let primero: Date | null = null;
+    filasPendientes.forEach(p => {
+      const inicio = inicioDeLaFila(p);
+      if (!inicio || inicio < hoy) return;
+      if (!primero || inicio < primero) primero = inicio;
+    });
+    return primero as Date | null;
+  }, [filasPendientes]);
+
+  /** Las filas del plan que todavía representan trabajo por hacer: alimentan la Carga. */
+  const cargaPendiente = React.useMemo(() => {
+    const entregadas = new Set(completedPlannedOrdenes.map(o => o.id));
+    return filteredPlanificacion.filter(
+      p => p.id_estado !== 3 && !entregadas.has(p.orden_id));
+  }, [filteredPlanificacion, completedPlannedOrdenes]);
+
+  /**
+   * Lo que el taller TERMINÓ y todavía NO se entregó.
+   *
+   * Antes eran todas las terminadas, y como al tildar el último proceso el sistema le
+   * pone fecha de entrega a la OT, casi todas caían también en "Entregadas al cliente":
+   * dos solapas diciendo lo mismo con nombres distintos («no entiendo la diferencia
+   * entre completadas y finalizadas», Julián, 16/09/2026). Sacando las entregadas, esta
+   * lista pasa a contestar algo que antes no contestaba nadie: qué hay para despachar.
+   */
+  const otsTerminadasSinEntregar = React.useMemo(
+    () => plannedOrdenes.filter(o => estaTerminadaEnElTaller(o) && !isOrderCompleted(o)),
+    [plannedOrdenes]);
+
+
   // Set de fechas (YYYY-MM-DD) que tienen al menos un proceso planificado.
   // Se usa en el calendario del banner para mostrar un punto rojo en esos días,
   // así el usuario sabe de un vistazo en qué días hay trabajo cargado.
+
   const plannedDates = React.useMemo(() => {
     const set = new Set<string>();
-    filteredPlanificacion.forEach(p => {
-      if (!p.creado_en || typeof p.inicio_min !== 'number') return;
-      const base = new Date(p.creado_en);
-      base.setHours(9, 0, 0, 0);
-      const real = addWorkMinutes(base, p.inicio_min);
+    filasPendientes.forEach(p => {
+      const real = inicioDeLaFila(p, feriados);
+      if (!real) return;
       const key = `${real.getFullYear()}-${String(real.getMonth() + 1).padStart(2, '0')}-${String(real.getDate()).padStart(2, '0')}`;
       set.add(key);
     });
@@ -408,15 +601,6 @@ export default function OperacionesPage() {
   // Calculate REALLY Unplanned Orders (excluding ALL planned orders from ANY batch AND delivered orders)
   const allPlannedIds = new Set(rawPlanificacion.map(p => p.orden_id));
   const trulyUnplannedOrders = ordenesTrabajo.filter(o => !allPlannedIds.has(o.id) && !isOrderDelivered(o));
-
-  // For the standard view (not re-planning), we usually show 'unplannedOrdenes' which excludes CURRENTLY viewed planned + Delivered.
-  // BUT if 'selectedLoteId' is specific, 'plannedOrdenes' has only that batch.
-  // If we want to show 'Unplanned' in the table, effectively it should be trulyUnplanned + those from other batches?
-  // Current logic: unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id));
-  // If I select 'Batch A', plannedOrderIds has Batch A IDs.
-  // unplannedOrdenes has Unplanned + Batch B IDs. This is CORRECT for the "Unplanned" table view if that's what's intended.
-  // BUT for Re-planning, user wants: Batch A + Unplanned. (Exclude Batch B).
-  const unplannedOrdenes = ordenesTrabajo.filter(o => !plannedOrderIds.has(o.id) && !isOrderDelivered(o));
 
 
   const ordersForPlanning = React.useMemo(() => {
@@ -437,9 +621,14 @@ export default function OperacionesPage() {
         return !allFinalized;
       });
     }
-    // If not re-planning, we just show "unplanned"
-    return unplannedOrdenes;
-  }, [isReplanning, selectedLoteId, trulyUnplannedOrders, plannedOrdenes, unplannedOrdenes]);
+    // Sin re-planificar: las que NO están en ningún plan.
+    //
+    // Devolvía `unplannedOrdenes`, que excluye sólo las del plan que estás mirando: las
+    // de los OTROS planes aparecían como "sin planificar" y se podían planificar dos
+    // veces sin que nada avisara. Con "Todas" elegido no se notaba porque ahí las dos
+    // listas coinciden; desde que la pantalla abre parada en una planificación, sí.
+    return trulyUnplannedOrders;
+  }, [isReplanning, selectedLoteId, trulyUnplannedOrders, plannedOrdenes]);
 
 
   // ... existing code ...
@@ -454,9 +643,10 @@ export default function OperacionesPage() {
     const rawItem = rawPlanificacion.find(i => i.id === task.dbId);
     if (!rawItem) return;
 
-    const baseDate = rawItem.creado_en ? new Date(rawItem.creado_en) : new Date();
-    const normalizedBaseDate = new Date(baseDate);
-    normalizedBaseDate.setHours(9, 0, 0, 0);
+    // El arranque de ESTE plan (lib/plan-fechas), no el día en que se apretó
+    // "Planificar" puesto a las 09:00: lo que se guarda es el minuto, así que si la
+    // base no es la misma que usó el backend, arrastrar un proceso lo manda a otro día.
+    const normalizedBaseDate = baseDelPlan(rawItem, feriados);
 
     if (isNaN(newStart.getTime()) || isNaN(normalizedBaseDate.getTime())) {
       console.error("Invalid date detected in handleTaskMove", {
@@ -464,14 +654,14 @@ export default function OperacionesPage() {
         newStartTime,
         newStart,
         creado_en: rawItem.creado_en,
-        baseDate,
+        inicio_base: rawItem.inicio_base,
         normalizedBaseDate
       });
       toast.error("Error al mover el proceso: Fecha inválida");
       return;
     }
 
-    const newInicioMin = calculateWorkingMinutes(normalizedBaseDate, newStart);
+    const newInicioMin = minutosDesdeFecha(normalizedBaseDate, newStart, feriados);
 
     let durationMinutes = 0;
     if (task.originalFinMin !== undefined && task.originalInicioMin !== undefined) {
@@ -499,8 +689,14 @@ export default function OperacionesPage() {
 
     const updatedRawPlanificacion = rawPlanificacion.map(item => {
       if (item.id === task.dbId) {
+        // Las fechas que mandó el backend quedaron viejas en cuanto movimos el minuto.
+        // Si se dejan, `inicioDeLaFila` las prefiere —son las que manda— y la barra se
+        // vuelve a dibujar donde estaba: parecía que el arrastre no hacía nada. Se
+        // sacan, y la fecha sale de los minutos nuevos con el mismo arranque y la misma
+        // jornada que va a usar el backend; el próximo refresco las repone.
+        const { fecha_inicio_estimada, fecha_fin_estimada, ...resto } = item;
         return {
-          ...item,
+          ...resto,
           inicio_min: newInicioMin,
           fin_min: newFinMin,
           id_operario: isNaN(newOperarioId) ? item.id_operario : newOperarioId
@@ -573,16 +769,21 @@ export default function OperacionesPage() {
       const op = rawOperarios.find(o => o.id === opId);
       const opName = op ? `${op.nombre} ${op.apellido}` : "";
 
+      // Se le pone el nombre a LA PASADA que se cambió, no a todas las que comparten
+      // el proceso. En una OT con el mismo proceso repetido —dato válido: la 7497
+      // tiene TORNO CNC trece veces— cambiarle el operario a una repintaba las trece,
+      // y de ahí sacan su valor los desplegables de la tabla. El fallback por proceso
+      // es para los planes viejos, donde `id_orden_trabajo_proceso` viene en NULL.
+      const idPasada = targetTask.id_orden_trabajo_proceso;
+
       return {
         ...order,
         procesos: order.procesos.map(proc => {
-          if (proc.proceso.id !== targetTask.proceso_id) return proc;
-          return {
-            ...proc,
-            operario_nombre: opName,
-            // If the local interface has id_operario, update it too
-            // id_operario: opId 
-          };
+          const esLaPasada = idPasada != null
+            ? proc.id === idPasada
+            : proc.proceso.id === targetTask.proceso_id;
+          if (!esLaPasada) return proc;
+          return { ...proc, operario_nombre: opName };
         })
       };
     }));
@@ -650,9 +851,11 @@ export default function OperacionesPage() {
 
   }
 
-  const handleMachineryChange = async (ordenId: number, procesoId: number, maquinariaId: number) => {
-    // Find the planificacion item
-    const planItem = rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId);
+  const handleMachineryChange = async (planId: number, maquinariaId: number) => {
+    // La fila exacta del plan. Se buscaba por (orden, proceso) y se tomaba la primera:
+    // en una OT con el mismo proceso repetido, cambiarle la máquina a la segunda pasada
+    // se la cambiaba a la primera.
+    const planItem = rawPlanificacion.find(p => p.id === planId);
     if (!planItem) return;
 
     // Optimistic update
@@ -927,19 +1130,17 @@ export default function OperacionesPage() {
         : (responseData.excedentes || []);
 
       // Enrich results with Client and Article info
-      const now = new Date();
       const enrich = (res: any) => {
         const order = ordenesTrabajo.find(o => o.id === res.orden_id);
         const operario = rawOperarios.find(op => op.id === res.id_operario);
         const maquina = rawMaquinarias.find(m => m.id === res.id_maquinaria);
 
-        // Calculate simplified dates (assuming T=0 is Now, and API returns 'inicio_min'/'fin_min')
-        // We use 'inicio_min' from result if available, otherwise fallback to check if 'start_time' exists (legacy?)
-        const startMin = res.inicio_min !== undefined ? res.inicio_min : (res.start_time || 0);
-        const endMin = res.fin_min !== undefined ? res.fin_min : (res.end_time || 0);
-
-        const startDate = new Date(now.getTime() + startMin * 60000);
-        const endDate = new Date(now.getTime() + endMin * 60000);
+        // Las fechas del plan las calcula el backend con la jornada real del taller
+        // (07:00 a 16:00 con pausas) y con el arranque de ESTE plan. Acá se hacía
+        // `ahora + inicio_min` en minutos de reloj corrido: la vista previa prometía
+        // trabajo a las 3 de la mañana y de madrugada de un domingo.
+        const startDate = inicioDeLaFila(res) || baseDelPlan(res);
+        const endDate = finDeLaFila(res) || startDate;
 
         const formatDateShort = (d: Date) => {
           return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -985,6 +1186,10 @@ export default function OperacionesPage() {
         resultados: enrichedResults,
         excedentes: enrichedExcedentes,
         diagnosticos: diags,
+        // El arranque del plan, tal como lo devolvió el backend. Viaja con el
+        // borrador y vuelve al confirmar: es lo que ata las fechas que se miran a
+        // las fechas que se guardan.
+        inicioBase: responseData?.inicio_base,
         huella,
       };
       setHuellaPlan(huella);
@@ -1015,8 +1220,7 @@ export default function OperacionesPage() {
       };
 
       const newPlanWeekKeys = new Set(enrichedResults.map((r: any) => {
-        const startMin = r.inicio_min !== undefined ? r.inicio_min : (r.start_time || 0);
-        return getWeekKey(new Date(now.getTime() + startMin * 60000));
+        return getWeekKey(inicioDeLaFila(r) || baseDelPlan(r));
       }));
 
       // Better approach using `tasks` (GanttTasks) which have absolute dates
@@ -1115,15 +1319,13 @@ export default function OperacionesPage() {
       const planificadosRaw: any[] = Array.isArray(responseData) ? responseData : (responseData.planificados || []);
       const excedentesRaw: any[] = Array.isArray(responseData) ? [] : (responseData.excedentes || []);
 
-      const now = new Date();
       const enrich = (res: any) => {
         const order = ordenesTrabajo.find(o => o.id === res.orden_id);
         const operario = rawOperarios.find(op => op.id === res.id_operario);
         const maquina = rawMaquinarias.find(m => m.id === res.id_maquinaria);
-        const startMin = res.inicio_min !== undefined ? res.inicio_min : (res.start_time || 0);
-        const endMin = res.fin_min !== undefined ? res.fin_min : (res.end_time || 0);
-        const startDate = new Date(now.getTime() + startMin * 60000);
-        const endDate = new Date(now.getTime() + endMin * 60000);
+        // Misma regla que el otro camino: la fecha la trae el backend.
+        const startDate = inicioDeLaFila(res) || baseDelPlan(res);
+        const endDate = finDeLaFila(res) || startDate;
         const formatDateShort = (d: Date) => d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
         return {
           ...res,
@@ -1161,6 +1363,7 @@ export default function OperacionesPage() {
         resultados: recalcResultados,
         excedentes: recalcExcedentes,
         diagnosticos: recalcDiags,
+        inicioBase: responseData?.inicio_base,
         huella,
       };
       setHuellaPlan(huella);
@@ -1227,6 +1430,15 @@ export default function OperacionesPage() {
   /** Cada cambio en lo que se agregó a mano (tandas nuevas, deshacer, quitar una
    *  OT o una pasada). Sin esto el borrador volvía sin nada agregado a mano y el
    *  primer recálculo le devolvía a cada OT todos sus procesos. */
+  /** Abrir la OT. Es lo que hace el doble clic en CUALQUIERA de las listas: en
+   *  Semanal, Diaria y Terminadas el doble clic no hacía nada y la fila prometía en
+   *  su globito que sí («un click para ver el detalle · doble clic para abrir la OT»),
+   *  así que parecía que la pantalla se había colgado. */
+  const abrirOT = (item: WorkOrder) => {
+    setOrderToEdit(item);
+    setIsCreateModalOpen(true);
+  };
+
   const handleTandasBorrador = useCallback((tandas: TandaManual[]) => {
     tandasBorrador.current = tandas;
     registrarBorrador();
@@ -1247,6 +1459,10 @@ export default function OperacionesPage() {
       resultados: borrador.resultados || [],
       excedentes: borrador.excedentes || [],
       diagnosticos: borrador.diagnosticos || [],
+      // Un borrador se confirma con el arranque con el que se CALCULÓ, aunque se
+      // retome tres días después. Los guardados antes del 16/09/2026 no lo tienen y
+      // el backend recalcula, como venía haciendo.
+      inicioBase: borrador.inicioBase,
       huella: borrador.huella ?? null,
     };
     // La huella es la del MOMENTO DEL CÁLCULO, no la de ahora: si se tomara ahora,
@@ -1331,6 +1547,10 @@ export default function OperacionesPage() {
           // ninguno más. Sin esto lo adivinaba por el lote de OTs y se llevaba
           // puestos todos los borradores contenidos en la tanda, propios y ajenos.
           borrador_id: idBorradorEnBase(),
+          // El arranque con el que se armó ESTE plan. Sin esto el backend le vuelve
+          // a preguntar la hora al reloj al guardar, y un plan mirado a las 06:59 y
+          // confirmado a las 07:01 se guarda con un día de más.
+          inicio_base: baseBorrador.current?.inicioBase,
         }),
       });
 
@@ -1338,6 +1558,13 @@ export default function OperacionesPage() {
         toast.error("Error al guardar planificación");
         return;
       }
+
+      // El id de la planificación recién guardada, para dejar la pantalla parada en
+      // ELLA. Antes el cuerpo de la respuesta no se leía nunca y al volver a
+      // Operaciones aparecías donde estabas: con el desplegable en cualquier plan
+      // viejo, mirando el trabajo de otro mes.
+      const guardado = await response.json().catch(() => null);
+      const loteNuevo = guardado?.planificados?.id_planificacion_lote;
 
       toast.success("Planificación guardada exitosamente");
       // Dejó de ser un borrador: ahora es el plan. Si no se olvida acá, la próxima
@@ -1375,7 +1602,28 @@ export default function OperacionesPage() {
       setIsConfirmingPlan(false);
       setCalculando({ activo: false, ots: 0, listo: false, modo: "calcular" });
 
-      void fetchData();
+      // El plan recién hecho es el que hay que mirar: se cae en Órdenes de Trabajo >
+      // Planificadas > Pendientes, con esa planificación elegida. El lote se setea
+      // DESPUÉS de que `fetchData` trajo sus filas; si se hiciera antes, el desplegable
+      // quedaría un instante mostrando un plan del que todavía no llegó nada.
+      setActiveTab("work_orders");
+      setOtSubTab("planificadas");
+      setPlanSubTab("general");
+      setSelectedPlanIds([]);
+      void fetchData().then((filas) => {
+        // Sólo se salta a la planificación nueva si el refresco la trajo de verdad.
+        // `fetchData` se traga los errores del GET a propósito (es un refresco de
+        // fondo), así que sin esta guarda un error de red dejaba la pantalla parada en
+        // un lote vacío: el plan estaba guardado y parecía perdido.
+        if (!loteNuevo) return;
+        const llego = (filas || []).some((f: any) => f.id_planificacion_lote === loteNuevo);
+        if (!llego) {
+          toast.error("El plan se guardó bien, pero no se pudo actualizar la pantalla. Recargá.");
+          return;
+        }
+        yaSeEligioLote.current = true;
+        setSelectedLoteId(loteNuevo);
+      });
       return;
 
     } catch (error) {
@@ -1421,6 +1669,63 @@ export default function OperacionesPage() {
     }
   };
 
+  /**
+   * Borra todas las planificaciones viejas de una. La vigente nunca entra.
+   *
+   * No hay deshacer: el backend guarda un resumen de lo borrado (cuántas filas, cuántas
+   * OT, quién y cuándo) pero no copia las filas a ningún lado. Por eso el cartel dice
+   * con todas las letras qué se lleva, en vez de frenar.
+   */
+  const handleLimpiarViejas = async () => {
+    setLimpiandoViejas(true);
+    let borrados = 0;
+    try {
+      for (const lote of lotesViejos) {
+        const res = await fetch(`${API_URL}/planificacion/lote/${lote.id}`, {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) borrados++;
+      }
+      if (borrados === lotesViejos.length) {
+        toast.success(`${borrados} planificación${borrados === 1 ? "" : "es"} eliminada${borrados === 1 ? "" : "s"}`);
+      } else {
+        toast.warning(`Se eliminaron ${borrados} de ${lotesViejos.length}. Probá de nuevo con las que quedaron.`);
+      }
+      setSelectedLoteId(uniqueLotes[0]?.id ?? "all");
+      await fetchData();
+    } catch (error) {
+      console.error("Error limpiando planificaciones viejas:", error);
+      toast.error("No se pudieron eliminar las planificaciones viejas");
+    } finally {
+      setLimpiandoViejas(false);
+      setIsLimpiarViejasOpen(false);
+    }
+  };
+
+  /** "Planificación Septiembre 2026 (16/9/2026 11:00)". Estaba escrito adentro del
+   *  desplegable; ahora lo usan también el botón de borrar y su confirmación, para que
+   *  el cartel diga QUÉ se está por borrar y no "esta planificación". */
+  const nombreDelLote = (lote: { descripcion: string; date: string }) => {
+    const cuando = new Date(lote.date);
+    let label = lote.descripcion;
+    if (label.toLowerCase().includes("planificación")) {
+      const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+      label = `Planificación ${capitalize(format(cuando, "MMMM yyyy", { locale: es }))}`;
+    }
+    const hora = cuando.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `${label} (${cuando.toLocaleDateString()} ${hora})`;
+  };
+
+  /** Cuánto se lleva puesto borrar una planificación: OTs y renglones. */
+  const tamanoDelLote = (id: string) => {
+    const filas = rawPlanificacion.filter(p => p.id_planificacion_lote === id);
+    return { renglones: filas.length, ots: new Set(filas.map(f => f.orden_id)).size };
+  };
+
+  /** Las planificaciones que no son la vigente. La más nueva nunca entra. */
+  const lotesViejos = React.useMemo(() => uniqueLotes.slice(1), [uniqueLotes]);
+
   const handleDeleteLote = async () => {
     if (selectedLoteId === "all") return;
 
@@ -1433,8 +1738,12 @@ export default function OperacionesPage() {
 
       if (!response.ok) throw new Error("Error al eliminar el lote de planificación");
 
-      toast.success("Lote de planificación eliminado correctamente");
-      setSelectedLoteId("all");
+      toast.success("Planificación eliminada");
+      // Queda parado en la más nueva que sobrevivió. Volvía a "Todas", y como el tacho
+      // está deshabilitado con "Todas", para borrar la siguiente había que volver a
+      // elegirla — y elegirla mandaba toda la pantalla a ese mes.
+      const queQuedan = uniqueLotes.filter(l => l.id !== selectedLoteId);
+      setSelectedLoteId(queQuedan[0]?.id ?? "all");
       await fetchData();
     } catch (error) {
       console.error("Error deleting planning batch:", error);
@@ -1446,8 +1755,621 @@ export default function OperacionesPage() {
   };
 
 
+  /**
+   * LA PANTALLA DE PLANIFICACIÓN, que ahora vive adentro de «Planificadas».
+   *
+   * Eran dos pantallas separadas —Órdenes de Trabajo → Planificadas y la solapa
+   * Planificación— que mostraban lo mismo con distinto nivel de detalle: una con
+   * los horarios y otra sin ellos, cada una con su propia idea de qué está
+   * planificado. Julián, 16/09/2026: «creo que podemos unificar esta sección de
+   * planificación en planificadas y listo, meter todo ahí».
+   *
+   * El estado sigue viviendo acá arriba (el plan elegido, el día, los tildes) y lo
+   * que baja es el árbol ya armado: `WorkOrdersListWrapper` lo dibuja adentro de su
+   * solapa, sin saber nada de planificación.
+   */
+  const pantallaDePlanificacion = (
+            <Tabs
+              value={planSubTab}
+              onValueChange={(v) => { setPlanSubTab(v); setSelectedPlanIds([]); }}
+              className="w-full flex-1 flex flex-col"
+            >
+              {/* Los cortes de ADENTRO de Planificadas: qué parte del plan se mira.
+                  Van en riel gris y redondeados, más chicos que las solapas de arriba,
+                  para que se lea que son la navegación de adentro y no compitan con
+                  ellas. Si no entran, scrollean con degradado + flecha (no se cortan en
+                  silencio). El ancho lo ceden las acciones, no los cortes. */}
+              <div className="mb-4 flex flex-col lg:flex-row lg:items-center justify-between gap-2 lg:gap-3">
+                <ScrollableTabsBar className="rounded-full bg-gray-100/90 p-1 ring-1 ring-black/[0.03]">
+                  <TabsTrigger
+                    value="general"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                    title="Todo lo que falta hacer de la planificación elegida"
+                  >
+                    Pendientes
+                    {otsPendientes.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
+                        {otsPendientes.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="semanal"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                    title="Lo que falta hacer en la semana que estás mirando"
+                  >
+                    Semanal
+                    {otsDeLaSemana.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
+                        {otsDeLaSemana.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="diaria"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                    title="Lo que falta hacer el día que estás mirando"
+                  >
+                    Diaria
+                    {otsDelDia.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
+                        {otsDelDia.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="completadas"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                    title="El cliente ya las recibió completas"
+                  >
+                    Entregadas al cliente
+                    {completedPlannedOrdenes.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-green-100 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                        {completedPlannedOrdenes.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="finalizadas"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                    title="El taller las terminó y todavía no se entregaron"
+                  >
+                    Terminadas en el taller
+                    {otsTerminadasSinEntregar.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-blue-100 text-blue-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                        {otsTerminadasSinEntregar.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="carga"
+                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                  >
+                    Carga
+                  </TabsTrigger>
+                </ScrollableTabsBar>
+
+                {/* Acciones de la derecha. Antes eran `lg:flex-nowrap`, o sea rígidas (~750px
+                    entre selector de semana, zoom, Re-planificar, borrar y el Select). Como los
+                    tabs son el único elemento con `overflow-x-auto` — y por spec eso les da
+                    min-width automático 0 — los tabs absorbían TODO el faltante de ancho y
+                    quedaban cortados en "Planificadas | Seman" con el sidebar abierto.
+                    Ahora las acciones wrappean a una segunda fila (`min-w-0` para poder ceder)
+                    y los tabs, que son la navegación principal, se ven siempre completos. */}
+                <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap w-full lg:w-auto lg:min-w-0 lg:justify-end">
+
+                  {/* Selector de semana (al lado del zoom): muestra la semana visualizada
+                      y permite cambiarla. Comparte estado con las vistas Semanal/Diaria
+                      (customRefDate / lote / hoy). */}
+                  {(() => {
+                    const refDate = fechaReferencia;
+                    const day = refDate.getDay();
+                    const monday = new Date(refDate);
+                    monday.setDate(refDate.getDate() - day + (day === 0 ? -6 : 1));
+                    const sunday = new Date(monday);
+                    sunday.setDate(monday.getDate() + 6);
+                    const fmtD = (d: Date) => format(d, "d MMM", { locale: es });
+                    return (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" size="sm" className="bg-white border-gray-200 text-xs gap-1.5" title="Semana visualizada — clic para cambiarla">
+                            <CalendarClock className="h-3.5 w-3.5 text-gray-500" />
+                            <span className="hidden xl:inline text-gray-400 font-normal">Semana</span>
+                            <span className="font-medium">{fmtD(monday)}–{fmtD(sunday)}</span>
+                            <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="end">
+                          <div className="border-b px-3 py-2 flex items-center justify-between gap-4">
+                            <p className="text-xs font-semibold text-gray-700">Elegí una semana</p>
+                            {!mirandoHoy && (
+                              <button onClick={() => setCustomRefDate(null)} className="text-[11px] text-blue-600 hover:underline">Volver a hoy</button>
+                            )}
+                          </div>
+                          <CalendarPicker
+                            mode="single"
+                            selected={refDate}
+                            onSelect={(d) => d && setCustomRefDate(d)}
+                            modifiers={{ hasPlan: plannedDateObjects }}
+                            modifiersClassNames={{
+                              hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
+                            }}
+                            locale={es}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    );
+                  })()}
+
+                  {/* Zoom control compartido (mismo storage key que No Planificadas,
+                      Historial, Planificar y Vista Previa). */}
+                  <ZoomControl value={planZoom} onChange={setPlanZoom} />
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (selectedLoteId === "all") {
+                        toast.error("Seleccione una planificación específica para re-planificar.");
+                        return;
+                      }
+                      setIsReplanning(true);
+                      setIsSelectionModalOpen(true);
+                    }}
+                    className={cn(
+                      "bg-white border-blue-200 transition-colors",
+                      selectedLoteId === "all"
+                        ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                        : "text-blue-600 hover:bg-gray-50"
+                    )}
+                    title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Re-planificar este lote (incluyendo órdenes pendientes)"}
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5 lg:mr-2", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
+                    <span className="hidden lg:inline">Re-planificar</span>
+                  </Button>
+
+                  {/* Tachito con doble función:
+                        - Con OTs tildadas → las saca de la planificación (una o varias).
+                        - Sin nada tildado → elimina el lote entero (comportamiento viejo). */}
+                  {(() => {
+                    const haySeleccion = selectedPlanIds.length > 0;
+                    const deshabilitado = (!haySeleccion && selectedLoteId === "all") || isDeletingLote || isQuitandoOts;
+                    return (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => haySeleccion ? setIsQuitarOtsDialogOpen(true) : setIsDeleteLoteDialogOpen(true)}
+                        className={cn(
+                          "bg-white border-red-200 transition-colors gap-1.5",
+                          deshabilitado
+                            ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                            : "text-red-600 hover:bg-red-50"
+                        )}
+                        disabled={deshabilitado}
+                        title={
+                          haySeleccion
+                            ? `Quitar ${selectedPlanIds.length} OT${selectedPlanIds.length === 1 ? "" : "s"} de la planificación`
+                            : selectedLoteId === "all"
+                              ? "Tildá OTs para quitarlas, o elegí una planificación para eliminarla entera"
+                              : "Eliminar este lote de planificación"
+                        }
+                      >
+                        <Trash2 className={cn("h-3.5 w-3.5", deshabilitado ? "text-gray-400" : "text-red-600")} />
+                        {/* Es el mismo botón rojo para dos cosas muy distintas —sacar una OT
+                            o borrar el plan entero— y cuál de las dos hacía no se veía en
+                            ningún lado hasta después de apretarlo. */}
+                        <span className="text-xs font-semibold">
+                          {haySeleccion
+                            ? `Quitar ${selectedPlanIds.length} OT${selectedPlanIds.length === 1 ? "" : "s"}`
+                            : "Eliminar plan"}
+                        </span>
+                      </Button>
+                    );
+                  })()}
+
+                  <Select
+                    value={selectedLoteId}
+                    onValueChange={(v) => {
+                      if (v === LIMPIAR_VIEJAS) { setIsLimpiarViejasOpen(true); return; }
+                      setSelectedLoteId(v);
+                    }}
+                  >
+                    <SelectTrigger className="w-[180px] lg:w-[220px] xl:w-[260px] bg-white border-gray-200 text-xs lg:text-sm">
+                      <SelectValue placeholder="Lote / Historial" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas las Planificaciones</SelectItem>
+                      {uniqueLotes.map((lote, i) => (
+                        <SelectItem key={lote.id} value={lote.id}>
+                          {nombreDelLote(lote)}{i === 0 ? " · la que está corriendo" : ""}
+                        </SelectItem>
+                      ))}
+                      {/* Limpiar las viejas de una: borrar una son cuatro clicks y hay que
+                          ELEGIRLA primero, lo que manda toda la pantalla a ese mes. La
+                          vigente —la primera de la lista— nunca entra. */}
+                      {lotesViejos.length > 0 && (
+                        <SelectItem value={LIMPIAR_VIEJAS} className="text-red-600">
+                          Limpiar planificaciones viejas ({lotesViejos.length})
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* El zoom NO se aplica acá globalmente — se pasa como prop `tableZoom`
+                  a cada PlanningListTable para que solo afecte la tabla, no la barra
+                  de búsqueda ni los banners de Semanal/Diaria. */}
+              <div className="flex-1 p-0">
+                <TabsContent value="general" className="m-0 h-full">
+                  {/* General: todas las que NO están terminadas ni entregadas.
+                      Las entregadas completas se mudan a la pestaña "Completadas". */}
+                  <PlanningListTable
+                    tableZoom={planZoom}
+                    data={otsPendientes}
+                    mensajeVacio="Esta planificación no tiene trabajo pendiente: ya está todo terminado o entregado."
+                    selectedIds={selectedPlanIds}
+                    onSelectionChange={setSelectedPlanIds}
+                    isLoading={isLoading}
+                    onProcessStatusChange={handleProcessStatusChange}
+                    onProcessReorder={handleProcessReorder}
+                    onOperatorChange={(planId, operarioId) => handleOperatorChange(operarioId.toString(), planId.toString())}
+                    onMachineryChange={handleMachineryChange}
+                    operarios={rawOperarios}
+                    maquinarias={rawMaquinarias}
+                    // La planificación ELEGIDA arriba, no todas juntas. Una OT que se
+                    // planificó dos veces tiene una fila por plan, y la fila que se
+                    // mostraba (y se editaba) era la primera de la lista mezclada: con
+                    // septiembre elegido podías estar leyendo, y corrigiendo, la de mayo.
+                    planificacion={filteredPlanificacion}
+                    feriados={feriados}
+                    onRowClick={abrirOT}
+                    onDataChange={fetchData}
+                  />
+                </TabsContent>
+
+                <TabsContent value="semanal" className="m-0 h-full">
+                  {/* Weekly: Filter by reference week based on selected Lote.
+                      La fecha de cada proceso sale de `inicioDeLaFila` (lib/plan-fechas):
+                      la que calculó el backend con la jornada real del taller y el arranque
+                      de ese plan. Acá había una cuenta propia —`creado_en` a las 09:00 más
+                      los minutos, con jornada de 09 a 18— que ponía el trabajo en el día en
+                      que se apretó "Planificar" en vez del día en que se hace. */}
+                  {/* Banner Semanal — rediseñado para verse pro:
+                        - Icono en cuadrito propio con fondo (jerarquía visual)
+                        - Label uppercase pequeño arriba ("Semana") + rango en grande
+                        - Badge con dot de color según origen (Hoy / Personalizada / Lote)
+                        - Botón explícito "Cambiar fecha" + "Volver a hoy" condicional */}
+                  {(() => {
+                    const refDate = fechaReferencia;
+                    let badgeText = "Esta semana";
+                    // Paleta en sintonía con la marca (rojo) + estados:
+                    //   - Default (esta semana / hoy): verde teal (estado positivo, complementa al rojo)
+                    //   - Personalizada: ámbar (warm tone, complementario al rojo de marca)
+                    //   - Según lote: índigo (frío, distingue del rojo sin chocar)
+                    let badgeColor = "bg-teal-50 text-teal-700 ring-teal-200/80";
+                    let badgeDot = "bg-teal-500";
+                    if (!mirandoHoy) {
+                      badgeText = "Fecha personalizada";
+                      badgeColor = "bg-amber-50 text-amber-800 ring-amber-200/80";
+                      badgeDot = "bg-amber-500";
+                    }
+                    const day = refDate.getDay();
+                    const diff = refDate.getDate() - day + (day === 0 ? -6 : 1);
+                    const monday = new Date(refDate);
+                    monday.setDate(diff);
+                    const sunday = new Date(monday);
+                    sunday.setDate(monday.getDate() + 6);
+                    const fmt = (d: Date) => format(d, "d 'de' MMM", { locale: es });
+                    const year = monday.getFullYear();
+
+                    return (
+                      <div className="mb-5 rounded-xl border border-red-100/80 bg-gradient-to-br from-white via-rose-50/40 to-red-50/30 shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
+                          {/* Icono + Info principal */}
+                          <div className="flex items-center gap-4 flex-1 min-w-0">
+                            <div className="shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#DC143C] to-[#B01030] shadow-md shadow-red-500/25 ring-1 ring-white/20">
+                              <CalendarClock className="h-6 w-6 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-900/60">
+                                Semana visualizada
+                                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${badgeDot}`} />
+                                  {badgeText}
+                                </span>
+                                {otsDeLaSemana.length === 0 && primerDiaConTrabajo && (
+                                  <button
+                                    onClick={() => setCustomRefDate(primerDiaConTrabajo)}
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 ring-1 ring-inset ring-blue-200/80 hover:bg-blue-100 transition-colors normal-case"
+                                  >
+                                    <CalendarClock className="h-3 w-3" />
+                                    Esta planificación arranca el {format(primerDiaConTrabajo, "EEE d/MM", { locale: es })} — ir a esa semana
+                                  </button>
+                                )}
+                              </div>
+                              <div className="mt-1 text-lg sm:text-xl font-bold text-slate-900 leading-tight tracking-tight">
+                                {fmt(monday)}
+                                <span className="mx-2 text-red-400/60 font-normal">→</span>
+                                {fmt(sunday)}
+                                <span className="ml-2 text-slate-400 font-normal text-base">{year}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Acciones */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!mirandoHoy && (
+                              <button
+                                onClick={() => setCustomRefDate(null)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 hover:border-red-300 transition-colors"
+                              >
+                                Volver a hoy
+                              </button>
+                            )}
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#DC143C] to-[#B01030] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 hover:brightness-110 active:scale-[0.98] transition-all">
+                                  <CalendarClock className="h-3.5 w-3.5" />
+                                  Cambiar fecha
+                                  <ChevronDown className="h-3.5 w-3.5 opacity-80" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0 border-red-100 shadow-xl shadow-red-500/10" align="end">
+                                <div className="border-b border-red-100 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-2.5">
+                                  <p className="text-xs font-semibold text-red-900">Elegí una fecha</p>
+                                  <p className="text-[10px] text-red-700/70 mt-0.5">Los días con un punto tienen OTs planificadas</p>
+                                </div>
+                                <CalendarPicker
+                                  mode="single"
+                                  selected={refDate}
+                                  onSelect={(d) => d && setCustomRefDate(d)}
+                                  modifiers={{ hasPlan: plannedDateObjects }}
+                                  modifiersClassNames={{
+                                    hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
+                                  }}
+                                  locale={es}
+                                />
+                                <div className="border-t border-red-100 bg-rose-50/40 px-3 py-2 text-[11px] text-red-900/80 flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-[#DC143C]" />
+                                  Días con OTs planificadas
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <PlanningListTable
+                    tableZoom={planZoom}
+                    data={otsDeLaSemana}
+                    mensajeVacio="Esta semana no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
+                    selectedIds={selectedPlanIds}
+                    onSelectionChange={setSelectedPlanIds}
+                    isLoading={isLoading}
+                    onProcessStatusChange={handleProcessStatusChange}
+                    onProcessReorder={handleProcessReorder}
+                    onOperatorChange={(planId, operarioId) => handleOperatorChange(operarioId.toString(), planId.toString())}
+                    onMachineryChange={handleMachineryChange}
+                    operarios={rawOperarios}
+                    maquinarias={rawMaquinarias}
+                    planificacion={filteredPlanificacion}
+                    feriados={feriados}
+                    onRowClick={abrirOT}
+                    onDataChange={fetchData}
+                  />
+                </TabsContent>
+
+                <TabsContent value="diaria" className="m-0 h-full">
+                  {/* Daily: misma regla que Semanal — el inicio y el fin de cada proceso
+                      salen de `inicioDeLaFila` / `finDeLaFila` (lib/plan-fechas). */}
+                  {/* Banner Diaria — mismo lenguaje visual que Semanal. Muestra el día
+                      en grande (día de la semana + fecha) con badge de origen. */}
+                  {(() => {
+                    const refDate = fechaReferencia;
+                    // Misma paleta que el banner Semanal — consistencia visual.
+                    let badgeText = "Hoy";
+                    let badgeColor = "bg-teal-50 text-teal-700 ring-teal-200/80";
+                    let badgeDot = "bg-teal-500";
+                    if (!mirandoHoy) {
+                      badgeText = "Fecha personalizada";
+                      badgeColor = "bg-amber-50 text-amber-800 ring-amber-200/80";
+                      badgeDot = "bg-amber-500";
+                    }
+                    const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+                    const diaSemana = capitalize(format(refDate, "EEEE", { locale: es }));
+                    const fechaCompleta = format(refDate, "d 'de' MMMM, yyyy", { locale: es });
+                    // Detectar si la fecha de referencia coincide con algún día que tiene OTs.
+                    const refKey = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}-${String(refDate.getDate()).padStart(2, '0')}`;
+                    const tieneOTs = plannedDates.has(refKey);
+
+                    return (
+                      <div className="mb-5 rounded-xl border border-red-100/80 bg-gradient-to-br from-white via-rose-50/40 to-red-50/30 shadow-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
+                          {/* Icono + Info principal */}
+                          <div className="flex items-center gap-4 flex-1 min-w-0">
+                            <div className="shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#DC143C] to-[#B01030] shadow-md shadow-red-500/25 ring-1 ring-white/20">
+                              <CalendarClock className="h-6 w-6 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-900/60">
+                                Día visualizado
+                                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${badgeDot}`} />
+                                  {badgeText}
+                                </span>
+                                {tieneOTs && (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200/80">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+                                    Con OTs planificadas
+                                  </span>
+                                )}
+                                {/* El día está vacío pero la planificación tiene trabajo más
+                                    adelante: decirlo, y ofrecer ir. Un día en blanco sin
+                                    explicación se lee como «se perdió el plan». */}
+                                {!tieneOTs && primerDiaConTrabajo && (
+                                  <button
+                                    onClick={() => setCustomRefDate(primerDiaConTrabajo)}
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 ring-1 ring-inset ring-blue-200/80 hover:bg-blue-100 transition-colors normal-case"
+                                  >
+                                    <CalendarClock className="h-3 w-3" />
+                                    Esta planificación arranca el {format(primerDiaConTrabajo, "EEE d/MM", { locale: es })} — ir a ese día
+                                  </button>
+                                )}
+                              </div>
+                              <div className="mt-1 text-lg sm:text-xl font-bold text-slate-900 leading-tight tracking-tight">
+                                {diaSemana}
+                                <span className="ml-2 text-slate-500 font-medium">{fechaCompleta}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Acciones */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!mirandoHoy && (
+                              <button
+                                onClick={() => setCustomRefDate(null)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 hover:border-red-300 transition-colors"
+                              >
+                                Volver a hoy
+                              </button>
+                            )}
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#DC143C] to-[#B01030] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 hover:brightness-110 active:scale-[0.98] transition-all">
+                                  <CalendarClock className="h-3.5 w-3.5" />
+                                  Cambiar fecha
+                                  <ChevronDown className="h-3.5 w-3.5 opacity-80" />
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0 border-red-100 shadow-xl shadow-red-500/10" align="end">
+                                <div className="border-b border-red-100 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-2.5">
+                                  <p className="text-xs font-semibold text-red-900">Elegí una fecha</p>
+                                  <p className="text-[10px] text-red-700/70 mt-0.5">Los días con un punto tienen OTs planificadas</p>
+                                </div>
+                                <CalendarPicker
+                                  mode="single"
+                                  selected={refDate}
+                                  onSelect={(d) => d && setCustomRefDate(d)}
+                                  modifiers={{ hasPlan: plannedDateObjects }}
+                                  modifiersClassNames={{
+                                    hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
+                                  }}
+                                  locale={es}
+                                />
+                                <div className="border-t border-red-100 bg-rose-50/40 px-3 py-2 text-[11px] text-red-900/80 flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-[#DC143C]" />
+                                  Días con OTs planificadas
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <PlanningListTable
+                    tableZoom={planZoom}
+                    data={otsDelDia}
+                    mensajeVacio="Este día no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
+                    selectedIds={selectedPlanIds}
+                    onSelectionChange={setSelectedPlanIds}
+                    isLoading={isLoading}
+                    onProcessStatusChange={handleProcessStatusChange}
+                    onProcessReorder={handleProcessReorder}
+                    onOperatorChange={(planId, operarioId) => handleOperatorChange(operarioId.toString(), planId.toString())}
+                    onMachineryChange={handleMachineryChange}
+                    operarios={rawOperarios}
+                    maquinarias={rawMaquinarias}
+                    planificacion={filteredPlanificacion}
+                    feriados={feriados}
+                    onRowClick={abrirOT}
+                    onDataChange={fetchData}
+                  />
+                </TabsContent>
+
+                <TabsContent value="completadas" className="m-0 h-full">
+                  {/* Completadas: OTs planificadas con la entrega completa (o ya marcadas
+                      como entregadas por el legacy). Salen de "Planificadas" y caen acá,
+                      así la lista de trabajo pendiente queda limpia. */}
+                  <div className="mb-3 flex items-start gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-green-800">
+                      OTs de esta planificación que <span className="font-semibold">el cliente ya recibió</span> completas.
+                      Se sacan solas de <span className="font-semibold">Planificadas</span>, de Semanal y de Diaria,
+                      para que ahí quede sólo lo que falta hacer.
+                    </p>
+                  </div>
+                  <PlanningListTable
+                    tableZoom={planZoom}
+                    data={completedPlannedOrdenes}
+                    mensajeVacio="Todavía no se entregó ninguna OT de esta planificación."
+                    selectedIds={selectedPlanIds}
+                    onSelectionChange={setSelectedPlanIds}
+                    isLoading={isLoading}
+                    onProcessStatusChange={handleProcessStatusChange}
+                    onProcessReorder={handleProcessReorder}
+                    onOperatorChange={(planId, operarioId) => handleOperatorChange(operarioId.toString(), planId.toString())}
+                    onMachineryChange={handleMachineryChange}
+                    operarios={rawOperarios}
+                    maquinarias={rawMaquinarias}
+                    planificacion={filteredPlanificacion}
+                    feriados={feriados}
+                    onRowClick={abrirOT}
+                    onDataChange={fetchData}
+                  />
+                </TabsContent>
+
+                <TabsContent value="finalizadas" className="m-0 h-full">
+                  {/* Terminadas en el taller: todos los pasos tildados y TODAVÍA SIN
+                      ENTREGAR. El "sin entregar" es lo que la distingue de la solapa de
+                      al lado; sin eso las dos listas decían casi lo mismo. */}
+                  <div className="mb-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+                    <CheckCircle2 className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-blue-900">
+                      OTs con <span className="font-semibold">todos los pasos terminados</span> que
+                      todavía no se entregaron: es lo que hay para despachar. Cuando se entregan
+                      pasan a <span className="font-semibold">Entregadas al cliente</span>.
+                    </p>
+                  </div>
+                  <PlanningListTable
+                    tableZoom={planZoom}
+                    data={otsTerminadasSinEntregar}
+                    mensajeVacio="No hay nada terminado esperando despacho en esta planificación."
+                    selectedIds={selectedPlanIds}
+                    onSelectionChange={setSelectedPlanIds}
+                    isLoading={isLoading}
+                    onProcessStatusChange={handleProcessStatusChange}
+                    onProcessReorder={handleProcessReorder}
+                    onOperatorChange={(planId, operarioId) => handleOperatorChange(operarioId.toString(), planId.toString())}
+                    onMachineryChange={handleMachineryChange}
+                    operarios={rawOperarios}
+                    maquinarias={rawMaquinarias}
+                    planificacion={filteredPlanificacion}
+                    feriados={feriados}
+                    onRowClick={abrirOT}
+                    onDataChange={fetchData}
+                  />
+                </TabsContent>
+
+                <TabsContent value="carga" className="m-0 h-full">
+                  {/* La carga de cada persona es LO QUE LE FALTA HACER: se sacan los pasos
+                      ya terminados y las OTs ya entregadas. Se sumaba todo, así que los
+                      minutos y los "Días Ocupados" venían inflados con trabajo hecho y
+                      cobrado, y con eso se decidía a quién cargarle lo que viene. */}
+                  <OperatorLoadTab
+                    planificacion={cargaPendiente}
+                    operarios={rawOperarios}
+                    ordenes={ordenesTrabajo}
+                  />
+                </TabsContent>
+              </div>
+            </Tabs>
+  );
+
   return (
-    <div className={"flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'xl:mr-[400px]' : '')}>
+    <div className={"flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'xl:mr-[400px]' : '')}>
       {/* La raíz no pone ni alto ni fondo: los pone la pantalla de adentro, que
           arranca justo del alto de la ventana. El `min-h-screen` que había acá
           sumaba los 24px de arriba y abajo del layout y hacía scrollear el
@@ -1488,6 +2410,8 @@ export default function OperacionesPage() {
             onEdicionesChange={handleEdicionesBorrador}
             onTandasChange={handleTandasBorrador}
             calculadoEn={planCalculadoEn}
+            inicioBase={baseBorrador.current?.inicioBase}
+            feriados={feriados}
             onConfirm={handleConfirmPlan}
             results={previewResults}
             excedentes={excedentesResults}
@@ -1599,13 +2523,7 @@ export default function OperacionesPage() {
               <LayoutList size={18} />
               Órdenes de Trabajo
             </button>
-            <button
-              onClick={() => setActiveTab("lista_planificacion")}
-              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "lista_planificacion" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
-            >
-              <LayoutList size={18} />
-              Planificación
-            </button>
+            
             {/* <button
               onClick={() => setActiveTab("gantt")}
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "gantt" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
@@ -1633,11 +2551,8 @@ export default function OperacionesPage() {
           </div>
         </div>
 
-        {/* El contenido apoya directo sobre la pantalla, sin card propio.
-            `lista_planificacion` va sin padding para que su barra de sub-solapas
-            toque los bordes; en `work_orders` el margen lateral es mínimo porque
-            cada píxel de aire es ancho de columna que la tabla pierde. */}
-        <div className={`flex-1 min-w-0 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'px-3 pt-3 pb-6' : activeTab === 'lista_planificacion' ? 'p-0 overflow-hidden' : 'px-4 py-4 sm:px-5'}`}>
+        {/* El padding lo pone cada pantalla. */}
+        <div className={`flex-1 min-w-0 flex flex-col ${activeTab === 'gantt' ? 'p-2' : activeTab === 'work_orders' ? 'px-3 pt-3 pb-6' : 'px-4 py-4 sm:px-5'}`}>
             {activeTab === "operarios" && (
               <div className="w-full">
                 <div className="flex items-center gap-2 mb-4">
@@ -1678,646 +2593,11 @@ export default function OperacionesPage() {
                 orders={ordenesTrabajo}
                 planificacion={rawPlanificacion}
                 onRefresh={fetchData}
+                contenidoPlanificadas={pantallaDePlanificacion}
+                conteoPlanificadas={otsPendientes.length}
+                subTab={otSubTab}
+                onSubTabChange={(v) => { setOtSubTab(v); if (v !== "planificadas") setSelectedPlanIds([]); }}
               />
-            )}
-            {activeTab === "lista_planificacion" && (
-              <Tabs
-                value={planSubTab}
-                onValueChange={(v) => { setPlanSubTab(v); setSelectedPlanIds([]); }}
-                className="w-full flex-1 flex flex-col"
-              >
-                {/* Header de sub-tabs: `lg:flex-row` para que tabs y acciones queden lado a lado
-                    desde 1024px. Prioridad de ancho: los tabs son navegación principal y NO
-                    ceden (`lg:shrink-0` dentro de ScrollableTabsBar); si no entra todo, lo que
-                    wrappea a una segunda fila son las acciones. Por debajo de 1024px los tabs sí
-                    scrollean horizontal, pero mostrando degradado + flecha. */}
-                <div className="border-b px-4 sm:px-6 pt-2 bg-gray-50/50 flex flex-col lg:flex-row lg:items-center justify-between gap-2 lg:gap-3">
-                  <ScrollableTabsBar>
-                    <TabsTrigger
-                      value="general"
-                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
-                    >
-                      Planificadas
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="semanal"
-                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
-                    >
-                      Semanal
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="diaria"
-                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
-                    >
-                      Diaria
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="completadas"
-                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
-                      title="OTs planificadas que ya se entregaron completas"
-                    >
-                      Completadas
-                      {completedPlannedOrdenes.length > 0 && (
-                        <span className="ml-1.5 rounded-full bg-green-100 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold">
-                          {completedPlannedOrdenes.length}
-                        </span>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="finalizadas"
-                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
-                    >
-                      Finalizadas
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="carga"
-                      className="shrink-0 rounded-none border-b-2 border-transparent px-2 lg:px-3 py-2.5 text-xs sm:text-sm font-medium text-gray-500 data-[state=active]:border-red-600 data-[state=active]:text-red-700 data-[state=active]:bg-transparent hover:text-gray-700 transition-colors"
-                    >
-                      Carga
-                    </TabsTrigger>
-                  </ScrollableTabsBar>
-
-                  {/* Acciones de la derecha. Antes eran `lg:flex-nowrap`, o sea rígidas (~750px
-                      entre selector de semana, zoom, Re-planificar, borrar y el Select). Como los
-                      tabs son el único elemento con `overflow-x-auto` — y por spec eso les da
-                      min-width automático 0 — los tabs absorbían TODO el faltante de ancho y
-                      quedaban cortados en "Planificadas | Seman" con el sidebar abierto.
-                      Ahora las acciones wrappean a una segunda fila (`min-w-0` para poder ceder)
-                      y los tabs, que son la navegación principal, se ven siempre completos. */}
-                  <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap w-full lg:w-auto lg:min-w-0 lg:justify-end">
-
-                    {/* Selector de semana (al lado del zoom): muestra la semana visualizada
-                        y permite cambiarla. Comparte estado con las vistas Semanal/Diaria
-                        (customRefDate / lote / hoy). */}
-                    {(() => {
-                      let refDate = new Date();
-                      if (customRefDate) refDate = customRefDate;
-                      else if (selectedLoteId !== "all") {
-                        const lote = uniqueLotes.find(l => l.id === selectedLoteId);
-                        if (lote) refDate = new Date(lote.date);
-                      }
-                      const day = refDate.getDay();
-                      const monday = new Date(refDate);
-                      monday.setDate(refDate.getDate() - day + (day === 0 ? -6 : 1));
-                      const sunday = new Date(monday);
-                      sunday.setDate(monday.getDate() + 6);
-                      const fmtD = (d: Date) => format(d, "d MMM", { locale: es });
-                      return (
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" size="sm" className="bg-white border-gray-200 text-xs gap-1.5" title="Semana visualizada — clic para cambiarla">
-                              <CalendarClock className="h-3.5 w-3.5 text-gray-500" />
-                              <span className="hidden xl:inline text-gray-400 font-normal">Semana</span>
-                              <span className="font-medium">{fmtD(monday)}–{fmtD(sunday)}</span>
-                              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="end">
-                            <div className="border-b px-3 py-2 flex items-center justify-between gap-4">
-                              <p className="text-xs font-semibold text-gray-700">Elegí una semana</p>
-                              {customRefDate && (
-                                <button onClick={() => setCustomRefDate(null)} className="text-[11px] text-blue-600 hover:underline">Volver a hoy</button>
-                              )}
-                            </div>
-                            <CalendarPicker
-                              mode="single"
-                              selected={refDate}
-                              onSelect={(d) => d && setCustomRefDate(d)}
-                              modifiers={{ hasPlan: plannedDateObjects }}
-                              modifiersClassNames={{
-                                hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
-                              }}
-                              locale={es}
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      );
-                    })()}
-
-                    {/* Zoom control compartido (mismo storage key que No Planificadas,
-                        Historial, Planificar y Vista Previa). */}
-                    <ZoomControl value={planZoom} onChange={setPlanZoom} />
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (selectedLoteId === "all") {
-                          toast.error("Seleccione una planificación específica para re-planificar.");
-                          return;
-                        }
-                        setIsReplanning(true);
-                        setIsSelectionModalOpen(true);
-                      }}
-                      className={cn(
-                        "bg-white border-blue-200 transition-colors",
-                        selectedLoteId === "all"
-                          ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
-                          : "text-blue-600 hover:bg-gray-50"
-                      )}
-                      title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Re-planificar este lote (incluyendo órdenes pendientes)"}
-                    >
-                      <RefreshCw className={cn("h-3.5 w-3.5 lg:mr-2", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
-                      <span className="hidden lg:inline">Re-planificar</span>
-                    </Button>
-
-                    {/* Tachito con doble función:
-                          - Con OTs tildadas → las saca de la planificación (una o varias).
-                          - Sin nada tildado → elimina el lote entero (comportamiento viejo). */}
-                    {(() => {
-                      const haySeleccion = selectedPlanIds.length > 0;
-                      const deshabilitado = (!haySeleccion && selectedLoteId === "all") || isDeletingLote || isQuitandoOts;
-                      return (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => haySeleccion ? setIsQuitarOtsDialogOpen(true) : setIsDeleteLoteDialogOpen(true)}
-                          className={cn(
-                            "bg-white border-red-200 transition-colors gap-1.5",
-                            deshabilitado
-                              ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
-                              : "text-red-600 hover:bg-red-50"
-                          )}
-                          disabled={deshabilitado}
-                          title={
-                            haySeleccion
-                              ? `Quitar ${selectedPlanIds.length} OT${selectedPlanIds.length === 1 ? "" : "s"} de la planificación`
-                              : selectedLoteId === "all"
-                                ? "Tildá OTs para quitarlas, o elegí una planificación para eliminarla entera"
-                                : "Eliminar este lote de planificación"
-                          }
-                        >
-                          <Trash2 className={cn("h-3.5 w-3.5", deshabilitado ? "text-gray-400" : "text-red-600")} />
-                          {haySeleccion && (
-                            <span className="text-xs font-semibold">{selectedPlanIds.length}</span>
-                          )}
-                        </Button>
-                      );
-                    })()}
-
-                    <Select value={selectedLoteId} onValueChange={setSelectedLoteId}>
-                      <SelectTrigger className="w-[180px] lg:w-[220px] xl:w-[260px] bg-white border-gray-200 text-xs lg:text-sm">
-                        <SelectValue placeholder="Lote / Historial" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Todas las Planificaciones</SelectItem>
-                        {uniqueLotes.map(lote => {
-                          const dateObj = new Date(lote.date);
-
-                          // Translate/Format Description
-                          let label = lote.descripcion;
-                          // If it looks like default format "Planificación [Month] [Year]", reformat it
-                          if (label.toLowerCase().includes("planificación")) {
-                            const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-                            const monthYear = capitalize(format(dateObj, 'MMMM yyyy', { locale: es }));
-                            label = `Planificación ${monthYear}`;
-                          }
-
-                          const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                          return (
-                            <SelectItem key={lote.id} value={lote.id}>
-                              {label} ({dateObj.toLocaleDateString()} {timeStr})
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* El zoom NO se aplica acá globalmente — se pasa como prop `tableZoom`
-                    a cada PlanningListTable para que solo afecte la tabla, no la barra
-                    de búsqueda ni los banners de Semanal/Diaria. */}
-                <div className="flex-1 p-0">
-                  <TabsContent value="general" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    {/* General: todas las que NO están terminadas ni entregadas.
-                        Las entregadas completas se mudan a la pestaña "Completadas". */}
-                    <PlanningListTable
-                      tableZoom={planZoom}
-                      data={plannedOrdenes.filter(order => {
-                        // Exclude if all processes are finalized
-                        const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
-                        return !allFinalized && !isOrderCompleted(order);
-                      })}
-                      selectedIds={selectedPlanIds}
-                      onSelectionChange={setSelectedPlanIds}
-                      isLoading={isLoading}
-                      onProcessStatusChange={handleProcessStatusChange}
-                      onProcessReorder={handleProcessReorder}
-                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
-                      onMachineryChange={handleMachineryChange}
-                      operarios={rawOperarios}
-                      maquinarias={rawMaquinarias}
-                      planificacion={rawPlanificacion}
-                      onRowClick={(item) => {
-                        setOrderToEdit(item);
-                        setIsCreateModalOpen(true);
-                      }}
-                      onDataChange={fetchData}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="semanal" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    {/* Weekly: Filter by reference week based on selected Lote.
-                        Bug previo: el código filtraba por `p.fecha_inicio_estimada` pero ese
-                        campo NO EXISTE en la tabla `planificacion`. Solo tiene `creado_en` +
-                        `inicio_min` (offset en minutos hábiles). La fecha real se calcula
-                        con `addWorkMinutes(creado_en@9am, inicio_min)` — misma lógica que
-                        usa el Gantt y `getScheduledStart` en PlanningListTable. */}
-                    {/* Banner Semanal — rediseñado para verse pro:
-                          - Icono en cuadrito propio con fondo (jerarquía visual)
-                          - Label uppercase pequeño arriba ("Semana") + rango en grande
-                          - Badge con dot de color según origen (Hoy / Personalizada / Lote)
-                          - Botón explícito "Cambiar fecha" + "Volver a hoy" condicional */}
-                    {(() => {
-                      let refDate = new Date();
-                      let badgeText = "Esta semana";
-                      // Paleta en sintonía con la marca (rojo) + estados:
-                      //   - Default (esta semana / hoy): verde teal (estado positivo, complementa al rojo)
-                      //   - Personalizada: ámbar (warm tone, complementario al rojo de marca)
-                      //   - Según lote: índigo (frío, distingue del rojo sin chocar)
-                      let badgeColor = "bg-teal-50 text-teal-700 ring-teal-200/80";
-                      let badgeDot = "bg-teal-500";
-                      if (customRefDate) {
-                        refDate = customRefDate;
-                        badgeText = "Fecha personalizada";
-                        badgeColor = "bg-amber-50 text-amber-800 ring-amber-200/80";
-                        badgeDot = "bg-amber-500";
-                      } else if (selectedLoteId !== "all") {
-                        const lote = uniqueLotes.find(l => l.id === selectedLoteId);
-                        if (lote) {
-                          refDate = new Date(lote.date);
-                          badgeText = "Según lote";
-                          badgeColor = "bg-indigo-50 text-indigo-700 ring-indigo-200/80";
-                          badgeDot = "bg-indigo-500";
-                        }
-                      }
-                      const day = refDate.getDay();
-                      const diff = refDate.getDate() - day + (day === 0 ? -6 : 1);
-                      const monday = new Date(refDate);
-                      monday.setDate(diff);
-                      const sunday = new Date(monday);
-                      sunday.setDate(monday.getDate() + 6);
-                      const fmt = (d: Date) => format(d, "d 'de' MMM", { locale: es });
-                      const year = monday.getFullYear();
-
-                      return (
-                        <div className="mb-5 rounded-xl border border-red-100/80 bg-gradient-to-br from-white via-rose-50/40 to-red-50/30 shadow-sm">
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
-                            {/* Icono + Info principal */}
-                            <div className="flex items-center gap-4 flex-1 min-w-0">
-                              <div className="shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#DC143C] to-[#B01030] shadow-md shadow-red-500/25 ring-1 ring-white/20">
-                                <CalendarClock className="h-6 w-6 text-white" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-900/60">
-                                  Semana visualizada
-                                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
-                                    <span className={`h-1.5 w-1.5 rounded-full ${badgeDot}`} />
-                                    {badgeText}
-                                  </span>
-                                </div>
-                                <div className="mt-1 text-lg sm:text-xl font-bold text-slate-900 leading-tight tracking-tight">
-                                  {fmt(monday)}
-                                  <span className="mx-2 text-red-400/60 font-normal">→</span>
-                                  {fmt(sunday)}
-                                  <span className="ml-2 text-slate-400 font-normal text-base">{year}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Acciones */}
-                            <div className="flex items-center gap-2 shrink-0">
-                              {customRefDate && (
-                                <button
-                                  onClick={() => setCustomRefDate(null)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 hover:border-red-300 transition-colors"
-                                >
-                                  Volver a hoy
-                                </button>
-                              )}
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#DC143C] to-[#B01030] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 hover:brightness-110 active:scale-[0.98] transition-all">
-                                    <CalendarClock className="h-3.5 w-3.5" />
-                                    Cambiar fecha
-                                    <ChevronDown className="h-3.5 w-3.5 opacity-80" />
-                                  </button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0 border-red-100 shadow-xl shadow-red-500/10" align="end">
-                                  <div className="border-b border-red-100 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-2.5">
-                                    <p className="text-xs font-semibold text-red-900">Elegí una fecha</p>
-                                    <p className="text-[10px] text-red-700/70 mt-0.5">Los días con un punto tienen OTs planificadas</p>
-                                  </div>
-                                  <CalendarPicker
-                                    mode="single"
-                                    selected={refDate}
-                                    onSelect={(d) => d && setCustomRefDate(d)}
-                                    modifiers={{ hasPlan: plannedDateObjects }}
-                                    modifiersClassNames={{
-                                      hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
-                                    }}
-                                    locale={es}
-                                  />
-                                  <div className="border-t border-red-100 bg-rose-50/40 px-3 py-2 text-[11px] text-red-900/80 flex items-center gap-2">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-[#DC143C]" />
-                                    Días con OTs planificadas
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    <PlanningListTable
-                      tableZoom={planZoom}
-                      data={plannedOrdenes.filter(order => {
-                        // 1. Check if fully finalized (exclude)
-                        const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
-                        if (allFinalized) return false;
-
-                        // 2. Determine Reference Date.
-                        //    Prioridad: customRefDate (calendar override) > lote del dropdown > hoy.
-                        let referenceDate = new Date();
-                        if (customRefDate) {
-                          referenceDate = customRefDate;
-                        } else if (selectedLoteId !== "all") {
-                          const lote = uniqueLotes.find(l => l.id === selectedLoteId);
-                          if (lote) referenceDate = new Date(lote.date);
-                        }
-
-                        // 3. Calculate Week Range (Monday to Sunday)
-                        const getWeekRange = (d: Date) => {
-                          const date = new Date(d);
-                          const day = date.getDay(); // 0 (Sun) to 6 (Sat)
-                          const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
-                          const monday = new Date(date.setDate(diff));
-                          monday.setHours(0, 0, 0, 0);
-
-                          const sunday = new Date(monday);
-                          sunday.setDate(monday.getDate() + 6);
-                          sunday.setHours(23, 59, 59, 999);
-
-                          return { start: monday, end: sunday };
-                        };
-
-                        const { start, end } = getWeekRange(referenceDate);
-
-                        // 4. Check if any process in this order is scheduled for this week.
-                        //    Calculamos la fecha real a partir de creado_en + inicio_min
-                        //    (minutos hábiles desde las 9:00 del día de creación del plan).
-                        const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
-                        if (orderProcesses.length === 0) return false;
-
-                        return orderProcesses.some(p => {
-                          if (!p.creado_en || typeof p.inicio_min !== 'number') return false;
-                          const baseDate = new Date(p.creado_en);
-                          baseDate.setHours(9, 0, 0, 0);
-                          const pDate = addWorkMinutes(baseDate, p.inicio_min);
-                          return pDate >= start && pDate <= end;
-                        });
-                      })}
-                      isLoading={isLoading}
-                      onProcessStatusChange={handleProcessStatusChange}
-                      onProcessReorder={handleProcessReorder}
-                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
-                      onMachineryChange={handleMachineryChange}
-                      operarios={rawOperarios}
-                      maquinarias={rawMaquinarias}
-                      planificacion={rawPlanificacion} // Pass full planificacion for lookup
-                      onRowClick={(item) => {
-                        console.log("Clicked order:", item);
-                      }}
-                      onDataChange={fetchData}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="diaria" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    {/* Daily: mismo bug que Semanal — usaba `fecha_inicio_estimada` que no
-                        existe. Acá calculamos pStart con `creado_en + inicio_min` y pEnd con
-                        `creado_en + fin_min` (o fallback a `inicio_min`). */}
-                    {/* Banner Diaria — mismo lenguaje visual que Semanal. Muestra el día
-                        en grande (día de la semana + fecha) con badge de origen. */}
-                    {(() => {
-                      let refDate = new Date();
-                      let badgeText = "Hoy";
-                      // Misma paleta que el banner Semanal — consistencia visual.
-                      let badgeColor = "bg-teal-50 text-teal-700 ring-teal-200/80";
-                      let badgeDot = "bg-teal-500";
-                      if (customRefDate) {
-                        refDate = customRefDate;
-                        const isToday = refDate.toDateString() === new Date().toDateString();
-                        if (!isToday) {
-                          badgeText = "Fecha personalizada";
-                          badgeColor = "bg-amber-50 text-amber-800 ring-amber-200/80";
-                          badgeDot = "bg-amber-500";
-                        }
-                      } else if (selectedLoteId !== "all") {
-                        const lote = uniqueLotes.find(l => l.id === selectedLoteId);
-                        if (lote) {
-                          refDate = new Date(lote.date);
-                          badgeText = "Según lote";
-                          badgeColor = "bg-indigo-50 text-indigo-700 ring-indigo-200/80";
-                          badgeDot = "bg-indigo-500";
-                        }
-                      }
-                      const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-                      const diaSemana = capitalize(format(refDate, "EEEE", { locale: es }));
-                      const fechaCompleta = format(refDate, "d 'de' MMMM, yyyy", { locale: es });
-                      // Detectar si la fecha de referencia coincide con algún día que tiene OTs.
-                      const refKey = `${refDate.getFullYear()}-${String(refDate.getMonth() + 1).padStart(2, '0')}-${String(refDate.getDate()).padStart(2, '0')}`;
-                      const tieneOTs = plannedDates.has(refKey);
-
-                      return (
-                        <div className="mb-5 rounded-xl border border-red-100/80 bg-gradient-to-br from-white via-rose-50/40 to-red-50/30 shadow-sm">
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5">
-                            {/* Icono + Info principal */}
-                            <div className="flex items-center gap-4 flex-1 min-w-0">
-                              <div className="shrink-0 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#DC143C] to-[#B01030] shadow-md shadow-red-500/25 ring-1 ring-white/20">
-                                <CalendarClock className="h-6 w-6 text-white" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex flex-wrap items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-red-900/60">
-                                  Día visualizado
-                                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${badgeColor}`}>
-                                    <span className={`h-1.5 w-1.5 rounded-full ${badgeDot}`} />
-                                    {badgeText}
-                                  </span>
-                                  {tieneOTs && (
-                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200/80">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
-                                      Con OTs planificadas
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="mt-1 text-lg sm:text-xl font-bold text-slate-900 leading-tight tracking-tight">
-                                  {diaSemana}
-                                  <span className="ml-2 text-slate-500 font-medium">{fechaCompleta}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Acciones */}
-                            <div className="flex items-center gap-2 shrink-0">
-                              {customRefDate && (
-                                <button
-                                  onClick={() => setCustomRefDate(null)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50 hover:border-red-300 transition-colors"
-                                >
-                                  Volver a hoy
-                                </button>
-                              )}
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#DC143C] to-[#B01030] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-red-500/20 hover:shadow-lg hover:shadow-red-500/30 hover:brightness-110 active:scale-[0.98] transition-all">
-                                    <CalendarClock className="h-3.5 w-3.5" />
-                                    Cambiar fecha
-                                    <ChevronDown className="h-3.5 w-3.5 opacity-80" />
-                                  </button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0 border-red-100 shadow-xl shadow-red-500/10" align="end">
-                                  <div className="border-b border-red-100 bg-gradient-to-r from-rose-50 to-red-50 px-4 py-2.5">
-                                    <p className="text-xs font-semibold text-red-900">Elegí una fecha</p>
-                                    <p className="text-[10px] text-red-700/70 mt-0.5">Los días con un punto tienen OTs planificadas</p>
-                                  </div>
-                                  <CalendarPicker
-                                    mode="single"
-                                    selected={refDate}
-                                    onSelect={(d) => d && setCustomRefDate(d)}
-                                    modifiers={{ hasPlan: plannedDateObjects }}
-                                    modifiersClassNames={{
-                                      hasPlan: "relative font-bold text-[#DC143C] after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:bg-[#DC143C] after:rounded-full",
-                                    }}
-                                    locale={es}
-                                  />
-                                  <div className="border-t border-red-100 bg-rose-50/40 px-3 py-2 text-[11px] text-red-900/80 flex items-center gap-2">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-[#DC143C]" />
-                                    Días con OTs planificadas
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    <PlanningListTable
-                      tableZoom={planZoom}
-                      data={plannedOrdenes.filter(order => {
-                        // 1. Check if fully finalized (exclude)
-                        const allFinalized = order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
-                        if (allFinalized) return false;
-
-                        // 2. Determine Reference Date.
-                        //    Prioridad: customRefDate (calendar override) > lote del dropdown > hoy.
-                        let referenceDate = new Date();
-                        if (customRefDate) {
-                          referenceDate = customRefDate;
-                        } else if (selectedLoteId !== "all") {
-                          const lote = uniqueLotes.find(l => l.id === selectedLoteId);
-                          if (lote) referenceDate = new Date(lote.date);
-                        }
-
-                        // 3. Check if any process in this order overlaps with reference day.
-                        const orderProcesses = filteredPlanificacion.filter(p => p.orden_id === order.id);
-                        if (orderProcesses.length === 0) return false;
-
-                        const startOfDay = new Date(referenceDate);
-                        startOfDay.setHours(0, 0, 0, 0);
-                        const endOfDay = new Date(referenceDate);
-                        endOfDay.setHours(23, 59, 59, 999);
-
-                        return orderProcesses.some(p => {
-                          if (!p.creado_en || typeof p.inicio_min !== 'number') return false;
-                          const baseDate = new Date(p.creado_en);
-                          baseDate.setHours(9, 0, 0, 0);
-                          const pStart = addWorkMinutes(baseDate, p.inicio_min);
-                          const finMinutes = (typeof p.fin_min === 'number' && p.fin_min > p.inicio_min)
-                            ? p.fin_min
-                            : p.inicio_min;
-                          const pEnd = addWorkMinutes(baseDate, finMinutes);
-
-                          // Overlap: Task Start <= Day End AND Task End >= Day Start
-                          return pStart <= endOfDay && pEnd >= startOfDay;
-                        });
-                      })}
-                      isLoading={isLoading}
-                      onProcessStatusChange={handleProcessStatusChange}
-                      onProcessReorder={handleProcessReorder}
-                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
-                      onMachineryChange={handleMachineryChange}
-                      operarios={rawOperarios}
-                      maquinarias={rawMaquinarias}
-                      planificacion={rawPlanificacion}
-                      onRowClick={(item) => {
-                        console.log("Clicked order:", item);
-                      }}
-                      onDataChange={fetchData}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="completadas" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    {/* Completadas: OTs planificadas con la entrega completa (o ya marcadas
-                        como entregadas por el legacy). Salen de "Planificadas" y caen acá,
-                        así la lista de trabajo pendiente queda limpia. */}
-                    <div className="mb-3 flex items-start gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
-                      <p className="text-xs text-green-800">
-                        OTs de esta planificación que ya se entregaron completas. Se sacan automáticamente de
-                        <span className="font-semibold"> Planificadas</span> para que ahí quede solo lo que falta hacer.
-                      </p>
-                    </div>
-                    <PlanningListTable
-                      tableZoom={planZoom}
-                      data={completedPlannedOrdenes}
-                      selectedIds={selectedPlanIds}
-                      onSelectionChange={setSelectedPlanIds}
-                      isLoading={isLoading}
-                      onProcessStatusChange={handleProcessStatusChange}
-                      onProcessReorder={handleProcessReorder}
-                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
-                      onMachineryChange={handleMachineryChange}
-                      operarios={rawOperarios}
-                      maquinarias={rawMaquinarias}
-                      planificacion={rawPlanificacion}
-                      onRowClick={(item) => {
-                        setOrderToEdit(item);
-                        setIsCreateModalOpen(true);
-                      }}
-                      onDataChange={fetchData}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="finalizadas" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    {/* Finalizadas: Filter where ALL processes are status 3 (Finalizado) */}
-                    <PlanningListTable
-                      tableZoom={planZoom}
-                      data={plannedOrdenes.filter(order => {
-                        // Check if order has processes and ALL are status 3
-                        return order.procesos && order.procesos.length > 0 && order.procesos.every(p => p.estado_proceso.id === 3);
-                      })}
-                      isLoading={isLoading}
-                      onProcessStatusChange={handleProcessStatusChange}
-                      onProcessReorder={handleProcessReorder}
-                      onOperatorChange={(ordenId, procesoId, operarioId) => handleOperatorChange(operarioId.toString(), rawPlanificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId)?.id.toString())}
-                      operarios={rawOperarios}
-                      planificacion={rawPlanificacion}
-                      onRowClick={(item) => {
-                        console.log("Clicked order:", item);
-                      }}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="carga" className="m-0 h-full px-4 py-4 sm:px-6 sm:py-6">
-                    <OperatorLoadTab
-                      planificacion={filteredPlanificacion}
-                      operarios={rawOperarios}
-                      ordenes={ordenesTrabajo}
-                    />
-                  </TabsContent>
-                </div>
-              </Tabs>
             )}
 
         </div>
@@ -2326,7 +2606,7 @@ export default function OperacionesPage() {
       )}
 
       {/* Sidebar rendered as Fixed Sidebar (Full Height) */}
-      <div className={"fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && !planificadorAbierto && (activeTab === 'gantt' || activeTab === 'lista_planificacion')) ? 'translate-x-0' : 'translate-x-full')}>
+      <div className={"fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'translate-x-0' : 'translate-x-full')}>
         <TaskDetailsModal
           isOpen={isDetailsPanelOpen}
           selectedItem={selectedTask}
@@ -2369,7 +2649,9 @@ export default function OperacionesPage() {
         onClose={() => setIsAvailabilityModalOpen(false)}
       />
 
-      {activeTab === "lista_planificacion" && (
+      {/* Vive suelto: lo abre `isStatusConfirmOpen` desde cualquier lista. Estaba
+          colgado de la solapa "Planificación", que ya no existe. */}
+      {(
         <ConfirmationDialog
           isOpen={isStatusConfirmOpen}
           onClose={() => setIsStatusConfirmOpen(false)}
@@ -2402,9 +2684,38 @@ export default function OperacionesPage() {
         isOpen={isDeleteLoteDialogOpen}
         onClose={() => setIsDeleteLoteDialogOpen(false)}
         onConfirm={handleDeleteLote}
-        title="¿Eliminar lote de planificación?"
-        description="Esta acción eliminará permanentemente todos los registros de esta planificación. Las órdenes volverán a estar disponibles para planificar. ¿Está seguro?"
+        title="¿Eliminar esta planificación?"
+        description={(() => {
+          const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+          if (!lote) return "Se va a eliminar la planificación elegida.";
+          const { ots, renglones } = tamanoDelLote(lote.id);
+          return `${nombreDelLote(lote)} — ${ots} OT y ${renglones} renglones de plan. `
+            + "Se borra para siempre y no se puede deshacer: los horarios, las personas y las "
+            + "máquinas que tenía asignadas se pierden. Las OTs vuelven a quedar disponibles "
+            + "para planificar.";
+        })()}
         confirmText={isDeletingLote ? "Eliminando..." : "Sí, eliminar"}
+        cancelText="Cancelar"
+        variant="destructive"
+      />
+
+      <ConfirmationDialog
+        isOpen={isLimpiarViejasOpen}
+        onClose={() => setIsLimpiarViejasOpen(false)}
+        onConfirm={handleLimpiarViejas}
+        title={`¿Eliminar ${lotesViejos.length} planificacion${lotesViejos.length === 1 ? "" : "es"} vieja${lotesViejos.length === 1 ? "" : "s"}?`}
+        description={(() => {
+          const detalle = lotesViejos.map(l => {
+            const { ots } = tamanoDelLote(l.id);
+            return `• ${nombreDelLote(l)} — ${ots} OT`;
+          }).join("\n");
+          const vigente = uniqueLotes[0];
+          return `Se eliminan todas menos la que está corriendo`
+            + (vigente ? ` (${nombreDelLote(vigente)}), que no se toca` : "")
+            + `:\n\n${detalle}\n\nSe borran para siempre y no se puede deshacer. Las OTs que `
+            + `sólo estaban en estas planificaciones vuelven a quedar sin planificar.`;
+        })()}
+        confirmText={limpiandoViejas ? "Eliminando..." : "Sí, eliminar todas"}
         cancelText="Cancelar"
         variant="destructive"
       />

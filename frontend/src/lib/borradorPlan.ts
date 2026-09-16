@@ -66,6 +66,19 @@ export type BorradorPlan = {
      * pasaba antes— y no se rompe nada.
      */
     tandasManuales?: TandaManual[];
+    /**
+     * Desde cuándo arranca este plan (el T=0 del planificador), tal como lo devolvió
+     * el backend.
+     *
+     * Viaja con el borrador y vuelve al backend al confirmar, para que las fechas que
+     * se guardan sean las mismas que se miraron. Sin esto, el backend le volvía a
+     * preguntar la hora al reloj al guardar: un borrador armado ayer y confirmado hoy
+     * quedaba corrido un día entero.
+     *
+     * Ausente en los borradores guardados antes del 16/09/2026: ahí el backend
+     * recalcula como antes.
+     */
+    inicioBase?: string;
     /** Cuándo se calculó. Es lo que permite avisar que puede haber quedado viejo. */
     guardadoEn: string;
     /**

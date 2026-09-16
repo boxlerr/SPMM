@@ -1505,7 +1505,7 @@ def _agregar_funcion_objetivo(
     model.Minimize(sum(v * c for (v, c) in total_obj))
 
 
-def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_dates=None):
+def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_dates=None, es_fin: bool = False):
     """
     Convierte minutos de trabajo lógicos a una fecha real del calendario físico.
 
@@ -1514,6 +1514,14 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_
     555 y 105 escritos a mano, así que un día entero de trabajo caía a las 18:00
     —dos horas después de que el taller cierra— y la fecha prometida al cliente
     heredaba ese error.
+
+    `es_fin` cambia qué pasa en el borde exacto de la jornada. El minuto 495 es, al
+    mismo tiempo, el CIERRE del primer día y la APERTURA del segundo: para un inicio
+    corresponde la apertura del día siguiente (un proceso que arranca ahí se hace al
+    otro día), pero para un fin corresponde el cierre (un proceso que termina ahí
+    terminó hoy a las 16:00, no mañana a las 07:00). Sin la distinción, un proceso que
+    cierra la jornada figuraba terminando al día siguiente y se colaba un día de más en
+    la vista Diaria.
     """
     from datetime import timedelta
 
@@ -1553,7 +1561,11 @@ def _convertir_minutos_a_fecha(minutos_acumulados: int, ahora_ref=None, blocked_
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
             continue
 
-        if minutos_restantes >= capacidad_hoy:
+        # En el borde exacto, un FIN se queda en el cierre de este día; un inicio pasa
+        # a la apertura del siguiente. Ver `es_fin` arriba.
+        pasa_al_dia_siguiente = (minutos_restantes > capacidad_hoy if es_fin
+                                 else minutos_restantes >= capacidad_hoy)
+        if pasa_al_dia_siguiente:
             minutos_restantes -= capacidad_hoy
             tiempo_actual += timedelta(days=1)
             tiempo_actual = avanzar_a_dia_valido(tiempo_actual)
@@ -1615,7 +1627,7 @@ def _extraer_resultados(solver,status,procesos_norm,inicio_vars,fin_vars,operari
                 else (fecha_prometida if isinstance(fecha_prometida, str) else None)
             )
             fecha_ini_est = _convertir_minutos_a_fecha(inicio_m, start_time_ref, blocked_dates)
-            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref, blocked_dates)
+            fecha_fin_est = _convertir_minutos_a_fecha(fin_m, start_time_ref, blocked_dates, es_fin=True)
 
             resultados.append({
                 "orden_id": orden_id,
@@ -1927,14 +1939,39 @@ def inicio_del_plan(ahora: datetime, fecha_desde: date | None = None,
     return inicio
 
 
-def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None):
+def base_confiable(inicio_base: datetime | None, ahora: datetime,
+                   fecha_desde: date | None = None, blocked_dates=()) -> datetime:
+    """El arranque que mandó la pantalla, pero nunca de un día que ya pasó.
+
+    EL PLAN NUNCA EMPIEZA EN EL PASADO, y eso no puede depender de lo que mande el
+    cliente. `inicio_base` viaja a la vista previa y vuelve al confirmar —es lo que ata
+    las fechas que se miran a las que se guardan— pero un borrador de hace tres días,
+    una pestaña vieja o un request armado a mano traen un arranque viejo, y guardarlo
+    tal cual deja un plan que arranca el martes pasado.
+
+    El piso es por DÍA y no por instante a propósito: lo que se cuida acá es que no sea
+    de ayer. Que sea de HOY más temprano es justamente lo que hay que respetar —una
+    previa armada a las 06:59 y confirmada a las 07:01 tiene que guardarse con el
+    arranque de las 06:59, que es el que vio la persona.
+    """
+    if inicio_base is not None and inicio_base.date() >= ahora.date():
+        return inicio_base
+    return inicio_del_plan(ahora, fecha_desde, blocked_dates)
+
+
+def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None):
     model = cp_model.CpModel()
 
     # Los días bloqueados los trae el servicio desde la base (ver DiaBloqueadoRepository).
     blocked_dates = list(blocked_dates or ())
     logger.info(f"PLANIFICADOR: Fechas bloqueadas cargadas: {blocked_dates}")
 
-    inicio_base = inicio_del_plan(_ahora_ar(), fecha_desde, blocked_dates)
+    # El arranque puede venir de afuera: quien llama lo calcula UNA vez y lo usa
+    # también para responder y para guardar. Si cada uno lo calcula por su cuenta,
+    # dos llamadas a `_ahora_ar()` separadas por un segundo pueden caer a distinto
+    # lado de las 07:00 y dar planes con un día de diferencia.
+    if inicio_base is None:
+        inicio_base = inicio_del_plan(_ahora_ar(), fecha_desde, blocked_dates)
 
     start_date = inicio_base.date()
     logger.info(f"PLANIFICADOR: start_date efectivo = {start_date} (fecha_desde solicitada = {fecha_desde})")
@@ -2466,6 +2503,7 @@ async def planificar(
     forzar_ordenes_ids: list[int] | None = None,
     procesos_por_orden: dict[int, list[int]] | None = None,
     lineas_por_orden: dict[int, list[int]] | None = None,
+    inicio_base: datetime | None = None,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
 
@@ -2487,11 +2525,22 @@ async def planificar(
     # campo venía vacío — los guardados quedaban registrados sin lote.
     if not preview and plan:
         logger.info(f"Service - Guardando plan ya armado ({len(plan)} items), sin solver")
-        # El mismo arranque con el que se armó lo que se está guardando. Se calcula
-        # igual que en el solver —misma función— así que las fechas que vio la persona
-        # en la vista previa son EXACTAMENTE las que van a quedar.
+        # EL ARRANQUE ES EL DE LA VISTA PREVIA, no uno nuevo.
+        #
+        # La vista previa lo devuelve y la pantalla lo manda de vuelta al confirmar, así
+        # que las fechas que se guardan son EXACTAMENTE las que se miraron. Recalcularlo
+        # acá era pedirle la hora al reloj por segunda vez: una previa armada a las 06:59
+        # y confirmada a las 07:01 se guardaba con un día más, y un borrador confirmado
+        # al otro día quedaba corrido entero.
+        #
+        # Si no viene (pestaña con el bundle viejo, borrador guardado antes del
+        # 16/09/2026) se recalcula como antes. Sin leer los feriados a propósito:
+        # guardar un plan aprobado no toca la base más que para escribirlo —eso es lo
+        # que cuida test_guardar_no_recalcula— y acá no hace falta, porque la vuelta de
+        # minutos a fecha ya saltea los días bloqueados al mostrar el plan.
+        base = base_confiable(inicio_base, _ahora_ar(), fecha_desde)
         guardado = await repo_planificacion.insertar_planificacion_lote(
-            plan, inicio_base=inicio_del_plan(_ahora_ar(), fecha_desde))
+            plan, inicio_base=base)
         return {"planificados": guardado, "excedentes": [], "diagnosticos": []}
 
     forzar_set = set(forzar_ordenes_ids or [])
@@ -2523,6 +2572,13 @@ async def planificar(
     calendarios = calendarios_de_operarios(await repo_operario.find_all())
     # 🔹 Feriados / días de mantenimiento, ahora desde la base.
     blocked_dates = await DiaBloqueadoRepository(db).listar()
+
+    # 🔹 DESDE CUÁNDO ARRANCA EL PLAN. Una sola vez, acá, y de acá en adelante todos
+    #    usan ESTE valor: el solver para armar el plan, la respuesta para mostrarlo y
+    #    el guardado para dejarlo escrito. El plan nunca empieza en el pasado: si la
+    #    jornada del taller ya arrancó, es para el día siguiente (ver inicio_del_plan).
+    arranque = base_confiable(inicio_base, _ahora_ar(), fecha_desde, blocked_dates)
+    logger.info(f"Service - arranque del plan: {arranque}")
 
     ##ordenes = await repo_orden.find_with_procesos()
     if ordenes_ids:
@@ -2708,6 +2764,9 @@ async def planificar(
         # taller (y la tabla planificacion_intento) hablan en OTs, y cruzar las dos
         # cifras es lo primero que uno quiere cuando una corrida se satura.
         len(ordenes),
+        # El arranque del plan, calculado una sola vez acá arriba. Es el mismo que
+        # viaja a la pantalla y el que se guarda al confirmar.
+        arranque,
     )
 
     _marcar_lineas(resultados, linea_por_clave)
@@ -2761,14 +2820,18 @@ async def planificar(
         diagnosticos = []
 
     if preview:
-        return {"planificados": planificados, "excedentes": excedentes, "diagnosticos": diagnosticos}
+        # `inicio_base` viaja a la pantalla y vuelve al confirmar: es lo que ata las
+        # fechas que se miran a las fechas que se guardan.
+        return {"planificados": planificados, "excedentes": excedentes,
+                "diagnosticos": diagnosticos, "inicio_base": arranque.isoformat()}
 
     # Marcar como forzado_fuera_rango los procesos cuyas órdenes el usuario decidió forzar
     for r in planificados:
         r["forzado_fuera_rango"] = (r["orden_id"] in forzar_set)
 
-    saved = await repo_planificacion.insertar_planificacion_lote(planificados)
-    return {"planificados": saved, "excedentes": excedentes, "diagnosticos": diagnosticos}
+    saved = await repo_planificacion.insertar_planificacion_lote(planificados, inicio_base=arranque)
+    return {"planificados": saved, "excedentes": excedentes, "diagnosticos": diagnosticos,
+            "inicio_base": arranque.isoformat()}
 
 async def planificar_pendientes(
         repo_orden,

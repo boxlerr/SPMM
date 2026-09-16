@@ -69,6 +69,12 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
 
     const hours = Array.from({ length: WORK_HOURS.total }, (_, i) => WORK_HOURS.start + i)
 
+    /** A qué hora abre el día de ese recurso. Estaba escrito a mano en cuatro lados. */
+    const horaDeArranqueDelRecurso = (resourceId: string) => {
+        const r = resources.find((x) => x.id === resourceId)
+        return Number.parseInt(((r as any)?.hora_inicio || `${WORK_HOURS.start}:00`).split(":")[0])
+    }
+
     const STATUS_GRADIENTS: Record<string, string> = {
         nuevo: "bg-gradient-to-br from-gray-400 to-gray-500 border-gray-300 shadow-gray-500/20",
         en_proceso: "bg-gradient-to-br from-blue-500 to-blue-600 border-blue-400 shadow-blue-500/20",
@@ -88,7 +94,10 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
             }
 
             // Case 2: Task started before this day, continues today, and this is the first hour of the day
-            if (task.startDate < date && task.endDate >= date && hour === WORK_HOURS.start) {
+            // La fila de continuación va en la hora en que arranca ESE recurso, que es
+            // con la que se dibuja su grilla. Buscarla en WORK_HOURS.start a secas dejaba
+            // sin dibujar a todo el que no empieza a esa hora.
+            if (task.startDate < date && task.endDate >= date && hour === horaDeArranqueDelRecurso(resourceId)) {
                 return true
             }
 
@@ -140,8 +149,8 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                 let targetHour = hour
                 if (targetHour === -1) {
                     // If dropped on summary row, preserve current start time
-                    const resStart = (targetResource as any)?.hora_inicio || "09:00"
-                    const resEnd = (targetResource as any)?.hora_fin || "18:00"
+                    const resStart = (targetResource as any)?.hora_inicio || "07:00"
+                    const resEnd = (targetResource as any)?.hora_fin || "16:00"
                     const resStartHour = Number.parseInt(resStart.split(":")[0])
                     const resEndHour = Number.parseInt(resEnd.split(":")[0])
 
@@ -356,8 +365,8 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                                             </TooltipTrigger>
                                                             <TooltipContent>
                                                                 <p>Carga: {Number(load.toFixed(2))}h / {(() => {
-                                                                    const s = (resource as any)?.hora_inicio || "09:00";
-                                                                    const e = (resource as any)?.hora_fin || "18:00";
+                                                                    const s = (resource as any)?.hora_inicio || "07:00";
+                                                                    const e = (resource as any)?.hora_fin || "16:00";
                                                                     const sh = parseInt(s.split(":")[0]);
                                                                     const eh = parseInt(e.split(":")[0]);
                                                                     return eh - sh;
@@ -379,8 +388,8 @@ export function GanttWeeklyDetailed({ tasks, resources, viewMode, onTaskMove, on
                                                         >
                                                             <div className="grid grid-rows-9 border-t border-gray-100/60 mt-12 bg-white/30">
                                                                 {(() => {
-                                                                    const s = parseInt(((resource as any)?.hora_inicio || "09:00").split(":")[0]);
-                                                                    const e = parseInt(((resource as any)?.hora_fin || "18:00").split(":")[0]);
+                                                                    const s = parseInt(((resource as any)?.hora_inicio || "07:00").split(":")[0]);
+                                                                    const e = parseInt(((resource as any)?.hora_fin || "16:00").split(":")[0]);
                                                                     const resHours = Array.from({ length: e - s }, (_, i) => s + i);
                                                                     return resHours.map((hour) => {
                                                                         const startingTasks = getTasksStartingInHour(resource.id, dateStr, hour)

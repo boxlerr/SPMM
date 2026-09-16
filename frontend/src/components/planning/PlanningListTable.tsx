@@ -49,7 +49,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 import { Checkbox } from "@/components/ui/checkbox";
-import { addWorkMinutes, calculateWorkingMinutes } from "@/lib/gantt-utils";
+import {
+    baseDelPlan,
+    formatoCorto,
+    inicioDeLaFila,
+    minutosDesdeFecha,
+    paraInputDatetimeLocal,
+} from "@/lib/plan-fechas";
 import { limitacionDeMaquina } from "@/lib/maquinas";
 import { API_URL } from "@/config";
 import { MaterialChip } from "@/components/common/MaterialChip";
@@ -69,13 +75,21 @@ interface PlanningListTableProps {
     // varias veces en la OT y cada una tiene su estado.
     onProcessStatusChange?: (ordenId: number, procesoId: number, newStatusId: number, idOtp?: number) => void;
     onProcessReorder?: (ordenId: number, newOrder: any[]) => void;
-    onOperatorChange?: (ordenId: number, procesoId: number, operarioId: number) => void;
-    onMachineryChange?: (ordenId: number, procesoId: number, maquinariaId: number) => void; // Added
+    /** Cambia el operario de UNA fila del plan. Se identifica por el id de la fila
+     *  (`planificacion.id`) y no por (orden, proceso): con el mismo proceso repetido
+     *  en la OT, ese par no distingue una pasada de la otra. */
+    onOperatorChange?: (planId: number, operarioId: number) => void;
+    onMachineryChange?: (planId: number, maquinariaId: number) => void;
     selectedIds?: number[];
     onSelectionChange?: (ids: number[]) => void;
     operarios?: any[];
     maquinarias?: any[]; // Added
     planificacion?: PlanificacionItem[];
+    /** Días que el taller no trabaja (feriados, mantenimiento). Hacen falta para la
+     *  VUELTA: lo que se guarda al corregir un horario a mano es el minuto, y ese minuto
+     *  tiene que contar los mismos días que contó el backend al armar la fecha que se
+     *  está viendo. Sin ellos, cada feriado en el medio corre el proceso un día. */
+    feriados?: string[];
     onDataChange?: () => void; // Added for refreshing data without reload
     hideStatus?: boolean; // New prop to hide status column
     highlightedIds?: number[]; // New prop for visual highlighting
@@ -86,6 +100,10 @@ interface PlanningListTableProps {
      *  cambiar la búsqueda (no con cada tilde): reordenar en vivo movía la fila
      *  bajo el cursor y el siguiente click caía en la OT equivocada. */
     pinSelectedOnTop?: boolean;
+    /** Qué decir cuando la lista está vacía. Sin esto las seis solapas mostraban la
+     *  misma frase —"No hay órdenes activas en este momento"— y no se entendía si no
+     *  había trabajo, si estaba en otro día o si algo había fallado. */
+    mensajeVacio?: string;
     /** Modo compacto: sin el margen de arriba y con menos aire entre buscador y tabla.
         Lo usa el planificador, donde la tabla ya vive adentro de una tarjeta. */
     compacto?: boolean;
@@ -177,6 +195,8 @@ function _PlanningListTable({
     hideStatus = false,
     highlightedIds = [],
     tableZoom = 100,
+    mensajeVacio,
+    feriados = [],
     pinSelectedOnTop = false,
     compacto = false,
     colapsarFilasKey
@@ -211,25 +231,45 @@ function _PlanningListTable({
     // Autoguardado: el staging se inicializa desde localStorage para sobrevivir a
     // un corte de luz / recarga (ver efectos de persistencia más abajo).
     const STAGING_KEY = "plan_pending_staging";
+    // Cuántos cambios de una sesión anterior no se pudieron recuperar. Ver abajo.
+    const perdidosAlAbrir = React.useRef(0);
     const [pendingRes, setPendingRes] = React.useState<Record<string, { operario?: number; maquina?: number }>>(() => {
         if (typeof window === "undefined") return {};
         try {
             const saved = JSON.parse(localStorage.getItem(STAGING_KEY) || "null");
-            if (saved && typeof saved === "object") return saved;
+            if (!saved || typeof saved !== "object") return {};
+            // Se queda SÓLO con las claves del formato nuevo ("p<id de la fila del
+            // plan>"). Las viejas eran "<orden>-<proceso>", que en una OT con el mismo
+            // proceso repetido no distingue una pasada de la otra: aplicarlas a ciegas
+            // sería cambiarle el operario a la pasada equivocada. Se descartan y se
+            // avisa, que es mejor que hacerlo mal o que borrarlas en silencio.
+            const vigentes: Record<string, { operario?: number; maquina?: number }> = {};
+            for (const [clave, valor] of Object.entries(saved)) {
+                if (/^p\d+$/.test(clave)) vigentes[clave] = valor as any;
+                else perdidosAlAbrir.current++;
+            }
+            return vigentes;
         } catch { /* dato corrupto / sin localStorage: ignorar */ }
         return {};
     });
-    const resKey = (ordenId: number, procesoId: number) => `${ordenId}-${procesoId}`;
-    const stageOperario = (ordenId: number, procesoId: number, operarioId: number) =>
-        setPendingRes(prev => ({ ...prev, [resKey(ordenId, procesoId)]: { ...prev[resKey(ordenId, procesoId)], operario: operarioId } }));
-    const stageMaquina = (ordenId: number, procesoId: number, maquinaId: number) =>
-        setPendingRes(prev => ({ ...prev, [resKey(ordenId, procesoId)]: { ...prev[resKey(ordenId, procesoId)], maquina: maquinaId } }));
+    // La clave del staging es la FILA del plan (`p<id>`). Era `${ordenId}-${procesoId}`,
+    // que en una OT con el mismo proceso repetido mezclaba las dos pasadas en un solo
+    // cambio pendiente. Las claves viejas que puedan estar guardadas en el navegador se
+    // reconocen por el guión y se resuelven como antes, para no perder lo que alguien
+    // haya dejado a medio hacer.
+    const resKey = (planId?: number) => `p${planId ?? 0}`;
+    const stageOperario = (planId: number, operarioId: number) =>
+        setPendingRes(prev => ({ ...prev, [resKey(planId)]: { ...prev[resKey(planId)], operario: operarioId } }));
+    const stageMaquina = (planId: number, maquinaId: number) =>
+        setPendingRes(prev => ({ ...prev, [resKey(planId)]: { ...prev[resKey(planId)], maquina: maquinaId } }));
     const discardPending = () => setPendingRes({});
     const applyPending = () => {
         for (const [key, chg] of Object.entries(pendingRes)) {
-            const [oid, pid] = key.split('-').map(Number);
-            if (chg.operario !== undefined && onOperatorChange) onOperatorChange(oid, pid, chg.operario);
-            if (chg.maquina !== undefined && onMachineryChange) onMachineryChange(oid, pid, chg.maquina);
+            // Todas las claves que sobreviven al montaje son "p<id>": ver el useState.
+            const planId = Number(key.slice(1));
+            if (!planId) continue;
+            if (chg.operario !== undefined && onOperatorChange) onOperatorChange(planId, chg.operario);
+            if (chg.maquina !== undefined && onMachineryChange) onMachineryChange(planId, chg.maquina);
         }
         setPendingRes({});
     };
@@ -238,6 +278,12 @@ function _PlanningListTable({
     React.useEffect(() => {
         const n = Object.keys(pendingRes).length;
         if (n > 0) toast.info(`Se recuperaron ${n} cambio${n === 1 ? "" : "s"} sin guardar de una sesión anterior`);
+        const perdidos = perdidosAlAbrir.current;
+        if (perdidos > 0) {
+            toast.warning(
+                `No se pudieron recuperar ${perdidos} cambio${perdidos === 1 ? "" : "s"} sin guardar de una sesión anterior. `
+                + "Volvé a elegir el recurso humano o la máquina.");
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -374,28 +420,41 @@ function _PlanningListTable({
     const valorEditableDeDescripcion = (item: WorkOrder) => item.observaciones || "";
 
 
-    const getScheduledStart = (ordenId: number, procesoId: number) => {
-        if (!planificacion || planificacion.length === 0) return "-";
-        const item = planificacion.find(p => p.orden_id === ordenId && p.proceso_id === procesoId);
+    /**
+     * La fila del plan que le corresponde a UNA PASADA de la OT.
+     *
+     * Se busca por `id_orden_trabajo_proceso`, que es la pasada exacta. Buscar por
+     * (orden, proceso) y quedarse con la primera es lo que hacía antes, y en una OT con
+     * el mismo proceso repetido —que es dato válido: la 7497 tiene TORNO CNC trece
+     * veces— las trece pasadas mostraban el horario, el operario y la máquina de la
+     * primera. Se cae al par viejo sólo para los planes guardados antes de que la
+     * pasada existiera, donde la columna viene en NULL.
+     */
+    const filaDelPlan = (ordenId: number, proc: { id?: number; proceso: { id: number } }) => {
+        if (!planificacion || planificacion.length === 0) return null;
+        if (proc.id) {
+            const exacta = planificacion.find(p => p.id_orden_trabajo_proceso === proc.id);
+            if (exacta) return exacta;
+        }
+        return planificacion.find(
+            p => p.orden_id === ordenId && p.proceso_id === proc.proceso.id) || null;
+    };
+
+    const getScheduledStart = (ordenId: number, proc: { id?: number; proceso: { id: number } }) => {
+        const item = filaDelPlan(ordenId, proc);
         if (!item) return "-";
 
-        // Logic matching convertPlanificacionToGanttTasks from page.tsx/gantt-utils
-        const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
-        const normalizedBaseDate = new Date(baseDate);
-        normalizedBaseDate.setHours(9, 0, 0, 0); // 9:00 AM start
-
-        const start = addWorkMinutes(normalizedBaseDate, item.inicio_min);
+        // La fecha la calcula el backend con la jornada real del taller y con el
+        // arranque de ESTE plan. Acá antes se recalculaba sola desde `creado_en` a las
+        // 09:00, y por eso un plan hecho el miércoles a las 11 mostraba trabajo para
+        // el miércoles a las 09:00 — nueve horas antes de existir. Ver lib/plan-fechas.
+        const start = inicioDeLaFila(item, feriados);
+        if (!start) return "-";
 
         // Formato compacto y legible: "Jue 07/05 09:00".
         // Antes el Intl daba "jue., 07/05, 09:00" con comas que cortaban feo cuando
-        // se truncaba. Construyo manualmente para mantener todo en una sola línea.
-        const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-        const dia = dias[start.getDay()];
-        const dd = String(start.getDate()).padStart(2, '0');
-        const mm = String(start.getMonth() + 1).padStart(2, '0');
-        const hh = String(start.getHours()).padStart(2, '0');
-        const mi = String(start.getMinutes()).padStart(2, '0');
-        return `${dia} ${dd}/${mm} ${hh}:${mi}`;
+        // se truncaba. Se arma a mano para mantener todo en una sola línea.
+        return formatoCorto(start);
     };
 
 
@@ -621,7 +680,9 @@ function _PlanningListTable({
     };
 
     const [editingOrder, setEditingOrder] = React.useState<{ id: number, field: string, value: string, originalValue: string } | null>(null);
-    const [editingStartDate, setEditingStartDate] = React.useState<{ orderId: number, processId: number, planId: number, value: string } | null>(null);
+    // Se guarda el id de la FILA del plan y no (orden, proceso): con el mismo proceso
+    // repetido en la OT, ese par abría el editor en las dos pasadas a la vez.
+    const [editingStartDate, setEditingStartDate] = React.useState<{ planId: number, value: string, original: string } | null>(null);
     const [deliveryOrder, setDeliveryOrder] = React.useState<{ id: number, total: number, delivered: number } | null>(null);
     const [incidencia, setIncidencia] = React.useState<{ orderId: number, procesoId: number, procesoNombre: string, operarioId: number | null, operarioNombre: string } | null>(null);
 
@@ -730,36 +791,18 @@ function _PlanningListTable({
         setEditingStartDate(null);
     };
 
-    const handleStartDateClick = (orderId: number, processId: number, currentValue: string) => {
+    const handleStartDateClick = (orderId: number, proc: { id?: number; proceso: { id: number } }) => {
         cancelandoInicio.current = false;
-        if (!planificacion) return;
-        const item = planificacion.find(p => p.orden_id === orderId && p.proceso_id === processId);
+        const item = filaDelPlan(orderId, proc);
         if (!item) return;
 
-        // Current Value is e.g. "vie 05-12, 09:48 a. m." which is formatted.
-        // We need the raw Date.
-        // Re-calculate raw date from planificacion item
-        const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
-        const normalizedBaseDate = new Date(baseDate);
-        normalizedBaseDate.setHours(9, 0, 0, 0);
+        // Lo que se ve en la celda ("Jue 17/09 07:00") está formateado: el campo
+        // necesita la fecha cruda, y tiene que ser LA MISMA que se está mostrando.
+        const start = inicioDeLaFila(item, feriados);
+        if (!start) return;
 
-        const start = addWorkMinutes(normalizedBaseDate, item.inicio_min);
-
-        // Format to datetime-local string: YYYY-MM-DDTHH:mm
-        const yyyy = start.getFullYear();
-        const mm = String(start.getMonth() + 1).padStart(2, '0');
-        const dd = String(start.getDate()).padStart(2, '0');
-        const hh = String(start.getHours()).padStart(2, '0');
-        const min = String(start.getMinutes()).padStart(2, '0');
-
-        const isoString = `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-
-        setEditingStartDate({
-            orderId,
-            processId,
-            planId: item.id,
-            value: isoString
-        });
+        const cargado = paraInputDatetimeLocal(start);
+        setEditingStartDate({ planId: item.id, value: cargado, original: cargado });
     };
 
     const handleStartDateSave = async () => {
@@ -768,20 +811,26 @@ function _PlanningListTable({
             return;
         }
         if (!editingStartDate) return;
+        // El campo guarda en `onBlur`, así que un click en cualquier otro lado dispara
+        // esto sin que nadie haya editado nada. Si el valor es el mismo que se cargó, no
+        // hay nada que escribir: era un click perdido.
+        if (editingStartDate.value === editingStartDate.original) {
+            setEditingStartDate(null);
+            return;
+        }
         // console.log("Saving new start date:", editingStartDate.value);
 
         // Calculate new inicio_min
         const item = planificacion.find(p => p.id === editingStartDate.planId);
         if (!item) return;
 
-        const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
-        const normalizedBaseDate = new Date(baseDate);
-        normalizedBaseDate.setHours(9, 0, 0, 0);
-
         const newDate = new Date(editingStartDate.value);
         if (isNaN(newDate.getTime())) return; // Invalid date
 
-        const newInicioMin = calculateWorkingMinutes(normalizedBaseDate, newDate);
+        // Lo que se guarda no es la fecha sino el minuto del plan, así que esta cuenta
+        // tiene que ser la inversa EXACTA de la que mostró la celda: misma jornada y
+        // mismo arranque. Si no, correr un proceso diez minutos lo movía de día.
+        const newInicioMin = minutosDesdeFecha(baseDelPlan(item, feriados), newDate, feriados);
         const duration = item.fin_min - item.inicio_min;
         const newFinMin = newInicioMin + duration;
 
@@ -883,12 +932,12 @@ function _PlanningListTable({
                     {item.procesos && item.procesos.length > 0 ? (
                         <>
                             {item.procesos.map((proc, idx) => {
-                                const plannedItem = planificacion ? planificacion.find(p => p.orden_id === item.id && p.proceso_id === proc.proceso.id) : null;
+                                const plannedItem = filaDelPlan(item.id, proc);
                                 const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Recurso maquinaria sin asignar");
 
                                 return (
                                     <div
-                                        key={`${item.id}-${proc.proceso.id}`}
+                                        key={proc.id ?? `${item.id}-${proc.proceso.id}-${idx}`}
                                         className="flex flex-col md:grid md:grid-cols-[40px_3fr_110px_110px_70px_70px_2fr_2fr] gap-3 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
                                     >
                                         {/* # */}
@@ -935,11 +984,11 @@ function _PlanningListTable({
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Inicio Estimado</span>
                                             <div
                                                 className="group relative flex items-center justify-center gap-1 text-xs font-medium text-amber-900 bg-amber-50/80 px-2 py-1 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
-                                                onClick={() => handleStartDateClick(item.id, proc.proceso.id, "")}
+                                                onClick={() => handleStartDateClick(item.id, proc)}
                                                 title="Click para editar el inicio estimado (Enter guarda, Escape cancela)"
                                             >
                                                 <CalendarClock className="w-3 h-3 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
-                                                {editingStartDate?.orderId === item.id && editingStartDate?.processId === proc.proceso.id ? (
+                                                {plannedItem && editingStartDate?.planId === plannedItem.id ? (
                                                     <input
                                                         type="datetime-local"
                                                         className="border rounded px-1 py-0.5 text-[10px] w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
@@ -955,7 +1004,7 @@ function _PlanningListTable({
                                                     />
                                                 ) : (
                                                     <span className="group-hover:text-amber-950 transition-colors whitespace-nowrap block">
-                                                        {getScheduledStart(item.id, proc.proceso.id)}
+                                                        {getScheduledStart(item.id, proc)}
                                                     </span>
                                                 )}
                                                 <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-1 transition-all duration-200" />
@@ -1007,14 +1056,14 @@ function _PlanningListTable({
                                             <div>
                                                 {onOperatorChange && operarios.length > 0 ? (
                                                     <Select
-                                                        value={(pendingRes[resKey(item.id, proc.proceso.id)]?.operario ?? operarios.find(op => {
+                                                        value={(pendingRes[resKey(plannedItem?.id)]?.operario ?? operarios.find(op => {
                                                             const opName = `${op.nombre} ${op.apellido}`.trim().toLowerCase();
                                                             const currentName = (proc.operario_nombre || "").trim().toLowerCase();
                                                             return opName === currentName;
                                                         })?.id)?.toString() || undefined}
-                                                        onValueChange={(val) => stageOperario(item.id, proc.proceso.id, parseInt(val))}
+                                                        onValueChange={(val) => plannedItem && stageOperario(plannedItem.id, parseInt(val))}
                                                     >
-                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(item.id, proc.proceso.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
+                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(plannedItem?.id)]?.operario !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
                                                             <SelectValue placeholder={toTitleCase(proc.operario_nombre) || "Sin Asignar"} />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1039,10 +1088,10 @@ function _PlanningListTable({
                                             <div>
                                                 {onMachineryChange && maquinarias.length > 0 ? (
                                                     <Select
-                                                        value={(pendingRes[resKey(item.id, proc.proceso.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
-                                                        onValueChange={(val) => stageMaquina(item.id, proc.proceso.id, parseInt(val))}
+                                                        value={(pendingRes[resKey(plannedItem?.id)]?.maquina ?? plannedItem?.id_maquinaria)?.toString() || "0"}
+                                                        onValueChange={(val) => plannedItem && stageMaquina(plannedItem.id, parseInt(val))}
                                                     >
-                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(item.id, proc.proceso.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
+                                                        <SelectTrigger className={cn("h-7 text-xs w-full border px-2", pendingRes[resKey(plannedItem?.id)]?.maquina !== undefined ? "border-amber-400 ring-1 ring-amber-300 bg-amber-50" : "border-gray-200")}>
                                                             <SelectValue placeholder={machineName} />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1163,7 +1212,7 @@ function _PlanningListTable({
             <div className="md:hidden space-y-4">
                 {sortedData.length === 0 ? (
                     <div className="text-center py-8 text-gray-500 bg-white rounded-lg shadow">
-                        {searchTerm ? "No se encontraron resultados." : "No hay órdenes activas."}
+                        {searchTerm ? "No se encontraron resultados." : (mensajeVacio || "No hay órdenes activas.")}
                     </div>
                 ) : (
                     sortedData.map((item) => (
@@ -1467,7 +1516,7 @@ function _PlanningListTable({
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
                                     <td colSpan={hideStatus ? 19 : 20} className="px-3 py-8 text-center text-gray-500">
-                                        {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes activas en este momento."}
+                                        {searchTerm ? "No se encontraron resultados para la búsqueda." : (mensajeVacio || "No hay órdenes activas en este momento.")}
                                     </td>
                                 </tr>
 

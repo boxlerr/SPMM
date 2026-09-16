@@ -11,17 +11,24 @@ Y no es sólo velocidad: el solver no devuelve siempre el mismo reparto (medido 
 10/09 sobre 40 OT), así que recalcular al guardar podía escribir un plan distinto
 del que se aprobó, sin que nadie se enterara.
 """
+from datetime import date, datetime, time, timedelta
+
 import pytest
 
 from backend.application.PlanificacionService import planificar
+from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
 
 
 class _RepoPlanificacion:
+    SIN_LLEGAR = object()
+
     def __init__(self):
         self.recibido = None
+        self.base_recibida = _RepoPlanificacion.SIN_LLEGAR
 
     async def insertar_planificacion_lote(self, resultados, inicio_base=None):
         self.recibido = resultados
+        self.base_recibida = inicio_base
         return {"mensaje": f"Planificación guardada ({len(resultados)} registros)",
                 "id_planificacion_lote": "lote-de-prueba",
                 "descripcion_lote": "Planificación de prueba"}
@@ -91,3 +98,60 @@ async def test_sin_plan_si_arranca_el_solver():
     except Exception:
         pass  # sin datos de verdad no va a terminar; alcanza con que haya ido a buscarlos
     assert espia.leido, "sin plan armado, planificar tiene que ir a leer los datos"
+
+
+# ---------------------------------------------------------------------------
+# El arranque del plan viaja: vista previa -> pantalla -> guardado
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_se_guarda_el_arranque_que_mando_la_pantalla():
+    """El plan se guarda con el arranque CON EL QUE SE MIRÓ, no con uno nuevo.
+
+    La vista previa devuelve `inicio_base`, la pantalla lo guarda en el borrador y lo
+    manda de vuelta al confirmar. Si ese valor se pierde en el camino, el backend le
+    vuelve a preguntar la hora al reloj y las fechas guardadas no son las que se
+    aprobaron: una previa armada a las 06:59 y confirmada a las 07:01 se guarda con un
+    día de más. Nada lo sostenía: los 373 tests seguían verdes aunque el valor se
+    perdiera.
+    """
+    repo_plan = _RepoPlanificacion()
+    # Un día de esta semana a las 06:59, que es el caso que importa: si el backend
+    # recalculara, a las 07:01 daría el día siguiente.
+    arranque = datetime.combine(date.today(), time(6, 59))
+
+    await planificar(
+        _RepoQueExplota(), _RepoQueExplota(), _RepoQueExplota(), repo_plan,
+        db=_RepoQueExplota(), ordenes_ids=[1], preview=False, plan=PLAN,
+        inicio_base=arranque,
+    )
+
+    assert repo_plan.base_recibida == arranque, (
+        "el arranque que mandó la pantalla no llegó al guardado")
+
+
+@pytest.mark.asyncio
+async def test_un_arranque_viejo_no_se_guarda_tal_cual():
+    """EL PLAN NUNCA EMPIEZA EN EL PASADO, tampoco si el arranque llega de afuera.
+
+    Un borrador de hace tres días, una pestaña vieja o un request armado a mano traen
+    un arranque viejo. Guardarlo tal cual deja un plan que arranca el martes pasado, que
+    es exactamente lo que se arregló el 11/9.
+    """
+    repo_plan = _RepoPlanificacion()
+    viejo = datetime.combine(date.today() - timedelta(days=3), time(7, 0))
+
+    await planificar(
+        _RepoQueExplota(), _RepoQueExplota(), _RepoQueExplota(), repo_plan,
+        db=_RepoQueExplota(), ordenes_ids=[1], preview=False, plan=PLAN,
+        inicio_base=viejo,
+    )
+
+    assert repo_plan.base_recibida != viejo, "se guardó un plan que arranca en el pasado"
+    assert repo_plan.base_recibida.date() >= date.today()
+
+
+def test_la_ruta_acepta_el_arranque():
+    """El campo tiene que existir en el DTO: si no, nunca llega al servicio."""
+    dto = PlanificarRequestDTO(plan=[], inicio_base="2026-09-17T07:00:00")
+    assert dto.inicio_base == datetime(2026, 9, 17, 7, 0)

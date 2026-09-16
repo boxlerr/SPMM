@@ -47,6 +47,76 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "planificacion-vive-adentro-de-planificadas",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "La planificación pasó a vivir adentro de «Planificadas»: una sola pantalla",
+        detalle:
+            "Había dos lugares que decían «planificadas» y mostraban lo mismo de dos maneras: uno con los horarios de cada paso y otro sin ellos, cada uno con su propia idea de qué está planificado y qué no. Ahora hay uno solo: entrás a Órdenes de Trabajo → Planificadas y ahí adentro está todo — qué planificación estás mirando, la semana o el día, el horario de cada paso, lo entregado, lo terminado y la carga de cada persona. Se fue la solapa «Planificación» de arriba, y los cortes de adentro quedaron más chicos para que no se peleen con las solapas principales.",
+        href: "/operaciones",
+    },
+    {
+        id: "la-pantalla-abre-en-el-plan-que-esta-corriendo",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Planificación abre en la planificación que está corriendo y en el día de hoy",
+        detalle:
+            "Antes abría en «Todas las Planificaciones» y se quedaba clavada donde la habías dejado la última vez: podías estar mirando la de mayo sin darte cuenta. Y peor, elegir una planificación te movía también el día: Semanal y Diaria se iban a la semana en que la habías armado, no a la semana en que se hace el trabajo. Ahora son dos cosas separadas: arriba elegís QUÉ planificación mirar (arranca en la más nueva, que dice «la que está corriendo») y el calendario elige QUÉ DÍA, que arranca en hoy.",
+        href: "/operaciones",
+    },
+    {
+        id: "cuando-el-dia-esta-vacio-la-pantalla-lo-explica",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Si el día está vacío, la pantalla te dice cuándo arranca el trabajo",
+        detalle:
+            "Si planificás con la jornada ya empezada, el trabajo es para el día siguiente, así que la vista Diaria de hoy queda vacía: eso está bien, pero antes parecía que algo había fallado. Ahora aparece «Esta planificación arranca el jue 17/09 — ir a ese día» y con un click estás ahí. Y cada lista vacía explica por qué está vacía, en vez de decir siempre lo mismo.",
+        href: "/operaciones",
+    },
+    {
+        id: "la-agenda-ya-no-muestra-ot-entregadas",
+        fecha: "2026-09-16",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Semanal y Diaria ya no muestran OTs que ya se entregaron",
+        detalle:
+            "Una OT entregada, con el cartel verde y la fecha de entrega puesta, se caía de Planificadas pero seguía apareciendo en la semana y en el día. Así podías ver «No hay órdenes activas» en una solapa y una lista de trabajo en la de al lado, mirando la misma planificación. Ahora las tres listas usan el mismo criterio. La solapa Carga también dejó de sumar trabajo ya terminado o entregado: los minutos y los días ocupados de cada persona son lo que le falta hacer.",
+        href: "/operaciones",
+    },
+    {
+        id: "completadas-y-finalizadas-ahora-se-entienden",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "«Completadas» y «Finalizadas» ahora dicen de qué hablan",
+        detalle:
+            "Eran dos solapas que mostraban casi lo mismo y nadie sabía en qué se diferenciaban. Pasaron a llamarse «Entregadas al cliente» (el cliente ya las recibió) y «Terminadas en el taller» (todos los pasos hechos y TODAVÍA SIN ENTREGAR, o sea lo que hay para despachar). Ahora no se repiten entre sí, y las seis solapas muestran cuántas OTs tiene cada una.",
+        href: "/operaciones",
+    },
+    {
+        id: "entrar-a-una-ot-y-borrar-un-plan-mas-rapido",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Entrás a la OT desde cualquier lista, y borrar planificaciones cuesta menos",
+        detalle:
+            "En Semanal, Diaria y Terminadas el doble clic en una fila no hacía nada, aunque el globito dijera que sí: ahora abre la OT, igual que en las otras listas, y también aparecen las casillas para tildar y sacar una OT desde donde la ves. El botón del tacho dice qué va a hacer antes de apretarlo («Quitar 2 OTs» o «Eliminar plan») y el cartel de confirmación nombra la planificación y te dice cuántas OTs y cuántos renglones se lleva. Y abajo del desplegable hay «Limpiar planificaciones viejas», que borra todas las anteriores de una sola vez sin tocar la que está corriendo.",
+        href: "/operaciones",
+    },
+    {
+        id: "los-horarios-del-plan-ya-no-arrancan-en-el-pasado",
+        fecha: "2026-09-16",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Los horarios del plan ya no arrancan en un día que ya pasó",
+        detalle:
+            "Si planificabas un miércoles a las 11 de la mañana, la lista te ponía el primer proceso ese mismo miércoles a las 9 —dos horas antes de que apretaras el botón— y horarios como las 9:06 o las 16:20, que no existen porque a esa hora el taller está desayunando o ya cerró. El plan siempre estuvo bien armado: lo que estaba mal era la pantalla, que se hacía la cuenta por su lado con una jornada de 9 a 18 en vez de la de 7 a 16. Ahora los horarios que ves son los del plan, y arrancan después de haberlo hecho: si planificás con la jornada empezada, el trabajo es para el día siguiente a las 7.",
+        href: "/operaciones",
+    },
+    {
         id: "no-se-puede-crear-un-proceso-sin-nombre",
         fecha: "2026-09-15",
         tipo: "arreglo",

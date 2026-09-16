@@ -1,8 +1,17 @@
 import type { WorkOrder, GanttTask, Priority, PlanificacionItem, Status, Resource } from "./types"
+import { baseDelPlan, finDeLaFila, inicioDeLaFila } from "./plan-fechas"
 
+/**
+ * La jornada del taller: 07:00 a 16:00. NUEVE horas de reloj.
+ *
+ * Decía 9 a 18 y no era un detalle de dibujo: con esa grilla, un proceso que el plan
+ * pone a las 07:00 quedaba fuera de la pantalla por arriba. Los minutos efectivos
+ * (495, con desayuno y almuerzo descontados) están en `lib/plan-fechas`, que es el
+ * espejo del backend; acá sólo viven las horas de reloj con las que se dibuja.
+ */
 export const WORK_HOURS = {
-  start: 9,
-  end: 18,
+  start: 7,
+  end: 16,
   total: 9,
 }
 
@@ -83,9 +92,10 @@ export function formatTime(hour: number): string {
 }
 
 function parseTime(timeStr?: string): { h: number; m: number } {
-  if (!timeStr) return { h: 9, m: 0 };
+  // Sin horario cargado se asume el del taller (abre 07:00), no las 9.
+  if (!timeStr) return { h: WORK_HOURS.start, m: 0 };
   const [h, m] = timeStr.split(':').map(Number);
-  return { h: isNaN(h) ? 9 : h, m: isNaN(m) ? 0 : m };
+  return { h: isNaN(h) ? WORK_HOURS.start : h, m: isNaN(m) ? 0 : m };
 }
 
 export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, date: string, resource?: Resource): number {
@@ -93,8 +103,8 @@ export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, da
   const targetDateStr = date
 
   // Use resource-specific hours if available, otherwise global defaults
-  const resStart = parseTime(resource?.hora_inicio || '09:00');
-  const resEnd = parseTime(resource?.hora_fin || '18:00');
+  const resStart = parseTime(resource?.hora_inicio || '07:00');
+  const resEnd = parseTime(resource?.hora_fin || '16:00');
 
   return resourceTasks.reduce((total, task) => {
     if (task.startDate > targetDateStr || task.endDate < targetDateStr) {
@@ -129,8 +139,8 @@ export function calculateResourceLoad(tasks: GanttTask[], resourceId: string, da
 }
 
 export function isOverloaded(load: number, resource?: Resource): boolean {
-  const resStart = parseTime(resource?.hora_inicio || '09:00');
-  const resEnd = parseTime(resource?.hora_fin || '18:00');
+  const resStart = parseTime(resource?.hora_inicio || '07:00');
+  const resEnd = parseTime(resource?.hora_fin || '16:00');
   const totalWorkHours = (resEnd.h + resEnd.m / 60) - (resStart.h + resStart.m / 60);
   return load > totalWorkHours;
 }
@@ -142,12 +152,14 @@ export function convertPlanificacionToGanttTasks(
   resources?: Resource[]
 ): GanttTask[] {
   const initialTasks = data.map((item) => {
-    const baseDate = item.creado_en ? new Date(item.creado_en) : new Date();
-    const normalizedBaseDate = new Date(baseDate);
-    normalizedBaseDate.setHours(9, 0, 0, 0);
-
-    const start = addWorkMinutes(normalizedBaseDate, item.inicio_min);
-    const end = addWorkMinutes(normalizedBaseDate, item.fin_min);
+    // Las fechas salen de lib/plan-fechas: primero la que mandó el backend —jornada
+    // real del taller y arranque de ESTE plan— y recién si no está, la cuenta local.
+    // Acá se recalculaba desde `creado_en` a las 09:00 con una jornada de 09 a 18 que
+    // el taller no tiene; el Gantt dibujaba trabajo en días y horas que el plan nunca
+    // dijo.
+    const base = baseDelPlan(item);
+    const start = inicioDeLaFila(item) || base;
+    const end = finDeLaFila(item) || start;
 
     const startDate = formatDate(start);
     const endDate = formatDate(end);
@@ -197,6 +209,21 @@ export function convertPlanificacionToGanttTasks(
     return task;
   });
 
+  // EL PLAN YA VIENE NIVELADO. `levelResources` es un segundo planificador que
+  // reacomoda las tareas una detrás de otra dentro del horario de cada persona; tenía
+  // sentido cuando las fechas las inventaba el frontend, pero el solver ya garantiza
+  // que nadie hace dos cosas a la vez, y esta pasada encima le hace daño: trata el
+  // sábado como día no laborable —el taller trabaja de 07:00 a 12:00— y empuja al lunes
+  // todo lo que el plan puso el sábado, arrastrando en cascada lo que venía después.
+  // Además suma la duración en minutos de reloj corrido, sin descontar el desayuno ni
+  // el almuerzo, así que terminaba cada proceso media hora antes que la lista.
+  //
+  // Cuando las filas traen la fecha del backend, se usa tal cual. La nivelación queda
+  // sólo para los datos viejos que no la tienen.
+  const todasConFechaDelBackend = data.length > 0
+    && data.every(item => !!item.fecha_inicio_estimada && !!item.fecha_fin_estimada);
+  if (todasConFechaDelBackend) return initialTasks;
+
   return levelResources(initialTasks, resources);
 }
 
@@ -216,8 +243,8 @@ function levelResources(tasks: GanttTask[], resources?: Resource[]): GanttTask[]
     if (resourceTasks.length === 0) return;
     const resourceId = resourceTasks[0].resourceId;
     const resource = resourceMap[resourceId];
-    const resStart = parseTime(resource?.hora_inicio || '09:00');
-    const resEnd = parseTime(resource?.hora_fin || '18:00');
+    const resStart = parseTime(resource?.hora_inicio || '07:00');
+    const resEnd = parseTime(resource?.hora_fin || '16:00');
 
     resourceTasks.sort((a, b) => {
       const dateA = new Date(`${a.startDate}T${a.startTime}`);
@@ -280,8 +307,8 @@ function addDurationToDate(startDate: Date, minutesToAdd: number, resource?: Res
   let currentDate = new Date(startDate);
   let minutesRemaining = minutesToAdd;
 
-  const resStart = parseTime(resource?.hora_inicio || '09:00');
-  const resEnd = parseTime(resource?.hora_fin || '18:00');
+  const resStart = parseTime(resource?.hora_inicio || '07:00');
+  const resEnd = parseTime(resource?.hora_fin || '16:00');
   const workStartMinutes = resStart.h * 60 + resStart.m;
   const workEndMinutes = resEnd.h * 60 + resEnd.m;
 
@@ -331,190 +358,21 @@ export function toTitleCase(str: string): string {
   return str.toLowerCase().replace(/(?:^|\s)\S/g, function (a) { return a.toUpperCase(); });
 }
 
-export function addWorkMinutes(startDate: Date, minutesToAdd: number): Date {
-  // Work hours per day in minutes
-  const workMinutesPerDay = (WORK_HOURS.end - WORK_HOURS.start) * 60;
-
-  const resultDate = new Date(startDate);
-
-  if (minutesToAdd >= 0) {
-    // Positive addition (forward in time)
-    let daysToAdd = Math.floor(minutesToAdd / workMinutesPerDay);
-    let remainingMinutes = minutesToAdd % workMinutesPerDay;
-
-    // Add working days
-    let daysAdded = 0;
-    while (daysAdded < daysToAdd) {
-      resultDate.setDate(resultDate.getDate() + 1);
-      const day = resultDate.getDay();
-      if (day !== 0 && day !== 6) {
-        daysAdded++;
-      }
-    }
-
-    // Add remaining minutes
-    resultDate.setHours(WORK_HOURS.start, 0, 0, 0);
-    resultDate.setMinutes(resultDate.getMinutes() + remainingMinutes);
-
-    return resultDate;
-  } else {
-    // Negative addition (backward in time)
-    let minutesToSubtract = Math.abs(minutesToAdd);
-    let daysToSubtract = Math.floor(minutesToSubtract / workMinutesPerDay);
-    let remainingMinutesToSubtract = minutesToSubtract % workMinutesPerDay;
-
-    // Subtract working days
-    let daysSubtracted = 0;
-    while (daysSubtracted < daysToSubtract) {
-      resultDate.setDate(resultDate.getDate() - 1);
-      const day = resultDate.getDay();
-      if (day !== 0 && day !== 6) {
-        daysSubtracted++;
-      }
-    }
-
-    // Subtract remaining minutes
-    // We assume we are starting from 09:00 (start of day) effectively
-    // So subtracting minutes means going to previous day's end
-    // Wait, the logic for positive was: set to 09:00 + remaining.
-    // For negative, we should set to 18:00 - remaining?
-    // If we are at 09:00 (normalized base), and we subtract 1 minute.
-    // We should go to previous working day 17:59.
-
-    // Let's simplify:
-    // 1. Move back N full days.
-    // 2. Move back remaining minutes from 09:00? No, from 09:00 of the *current* day?
-    // If we are at 09:00, and subtract 10 mins.
-    // We go to previous day 17:50.
-
-    // So, first subtract full days.
-    // Then subtract remaining minutes.
-
-    // If we are at 09:00.
-    // Subtract remainingMinutesToSubtract.
-    // We need to wrap to previous day.
-
-    // Actually, let's just use a loop for the remaining minutes part to be safe.
-
-    // But wait, the positive logic sets time to 09:00 + remaining.
-    // This implies the base date is always 09:00.
-    // So for negative:
-    // 18:00 - remaining?
-
-    // Example: -60 mins.
-    // 18:00 - 60 = 17:00.
-    // If -540 mins (9 hours).
-    // 18:00 - 540 = 09:00.
-
-    // So yes, set to 18:00 and subtract remaining.
-
-    // But we need to ensure we are on a working day.
-    // If we just subtracted days, we might be on a weekend?
-    // The loop ensures we land on a weekday (or we skipped weekends).
-    // But wait, if we land on Monday 09:00.
-    // And we need to subtract 1 minute.
-    // We should go to Friday 17:59.
-
-    // So:
-    // 1. Subtract full days.
-    // 2. If remaining > 0:
-    //    Move back 1 more day (skipping weekends).
-    //    Set time to 18:00 - remaining.
-
-    if (remainingMinutesToSubtract > 0) {
-      // Move back 1 day to start subtracting from its end
-      resultDate.setDate(resultDate.getDate() - 1);
-      while (resultDate.getDay() === 0 || resultDate.getDay() === 6) {
-        resultDate.setDate(resultDate.getDate() - 1);
-      }
-      resultDate.setHours(WORK_HOURS.end, 0, 0, 0);
-      resultDate.setMinutes(resultDate.getMinutes() - remainingMinutesToSubtract);
-    } else {
-      // Exact day boundary, set to 09:00
-      resultDate.setHours(WORK_HOURS.start, 0, 0, 0);
-    }
-
-    return resultDate;
-  }
-}
-
-export function calculateWorkingMinutes(startDate: Date, endDate: Date): number {
-  // console.log("calculateWorkingMinutes input:", startDate.toISOString(), endDate.toISOString());
-  let isNegative = false;
-  let start = new Date(startDate);
-  let end = new Date(endDate);
-
-  if (start > end) {
-    isNegative = true;
-    // Swap
-    const temp = start;
-    start = end;
-    end = temp;
-  }
-
-  let current = new Date(start);
-  let totalMinutes = 0;
-
-  const target = new Date(end);
-
-  while (current < target) {
-    const currentDay = current.getDay();
-    const isWeekend = currentDay === 0 || currentDay === 6;
-
-    // If weekend, skip to next Monday 09:00
-    if (isWeekend) {
-      current.setDate(current.getDate() + 1);
-      current.setHours(WORK_HOURS.start, 0, 0, 0);
-      continue;
-    }
-
-    // Current is a workday.
-    // Determine the end of the work day for current
-    const workStart = new Date(current);
-    workStart.setHours(WORK_HOURS.start, 0, 0, 0);
-
-    const workEnd = new Date(current);
-    workEnd.setHours(WORK_HOURS.end, 0, 0, 0);
-
-    // If current is before work start, move to work start
-    if (current < workStart) {
-      current = new Date(workStart);
-    }
-
-    // If current is after work end, move to next day
-    if (current >= workEnd) {
-      current.setDate(current.getDate() + 1);
-      current.setHours(WORK_HOURS.start, 0, 0, 0);
-      continue;
-    }
-
-    // Now current is within work hours (or at start).
-    // Determine how much we can add today.
-    // We stop at either workEnd or target.
-
-    let nextStop = new Date(workEnd);
-    if (target < nextStop) {
-      nextStop = new Date(target);
-    }
-
-    // Add difference
-    const diffMs = nextStop.getTime() - current.getTime();
-    if (diffMs > 0) {
-      totalMinutes += Math.floor(diffMs / 60000);
-    }
-
-    // Advance current
-    current = new Date(nextStop);
-
-    // If we reached workEnd, move to next day start to avoid infinite loop if target is far
-    if (current.getTime() === workEnd.getTime()) {
-      current.setDate(current.getDate() + 1);
-      current.setHours(WORK_HOURS.start, 0, 0, 0);
-    }
-  }
-
-  return isNegative ? -totalMinutes : totalMinutes;
-}
+/*
+ * ACÁ VIVÍAN `addWorkMinutes` y `calculateWorkingMinutes`, y se las llevó el
+ * arreglo del 16/09/2026.
+ *
+ * Eran una segunda jornada laboral, paralela a la del taller: 09:00 a 18:00 de
+ * corrido, sin desayuno ni almuerzo, 540 minutos por día. La del taller es 07:00 a
+ * 16:00 con pausas, 495 minutos. Con esa cuenta —y partiendo del día en que se
+ * apretó «Planificar» puesto a las 09:00— la pantalla mostraba un plan hecho el
+ * miércoles a las 11 como si el trabajo empezara ese mismo miércoles a las 09:00.
+ *
+ * La traducción entre los minutos del planificador y una fecha vive ahora en un
+ * solo lugar, `lib/plan-fechas`, que es espejo del backend. Si necesitás sumar
+ * minutos hábiles a una fecha, usá `fechaDesdeMinutos` de ahí: no vuelvas a
+ * escribir la jornada a mano.
+ */
 
 export const isOperatorQualified = (operatorRanges: number[], allowedRanges: number[] | string | any[]): boolean => {
   let parsedAllowed: number[] = [];

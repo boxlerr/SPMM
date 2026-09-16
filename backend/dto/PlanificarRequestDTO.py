@@ -1,5 +1,5 @@
 # backend/dto/PlanificarRequestDTO.py
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, model_validator
 from typing import Dict, List, Optional
 
@@ -27,6 +27,12 @@ class PlanificarRequestDTO(BaseModel):
     # viejo, o un plan que nunca llegó a guardarse) el backend cae al borrado por
     # lote exacto. Ver PlanificacionBorradorRepository.borrar_por_ordenes.
     borrador_id: Optional[int] = None
+    # Desde cuándo arranca el plan que se está confirmando (el T=0 del planificador).
+    # Lo devuelve la vista previa y la pantalla lo manda de vuelta tal cual, para que
+    # las fechas que se guardan sean EXACTAMENTE las que se miraron. Sin esto el
+    # backend le volvía a preguntar la hora al reloj: una previa armada a las 06:59 y
+    # confirmada a las 07:01 se guardaba con un día de más.
+    inicio_base: Optional[datetime] = None
 
     @model_validator(mode="after")
     def _validar_rango(self):

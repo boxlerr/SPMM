@@ -141,8 +141,8 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
             operatorTimeMap.set(opKey, newTime);
 
             const op = operarios.find(o => (o.id === item.id_operario) || (`${o.nombre} ${o.apellido}`.trim().toLowerCase() === item.operator_name_display.toLowerCase()));
-            const resStart = op?.hora_inicio || "09:00";
-            const resEnd = op?.hora_fin || "18:00";
+            const resStart = op?.hora_inicio || "07:00";
+            const resEnd = op?.hora_fin || "16:00";
             const [sh, sm] = resStart.split(':').map(Number);
             const [eh, em] = resEnd.split(':').map(Number);
             const totalMins = (eh * 60 + em) - (sh * 60 + sm);
@@ -255,7 +255,7 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                                             </span>
                                         </TableCell>
                                         <TableCell className="text-center font-mono text-xs">
-                                            #{item.orden_id}
+                                            #{item.pedido_externo || item.orden_id}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <span className="text-gray-600">{item.tiempo_proceso_display}</span>

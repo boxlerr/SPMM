@@ -28,6 +28,25 @@ interface WorkOrdersListWrapperProps {
     /** Callback para pedirle al padre que vuelva a cargar todos los datos
      *  (después de crear/editar/eliminar OTs o de cambios masivos). */
     onRefresh?: () => void;
+    /**
+     * La pantalla de planificación, que se dibuja adentro de la solapa «Planificadas».
+     *
+     * Baja armada desde Operaciones porque todo su estado vive allá (qué plan se está
+     * mirando, qué día, qué OTs están tildadas). Acá era una lista más sin horarios, y
+     * al lado había una segunda pantalla —la solapa «Planificación»— que mostraba lo
+     * mismo con los horarios y con su propia idea de qué está planificado. Eran dos
+     * lugares para una sola pregunta.
+     */
+    contenidoPlanificadas?: React.ReactNode;
+    /** Cuántas OTs cuenta la solapa «Planificadas». Lo manda el padre para que el
+     *  número y la lista de adentro digan lo mismo: acá se contarían las de TODAS las
+     *  planificaciones y adentro se muestran las de la que está elegida. */
+    conteoPlanificadas?: number;
+    /** Qué solapa está abierta. La manda el padre para poder caer en «Planificadas»
+     *  después de confirmar un plan, que es el momento en que más ganas hay de verlo. */
+    subTab?: string;
+    /** Avisa qué solapa se está mirando (para limpiar la selección al salir). */
+    onSubTabChange?: (valor: string) => void;
 }
 
 export default function WorkOrdersListWrapper({
@@ -35,6 +54,10 @@ export default function WorkOrdersListWrapper({
     orders,
     planificacion,
     onRefresh,
+    contenidoPlanificadas,
+    conteoPlanificadas,
+    subTab: subTabExterna,
+    onSubTabChange,
 }: WorkOrdersListWrapperProps) {
     // State local para permitir optimistic updates (cambio de operario, estado, etc.)
     // sin tener que esperar el round-trip al backend. Se re-sincroniza desde props
@@ -54,6 +77,12 @@ export default function WorkOrdersListWrapper({
 
     // Delete Confirmation State
     const [deleteOrderId, setDeleteOrderId] = useState<number | null>(null);
+
+    // Qué solapa se está mirando. Hace falta acá —y no sólo en el padre— porque
+    // «Planificadas» trae su propia barra de acciones con su propio zoom: mostrar los
+    // dos deslizadores, y que el de afuera no haga nada, es peor que no mostrar ninguno.
+    const [subTabLocal, setSubTabLocal] = useState("no_planificadas");
+    const subTab = subTabExterna ?? subTabLocal;
 
 
     // El fetch de /ordenes, /planificacion y /operarios ya no vive acá:
@@ -122,7 +151,11 @@ export default function WorkOrdersListWrapper({
         <div className="relative">
             {/* "No Planificadas" va primera y es la que abre: es el trabajo que todavía
                 hay que resolver. Las otras dos son consulta. */}
-            <Tabs defaultValue="no_planificadas" className="w-full">
+            <Tabs
+                value={subTab}
+                onValueChange={(v) => { setSubTabLocal(v); onSubTabChange?.(v); }}
+                className="w-full"
+            >
                 {/* Cabecera: tabs + ZoomControl alineado a la derecha. El zoom aplica a las
                     tres listas, que ahora son la misma tabla. */}
                 <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
@@ -131,7 +164,7 @@ export default function WorkOrdersListWrapper({
                             No Planificadas ({unplannedOrders.length})
                         </TabsTrigger>
                         <TabsTrigger value="planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm">
-                            Planificadas ({plannedOrders.length})
+                            Planificadas ({conteoPlanificadas ?? plannedOrders.length})
                         </TabsTrigger>
                         <TabsTrigger value="historial" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-green-700 data-[state=active]:shadow-sm">
                             Historial ({completedOrders.length})
@@ -145,7 +178,7 @@ export default function WorkOrdersListWrapper({
                         </TabsTrigger>
                     </TabsList>
                     <div className="flex items-center gap-2">
-                        <ZoomControl value={zoom} onChange={setZoom} />
+                        {subTab !== "planificadas" && <ZoomControl value={zoom} onChange={setZoom} />}
                         {/* Dar de alta una OT es lo que hace Carolina, y no entra nunca a
                             planificar: el botón tiene que estar en ESTA pantalla, no en la
                             cabecera de Operaciones, que se va con el scroll y se lee como
@@ -178,14 +211,20 @@ export default function WorkOrdersListWrapper({
                     único que cambia es el título y el color. Antes era una vista de
                     tarjetas plegables (Gantt) que no se parecía a ninguna otra pantalla. */}
                 <TabsContent value="planificadas" className="mt-0">
-                    <UnplannedWorkOrdersList
-                        variante="planificadas"
-                        orders={plannedOrders}
-                        onEdit={handleEditOrder}
-                        onDelete={handleDeleteOrder}
-                        onDataChange={onRefresh}
-                        tableZoom={zoom}
-                    />
+                    {/* Acá adentro va la planificación entera: el plan elegido, la semana
+                        o el día, los horarios de cada paso y la carga de cada persona.
+                        Cuando el padre no la manda (otras pantallas que usan este mismo
+                        componente) se cae a la lista de siempre. */}
+                    {contenidoPlanificadas ?? (
+                        <UnplannedWorkOrdersList
+                            variante="planificadas"
+                            orders={plannedOrders}
+                            onEdit={handleEditOrder}
+                            onDelete={handleDeleteOrder}
+                            onDataChange={onRefresh}
+                            tableZoom={zoom}
+                        />
+                    )}
                 </TabsContent>
 
                 <TabsContent value="historial" className="mt-0">

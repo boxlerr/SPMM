@@ -22,6 +22,7 @@ import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
 import { toast } from "sonner";
 import { API_URL } from "@/config";
+import { inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import type { TandaManual } from "@/lib/borradorPlan";
@@ -114,6 +115,16 @@ interface PlanningPreviewScreenProps {
     onEdicionesChange?: (ediciones: Record<string, any>, forzarOrdenIds: number[]) => void;
     /** Cuándo se calculó este plan (ISO). Un borrador retomado puede ser de ayer. */
     calculadoEn?: string;
+    /**
+     * Desde cuándo arranca el plan (el T=0 del planificador), tal como lo devolvió el
+     * backend. Hace falta para la vuelta: cuando alguien le escribe un horario a mano
+     * a un proceso que quedó afuera, lo que se guarda es el MINUTO, y ese minuto se
+     * cuenta desde acá. Ver `lib/plan-fechas`.
+     */
+    inicioBase?: string;
+    /** Días que el taller no trabaja. Se usan en la vuelta de fecha a minutos, para que
+     *  cuente los mismos días que el backend. */
+    feriados?: string[];
     /**
      * Cómo estaban los datos de Recursos cuando se calculó este plan.
      *
@@ -237,6 +248,8 @@ export function PlanningPreviewScreen({
     diagnosticos = [],
     onEdicionesChange,
     calculadoEn,
+    inicioBase,
+    feriados = [],
     huellaAlCalcular,
     edicionesIniciales,
     forzarIdsIniciales,
@@ -399,13 +412,24 @@ export function PlanningPreviewScreen({
         };
     };
 
-    /** Convierte un datetime-local (YYYY-MM-DDTHH:mm) a `inicio_min` relativo a ahora.
-     *  Se usa cuando el usuario asigna manualmente un proceso que quedó afuera. */
+    /**
+     * Convierte un datetime-local (YYYY-MM-DDTHH:mm) al `inicio_min` del plan.
+     *
+     * Se usa cuando alguien asigna a mano un proceso que quedó afuera. Los minutos del
+     * planificador son minutos TRABAJADOS contados desde el arranque del plan, no
+     * minutos de reloj contados desde ahora: acá se hacía `(fecha - ahora) / 60000`,
+     * así que poner un proceso el jueves a las 8 guardaba mil y pico de minutos —los
+     * de reloj, noches y fin de semana incluidos— y el proceso aterrizaba donde nadie
+     * lo había puesto. Ver `lib/plan-fechas`.
+     */
     const datetimeToInicioMin = (dtStr: string): number => {
         if (!dtStr) return 0;
-        const target = new Date(dtStr).getTime();
-        const now = Date.now();
-        return Math.max(0, Math.round((target - now) / 60000));
+        const destino = new Date(dtStr);
+        if (isNaN(destino.getTime())) return 0;
+        const base = inicioBase
+            ? new Date(inicioBase)
+            : inicioDelPlan(new Date(), feriados, planningRange?.fecha_desde);
+        return minutosDesdeFecha(base, destino, feriados);
     };
 
     /** Devuelve true si el proceso "unfit" fue completado a mano por el usuario
