@@ -241,6 +241,65 @@ const formatearMomento = (iso: string) => {
     return `${fecha} a las ${hora}`;
 };
 
+/**
+ * La huella de lo que el usuario puede cambiar en el modal.
+ *
+ * Sirve para contestar una sola pregunta: ¿cambió algo desde que se abrió? Se saca
+ * una huella al terminar de cargar y otra al cerrar; si son iguales, no hay nada que
+ * descartar y no hay por qué preguntar.
+ *
+ * QUÉ ENTRA Y QUÉ NO, y por qué:
+ *
+ *  - El `id` de cada proceso NO entra: se inventa al vuelo con `Math.random()` para
+ *    que React distinga las filas, así que es distinto en cada carga y compararlo
+ *    daría «cambió» siempre. `id_otp` —la pasada real— sí entra. El ORDEN del array
+ *    también cuenta: la posición ES el paso que se guarda.
+ *  - Las MATERIAS PRIMAS no entran: esa solapa se mira, no se edita (el único
+ *    `setMateriasPrimas` que no es carga ni reset no existe) y no viaja al guardar.
+ *  - Los ARCHIVOS EXISTENTES tampoco: el único botón que los saca escribe
+ *    `deletedFileIds` en la misma línea, así que esa lista ya cuenta la historia
+ *    completa. De los nuevos alcanza con nombre y tamaño.
+ *
+ * Que esas dos queden afuera no es un detalle de prolijidad: son justo las dos cosas
+ * que llegan por red. Sin ellas la foto se saca de una, sincrónica, y desaparece la
+ * ventana en la que lo que alguien tipeaba mientras cargaba se metía DENTRO de la
+ * foto — y se perdía al cerrar, sin cartel y sin aviso.
+ */
+type EstadoDelFormulario = {
+    generalData: any;
+    detailsData: any;
+    processes: ProcesoRow[];
+    files: File[];
+    deletedFileIds: number[];
+};
+
+/** El formulario en blanco. Está acá, y no escrito dos veces, para que el reset y la
+ *  foto del alta no se puedan separar: si se separaran, abrir «Nueva orden» y cerrar
+ *  sin escribir nada volvería a mostrar el cartel. */
+const generalVacio = () => ({
+    cliente: "", cliente_id: "", descripcion: "", prioridad_id: "", articulo_id: "", sector_id: "", fecha_prometida: "",
+    fecha_entrada: new Date().toISOString().split('T')[0], fecha_orden: new Date().toISOString().split('T')[0],
+    fecha_entrega: "", cantidad_entregada: "", reclamo: false, finalizadototal: false, finalizadoparcial: false,
+    n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
+    f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
+    revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false,
+    tiene_plano: false, no_lleva_plano: false, no_lleva_materia_prima: false,
+    programada: false, en_proceso: false, id_otvieja: "",
+});
+
+const detallesVacios = () => ({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
+
+const huellaDelFormulario = (v: EstadoDelFormulario): string => {
+    const sinIdDeUI = ({ id, ...resto }: any) => resto;
+    return JSON.stringify({
+        general: v.generalData,
+        detalles: v.detailsData,
+        procesos: (v.processes || []).map(sinIdDeUI),
+        archivosNuevos: (v.files || []).map(f => `${f.name}:${f.size}`),
+        archivosBorrados: [...(v.deletedFileIds || [])].sort((a, b) => a - b),
+    });
+};
+
 export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -260,6 +319,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const [activeTab, setActiveTab] = useState("general");
     const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
     const [showConfirmCancel, setShowConfirmCancel] = useState(false);
+
+    /**
+     * Cómo estaba el formulario recién abierto. Con esto se sabe si de verdad cambió
+     * algo: antes se preguntaba «¿tiene datos?» —`cliente_id || descripcion ||
+     * processes.length`— y editando una OT eso es SIEMPRE que sí, así que el cartel de
+     * «Descartar los cambios» salía aunque no se hubiera tocado nada (Julián, 16/09).
+     */
+    const fotoInicial = useRef<string | null>(null);
 
 
     // Form state
@@ -349,6 +416,10 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
     useEffect(() => {
         if (isOpen) {
+            // La foto de la apertura anterior no vale: el modal queda montado y su
+            // estado sobrevive al cierre.
+            fotoInicial.current = null;
+
             fetchData();
             if (activeTab !== "general") setActiveTab("general");
 
@@ -358,7 +429,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 // Helper to get ID string safely
                 const getSafeId = (obj: any) => obj?.id?.toString() || "";
 
-                setGeneralData({
+                const generalCargado = {
                     cliente: orderToEdit.cliente ? (typeof orderToEdit.cliente === 'object' ? orderToEdit.cliente.nombre : orderToEdit.cliente) || "" : "",
                     cliente_id: getSafeId(orderToEdit.cliente),
                     descripcion: orderToEdit.detalle || orderToEdit.observaciones || "",
@@ -397,15 +468,21 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     no_lleva_materia_prima: (orderToEdit as any).no_lleva_materia_prima === 1 || (orderToEdit as any).no_lleva_materia_prima === true,
                     programada: orderToEdit.programada === 1 || orderToEdit.programada === true,
                     en_proceso: orderToEdit.en_proceso === 1 || orderToEdit.en_proceso === true
-                });
+                };
+                setGeneralData(generalCargado);
 
-                setDetailsData({
+                const detallesCargados = {
                     cantidad: orderToEdit.unidades ? orderToEdit.unidades.toString() : "",
                     observaciones: orderToEdit.observaciones || "",
                     nota_1: "",
                     nota_2: "",
                     nota_3: "",
-                });
+                };
+                setDetailsData(detallesCargados);
+
+                // Los procesos ya mapeados, fuera del `if` para que la foto de abajo
+                // pueda verlos: adentro del bloque quedan fuera de alcance.
+                let procesosCargados: ProcesoRow[] = [];
 
                 // Populate processes if they exist
                 if (orderToEdit.procesos && orderToEdit.procesos.length > 0) {
@@ -442,6 +519,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         operario_id: (p as any).id_operario ? (p as any).id_operario.toString() : "",
                         incluido: true,
                     }));
+                    procesosCargados = mappedProcesses;
                     setProcesses(mappedProcesses);
                     // Lo que el planificador asignó viene pegado a cada proceso en la
                     // misma respuesta: no hace falta un segundo viaje, y así no parpadea
@@ -455,6 +533,26 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     setProcesses([]);
                     setPlanificado({});
                 }
+
+                // LA FOTO, ACÁ Y AHORA.
+                //
+                // Se arma con los valores que se acaban de setear y NO leyendo el
+                // estado: los setters de React no se aplicaron todavía, así que en este
+                // punto `generalData` y `processes` siguen teniendo lo de la apertura
+                // anterior.
+                //
+                // Y se saca ANTES de los dos viajes de abajo a propósito. Esperarlos
+                // abría una ventana de medio segundo en la que lo que alguien tipeaba
+                // entraba DENTRO de la foto: al cerrar, esos cambios figuraban como
+                // "nada cambió" y se perdían sin cartel. Ninguno de los dos hace falta
+                // para la comparación (ver `huellaDelFormulario`).
+                fotoInicial.current = huellaDelFormulario({
+                    generalData: generalCargado,
+                    detailsData: detallesCargados,
+                    processes: procesosCargados,
+                    files: [],
+                    deletedFileIds: [],
+                });
 
                 // Fetch existing files
                 fetch(`${API_URL}/planos/orden/${orderToEdit.id}`, { headers: getAuthHeaders() })
@@ -481,6 +579,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     })
                     .catch(err => console.error("Error fetching files:", err));
 
+
                 // Fetch existing materias primas (orden_trabajo_pieza JOIN pieza)
                 fetch(`${API_URL}/ordenes-trabajo-piezas?id_orden_trabajo=${orderToEdit.id}`, { headers: getAuthHeaders() })
                     .then(async (res) => {
@@ -506,12 +605,24 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     })
                     .catch(err => console.error("Error fetching materias primas:", err));
 
+
             } else {
                 // Reset if new
                 resetForm();
+                // Y su foto: un alta recién abierta y sin tocar tampoco tiene nada que
+                // descartar. `resetForm` deja exactamente estos valores.
+                fotoInicial.current = huellaDelFormulario({
+                    generalData: generalVacio(),
+                    detailsData: detallesVacios(),
+                    processes: [],
+                    files: [],
+                    deletedFileIds: [],
+                });
             }
         }
     }, [isOpen, orderToEdit]);
+
+
 
     const fetchData = async () => {
         setLoading(true);
@@ -980,16 +1091,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     };
 
     const resetForm = () => {
-        setGeneralData({
-            cliente: "", cliente_id: "", descripcion: "", prioridad_id: "", articulo_id: "", sector_id: "", fecha_prometida: "",
-            fecha_entrada: new Date().toISOString().split('T')[0], fecha_orden: new Date().toISOString().split('T')[0],
-            fecha_entrega: "", cantidad_entregada: "", reclamo: false, finalizadototal: false, finalizadoparcial: false,
-            n_ped_l: "", n_pedido: "", subsector: "", requerido_por: "", aprobado_por: "", remitos_salida: "",
-            f_disp_material: "", fabricacion: false, reparacion: false, sin_cargo: false, stock: false, interno: false,
-            revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false, tiene_plano: false, no_lleva_plano: false, no_lleva_materia_prima: false,
-            programada: false, en_proceso: false, id_otvieja: ""
-        });
-        setDetailsData({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
+        setGeneralData(generalVacio());
+        setDetailsData(detallesVacios());
         setProcesses([]);
         setMateriasPrimas([]);
         setFiles([]);
@@ -999,13 +1102,25 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     };
 
     const handleAttemptClose = () => {
-        // Check if form is dirty (has data)
-        const isDirty = generalData.cliente_id || generalData.descripcion || processes.length > 0;
+        // ¿CAMBIÓ ALGO? — no «¿tiene datos?», que es lo que preguntaba antes.
+        //
+        // Editando una OT siempre hay cliente y procesos, así que con la pregunta vieja
+        // el cartel de «Descartar los cambios» salía SIEMPRE, aunque uno hubiera abierto
+        // la orden sólo para mirarla. Ahora se compara contra la foto del momento en que
+        // terminó de cargar.
+        //
+        // Si la foto todavía no se sacó (el modal se está cargando, o falló algo), se
+        // pregunta: ante la duda, mejor un cartel de más que perder lo que alguien
+        // escribió.
+        const huellaActual = huellaDelFormulario({
+            generalData, detailsData, processes, files, deletedFileIds,
+        });
+        const sinCambios = fotoInicial.current !== null && huellaActual === fotoInicial.current;
 
-        if (isDirty) {
-            setShowConfirmCancel(true);
-        } else {
+        if (sinCambios) {
             handleClose();
+        } else {
+            setShowConfirmCancel(true);
         }
     };
 

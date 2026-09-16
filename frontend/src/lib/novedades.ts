@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "cerrar-una-ot-sin-cambios-no-pregunta",
+        fecha: "2026-09-16",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Si abrís una OT, no tocás nada y la cerrás, ya no te pregunta si querés descartar",
+        detalle:
+            "Abrías una orden sólo para mirarla, la cerrabas y te saltaba «Descartar los cambios, perderás los cambios que hiciste». No había ningún cambio: el sistema preguntaba «¿tiene datos?» en vez de «¿cambió algo?», y una OT que se edita siempre tiene cliente y procesos, así que el cartel salía siempre. Ahora se compara contra cómo estaba al abrirla. Si cambiaste algo —aunque sea un número, un archivo o el orden de un paso— el cartel sigue saliendo, que para eso está.",
+        href: "/operaciones",
+    },
+    {
         id: "el-horario-se-lee-y-se-cambia-mejor",
         fecha: "2026-09-16",
         tipo: "mejora",
