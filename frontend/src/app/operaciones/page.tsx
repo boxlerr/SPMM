@@ -590,7 +590,11 @@ export default function OperacionesPage() {
       set.add(key);
     });
     return set;
-  }, [filteredPlanificacion]);
+    // Las dependencias son las que el cuerpo LEE de verdad. Decían
+    // `[filteredPlanificacion]`, que ya no se usa acá adentro: el set quedaba pegado a
+    // un valor viejo y no coincidía con las listas. Se veía como el aviso «esta
+    // planificación arranca el mié 16/09 — ir a ese día» estando parado en el 16/09.
+  }, [filasPendientes, feriados]);
 
   // Lista de Date objects (uno por cada día con planificación) — react-day-picker
   // espera un array de Dates como modificador, no un Set de strings.
@@ -2274,6 +2278,10 @@ export default function OperacionesPage() {
                   />
                 </TabsContent>
 
+                {/* `diaResaltado`: para que se vea CUÁL paso trae a la OT a este día.
+                    Un paso largo —soldar 2700 minutos son cinco jornadas y media— puede
+                    haber arrancado el viernes y seguir en curso hoy, y en pantalla se leía
+                    «Vie 11/09» estando parado un miércoles: parecía un error de la lista. */}
                 <TabsContent value="diaria" className="m-0 h-full">
                   {/* Daily: misma regla que Semanal — el inicio y el fin de cada proceso
                       salen de `inicioDeLaFila` / `finDeLaFila` (lib/plan-fechas). */}
@@ -2386,6 +2394,7 @@ export default function OperacionesPage() {
                     tableZoom={planZoom}
                     data={otsDelDia}
                     mensajeVacio="Este día no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
+                    diaResaltado={fechaReferencia}
                     selectedIds={selectedPlanIds}
                     onSelectionChange={setSelectedPlanIds}
                     isLoading={isLoading}

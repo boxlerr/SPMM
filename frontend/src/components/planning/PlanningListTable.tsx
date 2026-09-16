@@ -51,6 +51,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     baseDelPlan,
+    finDeLaFila,
     formatoCorto,
     inicioDeLaFila,
     minutosDesdeFecha,
@@ -90,6 +91,16 @@ interface PlanningListTableProps {
      *  tiene que contar los mismos días que contó el backend al armar la fecha que se
      *  está viendo. Sin ellos, cada feriado en el medio corre el proceso un día. */
     feriados?: string[];
+    /**
+     * El día que se está mirando, para marcar qué pasos caen ahí.
+     *
+     * La vista Diaria muestra una OT si ALGÚN paso suyo toca ese día, y un paso largo
+     * —soldar 2700 minutos son cinco jornadas y media— toca varios días seguidos. El
+     * problema es que en pantalla se leía «Vie 11/09» estando parado un miércoles, y
+     * parecía un error: no había forma de ver cuál de los pasos era el que estaba en
+     * curso. Con esto, el que toca el día queda resaltado y dice por qué está.
+     */
+    diaResaltado?: Date;
     onDataChange?: () => void; // Added for refreshing data without reload
     hideStatus?: boolean; // New prop to hide status column
     highlightedIds?: number[]; // New prop for visual highlighting
@@ -197,6 +208,7 @@ function _PlanningListTable({
     tableZoom = 100,
     mensajeVacio,
     feriados = [],
+    diaResaltado,
     pinSelectedOnTop = false,
     compacto = false,
     colapsarFilasKey
@@ -464,6 +476,26 @@ function _PlanningListTable({
      * entre procesos seguidos) y A QUÉ HORA arranca (que es el dato que se busca). En
      * una sola línea del mismo tamaño las dos competían; separadas, la hora manda.
      */
+    /**
+     * Qué relación tiene el paso con el día que se está mirando: si arranca ahí, si
+     * viene de antes y sigue en curso, o si no lo toca. `null` cuando no se está
+     * mirando ningún día en particular (Pendientes, Entregadas, etc.).
+     */
+    const relacionConElDia = (ordenId: number, proc: { id?: number; proceso: { id: number } })
+        : "arranca" | "en curso" | null => {
+        if (!diaResaltado) return null;
+        const fila = filaDelPlan(ordenId, proc);
+        if (!fila) return null;
+        const inicio = inicioDeLaFila(fila, feriados);
+        const fin = finDeLaFila(fila, feriados);
+        if (!inicio || !fin) return null;
+        const desde = new Date(diaResaltado); desde.setHours(0, 0, 0, 0);
+        const hasta = new Date(diaResaltado); hasta.setHours(23, 59, 59, 999);
+        if (inicio >= desde && inicio <= hasta) return "arranca";
+        if (inicio < desde && fin >= desde) return "en curso";
+        return null;
+    };
+
     const inicioEnPartes = (ordenId: number, proc: { id?: number; proceso: { id: number } }) => {
         const item = filaDelPlan(ordenId, proc);
         if (!item) return null;
@@ -996,45 +1028,118 @@ function _PlanningListTable({
                                             </div>
                                         </div>
 
-                                        {/* Inicio Estimado */}
+                                        {/* Inicio Estimado.
+
+                                            Se edita en un desplegable y no con un campo
+                                            metido adentro de la celda: ahí no entraba
+                                            —"11/09/2026, 08:30 a.m." con su calendarito en
+                                            110px— y guardaba al perder el foco, así que un
+                                            click en cualquier lado escribía. Acá hay lugar
+                                            para el campo, y para decir qué se está por
+                                            guardar y con qué botón. */}
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Inicio Estimado</span>
-                                            <div
-                                                className="group relative flex w-full cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 transition-all duration-200 hover:border-amber-300 hover:bg-amber-100 hover:shadow-sm"
-                                                onClick={() => handleStartDateClick(item.id, proc)}
-                                                title="Click para editar el inicio estimado (Enter guarda, Escape cancela)"
-                                            >
-                                                <CalendarClock className="w-3.5 h-3.5 shrink-0 text-amber-500 group-hover:text-amber-700 transition-colors" />
-                                                {plannedItem && editingStartDate?.planId === plannedItem.id ? (
-                                                    <input
-                                                        type="datetime-local"
-                                                        className="border rounded px-1 py-0.5 text-[10px] w-full bg-white shadow-inner focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
-                                                        value={editingStartDate.value}
-                                                        onChange={(e) => setEditingStartDate({ ...editingStartDate, value: e.target.value })}
-                                                        onBlur={handleStartDateSave}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleStartDateSave();
-                                                            if (e.key === 'Escape') cancelarInicioEstimado();
+                                            {(() => {
+                                                const partes = inicioEnPartes(item.id, proc);
+                                                const relacion = relacionConElDia(item.id, proc);
+                                                return (
+                                                    <Popover
+                                                        // SIN `open`: lo maneja el propio desplegable.
+                                                        //
+                                                        // Atándolo a `editingStartDate` no abría nunca: el estado se
+                                                        // seteaba pero el desplegable seguía cerrado, porque su apertura
+                                                        // dependía de que ese estado volviera a coincidir con la fila, y en
+                                                        // el medio se perdía. Acá el click abre —que es lo que el usuario
+                                                        // pidió que funcione— y el estado de edición se prepara y se limpia
+                                                        // desde el mismo aviso.
+                                                        onOpenChange={(abierto) => {
+                                                            if (abierto) handleStartDateClick(item.id, proc);
+                                                            else cancelarInicioEstimado();
                                                         }}
-                                                        autoFocus
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                ) : (
-                                                    (() => {
-                                                        const partes = inicioEnPartes(item.id, proc);
-                                                        if (!partes) return (
-                                                            <span className="whitespace-nowrap text-gray-400">—</span>
-                                                        );
-                                                        return (
-                                                            <span className="flex items-baseline gap-1.5 whitespace-nowrap transition-colors group-hover:text-amber-950">
-                                                                <span className="text-[11px] font-medium text-amber-700/80">{partes.dia}</span>
-                                                                <span className="text-sm font-bold tabular-nums tracking-tight text-amber-900">{partes.hora}</span>
-                                                            </span>
-                                                        );
-                                                    })()
-                                                )}
-                                                <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-1 transition-all duration-200" />
-                                            </div>
+                                                    >
+                                                        <PopoverTrigger asChild>
+                                                            <button
+                                                                type="button"
+                                                                title="Cambiar el horario de este paso"
+                                                                className={cn(
+                                                                    "group relative flex w-full items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1 text-left transition-all",
+                                                                    relacion === "arranca"
+                                                                        ? "border-amber-400 bg-amber-100 ring-1 ring-amber-300"
+                                                                        : relacion === "en curso"
+                                                                            ? "border-blue-300 bg-blue-50"
+                                                                            : "border-amber-200 bg-amber-50 hover:border-amber-300 hover:bg-amber-100",
+                                                                    "hover:shadow-sm",
+                                                                )}
+                                                            >
+                                                                <CalendarClock className={cn(
+                                                                    "h-3.5 w-3.5 shrink-0",
+                                                                    relacion === "en curso" ? "text-blue-500" : "text-amber-500",
+                                                                )} />
+                                                                {partes ? (
+                                                                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                                                                        <span className={cn(
+                                                                            "text-[11px] font-semibold",
+                                                                            relacion === "en curso" ? "text-blue-800" : "text-amber-800",
+                                                                        )}>
+                                                                            {partes.dia}
+                                                                        </span>
+                                                                        <span className={cn(
+                                                                            "text-sm font-bold tabular-nums tracking-tight",
+                                                                            relacion === "en curso" ? "text-blue-950" : "text-amber-950",
+                                                                        )}>
+                                                                            {partes.hora}
+                                                                        </span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="flex-1 text-gray-400">—</span>
+                                                                )}
+                                                                {/* El lápiz, siempre a la vista: que la celda se puede tocar
+                                                                    no puede depender de pasar el mouse por encima. */}
+                                                                <Pencil className="h-3 w-3 shrink-0 text-amber-400 opacity-60 transition-opacity group-hover:opacity-100" />
+                                                            </button>
+                                                        </PopoverTrigger>
+                                                        <PopoverContent align="start" className="w-[270px] p-3">
+                                                            <p className="text-xs font-semibold text-gray-800">Cambiar el horario</p>
+                                                            <p className="mt-0.5 mb-2 truncate text-[11px] text-gray-500" title={proc.proceso?.nombre || ""}>
+                                                                {proc.proceso?.nombre || ""}
+                                                            </p>
+                                                            <input
+                                                                type="datetime-local"
+                                                                className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-xs outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
+                                                                value={editingStartDate?.value || ""}
+                                                                onChange={(e) => editingStartDate && setEditingStartDate({ ...editingStartDate, value: e.target.value })}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') handleStartDateSave();
+                                                                    if (e.key === 'Escape') cancelarInicioEstimado();
+                                                                }}
+                                                                autoFocus
+                                                            />
+                                                            <div className="mt-2.5 flex justify-end gap-2">
+                                                                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={cancelarInicioEstimado}>
+                                                                    Cancelar
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    className="h-7 bg-amber-600 text-xs hover:bg-amber-700"
+                                                                    onClick={handleStartDateSave}
+                                                                    disabled={!editingStartDate || editingStartDate.value === editingStartDate.original}
+                                                                >
+                                                                    Guardar
+                                                                </Button>
+                                                            </div>
+                                                        </PopoverContent>
+                                                    </Popover>
+                                                );
+                                            })()}
+                                            {/* Por qué esta OT está en la lista del día: el paso
+                                                que la trae. Sin esto, un paso largo que empezó el
+                                                viernes se leía como «esto no es de hoy». */}
+                                            {relacionConElDia(item.id, proc) === "en curso" && (
+                                                <span className="mt-1 hidden items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700 md:inline-flex">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                                    Sigue en curso este día
+                                                </span>
+                                            )}
                                         </div>
 
                                         {/* Estado */}

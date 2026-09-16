@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "el-horario-se-lee-y-se-cambia-mejor",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "En Diaria se ve cuál paso sigue en curso, y el horario se cambia en un cuadrito aparte",
+        detalle:
+            "Si mirabas un miércoles y te aparecía una OT con horarios del viernes, parecía un error: era un paso largo —soldar 2700 minutos son más de cinco jornadas— que arrancó el viernes y todavía está en curso. Ahora ese paso se ve en azul y dice «sigue en curso este día», y el que arranca ese día queda resaltado. Además el día y la hora dejaron de verse despintados, el lapicito está siempre a la vista, y al tocar el horario se abre un cuadrito con lugar de sobra y botones de Guardar y Cancelar: antes el campo no entraba en la celda y se guardaba solo con hacer click en cualquier otro lado.",
+        href: "/operaciones",
+    },
+    {
         id: "salir-del-planificador-con-la-x",
         fecha: "2026-09-16",
         tipo: "mejora",
