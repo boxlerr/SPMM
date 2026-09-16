@@ -47,6 +47,26 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "acciones-sobre-las-ot-tildadas",
+        fecha: "2026-09-16",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Al tildar órdenes aparece una barra con lo que podés hacer con ellas",
+        detalle:
+            "Antes tildar OTs no se notaba: lo único que cambiaba era que el botón rojo de arriba pasaba de decir «Eliminar plan» a «Quitar 5 OTs», en el mismo lugar y del mismo color. Ahora aparece una barra que te dice cuántas tenés tildadas y qué podés hacer: darlas por terminadas todas juntas, volverlas a pendientes o sacarlas de la planificación. Marcar como terminadas hace de una lo que antes era tildar paso por paso, y te avisa antes cuántas órdenes va a tocar.",
+        href: "/operaciones",
+    },
+    {
+        id: "la-hora-de-arranque-se-lee-mejor",
+        fecha: "2026-09-16",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "El horario de cada paso se lee de un vistazo y la lista dejó de tener huecos",
+        detalle:
+            "La hora de arranque ahora resalta sobre el día, que es lo que uno busca cuando mira la lista. Y se acomodaron las columnas: había un espacio en blanco enorme entre el nombre del proceso y el horario, y arriba el nombre de la planificación se cortaba a la mitad. Ahora entra entero y el aire quedó del lado derecho, donde están los recursos.",
+        href: "/operaciones",
+    },
+    {
         id: "planificacion-vive-adentro-de-planificadas",
         fecha: "2026-09-16",
         tipo: "mejora",

@@ -213,6 +213,9 @@ export default function OperacionesPage() {
   const [selectedPlanIds, setSelectedPlanIds] = useState<number[]>([])
   const [isQuitarOtsDialogOpen, setIsQuitarOtsDialogOpen] = useState(false)
   const [isQuitandoOts, setIsQuitandoOts] = useState(false)
+  /** Qué estado se está por aplicar a todas las OTs tildadas (null = ninguno). */
+  const [estadoMasivo, setEstadoMasivo] = useState<number | null>(null)
+  const [estadoMasivoEnCurso, setEstadoMasivoEnCurso] = useState(false)
 
 
 
@@ -1430,6 +1433,43 @@ export default function OperacionesPage() {
   /** Cada cambio en lo que se agregó a mano (tandas nuevas, deshacer, quitar una
    *  OT o una pasada). Sin esto el borrador volvía sin nada agregado a mano y el
    *  primer recálculo le devolvía a cada OT todos sus procesos. */
+  /**
+   * Pone todos los pasos de las OTs tildadas en el mismo estado, de una.
+   *
+   * Va por un endpoint que lo hace en UNA transacción y no por un PUT por paso:
+   * cinco OTs de diez pasos son cincuenta requests, y si uno falla a la mitad la
+   * orden queda hecha por la mitad sin que nadie lo haya decidido.
+   */
+  const aplicarEstadoMasivo = async () => {
+    if (estadoMasivo === null) return;
+    const ids = [...selectedPlanIds];
+    try {
+      setEstadoMasivoEnCurso(true);
+      const res = await fetch(`${API_URL}/ordenes/estado-masivo`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        body: JSON.stringify({ orden_ids: ids, id_estado: estadoMasivo }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json().catch(() => null);
+      const pasos = data?.data?.procesos;
+      toast.success(
+        estadoMasivo === 3
+          ? `${ids.length} orden${ids.length === 1 ? "" : "es"} marcada${ids.length === 1 ? "" : "s"} como terminada${ids.length === 1 ? "" : "s"}`
+          : `${ids.length} orden${ids.length === 1 ? "" : "es"} vuelta${ids.length === 1 ? "" : "s"} a pendiente`,
+        pasos ? { description: `${pasos} paso${pasos === 1 ? "" : "s"} actualizado${pasos === 1 ? "" : "s"}.` } : undefined,
+      );
+      setSelectedPlanIds([]);
+      await fetchData();
+    } catch (error) {
+      console.error("Error en el cambio de estado masivo:", error);
+      toast.error("No se pudo cambiar el estado. No se modificó ninguna orden.");
+    } finally {
+      setEstadoMasivoEnCurso(false);
+      setEstadoMasivo(null);
+    }
+  };
+
   /** Abrir la OT. Es lo que hace el doble clic en CUALQUIERA de las listas: en
    *  Semanal, Diaria y Terminadas el doble clic no hacía nada y la fila prometía en
    *  su globito que sí («un click para ver el detalle · doble clic para abrir la OT»),
@@ -1717,6 +1757,27 @@ export default function OperacionesPage() {
     return `${label} (${cuando.toLocaleDateString()} ${hora})`;
   };
 
+  /**
+   * El nombre corto, para el botón: "Sep 2026 · 16/9 11:00".
+   *
+   * En el desplegable va el nombre largo, que es donde hay lugar; en el botón no
+   * entraba y se cortaba en «Planificación Septiembre 2026 (10». La fecha y la hora
+   * son lo único que distingue dos planificaciones del mismo mes, así que son lo que
+   * no se puede perder.
+   */
+  const nombreCortoDelLote = (lote: { descripcion: string; date: string }) => {
+    const cuando = new Date(lote.date);
+    const mes = format(cuando, "MMM yyyy", { locale: es });
+    return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} · ${format(cuando, "d/M HH:mm")}`;
+  };
+
+  /** Lo que dice el botón del selector según lo que esté elegido. */
+  const etiquetaPlanElegido = (() => {
+    if (selectedLoteId === "all") return "Todas";
+    const lote = uniqueLotes.find(l => l.id === selectedLoteId);
+    return lote ? nombreCortoDelLote(lote) : "Elegí una";
+  })();
+
   /** Cuánto se lleva puesto borrar una planificación: OTs y renglones. */
   const tamanoDelLote = (id: string) => {
     const filas = rawPlanificacion.filter(p => p.id_planificacion_lote === id);
@@ -1774,90 +1835,172 @@ export default function OperacionesPage() {
               onValueChange={(v) => { setPlanSubTab(v); setSelectedPlanIds([]); }}
               className="w-full flex-1 flex flex-col"
             >
-              {/* Los cortes de ADENTRO de Planificadas: qué parte del plan se mira.
-                  Van en riel gris y redondeados, más chicos que las solapas de arriba,
-                  para que se lea que son la navegación de adentro y no compitan con
-                  ellas. Si no entran, scrollean con degradado + flecha (no se cortan en
-                  silencio). El ancho lo ceden las acciones, no los cortes. */}
-              <div className="mb-4 flex flex-col lg:flex-row lg:items-center justify-between gap-2 lg:gap-3">
+              {/* LA BARRA DE ARRIBA, EN DOS RENGLONES QUE CONTESTAN DOS PREGUNTAS.
+
+                  Estaba todo en uno solo y no entraba: los cinco controles envolvían a
+                  tres renglones contra la derecha mientras la izquierda tenía sólo el riel,
+                  y el hueco que quedaba entre medio era más alto que la tabla. Encima el
+                  nombre de la planificación se cortaba en «Planificación Septiembre 2026 (10».
+
+                  Renglón 1 — QUÉ PLAN se está mirando, y qué se puede hacer con él.
+                  Renglón 2 — QUÉ PARTE de ese plan se muestra, y con qué zoom. */}
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Select
+                  value={selectedLoteId}
+                  onValueChange={(v) => {
+                    if (v === LIMPIAR_VIEJAS) { setIsLimpiarViejasOpen(true); return; }
+                    setSelectedLoteId(v);
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-9 w-full min-w-0 max-w-[340px] gap-1.5 border-gray-200 bg-white text-xs sm:w-auto sm:min-w-[230px]"
+                    title="Qué planificación se está mirando"
+                  >
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+                    <span className="hidden shrink-0 font-normal text-gray-400 xl:inline">Plan</span>
+                    <span className="truncate font-medium">{etiquetaPlanElegido}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las Planificaciones</SelectItem>
+                    {uniqueLotes.map((lote, i) => (
+                      <SelectItem key={lote.id} value={lote.id}>
+                        {nombreDelLote(lote)}{i === 0 ? " · la que está corriendo" : ""}
+                      </SelectItem>
+                    ))}
+                    {/* Limpiar las viejas de una: borrar una son cuatro clicks y hay que
+                        ELEGIRLA primero, lo que manda toda la pantalla a ese mes. La
+                        vigente —la primera de la lista— nunca entra. */}
+                    {lotesViejos.length > 0 && (
+                      <SelectItem value={LIMPIAR_VIEJAS} className="text-red-600">
+                        Limpiar planificaciones viejas ({lotesViejos.length})
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (selectedLoteId === "all") {
+                        toast.error("Seleccione una planificación específica para re-planificar.");
+                        return;
+                      }
+                      setIsReplanning(true);
+                      setIsSelectionModalOpen(true);
+                    }}
+                    className={cn(
+                      "bg-white border-blue-200 transition-colors",
+                      selectedLoteId === "all"
+                        ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                        : "text-blue-600 hover:bg-gray-50"
+                    )}
+                    title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Re-planificar este lote (incluyendo órdenes pendientes)"}
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5 lg:mr-2", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
+                    <span className="hidden lg:inline">Re-planificar</span>
+                  </Button>
+                  {/* Eliminar la planificación entera. Antes este mismo botón hacía DOS
+                      cosas según hubiera OTs tildadas o no —borrar el plan o sacar esas
+                      OTs— y cuál de las dos no se veía hasta después de apretarlo.
+                      Sacar las tildadas se mudó a la barra de selección, que aparece
+                      sola y dice qué hace. */}
+                  {(() => {
+                    const deshabilitado = selectedLoteId === "all" || isDeletingLote || isQuitandoOts;
+                    return (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsDeleteLoteDialogOpen(true)}
+                        className={cn(
+                          "bg-white border-red-200 transition-colors gap-1.5",
+                          deshabilitado
+                            ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
+                            : "text-red-600 hover:bg-red-50"
+                        )}
+                        disabled={deshabilitado}
+                        title={selectedLoteId === "all"
+                          ? "Elegí una planificación para poder eliminarla"
+                          : "Eliminar esta planificación entera"}
+                      >
+                        <Trash2 className={cn("h-3.5 w-3.5", deshabilitado ? "text-gray-400" : "text-red-600")} />
+                        <span className="text-xs font-semibold">Eliminar plan</span>
+                      </Button>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
                 <ScrollableTabsBar className="rounded-full bg-gray-100/90 p-1 ring-1 ring-black/[0.03]">
-                  <TabsTrigger
-                    value="general"
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
-                    title="Todo lo que falta hacer de la planificación elegida"
-                  >
-                    Pendientes
-                    {otsPendientes.length > 0 && (
-                      <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
-                        {otsPendientes.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="semanal"
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
-                    title="Lo que falta hacer en la semana que estás mirando"
-                  >
-                    Semanal
-                    {otsDeLaSemana.length > 0 && (
-                      <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
-                        {otsDeLaSemana.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="diaria"
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
-                    title="Lo que falta hacer el día que estás mirando"
-                  >
-                    Diaria
-                    {otsDelDia.length > 0 && (
-                      <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
-                        {otsDelDia.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="completadas"
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
-                    title="El cliente ya las recibió completas"
-                  >
-                    Entregadas al cliente
-                    {completedPlannedOrdenes.length > 0 && (
-                      <span className="ml-1.5 rounded-full bg-green-100 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold">
-                        {completedPlannedOrdenes.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="finalizadas"
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
-                    title="El taller las terminó y todavía no se entregaron"
-                  >
-                    Terminadas en el taller
-                    {otsTerminadasSinEntregar.length > 0 && (
-                      <span className="ml-1.5 rounded-full bg-blue-100 text-blue-700 px-1.5 py-0.5 text-[10px] font-semibold">
-                        {otsTerminadasSinEntregar.length}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="carga"
-                    className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
-                  >
-                    Carga
-                  </TabsTrigger>
+                <TabsTrigger
+                  value="general"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                  title="Todo lo que falta hacer de la planificación elegida"
+                >
+                  Pendientes
+                  {otsPendientes.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
+                      {otsPendientes.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="semanal"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                  title="Lo que falta hacer en la semana que estás mirando"
+                >
+                  Semanal
+                  {otsDeLaSemana.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
+                      {otsDeLaSemana.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="diaria"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                  title="Lo que falta hacer el día que estás mirando"
+                >
+                  Diaria
+                  {otsDelDia.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 ring-1 ring-black/[0.04]">
+                      {otsDelDia.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="completadas"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                  title="El cliente ya las recibió completas"
+                >
+                  Entregadas al cliente
+                  {completedPlannedOrdenes.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-green-100 text-green-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                      {completedPlannedOrdenes.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="finalizadas"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                  title="El taller las terminó y todavía no se entregaron"
+                >
+                  Terminadas en el taller
+                  {otsTerminadasSinEntregar.length > 0 && (
+                    <span className="ml-1.5 rounded-full bg-blue-100 text-blue-700 px-1.5 py-0.5 text-[10px] font-semibold">
+                      {otsTerminadasSinEntregar.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="carga"
+                  className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-black/5"
+                >
+                  Carga
+                </TabsTrigger>
                 </ScrollableTabsBar>
-
-                {/* Acciones de la derecha. Antes eran `lg:flex-nowrap`, o sea rígidas (~750px
-                    entre selector de semana, zoom, Re-planificar, borrar y el Select). Como los
-                    tabs son el único elemento con `overflow-x-auto` — y por spec eso les da
-                    min-width automático 0 — los tabs absorbían TODO el faltante de ancho y
-                    quedaban cortados en "Planificadas | Seman" con el sidebar abierto.
-                    Ahora las acciones wrappean a una segunda fila (`min-w-0` para poder ceder)
-                    y los tabs, que son la navegación principal, se ven siempre completos. */}
-                <div className="py-2 pr-2 flex flex-row items-center gap-2 flex-wrap w-full lg:w-auto lg:min-w-0 lg:justify-end">
-
+                <div className="flex shrink-0 items-center gap-2">
                   {/* Selector de semana (al lado del zoom): muestra la semana visualizada
                       y permite cambiarla. Comparte estado con las vistas Semanal/Diaria
                       (customRefDate / lote / hoy). */}
@@ -1900,102 +2043,72 @@ export default function OperacionesPage() {
                       </Popover>
                     );
                   })()}
-
                   {/* Zoom control compartido (mismo storage key que No Planificadas,
                       Historial, Planificar y Vista Previa). */}
                   <ZoomControl value={planZoom} onChange={setPlanZoom} />
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (selectedLoteId === "all") {
-                        toast.error("Seleccione una planificación específica para re-planificar.");
-                        return;
-                      }
-                      setIsReplanning(true);
-                      setIsSelectionModalOpen(true);
-                    }}
-                    className={cn(
-                      "bg-white border-blue-200 transition-colors",
-                      selectedLoteId === "all"
-                        ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
-                        : "text-blue-600 hover:bg-gray-50"
-                    )}
-                    title={selectedLoteId === "all" ? "Seleccione una planificación para habilitar" : "Re-planificar este lote (incluyendo órdenes pendientes)"}
-                  >
-                    <RefreshCw className={cn("h-3.5 w-3.5 lg:mr-2", selectedLoteId === "all" ? "text-gray-400" : "text-blue-600")} />
-                    <span className="hidden lg:inline">Re-planificar</span>
-                  </Button>
-
-                  {/* Tachito con doble función:
-                        - Con OTs tildadas → las saca de la planificación (una o varias).
-                        - Sin nada tildado → elimina el lote entero (comportamiento viejo). */}
-                  {(() => {
-                    const haySeleccion = selectedPlanIds.length > 0;
-                    const deshabilitado = (!haySeleccion && selectedLoteId === "all") || isDeletingLote || isQuitandoOts;
-                    return (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => haySeleccion ? setIsQuitarOtsDialogOpen(true) : setIsDeleteLoteDialogOpen(true)}
-                        className={cn(
-                          "bg-white border-red-200 transition-colors gap-1.5",
-                          deshabilitado
-                            ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white"
-                            : "text-red-600 hover:bg-red-50"
-                        )}
-                        disabled={deshabilitado}
-                        title={
-                          haySeleccion
-                            ? `Quitar ${selectedPlanIds.length} OT${selectedPlanIds.length === 1 ? "" : "s"} de la planificación`
-                            : selectedLoteId === "all"
-                              ? "Tildá OTs para quitarlas, o elegí una planificación para eliminarla entera"
-                              : "Eliminar este lote de planificación"
-                        }
-                      >
-                        <Trash2 className={cn("h-3.5 w-3.5", deshabilitado ? "text-gray-400" : "text-red-600")} />
-                        {/* Es el mismo botón rojo para dos cosas muy distintas —sacar una OT
-                            o borrar el plan entero— y cuál de las dos hacía no se veía en
-                            ningún lado hasta después de apretarlo. */}
-                        <span className="text-xs font-semibold">
-                          {haySeleccion
-                            ? `Quitar ${selectedPlanIds.length} OT${selectedPlanIds.length === 1 ? "" : "s"}`
-                            : "Eliminar plan"}
-                        </span>
-                      </Button>
-                    );
-                  })()}
-
-                  <Select
-                    value={selectedLoteId}
-                    onValueChange={(v) => {
-                      if (v === LIMPIAR_VIEJAS) { setIsLimpiarViejasOpen(true); return; }
-                      setSelectedLoteId(v);
-                    }}
-                  >
-                    <SelectTrigger className="w-[180px] lg:w-[220px] xl:w-[260px] bg-white border-gray-200 text-xs lg:text-sm">
-                      <SelectValue placeholder="Lote / Historial" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas las Planificaciones</SelectItem>
-                      {uniqueLotes.map((lote, i) => (
-                        <SelectItem key={lote.id} value={lote.id}>
-                          {nombreDelLote(lote)}{i === 0 ? " · la que está corriendo" : ""}
-                        </SelectItem>
-                      ))}
-                      {/* Limpiar las viejas de una: borrar una son cuatro clicks y hay que
-                          ELEGIRLA primero, lo que manda toda la pantalla a ese mes. La
-                          vigente —la primera de la lista— nunca entra. */}
-                      {lotesViejos.length > 0 && (
-                        <SelectItem value={LIMPIAR_VIEJAS} className="text-red-600">
-                          Limpiar planificaciones viejas ({lotesViejos.length})
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
                 </div>
               </div>
+
+              {/* LO QUE SE PUEDE HACER CON LO TILDADO.
+
+                  Tildar OTs no se notaba: el único cambio era que el botón rojo de
+                  arriba pasaba de decir "Eliminar plan" a "Quitar 5 OTs", en el mismo
+                  lugar y del mismo color. Julián, 16/09: «al seleccionar todas no me
+                  deja hacer nada (...) no se nota el cambio, una animación o algo que
+                  me deje ver que aparecen botones al seleccionarlas».
+                  Ahora aparece esta barra, entra deslizándose y dice qué se puede hacer. */}
+              {selectedPlanIds.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-red-200 bg-gradient-to-r from-rose-50 to-red-50/60 px-3 py-2.5 shadow-sm ring-1 ring-red-500/5 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold text-white">
+                    {selectedPlanIds.length}
+                  </span>
+                  <span className="text-sm font-semibold text-red-900">
+                    {selectedPlanIds.length === 1 ? "orden seleccionada" : "órdenes seleccionadas"}
+                  </span>
+
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEstadoMasivo(3)}
+                      disabled={estadoMasivoEnCurso}
+                      className="h-8 gap-1.5 border-green-300 bg-white text-xs font-semibold text-green-700 hover:bg-green-50"
+                      title="Dar por terminados TODOS los pasos de las OTs tildadas"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Marcar como terminadas
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEstadoMasivo(1)}
+                      disabled={estadoMasivoEnCurso}
+                      className="h-8 gap-1.5 border-gray-300 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                      title="Volver TODOS los pasos de las OTs tildadas a pendiente"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Volver a pendientes
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsQuitarOtsDialogOpen(true)}
+                      disabled={isQuitandoOts}
+                      className="h-8 gap-1.5 border-red-300 bg-white text-xs font-semibold text-red-700 hover:bg-red-50"
+                      title="Sacarlas de la planificación (vuelven a quedar sin planificar)"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Quitar del plan
+                    </Button>
+                    <button
+                      onClick={() => setSelectedPlanIds([])}
+                      className="px-2 text-xs font-medium text-red-700/70 underline-offset-2 hover:text-red-900 hover:underline"
+                    >
+                      Deseleccionar
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* El zoom NO se aplica acá globalmente — se pasa como prop `tableZoom`
                   a cada PlanningListTable para que solo afecte la tabla, no la barra
@@ -2697,6 +2810,30 @@ export default function OperacionesPage() {
         confirmText={isDeletingLote ? "Eliminando..." : "Sí, eliminar"}
         cancelText="Cancelar"
         variant="destructive"
+      />
+
+      {/* El cambio masivo escribe en MUCHAS filas de una: cinco OTs pueden ser
+          cincuenta pasos con su hora de fin. Por eso el cartel dice cuántas órdenes y
+          qué les va a pasar, en vez de un "¿estás seguro?". */}
+      <ConfirmationDialog
+        isOpen={estadoMasivo !== null}
+        onClose={() => setEstadoMasivo(null)}
+        onConfirm={aplicarEstadoMasivo}
+        title={estadoMasivo === 3
+          ? `¿Dar por terminadas ${selectedPlanIds.length} orden${selectedPlanIds.length === 1 ? "" : "es"}?`
+          : `¿Volver ${selectedPlanIds.length} orden${selectedPlanIds.length === 1 ? "" : "es"} a pendiente?`}
+        description={estadoMasivo === 3
+          ? "Se marcan como terminados TODOS los pasos de esas órdenes, con la hora de "
+            + "ahora como hora de fin, y las órdenes pasan a «Terminadas en el taller». "
+            + "Es el mismo efecto que tildar cada paso a mano, todo junto."
+          : "Se vuelven a pendiente TODOS los pasos de esas órdenes y se borran sus horas "
+            + "reales de arranque y de fin. El trabajo que ya se haya hecho no queda "
+            + "registrado."}
+        confirmText={estadoMasivoEnCurso
+          ? "Aplicando..."
+          : (estadoMasivo === 3 ? "Sí, darlas por terminadas" : "Sí, volverlas a pendiente")}
+        cancelText="Cancelar"
+        variant={estadoMasivo === 3 ? "default" : "destructive"}
       />
 
       <ConfirmationDialog

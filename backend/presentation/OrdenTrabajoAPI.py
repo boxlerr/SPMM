@@ -18,6 +18,8 @@ async def get_db():
 # 🔹 Crear orden de trabajo
 from fastapi import FastAPI, APIRouter, Depends, Form, File, UploadFile, Request
 from typing import List
+# Arriba de todo: `EstadoMasivo` se declara antes que el import de más abajo.
+from pydantic import BaseModel
 
 # ... imports ...
 
@@ -36,6 +38,31 @@ async def crear_orden(
     return await service.crearOrdenTrabajo(data, files, user=current_user)
 
 from backend.dto.RegistrarEntregaDTO import RegistrarEntregaDTO
+
+class EstadoMasivo(BaseModel):
+    orden_ids: list[int]
+    id_estado: int
+
+
+@router.put("/ordenes/estado-masivo")
+async def actualizar_estado_masivo(
+    body: EstadoMasivo,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    """Cambia el estado de TODOS los pasos de varias OT, en una sola transacción.
+
+    VA ANTES DE `PUT /ordenes/{id}` A PROPÓSITO. FastAPI resuelve las rutas en el
+    orden en que se declaran, así que declarada después, esta URL entra por
+    `/ordenes/{id}`, que intenta leer "estado-masivo" como un número y contesta 422.
+    Lo cuida `test_rutas_en_orden.py`.
+    """
+    logger.info(f"API - PUT /ordenes/estado-masivo ({len(body.orden_ids)} OT -> {body.id_estado})")
+    event_bus = getattr(request.app.state, "event_bus", None)
+    service = OrdenTrabajoService(db, event_bus)
+    return await service.marcarEstadoDeOrdenes(body.orden_ids, body.id_estado, user=current_user)
+
 
 @router.put("/ordenes/{id}/entrega")
 async def registrar_entrega(

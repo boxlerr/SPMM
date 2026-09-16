@@ -457,6 +457,23 @@ function _PlanningListTable({
         return formatoCorto(start);
     };
 
+    /**
+     * Lo mismo, partido en día y hora.
+     *
+     * El renglón contesta dos cosas de distinto peso: QUÉ DÍA se hace (que se repite
+     * entre procesos seguidos) y A QUÉ HORA arranca (que es el dato que se busca). En
+     * una sola línea del mismo tamaño las dos competían; separadas, la hora manda.
+     */
+    const inicioEnPartes = (ordenId: number, proc: { id?: number; proceso: { id: number } }) => {
+        const item = filaDelPlan(ordenId, proc);
+        if (!item) return null;
+        const start = inicioDeLaFila(item, feriados);
+        if (!start) return null;
+        const texto = formatoCorto(start);          // "Jue 17/09 07:00"
+        const corte = texto.lastIndexOf(" ");
+        return { dia: texto.slice(0, corte), hora: texto.slice(corte + 1) };
+    };
+
 
     const getRowColor = (item: WorkOrder) => {
         // Highlighted check (e.g. reused orders in re-planning)
@@ -917,7 +934,7 @@ function _PlanningListTable({
 
             {/* Producción primero: `order-1` contra el `order-2` del plegable de arriba. */}
             <div className="order-1 w-full text-sm">
-                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[40px_3fr_110px_110px_70px_70px_2fr_2fr] gap-3 px-4 py-2 font-bold border-t border-gray-200">
+                <div className="hidden md:grid bg-gray-100 text-[11px] uppercase text-gray-600 grid-cols-[44px_minmax(200px,1.6fr)_150px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-2 font-bold border-t border-gray-200">
                     <div>#</div>
                     <div>Proceso</div>
                     <div>Inicio Estimado</div>
@@ -938,7 +955,7 @@ function _PlanningListTable({
                                 return (
                                     <div
                                         key={proc.id ?? `${item.id}-${proc.proceso.id}-${idx}`}
-                                        className="flex flex-col md:grid md:grid-cols-[40px_3fr_110px_110px_70px_70px_2fr_2fr] gap-3 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
+                                        className="flex flex-col md:grid md:grid-cols-[44px_minmax(200px,1.6fr)_150px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
                                     >
                                         {/* # */}
                                         <div className="flex flex-row justify-between md:block w-full md:w-auto">
@@ -983,11 +1000,11 @@ function _PlanningListTable({
                                         <div className="flex flex-col md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase mb-1">Inicio Estimado</span>
                                             <div
-                                                className="group relative flex items-center justify-center gap-1 text-xs font-medium text-amber-900 bg-amber-50/80 px-2 py-1 rounded-lg border border-amber-200/60 cursor-pointer hover:bg-amber-100 hover:border-amber-300 hover:shadow-sm transition-all duration-200 w-full whitespace-nowrap"
+                                                className="group relative flex w-full cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 transition-all duration-200 hover:border-amber-300 hover:bg-amber-100 hover:shadow-sm"
                                                 onClick={() => handleStartDateClick(item.id, proc)}
                                                 title="Click para editar el inicio estimado (Enter guarda, Escape cancela)"
                                             >
-                                                <CalendarClock className="w-3 h-3 text-amber-600/70 group-hover:text-amber-700 transition-colors" />
+                                                <CalendarClock className="w-3.5 h-3.5 shrink-0 text-amber-500 group-hover:text-amber-700 transition-colors" />
                                                 {plannedItem && editingStartDate?.planId === plannedItem.id ? (
                                                     <input
                                                         type="datetime-local"
@@ -1003,9 +1020,18 @@ function _PlanningListTable({
                                                         onClick={(e) => e.stopPropagation()}
                                                     />
                                                 ) : (
-                                                    <span className="group-hover:text-amber-950 transition-colors whitespace-nowrap block">
-                                                        {getScheduledStart(item.id, proc)}
-                                                    </span>
+                                                    (() => {
+                                                        const partes = inicioEnPartes(item.id, proc);
+                                                        if (!partes) return (
+                                                            <span className="whitespace-nowrap text-gray-400">—</span>
+                                                        );
+                                                        return (
+                                                            <span className="flex items-baseline gap-1.5 whitespace-nowrap transition-colors group-hover:text-amber-950">
+                                                                <span className="text-[11px] font-medium text-amber-700/80">{partes.dia}</span>
+                                                                <span className="text-sm font-bold tabular-nums tracking-tight text-amber-900">{partes.hora}</span>
+                                                            </span>
+                                                        );
+                                                    })()
                                                 )}
                                                 <Pencil className="w-3 h-3 text-amber-400 opacity-0 group-hover:opacity-100 absolute right-1 transition-all duration-200" />
                                             </div>

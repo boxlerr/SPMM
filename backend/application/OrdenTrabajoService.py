@@ -548,6 +548,21 @@ class OrdenTrabajoService:
             raise ApplicationException("Error al obtener timeline de próximas entregas.") from e
 
 
+    async def marcarEstadoDeOrdenes(self, orden_ids: list[int], id_estado: int, user: dict | None = None):
+        """Pone todas las OT elegidas en el mismo estado, de una.
+
+        Se usa desde la lista de planificadas, donde se tildan varias y se marcan
+        juntas: tildar cinco OT y tener que abrir los cincuenta pasos de a uno es el
+        tipo de cosa que nadie hace, así que el dato queda sin cargar.
+        """
+        logger.info(f"Service - Estado masivo: {len(orden_ids or [])} OT -> estado {id_estado}")
+        if id_estado not in (1, 2, 3):
+            raise ApplicationException("Estado inválido.")
+        if not orden_ids:
+            raise ApplicationException("No se recibieron órdenes.")
+        hecho = await self.repository.marcar_estado_de_ordenes(orden_ids, id_estado, usuario=user)
+        return ResponseDTO(status=True, data=hecho)
+
     async def actualizarEstadoProceso(self, id_orden: int, id_proceso: int, id_estado: int, user: dict | None = None, id_otp: int | None = None):
         logger.info(f"Service - Actualizar estado proceso: Orden {id_orden}, Proceso {id_proceso} -> ID Estado {id_estado}")
 

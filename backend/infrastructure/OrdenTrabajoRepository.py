@@ -808,6 +808,60 @@ class OrdenTrabajoRepository:
             logger.error(f"Repository - Error en check_all_processes_completed: {e}")
             raise InfrastructureException("Error al verificar completitud de la orden.") from e
 
+    async def marcar_estado_de_ordenes(self, orden_ids: list[int], id_estado: int,
+                                       usuario: dict | None = None) -> dict:
+        """Pone TODOS los pasos de varias OT en el mismo estado, en UNA transacción.
+
+        Existe porque hacerlo desde el navegador serían cincuenta PUT sueltos —diez
+        pasos por OT, cinco OT— y si uno falla a la mitad la orden queda hecha por la
+        mitad: unos pasos terminados y otros no, sin que nadie lo haya decidido. Acá o
+        se guardan todos o no se guarda ninguno.
+
+        Las marcas de tiempo siguen la misma regla que el cambio de a uno
+        (`update_proceso_status`): pendiente borra las dos, en proceso deja la de
+        arranque si ya estaba, y terminado escribe la de fin.
+        """
+        try:
+            ids = [int(i) for i in (orden_ids or [])]
+            if not ids:
+                return {"ordenes": 0, "procesos": 0}
+
+            ahora = _ahora_ar()
+            resultado = await self.db.execute(text("""
+                UPDATE orden_trabajo_proceso
+                   SET id_estado   = :estado,
+                       inicio_real = CASE WHEN :estado = 1 THEN NULL
+                                          WHEN :estado = 2 THEN COALESCE(inicio_real, :ahora)
+                                          ELSE inicio_real END,
+                       fin_real    = CASE WHEN :estado = 3 THEN :ahora ELSE NULL END
+                 WHERE id_orden_trabajo = ANY(:ordenes)
+            """), {"estado": id_estado, "ahora": ahora, "ordenes": ids})
+            procesos = resultado.rowcount or 0
+
+            # La OT queda entregada sólo si TODOS sus pasos quedaron terminados, que es
+            # exactamente lo que acaba de pasar cuando el estado pedido es "finalizado".
+            # 1950-01-01 es el centinela de "sin entregar" que usa toda la app.
+            entregada = ahora if id_estado == 3 else datetime(1950, 1, 1)
+            await self.db.execute(text("""
+                UPDATE orden_trabajo
+                   SET fecha_entrega  = :entrega,
+                       modificado_en  = :cuando,
+                       modificado_por = :quien
+                 WHERE id = ANY(:ordenes)
+                   AND EXISTS (SELECT 1 FROM orden_trabajo_proceso
+                                WHERE id_orden_trabajo = orden_trabajo.id)
+            """), {"entrega": entregada, "cuando": ahora,
+                   "quien": nombre_de(usuario), "ordenes": ids})
+
+            await self.db.commit()
+            logger.info(f"Repository - {procesos} pasos de {len(ids)} OT pasaron a estado {id_estado}.")
+            return {"ordenes": len(ids), "procesos": procesos}
+
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error en marcar_estado_de_ordenes: {e}")
+            raise InfrastructureException("Error al cambiar el estado de las órdenes.") from e
+
     async def mark_as_completed(self, id_orden: int):
         """
         Marca la orden como completada estableciendo fecha_entrega = NOW.
