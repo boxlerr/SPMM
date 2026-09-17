@@ -50,6 +50,15 @@ async def planificar_endpoint(
     lineas_por_orden = body.lineas_por_orden if body else None
     borrador_id = body.borrador_id if body else None
     inicio_base = body.inicio_base if body else None
+    # Los arreglos "solo para este plan" del panel de trabas. Va el model_dump() del
+    # DTO y NO el dict crudo del body a propósito: en el JSON las claves de procesos y
+    # maquinarias viajan como texto ("10") y el servicio las compara contra ids del ORM
+    # (10). Pydantic es el que las convierte; salteándolo el ajuste no matchea nunca y
+    # se pierde EN SILENCIO — el plan sale igual que sin ajuste y nadie se entera.
+    ajustes_del_plan = (
+        body.ajustes_del_plan.model_dump()
+        if body and body.ajustes_del_plan else None
+    )
 
     # Cada intento queda auditado, salga bien o mal. Antes un intento fallado no
     # dejaba rastro en la app: el 15/08 uno murió por memoria y la única evidencia
@@ -76,6 +85,7 @@ async def planificar_endpoint(
             procesos_por_orden=procesos_por_orden,
             lineas_por_orden=lineas_por_orden,
             inicio_base=inicio_base,
+            ajustes_del_plan=ajustes_del_plan,
         )
         await auditoria.registrar_intento(
             tipo, ordenes_ids, "ok",

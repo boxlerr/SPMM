@@ -40,6 +40,12 @@ from backend.domain.Cliente import Cliente
 # sin esta tabla ese camino ni se puede probar (y es el cambio más destructivo que
 # tiene la OT).
 from backend.domain.Planificacion import Planificacion
+# Borrar una OT borra también sus planos, así que sin esta tabla ese camino ni se
+# puede probar.
+from backend.domain.Plano import Plano
+# El registro de quién tocó cada paso. Se escribe sola, enganchada al ORM, así que
+# cualquier test que guarde un proceso la necesita creada.
+from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -63,6 +69,8 @@ TEST_TABLES = [
     Articulo.__table__,
     Cliente.__table__,
     Planificacion.__table__,
+    Plano.__table__,
+    AuditoriaProcesoOT.__table__,
 ]
 
 

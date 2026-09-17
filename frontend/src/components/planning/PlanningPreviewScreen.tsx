@@ -26,7 +26,18 @@ import { inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import type { TandaManual } from "@/lib/borradorPlan";
+import {
+    payloadDeAjustes, descripcionDeAccion, claveDeAjuste, objetivosDeAjuste,
+    type AjusteDelPlan, type AjustesDelPlanPayload, type AccionDeSolucion,
+} from "@/lib/ajustesPlan";
 import { MaterialChip } from "@/components/common/MaterialChip";
+import {
+    useProcesosEnPlan, contarCambios, resumirCambios, filasVisiblesDeOT, pasadasEnOrden,
+} from "@/components/planning/useProcesosEnPlan";
+import {
+    NombreDeProcesoEditable, MinutosDelProceso, AccionesDeProcesoEnPlan,
+    AgregarProcesoEnPlan, type ProcesoDelCatalogo,
+} from "@/components/planning/ProcesoEnPlanEditable";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -103,8 +114,15 @@ interface PlanningPreviewScreenProps {
     selectedOrderIds?: number[];
     /** Rango de fechas elegido en el modal anterior (para recalcular con el mismo). */
     planningRange?: { fecha_desde?: string; fecha_hasta?: string };
-    /** Recalcula el plan con un nuevo set de OTs + el mismo rango + las decisiones de forzar. */
-    onRecalculate?: (ids: number[], range: { fecha_desde?: string; fecha_hasta?: string }, forzarIds: number[], lineasPorOrden?: Record<number, number[]>) => void;
+    /** Recalcula el plan con un nuevo set de OTs + el mismo rango + las decisiones de
+     *  forzar + las soluciones que se aplicaron sólo a este plan (ver `lib/ajustesPlan`). */
+    onRecalculate?: (
+        ids: number[],
+        range: { fecha_desde?: string; fecha_hasta?: string },
+        forzarIds: number[],
+        lineasPorOrden?: Record<number, number[]>,
+        ajustes?: AjustesDelPlanPayload,
+    ) => void;
     /** True mientras se está recalculando (para mostrar spinner). */
     isCalculating?: boolean;
     /** Qué traba este plan y cómo se destraba (lo calcula el backend). */
@@ -145,6 +163,16 @@ interface PlanningPreviewScreenProps {
      *  Es lo que hace que las pasadas elegidas de a una sobrevivan a retomar el plan:
      *  sin ellas el recálculo siguiente le devuelve a la OT todos sus procesos. */
     onTandasChange?: (tandas: TandaManual[]) => void;
+    /**
+     * Las soluciones aplicadas "solo para este plan" que traía el borrador retomado.
+     *
+     * No están en Recursos ni en el plan que devolvió el solver: si no vuelven por
+     * acá, el primer recálculo devuelve el plan a lo que dicen los datos y la traba
+     * que alguien había destrabado reaparece sola.
+     */
+    ajustesIniciales?: AjusteDelPlan[];
+    /** Avisa de cada ajuste aplicado o deshecho, para que se guarde en el borrador. */
+    onAjustesChange?: (ajustes: AjusteDelPlan[]) => void;
 }
 
 /**
@@ -255,6 +283,8 @@ export function PlanningPreviewScreen({
     forzarIdsIniciales,
     tandasIniciales,
     onTandasChange,
+    ajustesIniciales,
+    onAjustesChange,
 }: PlanningPreviewScreenProps) {
 
     // Zoom compartido (key 'plan_zoom' en localStorage).
@@ -266,12 +296,34 @@ export function PlanningPreviewScreen({
     // Decisión por orden excedente: true = forzar (incluir igual), false = descartar (default)
     const [forzarOrdenIds, setForzarOrdenIds] = React.useState<Set<number>>(new Set());
 
+    /**
+     * Las soluciones que se aplicaron SOLO a este plan, sin tocar Recursos.
+     *
+     * Pedido de Julián (17/09/2026): destrabar un aviso para esta tanda sin dejar la
+     * máquina abierta para siempre. El ajuste no se escribe en ningún lado: viaja en
+     * el body de cada `/planificar` y el backend lo aplica en memoria. Ver
+     * `lib/ajustesPlan`.
+     *
+     * Vive acá y no adentro de `DiagnosticosPlan` porque el array `diagnosticos` se
+     * reemplaza entero en cada recálculo —y el panel limpia su estado con él—, así que
+     * el ajuste se perdería justo cuando vuelve el plan que produjo. Acá sobrevive al
+     * recálculo, igual que los retoques y las tandas.
+     */
+    const [ajustesDelPlan, setAjustesDelPlan] = React.useState<AjusteDelPlan[]>(ajustesIniciales ?? []);
+
     // Cada retoque sube al borrador. Va en un efecto y no dentro de cada setter
     // porque los cambios entran por varios lados (celda, popover, atajo) y con un
     // solo lugar no hay forma de que alguno se olvide de avisar.
     React.useEffect(() => {
         onEdicionesChange?.(editedResults, Array.from(forzarOrdenIds));
     }, [editedResults, forzarOrdenIds, onEdicionesChange]);
+
+    // Lo mismo con los ajustes de este plan: son lo único del borrador que no tiene
+    // copia en ningún lado —ni en Recursos ni en el plan que devolvió el solver—, así
+    // que si alguno no sube, se pierde sin dejar rastro.
+    React.useEffect(() => {
+        onAjustesChange?.(ajustesDelPlan);
+    }, [ajustesDelPlan, onAjustesChange]);
 
     // D1 (feedback 06/07): agregar procesos SUELTOS. `pendingAddLineas` mapea
     // orden_id -> set de ids de PASADA (orden_trabajo_proceso.id) elegidas;
@@ -295,13 +347,17 @@ export function PlanningPreviewScreen({
      * Va acá y no en un `useState` inicial porque la pantalla queda montada entre
      * plan y plan: el inicializador corre una sola vez en la vida del componente.
      *
-     * Cuando el plan es nuevo, el padre manda los dos vacíos y esto los limpia,
+     * Cuando el plan es nuevo, el padre manda los tres vacíos y esto los limpia,
      * que es lo que hacía antes con `forzarOrdenIds`.
      */
     React.useEffect(() => {
         if (!isOpen) return;
         setForzarOrdenIds(new Set(forzarIdsIniciales ?? []));
         setEditedResults((edicionesIniciales ?? {}) as Record<string, PlanificacionResult>);
+        // Los ajustes "solo para este plan" vuelven por el mismo camino. Un plan nuevo
+        // manda la lista vacía y eso los limpia: valen para el plan en el que se
+        // aplicaron y no para el siguiente.
+        setAjustesDelPlan(ajustesIniciales ?? []);
         // Solo al entrar: adentro de la pantalla mandan los cambios del usuario.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen]);
@@ -478,7 +534,7 @@ export function PlanningPreviewScreen({
         if (!onRecalculate) return;
         const forcedArr = Array.from(next);
         const mergedIds = buildOrdenIdsForRecalc(forcedArr);
-        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds));
+        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds), ajustesParaEnviar());
     };
 
     /**
@@ -512,6 +568,9 @@ export function PlanningPreviewScreen({
 
         // 1. Procesos auto-asignados (con edits del usuario aplicados).
         for (const r of results) {
+            // Las pasadas que se sacaron de la OT desde acá ya no existen: guardar su
+            // fila dejaría el plan apuntando a un paso borrado.
+            if (procesosEnPlan.fueBorrada(r.id_orden_trabajo_proceso)) continue;
             const eff = getEffectiveItem(r);
             manualPlan.push({
                 ...eff,
@@ -523,6 +582,9 @@ export function PlanningPreviewScreen({
         for (const info of forcedPartialMap.values()) {
             for (const u of info.unfit) {
                 if (!isUnfitManuallyAssigned(u)) continue;
+                // Mismo motivo que arriba: si esa pasada ya no está en la OT, su fila
+                // del plan no puede guardarse.
+                if (procesosEnPlan.fueBorrada(u.id_orden_trabajo_proceso)) continue;
                 const eff = getEffectiveItem(u);
                 const inicioMin = datetimeToInicioMin(eff.fecha_inicio_estimada || "");
                 const finMin = inicioMin + (eff.duracion_min || 0);
@@ -543,9 +605,59 @@ export function PlanningPreviewScreen({
     // Cartel de aviso al forzar: si al confirmar quedan OT excedentes SIN forzar,
     // avisamos antes de guardar (esas OT no se van a incluir en el plan).
     const [showForzarWarn, setShowForzarWarn] = React.useState(false);
-    const onClickConfirmar = () => {
+
+    /**
+     * Aviso al guardar con procesos editados y sin recalcular.
+     *
+     * Lo que se guarda es el plan que está en pantalla, y ese plan se calculó ANTES de
+     * los cambios: el paso que se agregó no tiene lugar y el que se cambió sigue con la
+     * persona y la máquina del proceso anterior. No se bloquea —el criterio de siempre
+     * es avisar, no frenar: guardar así puede ser justo lo que se quiere— pero tiene
+     * que estar dicho, porque es la diferencia entre guardar el plan que uno mira y
+     * guardar uno que ya no existe.
+     *
+     * Es el primer eslabón de una cadena: cada aviso, al seguir, llama al SIGUIENTE
+     * (`seguirGuardando`) y nunca a `handleConfirmWithDecisions` directo. Saltearse un
+     * eslabón se ve igual que guardar bien, y por eso no se nota hasta que ya está
+     * guardado.
+     */
+    const [showProcesosWarn, setShowProcesosWarn] = React.useState(false);
+
+    /**
+     * Aviso al guardar un plan que se calculó con arreglos «Solo en este plan».
+     *
+     * Esos arreglos no se escribieron en ningún lado: el plan salió como si la
+     * máquina aceptara ese rango, pero en Recursos la máquina sigue cerrada. Mientras
+     * se mira la vista previa eso está a la vista en la tira de ajustes; una vez
+     * guardado, el plan queda repartiendo trabajo que, según los datos del taller,
+     * esa persona o esa máquina no puede tomar, y en pantalla ya no hay nada que lo
+     * diga.
+     *
+     * Avisa y deja seguir, como todos los de esta cadena: aplicar el arreglo sólo a
+     * esta tanda puede ser exactamente lo que se quiso hacer. Lo que no puede pasar
+     * es que se guarde sin que nadie lo haya leído.
+     */
+    const [showAjustesWarn, setShowAjustesWarn] = React.useState(false);
+
+    /** El último tramo: excedentes sin forzar y, si no hay, se guarda. */
+    const seguirDespuesDeAjustes = () => {
         if (displayedExcedentes.length > 0) { setShowForzarWarn(true); return; }
         handleConfirmWithDecisions();
+    };
+    /**
+     * El eslabón de los ajustes va ACÁ y no en `onClickConfirmar` a propósito: por
+     * `seguirGuardando` pasan los dos caminos —el click directo y el «Guardar igual»
+     * del aviso de procesos—, así que ninguno lo puede saltear. Puesto en el click, el
+     * aviso de procesos seguiría derecho al de excedentes y se lo saltearía, que es
+     * justo la forma de romper la cadena que advierte el comentario de arriba.
+     */
+    const seguirGuardando = () => {
+        if (ajustesDelPlan.length > 0) { setShowAjustesWarn(true); return; }
+        seguirDespuesDeAjustes();
+    };
+    const onClickConfirmar = () => {
+        if (procesosEnPlan.hayCambios) { setShowProcesosWarn(true); return; }
+        seguirGuardando();
     };
 
     const handleConfirmWithEdits = () => {
@@ -740,16 +852,186 @@ export function PlanningPreviewScreen({
         return Object.keys(acc).length > 0 ? acc : undefined;
     };
 
+    /**
+     * Los ajustes "solo para este plan" que van en un recálculo.
+     *
+     * Toda llamada a `onRecalculate` tiene que pasar por acá, igual que por
+     * `lineasParaEnviar` y por el mismo motivo: el recálculo entra por ocho puertas
+     * distintas (forzar una OT, agregar, deshacer una tanda, quitar una OT, quitar
+     * una pasada, editar los procesos de una OT, ampliar el rango, la revisión
+     * automática al volver de Recursos) y a la que se olvide de mandarlos el plan
+     * vuelve en silencio a lo que dice la base, con la tira de ajustes todavía en
+     * pantalla diciendo que están aplicados.
+     *
+     * El `override` no es una comodidad: aplicar o deshacer un ajuste recalcula en el
+     * mismo tick en que hace el `setAjustesDelPlan`, y ahí el estado todavía tiene la
+     * lista VIEJA. Sin el override, el primer ajuste se aplicaría mandando la lista
+     * vacía y el deshecho se volvería a mandar.
+     */
+    const ajustesParaEnviar = (override?: AjusteDelPlan[]) => payloadDeAjustes(override ?? ajustesDelPlan);
+
     /** Recalcula el plan con las OTs actuales + las nuevas pendientes + decisiones de forzar. */
-    const handleRecalculate = (extraIds: number[] = [], lineasPorOrden?: Record<number, number[]>) => {
+    const handleRecalculate = (
+        extraIds: number[] = [],
+        lineasPorOrden?: Record<number, number[]>,
+        ajustesOverride?: AjusteDelPlan[],
+    ) => {
         if (!onRecalculate) {
             toast.error("Recalcular no está disponible en este contexto.");
             return;
         }
         const forcedArr = Array.from(forzarOrdenIds);
         const mergedIds = buildOrdenIdsForRecalc(forcedArr, extraIds);
-        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds, lineasPorOrden));
+        onRecalculate(
+            mergedIds,
+            planningRange,
+            forcedArr,
+            lineasParaEnviar(mergedIds, lineasPorOrden),
+            ajustesParaEnviar(ajustesOverride),
+        );
     };
+
+    /**
+     * El nombre del rango, para los avisos que proponen una solución sin traer los
+     * nombres puestos.
+     *
+     * Los que traen `accion` ya vienen con los nombres desde el backend (`suma` /
+     * `tenia`). Los avisos Media no traen acción —qué rango va lo sabe el taller, no
+     * el planificador— y de ahí sólo salen ids. Sin traducirlos, la tira de ajustes
+     * diría «rangos 3, 7», que es exactamente la jerga que se pidió sacar. El
+     * catálogo ya está cargado en la pantalla; si falló, se muestra el resto igual.
+     */
+    const nombreDeRango = React.useCallback(
+        (id: number) => rangosCatalog.find(r => r.id === id)?.nombre ?? "",
+        [rangosCatalog],
+    );
+
+    /**
+     * Aplica una solución SOLO a este cálculo, sin escribir nada en Recursos.
+     *
+     * Pedido de Julián (17/09/2026), copiado tal cual se escribió —tipeos incluidos, y
+     * por lo mismo que en `lib/ajustesPlan`: una cita "arreglada" ya no se puede buscar
+     * ni verificar contra el original—: *"si por ejemplo esas medianas solo se quieren
+     * solucionar para esa planificacion un boton para aplicar la solucion solo para
+     * esta pla ificacion y no me cambie todo en la base de datos"*. El botón de al
+     * lado —el permanente— sigue estando y sigue pidiendo confirmación en dos pasos,
+     * porque ése sí deja la máquina abierta para todos los planes que vengan.
+     *
+     * Éste es de un click a propósito: no toca ningún dato y se deshace con un botón,
+     * así que pedir confirmación sería sólo un paso más para nada.
+     *
+     * El recálculo va con la lista NUEVA y no con la del estado: `setAjustesDelPlan`
+     * recién se ve en el render siguiente, y sin el override el primer ajuste se
+     * aplicaría mandando la lista vacía.
+     */
+    const aplicarAjusteDelPlan = (ajuste: AjusteDelPlan) => {
+        if (!onRecalculate) {
+            toast.error("Recalcular no está disponible en este contexto.");
+            return;
+        }
+        // Dos veces el mismo ajuste no suma nada —los rangos son un conjunto final,
+        // no una suma— y dejaría dos líneas iguales en la tira.
+        if (ajustesDelPlan.some(a => a.clave === ajuste.clave)) return;
+
+        // Dos ajustes sobre la misma máquina CONVIVEN, no se pisan.
+        //
+        // Acá antes el segundo reemplazaba al primero. Se apoyaba en que el backend
+        // armaba cada solución mirando los rangos ya ajustados, o sea que el segundo
+        // traía adentro lo que había puesto el primero. Eso dejó de ser cierto cuando
+        // las acciones pasaron a calcularse contra lo que dice Recursos —para que el
+        // botón que guarda no escriba el rango temporal de un ajuste—: desde entonces
+        // reemplazar borraba en silencio el primero, con los dos renglones en la tira.
+        //
+        // Ahora la identidad incluye los rangos propuestos (`claveDeAjuste`), así que
+        // dos soluciones distintas sobre la misma fresadora son dos ajustes distintos,
+        // y quien los junta es `payloadDeAjustes`, sumando los conjuntos. Lo único que
+        // se corta es aplicar dos veces exactamente lo mismo, arriba.
+        const conTexto: AjusteDelPlan = {
+            ...ajuste,
+            // El texto se rearma ACÁ aunque el panel mande el suyo, y no al revés.
+            // Es la misma función para los dos, pero de este lado está el catálogo de
+            // rangos: el panel sólo puede decir "al proceso X le cambio quién lo puede
+            // hacer" y desde acá sale "al proceso X lo puede hacer OFICIAL CNC", que es
+            // el dato que se necesita para decidir si ese ajuste se deshace o se deja.
+            // El del panel queda de red por si la acción viene sin nada que traducir.
+            descripcion: descripcionDeAccion(ajuste.accion, nombreDeRango) || ajuste.descripcion?.trim() || "",
+        };
+        const nueva = [...ajustesDelPlan, conTexto];
+        setAjustesDelPlan(nueva);
+        toast.info("Aplicado solo a este plan", {
+            description: `${conTexto.descripcion}. No se guardó nada en Recursos: vale para este plan y se pierde si lo descartás.`,
+        });
+        handleRecalculate([], undefined, nueva);
+    };
+
+    /**
+     * Saca un ajuste y recalcula como si nunca se hubiera aplicado.
+     *
+     * Saca ESE y nada más. Hubo una versión que además arrastraba los posteriores que
+     * tocaran alguna de las mismas cosas, porque se suponía que se habían calculado
+     * encima —el segundo ajuste sobre la misma máquina contenía al primero—. Esa
+     * suposición se cayó cuando las acciones pasaron a calcularse contra lo que dice
+     * Recursos: cada ajuste es ahora independiente de los otros, y `payloadDeAjustes`
+     * los suma. Arrastrar se llevaba puestos ajustes que nadie había tocado y que no
+     * dependían de éste.
+     */
+    const quitarAjusteDelPlan = (clave: string) => {
+        const i = ajustesDelPlan.findIndex(a => a.clave === clave);
+        if (i < 0) return;
+
+        const nueva = ajustesDelPlan.filter((_, j) => j !== i);
+        setAjustesDelPlan(nueva);
+        toast.info("Ajuste deshecho", {
+            description: nueva.length > 0
+                ? "Recalculando el plan sin ese ajuste."
+                : "Recalculando el plan con los datos tal como están en Recursos.",
+        });
+        // Misma razón que arriba para el override: si mandara el estado, el ajuste que
+        // se acaba de sacar viajaría igual y el plan volvería idéntico.
+        handleRecalculate([], undefined, nueva);
+    };
+
+    /**
+     * Los ajustes que quedan pisados cuando un cambio se guarda EN SERIO en Recursos.
+     *
+     * El caso: hay un ajuste vigente sobre una fresadora y después, desde el mismo
+     * panel, se usa «Guardar en Recursos» sobre esa misma fresadora. El ajuste viejo
+     * tiene un conjunto final armado antes de ese guardado, y como el conjunto
+     * REEMPLAZA (no suma), el próximo recálculo lo manda y le pisa a la máquina lo que
+     * se acaba de dejar cargado — en silencio y con el ajuste diciendo que sólo vale
+     * para este plan. Lo permanente manda: el ajuste se va.
+     *
+     * `accion` es opcional porque el panel puede no mandarla (versión anterior del
+     * componente): sin ella no hay forma de saber qué se tocó y se recalcula como
+     * siempre, que es el comportamiento de antes.
+     */
+    const olvidarAjustesPisadosPor = (accion?: AccionDeSolucion): AjusteDelPlan[] => {
+        if (!accion) return ajustesDelPlan;
+        const tocados = new Set(objetivosDeAjuste(accion));
+        const nueva = ajustesDelPlan.filter(a => !objetivosDeAjuste(a.accion).some(o => tocados.has(o)));
+        if (nueva.length === ajustesDelPlan.length) return ajustesDelPlan;
+
+        const sacados = ajustesDelPlan.length - nueva.length;
+        setAjustesDelPlan(nueva);
+        toast.info("Se dio de baja el ajuste temporal", {
+            description: `Lo acabás de dejar cargado en Recursos, así que ${sacados === 1 ? "el ajuste que tenías" : `los ${sacados} ajustes que tenías`} sobre eso ${sacados === 1 ? "sale" : "salen"} de la lista: si ${sacados === 1 ? "se quedaba" : "se quedaban"}, el próximo cálculo te pisaba lo que guardaste.`,
+        });
+        return nueva;
+    };
+
+    /**
+     * Los ajustes vigentes, en una línea, para contarlos en el aviso de guardado.
+     *
+     * Se cortan en tres: el diálogo es un párrafo, y diez renglones de fresadoras no
+     * se leen — el que quiere el detalle lo tiene en la tira, que es donde están todos.
+     */
+    const resumenDeAjustes = React.useMemo(() => {
+        const textos = ajustesDelPlan.map(a => a.descripcion?.trim()).filter(Boolean) as string[];
+        if (textos.length === 0) return "";
+        const muestra = textos.slice(0, 3).join("; ");
+        const resto = textos.length - 3;
+        return resto > 0 ? `${muestra}; y ${resto} más` : muestra;
+    }, [ajustesDelPlan]);
 
     const handleAddSelectedAndRecalculate = () => {
         const wholeOts = Array.from(pendingAddIds);
@@ -830,6 +1112,7 @@ export function PlanningPreviewScreen({
             planningRange,
             newForzar,
             Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
+            ajustesParaEnviar(),
         );
     };
 
@@ -844,6 +1127,46 @@ export function PlanningPreviewScreen({
      * después recalcula para ver cómo queda.
      */
     const [editandoProcesosDe, setEditandoProcesosDe] = React.useState<{ id: number; visible: number | string } | null>(null);
+
+    /**
+     * Lo mismo, pero sobre la fila que estás mirando (Julián, 17/09).
+     *
+     * El modal de arriba sigue estando —es donde está el «Deshacer» y donde se ve la OT
+     * entera, incluidos los pasos que no entraron al plan—, pero para corregir los
+     * minutos de un paso o sacar uno que no va, abrir la OT completa es demasiado
+     * camino. Acá se edita el renglón: el nombre, los minutos, el orden, y se agrega o
+     * se saca. Se guarda en la OT y el plan NO se recalcula solo: ver el comentario
+     * largo en `useProcesosEnPlan`.
+     */
+    const procesosEnPlan = useProcesosEnPlan();
+    // Suelta para el efecto que limpia las marcas: en el array de dependencias,
+    // `procesosEnPlan.olvidarTodo` es una expresión y el linter de hooks la rechaza.
+    const olvidarCambiosDeProcesos = procesosEnPlan.olvidarTodo;
+
+    /**
+     * El catálogo de procesos, para el desplegable de nombre.
+     *
+     * Se pide una sola vez y recién cuando alguien despliega una OT: la vista previa
+     * trabaja con el plan ya resuelto y no lo necesita para mostrarse. Son ~400 filas
+     * que la mayoría de las veces no hacen falta.
+     */
+    const [catalogoProcesos, setCatalogoProcesos] = React.useState<ProcesoDelCatalogo[]>([]);
+    const pidiendoCatalogo = React.useRef(false);
+    const pedirCatalogoProcesos = React.useCallback(async () => {
+        if (pidiendoCatalogo.current || catalogoProcesos.length > 0) return;
+        pidiendoCatalogo.current = true;
+        try {
+            const r = await fetch(`${API_URL.replace(/\/$/, "")}/procesos`, { headers: getAuthHeaders() });
+            const json = await r.json();
+            const lista = Array.isArray(json) ? json : (json?.data ?? []);
+            setCatalogoProcesos(lista.map((p: any) => ({ id: p.id, nombre: p.nombre })));
+        } catch {
+            // Sin catálogo se puede todo lo demás —minutos, orden, sacar un paso—; lo
+            // único que no se puede es cambiar un paso por otro proceso.
+        } finally {
+            pidiendoCatalogo.current = false;
+        }
+    }, [catalogoProcesos.length]);
 
     const handleProcesosEditados = (ordenId: number) => {
         // Los procesos elegidos a mano de ESTA OT dejan de valer: apuntaban a pasadas
@@ -869,7 +1192,7 @@ export function PlanningPreviewScreen({
         // Sin `lineasParaEnviar`: acaba de cambiar justo lo que esas restricciones
         // referenciaban. El resto de las OT conserva las suyas porque salen de
         // `lineasVigentes`, que ya quedó sin las de esta.
-        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds));
+        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds), ajustesParaEnviar());
     };
 
     const handleRemoveOrderAndRecalculate = (ordenId: number) => {
@@ -906,6 +1229,7 @@ export function PlanningPreviewScreen({
             planningRange,
             newForzar,
             Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
+            ajustesParaEnviar(),
         );
     };
 
@@ -966,15 +1290,18 @@ export function PlanningPreviewScreen({
             planningRange,
             newForzar,
             Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
+            ajustesParaEnviar(),
         );
     };
 
     const toggleRow = (ordenId: number) => {
-        setExpandedOrderIds(prev =>
-            prev.includes(ordenId)
-                ? prev.filter(id => id !== ordenId)
-                : [...prev, ordenId]
-        );
+        setExpandedOrderIds(prev => {
+            const abriendo = !prev.includes(ordenId);
+            // Los desplegables de proceso de adentro lo necesitan cargado. Se pide una
+            // sola vez en toda la pantalla, y sólo si alguien abre una OT.
+            if (abriendo) void pedirCatalogoProcesos();
+            return abriendo ? [...prev, ordenId] : prev.filter(id => id !== ordenId);
+        });
     };
 
     /**
@@ -1374,6 +1701,7 @@ export function PlanningPreviewScreen({
             { fecha_desde: planningRange.fecha_desde, fecha_hasta: sumarDias(base, 14) },
             forcedArr,
             lineasParaEnviar(ids),
+            ajustesParaEnviar(),
         );
     };
 
@@ -1406,9 +1734,14 @@ export function PlanningPreviewScreen({
 
     // Cada plan nuevo (o recalculado) limpia el estado del cartel: la foto que se
     // está mirando pasó a ser la de recién.
+    //
+    // Con las marcas de procesos editados pasa lo mismo, y por eso se limpian acá: el
+    // cálculo que acaba de volver ya salió con los minutos, el orden y los pasos nuevos
+    // de la OT, así que no hay nada viejo que marcar.
     React.useEffect(() => {
         setRevisionAuto(null);
-    }, [calculadoEn]);
+        olvidarCambiosDeProcesos();
+    }, [calculadoEn, olvidarCambiosDeProcesos]);
 
     const revisarSiCambioAlgo = async () => {
         if (!isOpen || !onRecalculate) return;
@@ -2519,12 +2852,37 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                        plan al toque: el aviso desaparece solo si de verdad
                                        se resolvió, y las fechas se actualizan con el dato
                                        nuevo sin salir de la vista previa. */
-                                    onResuelto={() => {
+                                    onResuelto={(accion?: AccionDeSolucion) => {
                                         if (!onRecalculate) return;
+                                        // Lo que se acaba de cargar en Recursos pisa al ajuste
+                                        // temporal que tocaba lo mismo: el ajuste tiene un
+                                        // conjunto final viejo y, como reemplaza, el recálculo
+                                        // de acá abajo le borraría a la máquina lo recién
+                                        // guardado sin decir una palabra. Manda lo permanente.
+                                        const quedan = olvidarAjustesPisadosPor(accion);
                                         const forcedArr = Array.from(forzarOrdenIds);
                                         const ids = buildOrdenIdsForRecalc(forcedArr);
-                                        onRecalculate(ids, planningRange, forcedArr, lineasParaEnviar(ids));
+                                        // Con la lista NUEVA y no con la del estado, por lo mismo
+                                        // de siempre: `setAjustesDelPlan` se ve recién en el
+                                        // render que viene.
+                                        onRecalculate(ids, planningRange, forcedArr, lineasParaEnviar(ids), ajustesParaEnviar(quedan));
                                     }}
+                                    /* El otro camino: destrabar el aviso SOLO para este
+                                       cálculo. No escribe en Recursos —el plan sale como
+                                       si el dato estuviera cargado y nada más—, así que
+                                       no pide confirmación y se deshace con un botón.
+                                       Pedido de Julián (17/09/2026). Ver lib/ajustesPlan. */
+                                    ajustes={ajustesDelPlan}
+                                    onAplicarSoloEstePlan={aplicarAjusteDelPlan}
+                                    onQuitarAjuste={quitarAjusteDelPlan}
+                                    /* El traductor de rangos, para que el panel pueda escribir
+                                       los nombres y no los ids. Los avisos Media no traen acción
+                                       —qué rango va lo sabe el taller, no el planificador—, así
+                                       que el panel la arma en pantalla y de ahí sólo salen ids:
+                                       sin esto el botón dice "le cambio quién la puede usar", sin
+                                       nombrar ningún rango, justo en los avisos que son el pedido
+                                       de Julián. El catálogo está cargado acá, no allá. */
+                                    nombreDeRango={nombreDeRango}
                                     /* Mismo recálculo, pero pedido a mano: el caso es
                                        "fui a Recursos, arreglé lo que pedía el aviso y
                                        volví". Los diagnósticos son la foto del momento
@@ -2883,6 +3241,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                             // Entró a mano en esta vista previa (OT entera o procesos sueltos).
                                             const esAMano = ordenesAMano.has(ordenId);
                                             const lineasDeEstaOT = lineasVigentes[ordenId] || [];
+                                            // Lo que se le editó a los procesos de esta OT y el plan todavía no refleja.
+                                            const cambiosDeLaOT = procesosEnPlan.cambiosDe(ordenId);
+                                            const editandoEstaOT = procesosEnPlan.trabajando === ordenId;
+                                            // Sin las pasadas borradas y, si se cambió el orden, con el orden nuevo.
+                                            const procesosVisibles = filasVisiblesDeOT(items, cambiosDeLaOT);
+                                            const pasadasVisibles = pasadasEnOrden(procesosVisibles);
 
                                             // Calculate alerts (Lateness)
                                             const effectiveItems = items.map(i => getEffectiveItem(i));
@@ -2972,6 +3336,17 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                         title="OT forzada — el motor amplió el rango para incluirla"
                                                                     >
                                                                         Forzada
+                                                                    </span>
+                                                                )}
+                                                                {/* Se le tocaron los procesos y el plan todavía no se rehizo. Va en la
+                                                                    fila cerrada para poder encontrar la OT sin desplegarlas todas. */}
+                                                                {cambiosDeLaOT && (
+                                                                    <span
+                                                                        className="text-[9px] uppercase tracking-wider bg-orange-100 text-orange-900 border border-orange-400 px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-1"
+                                                                        title={`Procesos editados desde el plan (${resumirCambios(cambiosDeLaOT)}). Están guardados en la OT, pero los horarios son los del último cálculo.`}
+                                                                    >
+                                                                        <AlertTriangle className="w-2.5 h-2.5" />
+                                                                        Procesos cambiados
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -3099,7 +3474,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                     setEditandoProcesosDe({ id: ordenId, visible: firstItem.id_otvieja || ordenId });
                                                                 }}
                                                                 disabled={isCalculating || isConfirming}
-                                                                title="Editar los procesos de esta OT: agregar, sacar, reordenar, elegir recurso maquinaria y recurso humano"
+                                                                title="Ver TODOS los procesos de la OT —también los que no entraron al plan— y deshacer el último cambio. Para tocar los que ya están en el plan, se editan directamente en la fila."
                                                             >
                                                                 <ListChecks className="w-4 h-4" />
                                                             </Button>
@@ -3123,8 +3498,46 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                             <td colSpan={totalColumnas} className="px-0 py-0 border-b shadow-inner">
                                                                 <div className="px-4 py-4 md:px-8 md:py-6 bg-gray-50/50">
                                                                     <div className="text-xs font-semibold uppercase text-gray-400 mb-2 pl-1">Procesos Planificados</div>
+
+                                                                    {/* Los procesos se editan en la fila (Julián, 17/09) y lo que se edita es
+                                                                        la ORDEN, no el plan. Mientras no se recalcule, este cartel dice que
+                                                                        los horarios de abajo son los de antes del cambio: es la diferencia
+                                                                        entre "ya está arreglado" y "ya está arreglado en la OT".
+
+                                                                        La frase de "queda guardado aunque descartes el borrador" es a
+                                                                        propósito la contraria de la que usan los ajustes «Solo en este
+                                                                        plan» ("no queda guardado en ningún lado"): son las dos mitades de
+                                                                        la misma regla y conviene que se lean igual en los dos lados. */}
+                                                                    {cambiosDeLaOT && (
+                                                                        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+                                                                            <AlertTriangle className="w-4 h-4 shrink-0 text-orange-600" />
+                                                                            <span className="flex-1 min-w-[260px] leading-snug">
+                                                                                <strong>
+                                                                                    {contarCambios(cambiosDeLaOT) === 1
+                                                                                        ? "Cambiaste un proceso de esta OT"
+                                                                                        : `Cambiaste ${contarCambios(cambiosDeLaOT)} procesos de esta OT`}
+                                                                                </strong>
+                                                                                {` (${resumirCambios(cambiosDeLaOT)}). `}
+                                                                                <strong>Queda guardado en la orden aunque descartes el borrador.</strong>
+                                                                                {" "}Lo que falta es el plan: los horarios de abajo se calcularon antes del cambio,
+                                                                                así que hay que recalcular para que valgan.
+                                                                            </span>
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant="outline"
+                                                                                className="h-7 shrink-0 border-orange-400 bg-white px-2 text-xs text-orange-900 hover:bg-orange-100"
+                                                                                disabled={isCalculating || isConfirming || !onRecalculate}
+                                                                                onClick={() => handleRecalculate()}
+                                                                                title="Volver a repartir el trabajo con los procesos como quedaron. Se rehacen los horarios de TODO el plan, no sólo los de esta OT."
+                                                                            >
+                                                                                <RefreshCw className={cn("mr-1 h-3 w-3", isCalculating && "animate-spin")} />
+                                                                                Recalcular el plan
+                                                                            </Button>
+                                                                        </div>
+                                                                    )}
+
                                                                     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm w-max max-w-full">
-                                                                        <div className="grid grid-cols-[auto_minmax(200px,340px)_auto_auto_auto] gap-0 text-sm">
+                                                                        <div className="grid grid-cols-[auto_minmax(200px,340px)_auto_auto_auto_auto] gap-0 text-sm">
                                                                             {/* Inner Header */}
                                                                             <div className="contents text-xs font-bold text-gray-500 uppercase bg-gray-100/50">
                                                                                 <div className="px-3 py-1.5 border-b">#</div>
@@ -3132,10 +3545,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 <div className="px-3 py-1.5 border-b">Recurso humano</div>
                                                                                 <div className="px-3 py-1.5 border-b">Recurso maquinaria</div>
                                                                                 <div className="px-3 py-1.5 border-b">Inicio</div>
+                                                                                <div className="px-3 py-1.5 border-b text-right">Paso</div>
                                                                             </div>
 
                                                                             {/* Inner Body: procesos auto-asignados (editables) */}
-                                                                            {items.map((item, idx) => {
+                                                                            {procesosVisibles.map((item, idx) => {
                                                                                 const effectiveItem = getEffectiveItem(item);
                                                                                 const limitacionElegida = limitacionDeMaquina(
                                                                                     availableMachines.find((m: any) => m.id === effectiveItem.id_maquinaria)
@@ -3143,18 +3557,61 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 // Esta pasada la eligió alguien a mano (no vino con la OT entera).
                                                                                 const lineaId = item.id_orden_trabajo_proceso ?? null;
                                                                                 const procesoAMano = lineaId != null && lineasAMano.has(lineaId);
+
+                                                                                // Lo que se le editó a ESTA pasada desde que se calculó el plan.
+                                                                                const cambio = lineaId != null ? cambiosDeLaOT?.lineas[lineaId] : undefined;
+                                                                                // El nombre y el proceso que hay que mostrar son los de después del
+                                                                                // cambio; la fila del plan sigue trayendo el de antes.
+                                                                                const nombreProceso = cambio?.proceso?.ahora ?? effectiveItem.nombre_proceso;
+                                                                                const idProcesoActual = cambio?.proceso?.id ?? effectiveItem.proceso_id;
+                                                                                /** El horario que se ve es de antes del cambio: o de esta fila, o del
+                                                                                 *  reordenamiento, que le mueve el lugar a toda la OT. */
+                                                                                const horarioViejo = !!cambio || !!cambiosDeLaOT?.pasos;
+                                                                                // La segunda persona de un proceso comparte la pasada con la fila de
+                                                                                // arriba: editarla dos veces sería editar lo mismo.
+                                                                                const noSeEdita = isCalculating || isConfirming || lineaId == null || !!item.slot_extra;
+                                                                                const motivoNoSeEdita = lineaId == null
+                                                                                    ? "Esta fila no está atada a un paso de la orden (plan viejo): recalculá para poder editarla."
+                                                                                    : item.slot_extra
+                                                                                        ? "Es otra persona en el mismo paso: se edita en el renglón de arriba."
+                                                                                        : undefined;
+                                                                                const posPasada = lineaId != null ? pasadasVisibles.indexOf(lineaId) : -1;
+                                                                                const vecinoArriba = posPasada > 0 ? pasadasVisibles[posPasada - 1] : null;
+                                                                                const vecinoAbajo = posPasada >= 0 && posPasada < pasadasVisibles.length - 1
+                                                                                    ? pasadasVisibles[posPasada + 1]
+                                                                                    : null;
                                                                                 return (
-                                                                                    <div key={claveDeEdicion(item)} className={cn("contents group/row", procesoAMano && "[&>div]:bg-indigo-50/60")}>
+                                                                                    <div key={claveDeEdicion(item)} className={cn(
+                                                                                        "contents group/row",
+                                                                                        // El cambio sin recalcular gana sobre el violeta de "a mano":
+                                                                                        // es lo que hay que ver antes de guardar el plan.
+                                                                                        cambio ? "[&>div]:bg-orange-50/70" : procesoAMano && "[&>div]:bg-indigo-50/60",
+                                                                                    )}>
                                                                                         <div className="px-3 py-1.5 border-b flex items-center gap-1 text-gray-400 font-mono text-xs">
-                                                                                            {procesoAMano && <span className="w-0.5 self-stretch -ml-3 mr-1 bg-indigo-500 rounded-r" />}
+                                                                                            {(cambio || procesoAMano) && (
+                                                                                                <span className={cn(
+                                                                                                    "w-0.5 self-stretch -ml-3 mr-1 rounded-r",
+                                                                                                    cambio ? "bg-orange-500" : "bg-indigo-500",
+                                                                                                )} />
+                                                                                            )}
                                                                                             {idx + 1}
                                                                                         </div>
                                                                                         {/* Nombre y minutos en la MISMA línea: apilados sumaban un renglón
                                                                                             por proceso para un dato de cuatro caracteres. */}
                                                                                         <div className="px-3 py-1.5 border-b flex flex-col justify-center">
                                                                                             <div className="flex items-baseline gap-2 min-w-0">
-                                                                                                <span className="font-medium text-gray-800 truncate" title={effectiveItem.nombre_proceso}>{capitalize(effectiveItem.nombre_proceso)}</span>
-                                                                                                <span className="shrink-0 text-xs text-gray-500 bg-gray-100 px-1.5 rounded">{effectiveItem.duracion_min}m</span>
+                                                                                                <NombreDeProcesoEditable
+                                                                                                    texto={capitalize(nombreProceso)}
+                                                                                                    idProceso={idProcesoActual}
+                                                                                                    procesos={catalogoProcesos}
+                                                                                                    cambio={cambio}
+                                                                                                    bloqueado={noSeEdita}
+                                                                                                    motivoBloqueo={motivoNoSeEdita}
+                                                                                                    trabajando={editandoEstaOT}
+                                                                                                    onCambiar={(id, nombre) => void procesosEnPlan.cambiarProceso(
+                                                                                                        ordenId, lineaId!, id, nombre, effectiveItem.nombre_proceso)}
+                                                                                                />
+                                                                                                <MinutosDelProceso minutos={effectiveItem.duracion_min} />
                                                                                                 {/* Lo agregado a mano se distingue de lo que trajo la OT.
                                                                                                     La X saca esta pasada sola: sin ella, corregir "elegí
                                                                                                     la fresadora de otra OT" era tirar la OT entera y
@@ -3287,14 +3744,101 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                         <div className="px-4 py-2 border-b flex items-center">
                                                                                             <Input
                                                                                                 type="datetime-local"
-                                                                                                className="h-8 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-amber-200"
+                                                                                                className={cn(
+                                                                                                    "h-8 text-xs px-2 border-gray-200 bg-gray-50/50 focus:ring-1 focus:ring-amber-200",
+                                                                                                    // Se marca la HORA, no sólo la fila: es el dato que dejó de
+                                                                                                    // ser cierto cuando cambiaron los minutos o el orden.
+                                                                                                    horarioViejo && "border-orange-400 bg-orange-50 text-orange-900 font-medium",
+                                                                                                )}
+                                                                                                title={horarioViejo
+                                                                                                    ? "Este horario se calculó antes del cambio. Recalculá para que el plan lo acomode, o dejalo y guardá así."
+                                                                                                    : undefined}
                                                                                                 value={effectiveItem.fecha_inicio_estimada ? effectiveItem.fecha_inicio_estimada.slice(0, 16) : getDateFromMin(effectiveItem.inicio_min)}
                                                                                                 onChange={(e) => handleDateChange(item, e.target.value)}
+                                                                                            />
+                                                                                        </div>
+
+                                                                                        {/* Mover el paso y sacarlo de la OT. */}
+                                                                                        <div className="px-2 py-1.5 border-b flex items-center">
+                                                                                            <AccionesDeProcesoEnPlan
+                                                                                                nombre={nombreProceso}
+                                                                                                esPrimero={vecinoArriba == null}
+                                                                                                esUltimo={vecinoAbajo == null}
+                                                                                                bloqueado={noSeEdita}
+                                                                                                motivoBloqueo={motivoNoSeEdita}
+                                                                                                trabajando={editandoEstaOT}
+                                                                                                onSubir={() => void procesosEnPlan.moverLinea(ordenId, lineaId!, vecinoArriba!, "arriba")}
+                                                                                                onBajar={() => void procesosEnPlan.moverLinea(ordenId, lineaId!, vecinoAbajo!, "abajo")}
+                                                                                                onBorrar={() => void procesosEnPlan.borrarLinea(ordenId, idProcesoActual, lineaId!, nombreProceso)}
                                                                                             />
                                                                                         </div>
                                                                                     </div>
                                                                                 );
                                                                             })}
+
+                                                                            {/* Los pasos agregados desde acá.
+                                                                                Están en la OT, pero el plan todavía no les buscó lugar: se
+                                                                                muestran igual —si no, agregar un proceso no se ve en ningún
+                                                                                lado hasta recalcular— y con el horario vacío, que es la
+                                                                                verdad. Van al final porque es donde los puso la orden. */}
+                                                                            {(cambiosDeLaOT?.nuevas ?? []).map((nueva, i) => (
+                                                                                <div key={`nueva-${nueva.idOtp}`} className="contents group/row [&>div]:bg-emerald-50/60">
+                                                                                    <div className="px-3 py-1.5 border-b flex items-center gap-1 text-gray-400 font-mono text-xs">
+                                                                                        <span className="w-0.5 self-stretch -ml-3 mr-1 bg-emerald-500 rounded-r" />
+                                                                                        {procesosVisibles.length + i + 1}
+                                                                                    </div>
+                                                                                    <div className="px-3 py-1.5 border-b flex items-center">
+                                                                                        <div className="flex items-baseline gap-2 min-w-0">
+                                                                                            <NombreDeProcesoEditable
+                                                                                                texto={capitalize(nueva.nombre)}
+                                                                                                idProceso={nueva.idProceso}
+                                                                                                procesos={catalogoProcesos}
+                                                                                                esNueva
+                                                                                                bloqueado={isCalculating || isConfirming}
+                                                                                                trabajando={editandoEstaOT}
+                                                                                                onCambiar={(id, nombre) => void procesosEnPlan.cambiarProceso(
+                                                                                                    ordenId, nueva.idOtp, id, nombre, nueva.nombre)}
+                                                                                            />
+                                                                                            <MinutosDelProceso minutos={nueva.minutos} />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="px-4 py-2 border-b flex items-center text-xs text-gray-500 italic">
+                                                                                        Lo elige el plan
+                                                                                    </div>
+                                                                                    <div className="px-4 py-2 border-b flex items-center text-xs text-gray-500 italic">
+                                                                                        Lo elige el plan
+                                                                                    </div>
+                                                                                    <div className="px-4 py-2 border-b flex items-center text-xs font-medium text-emerald-800">
+                                                                                        Sin horario todavía
+                                                                                    </div>
+                                                                                    <div className="px-2 py-1.5 border-b flex items-center">
+                                                                                        <AccionesDeProcesoEnPlan
+                                                                                            nombre={nueva.nombre}
+                                                                                            sinMover
+                                                                                            esPrimero
+                                                                                            esUltimo
+                                                                                            bloqueado={isCalculating || isConfirming}
+                                                                                            trabajando={editandoEstaOT}
+                                                                                            onSubir={() => { }}
+                                                                                            onBajar={() => { }}
+                                                                                            onBorrar={() => void procesosEnPlan.borrarLinea(
+                                                                                                ordenId, nueva.idProceso, nueva.idOtp, nueva.nombre)}
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+
+                                                                        {/* Agregar un paso a la OT sin salir del plan. */}
+                                                                        <div className="border-t border-gray-100">
+                                                                            <AgregarProcesoEnPlan
+                                                                                procesos={catalogoProcesos}
+                                                                                bloqueado={isCalculating || isConfirming}
+                                                                                trabajando={editandoEstaOT}
+                                                                                onAbrir={() => void pedirCatalogoProcesos()}
+                                                                                onAgregar={(id, nombre, minutos) => void procesosEnPlan.agregarLinea(
+                                                                                    ordenId, id, nombre, minutos)}
+                                                                            />
                                                                         </div>
                                                                     </div>
 
@@ -3728,6 +4272,43 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     </div>
                 )}
         </PantallaPlanificador>
+        <ConfirmationDialog
+            isOpen={showProcesosWarn}
+            onClose={() => setShowProcesosWarn(false)}
+            onConfirm={seguirGuardando}
+            title="Cambiaste procesos y no recalculaste"
+            description={
+                `Editaste los procesos de ${procesosEnPlan.otsCambiadas.length === 1
+                    ? `la OT ${numeroDeOT(procesosEnPlan.otsCambiadas[0])}`
+                    : `${procesosEnPlan.otsCambiadas.length} OT (${procesosEnPlan.otsCambiadas.slice(0, 4).map(numeroDeOT).join(", ")}${procesosEnPlan.otsCambiadas.length > 4 ? "…" : ""})`}`
+                + ". Eso ya está guardado en las órdenes, pero el plan que se va a guardar se calculó antes: "
+                + "los horarios son los de antes del cambio y los pasos que agregaste no tienen lugar todavía. "
+                + "Si querés que el motor los acomode, volvé y usá «Recalcular el plan»."
+            }
+            confirmText="Guardar igual"
+            cancelText="Volver a revisar"
+        />
+        {/* Segundo eslabón: se guarda un plan que salió de datos que no están cargados.
+            Cuenta qué se aplicó y deja las dos salidas abiertas —guardar igual, o volver
+            y dejarlo cargado de verdad con «Guardar en Recursos»—. */}
+        <ConfirmationDialog
+            isOpen={showAjustesWarn}
+            onClose={() => setShowAjustesWarn(false)}
+            onConfirm={seguirDespuesDeAjustes}
+            title="Este plan salió con arreglos que no están cargados"
+            description={
+                `Para destrabar este plan se aplicaron ${ajustesDelPlan.length} ${ajustesDelPlan.length === 1 ? "arreglo que vale" : "arreglos que valen"} `
+                // Sin descripción no se inventa una lista vacía: se dice igual cuántos son.
+                + (resumenDeAjustes ? `solo para él: ${resumenDeAjustes}. ` : "solo para él. ")
+                + "Eso NO quedó cargado en el sistema: en Recursos los datos siguen como estaban. "
+                + "O sea que este plan le reparte trabajo a alguien o a una máquina que, según los datos del taller, no lo puede tomar, "
+                + "y una vez guardado no queda nada en pantalla que lo explique. "
+                + "Si el cambio es de verdad, volvé y aplicalo con «Guardar en Recursos» en cada aviso; "
+                + "si era solo para esta tanda, guardá igual."
+            }
+            confirmText="Guardar igual"
+            cancelText="Volver y cargarlos"
+        />
         <ConfirmationDialog
             isOpen={showForzarWarn}
             onClose={() => setShowForzarWarn(false)}

@@ -21,6 +21,7 @@
  */
 
 import { API_URL } from "@/config";
+import type { AjusteDelPlan } from "@/lib/ajustesPlan";
 
 const CLAVE_LOCAL = "spmm_borrador_plan";
 
@@ -66,6 +67,20 @@ export type BorradorPlan = {
      * pasaba antes— y no se rompe nada.
      */
     tandasManuales?: TandaManual[];
+    /**
+     * Las soluciones que se aplicaron SOLO a este plan, sin tocar Recursos.
+     *
+     * Tienen que viajar con el borrador porque no están en ningún otro lado: un
+     * ajuste local no se escribe en la base, así que si no se guarda acá, retomar el
+     * borrador y recalcular devuelve el plan a lo que dicen los datos —con la traba
+     * de vuelta— y nadie entiende por qué cambió. Ver `lib/ajustesPlan`.
+     *
+     * Opcional a propósito, igual que `tandasManuales` y `huella`: los borradores
+     * guardados antes del 17/09/2026 no lo tienen y se tienen que poder retomar
+     * igual. Cuando falta, el plan se abre sin ningún ajuste —que es exactamente lo
+     * que pasaba antes— y no se rompe nada.
+     */
+    ajustesDelPlan?: AjusteDelPlan[];
     /**
      * Desde cuándo arranca este plan (el T=0 del planificador), tal como lo devolvió
      * el backend.

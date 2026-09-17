@@ -263,6 +263,7 @@ from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
+from backend.infrastructure import auditoria_procesos as auditoria_proc
 
 
 class OperarioService:
@@ -413,6 +414,18 @@ class OperarioService:
             )
 
         try:
+            # Qué pasos quedan sin su persona elegida, anotado ANTES de blanquearlos:
+            # después ya no hay forma de saber a quién tenían puesto. Va a mano porque
+            # esto es un UPDATE masivo en SQL crudo y la auditoría de procesos se
+            # engancha al ORM. Ver infrastructure/auditoria_procesos.py.
+            con_esta_persona = await auditoria_proc.leer_pasadas(
+                db, "id_operario = :o", {"o": id}
+            )
+            await auditoria_proc.anotar(
+                db, con_esta_persona, "edicion", nuevos={"id_operario": None},
+                origen="Al borrar una persona",
+            )
+
             # A mano y en la misma transacción: estas tres FK son NO ACTION. Sin esto
             # el borrado revienta con un error de constraint que en pantalla se lee
             # como un problema de conexión.

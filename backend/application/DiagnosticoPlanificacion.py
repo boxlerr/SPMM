@@ -188,8 +188,18 @@ def _listar_rangos(nombres):
 
 
 def _resumen(procesos: int, ots, minutos: int) -> str:
+    """«3 procesos · 2 OT · 4h» — cuánto trabajo toca este aviso.
+
+    Decía «3 proc». Esa abreviatura no está escrita en ninguna otra pantalla del
+    sistema, así que el que la leía por primera vez tenía que adivinar de qué se
+    hablaba, y encima no concordaba: con uno solo salía «1 proc». Va la palabra
+    entera, por el pedido de Julián (17/09/2026) de que el panel lo entienda alguien
+    que no conoce el sistema. «OT» se queda como está: esa sí es palabra del taller
+    y se dice así todos los días.
+    """
     n_ots = len(ots)
-    return f"{procesos} proc · {n_ots} OT · {_corto(minutos)}"
+    return (f"{procesos} {_concuerda(procesos, 'proceso', 'procesos')} · "
+            f"{n_ots} OT · {_corto(minutos)}")
 
 
 def construir_diagnosticos(
@@ -205,6 +215,8 @@ def construir_diagnosticos(
     op_planos=None,
     rangos_efectivos=None,
     prioridad_skills=None,
+    maq_rangos_reales=None,
+    rangos_reales_por_proceso=None,
 ):
     """
     procesos      : tuplas que se le pasan al solver
@@ -215,6 +227,20 @@ def construir_diagnosticos(
                     usa el solver para preferir la habilidad principal. No define quién
                     puede: solo sirve para poder decir en el aviso quién va a tomar el
                     trabajo cuando una solución habilita a varios.
+    maq_rangos_reales         : id_maquina -> {rangos} tal como están GUARDADOS en Recursos.
+    rangos_reales_por_proceso : id_proceso -> {rangos} tal como están GUARDADOS en Recursos.
+
+    Los dos existen por los ajustes «solo en este plan». El aviso se DETECTA con los
+    datos ajustados —si el ajuste destrabó la traba, la traba tiene que desaparecer del
+    panel, que es todo el sentido del botón—, pero la ACCIÓN PERMANENTE (qué se escribe
+    en la base y qué dice que «hoy tiene») se calcula sobre estos, que son los de
+    Recursos. Sin separarlos, el ajuste temporal se colaba en el primer «Guardar en
+    Recursos» que se apretara sobre esa misma máquina o ese mismo proceso —el conjunto
+    final se arma como «lo que tiene ahora ∪ lo nuevo»—, que es justo lo que el botón
+    «Solo en este plan» promete que no pasa; y el panel de confirmación lo mostraba en
+    «hoy tiene», afirmando que un dato está cargado cuando no lo está.
+
+    En None caen a los ajustados, que en un plan sin ajustes son los mismos.
     """
     skills_manuales = skills_manuales or {}
     nativas_off = nativas_off or {}
@@ -251,6 +277,7 @@ def construir_diagnosticos(
     )
     diagnosticos += _cuellos_de_maquina(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
+        maq_rangos_reales,
     )
     # Único responsable de "pidió máquina y no la tuvo", en sus tres causas.
     # Absorbió a _gente_sin_habilitacion_en_la_maquina, que contaba una de ellas
@@ -259,6 +286,7 @@ def construir_diagnosticos(
         procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
         ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
         ots_con_plano, op_planos, rangos_crudos, prioridad_skills,
+        maq_rangos_reales, rangos_reales_por_proceso,
     )
     diagnosticos += _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango)
     diagnosticos += _trabajo_tercerizado(procesos, nombre_rango)
@@ -301,15 +329,49 @@ def _resumen_corto(d) -> str:
     «SETUP» no van—, y en el orden en que se pregunta: primero de qué se habla,
     después qué falta.
 
-    Sale de los campos que el aviso ya trae armados (`recurso`, `subtipo`, `tiene`,
-    `pide`), no de recortar el detalle: recortar texto da frases sin verbo.
+    Sale de los campos que el aviso ya trae armados (`tipo`, `recurso`, `subtipo`,
+    `tiene`), no de recortar el detalle: recortar texto da frases sin verbo.
     """
-    # Los títulos son todos «Sujeto: qué le pasa» desde el lote del 1/9, así que el
-    # sujeto sale del corte. Si alguno no lo respeta, se usa el título entero: peor
-    # es quedarse sin frase.
-    sujeto = (d["titulo"].split(":", 1)[0] or d["titulo"]).strip()
     tiene, pide = (d.get("tiene") or "").strip(), (d.get("pide") or "").strip()
     recurso, subtipo = d.get("recurso"), d.get("subtipo")
+
+    # ── Primero la FAMILIA del aviso, y recién después (recurso, subtipo) ──────
+    #
+    # El par (recurso, subtipo) es la taxonomía cerrada y sirve para clasificar,
+    # pero no alcanza para escribir la frase: CUATRO familias distintas caen en
+    # humano/rango, y tres de ellas mostraban, con el aviso cerrado, «La gente que
+    # hace este trabajo no puede usar esa máquina». Templado es un trabajo manual y
+    # no tiene ninguna máquina de la que hablar; un puesto vacante tampoco; un
+    # proceso sin rango no tiene nada trabado. Del otro lado pasaba lo mismo: un
+    # tercerizado es máquina/capacidad y decía «no alcanzan las máquinas» cuando su
+    # propio detalle dice que no hay nada que corregir.
+    #
+    # Como el resumen es lo ÚNICO que se lee sin abrir el aviso, la pantalla le
+    # afirmaba al taller cosas falsas en la primera línea, y lo único que lo miraba
+    # era un test de LARGO. Entra por el pedido de Julián (17/09/2026) de hacer las
+    # explicaciones entendibles: una explicación falsa no hay con qué entenderla.
+    #
+    # Se lee con `.get` a propósito: un aviso armado a mano no trae `tipo` y tiene
+    # que seguir cayendo en la lógica de abajo, que queda igual que estaba.
+    tipo = d.get("tipo")
+    if tipo == "proceso_sin_rango":
+        return "Nadie controla quién lo agarra."
+    if tipo == "puestos_vacantes":
+        return "Se lo cargó a un puesto que está vacío."
+    if tipo == "trabajo_tercerizado":
+        return "Lo hace alguien de afuera. No hay nada que corregir."
+    if tipo == "proceso_sin_operarios" and subtipo == RANGO:
+        return "Nadie de los disponibles puede hacerlo."
+    if tipo == "cuello_de_maquina" and d.get("severidad") == ADVERTENCIA and tiene:
+        # El cuello que ENTRA no es un faltante: es la capacidad real del taller, y
+        # su detalle lo dice con todas las letras («No hay nada roto»). `tiene` ya
+        # viene armado como «1 máquina» o «3 máquinas», así que la frase sirve para
+        # el cuello de una sola y para el grupo que se reparte el trabajo.
+        return f"Entra todo, pero por turnos: hay {_min(tiene)} para todo esto."
+    if tipo == "maquina_incompatible" and d.get("causa") == "sin_maquina":
+        return "No hay ninguna máquina cargada para esto."
+    if tipo == "maquina_incompatible" and d.get("causa") == "sin_familia":
+        return "No se sabe qué máquina usa."
 
     if recurso == MAQUINA and subtipo == RANGO and tiene and pide:
         # El malentendido de la reunión del 10/09 se arregla acá: el título decía
@@ -337,7 +399,10 @@ def _resumen_corto(d) -> str:
         return f"Tiene {_min(tiene)}. Necesita {_min(pide)}."
 
     # Sin dos lados que comparar no hay frase que armar: queda el problema del
-    # título, que ya es corto.
+    # título, que ya es corto. Los títulos son todos «Sujeto: qué le pasa» desde el
+    # lote del 1/9, así que lo que va después de los dos puntos ya es la frase; si
+    # alguno no respeta la forma, se usa el título entero, que es peor que quedarse
+    # sin nada.
     return d["titulo"].split(":", 1)[-1].strip().capitalize() or d["titulo"]
 
 
@@ -480,7 +545,8 @@ def _accion_proceso(proc_id, nombre_proc, rangos_finales, nombre_rango=None, ran
     }
 
 
-def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar, nombre_rango=None):
+def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar, nombre_rango=None,
+                    maq_rangos_reales=None):
     """Cargarle rangos a las máquinas candidatas.
 
     Antes, con más de una máquina no se ofrecía botón: tocar un parque entero de un
@@ -493,22 +559,27 @@ def _accion_maquina(maquinas, maq_nombre, maq_rangos, rangos_a_sumar, nombre_ran
     """
     if not maquinas:
         return None
+    # De DÓNDE parte el cambio. `maq_rangos` es lo que el diagnóstico está mirando, que
+    # con un ajuste «solo en este plan» encima ya trae el rango temporal; esto escribe en
+    # la base, así que parte de lo que la base dice. Si no, el ajuste de un día se
+    # guardaba para siempre apretando cualquier otro aviso de la misma máquina, y el
+    # «hoy tiene» del panel de confirmación nombraba un rango que nadie cargó nunca.
+    tiene_hoy = lambda m: set((maq_rangos_reales or {}).get(m, maq_rangos.get(m, set())))
     return {
         "tipo": "maquinaria",
         # `id` y `rangos` quedan por compatibilidad con lo ya desplegado: un
         # frontend viejo sigue aplicando la primera máquina en vez de romperse.
         "id": maquinas[0],
         "nombre": maq_nombre[maquinas[0]],
-        "rangos": sorted(set(maq_rangos.get(maquinas[0], set())) | set(rangos_a_sumar)),
+        "rangos": sorted(tiene_hoy(maquinas[0]) | set(rangos_a_sumar)),
         "objetivos": [
             {
                 "id": m,
                 "nombre": maq_nombre[m],
-                "rangos": sorted(set(maq_rangos.get(m, set())) | set(rangos_a_sumar)),
+                "rangos": sorted(tiene_hoy(m) | set(rangos_a_sumar)),
                 # Qué le cambia a ESTA máquina. No todas parten de lo mismo: una puede
                 # sumar dos rangos y la de al lado ninguno.
-                **_cambio(set(maq_rangos.get(m, set())) | set(rangos_a_sumar),
-                          maq_rangos.get(m, set()), nombre_rango),
+                **_cambio(tiene_hoy(m) | set(rangos_a_sumar), tiene_hoy(m), nombre_rango),
             }
             for m in maquinas
         ],
@@ -874,7 +945,8 @@ def _procesos_que_nadie_puede_hacer(
     return salida
 
 
-def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados):
+def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
+                        maq_rangos_reales=None):
     """Más trabajo del que entra en las máquinas habilitadas dentro del período.
 
     Se agrupa por el CONJUNTO de máquinas que el proceso puede usar, no por familia:
@@ -944,10 +1016,11 @@ def _cuellos_de_maquina(procesos, maq_familia, maq_nombre, maq_rangos, nombre_ra
                 "texto": f"Si **{_listar([maq_nombre[m] for m in sin_habilitar])}** también puede hacer este "
                          f"trabajo, agregale **{rangos_txt}** y el trabajo se reparte entre más máquinas.",
                 "donde": "Recursos › Recurso maquinaria",
-                "accion": _accion_maquina(sin_habilitar, maq_nombre, maq_rangos, d["rangos"], nombre_rango),
+                "accion": _accion_maquina(sin_habilitar, maq_nombre, maq_rangos, d["rangos"],
+                                          nombre_rango, maq_rangos_reales),
             })
         soluciones.append({
-            "texto": "O planificá menos OTs juntas: con menos trabajo en la misma máquina, las fechas se acercan.",
+            "texto": "O planificá menos OTs juntas: con menos trabajo en la misma máquina, cada OT termina antes.",
             "donde": "Al elegir las OTs",
         })
 
@@ -1020,6 +1093,7 @@ def _procesos_sin_maquina_compatible(
     procesos, maq_familia, maq_nombre, maq_rangos, nombre_rango, resultados,
     ops_por_rango, rangos_por_op, skills_manuales, nativas_off, nombre_operario,
     ots_con_plano=None, op_planos=None, rangos_crudos=None, prioridad_skills=None,
+    maq_rangos_reales=None, rangos_reales_por_proceso=None,
 ):
     """El proceso pidió máquina y no la consiguió. Acá se explica por qué.
 
@@ -1046,6 +1120,7 @@ def _procesos_sin_maquina_compatible(
     ots_con_plano = set(ots_con_plano or ())
     op_planos = op_planos or {}
     rangos_crudos = rangos_crudos or {}
+    rangos_reales_por_proceso = rangos_reales_por_proceso or {}
 
     # Las filas de operarios ADICIONALES comparten (orden, secuencia) con la
     # principal y van siempre sin máquina —la reserva la principal—, así que
@@ -1121,11 +1196,24 @@ def _procesos_sin_maquina_compatible(
             causa = "rango_maquina"
         else:
             causa = "rango_persona"
+        # Dos conjuntos que se parecen y NO son lo mismo; confundirlos rompe una cosa
+        # distinta cada vez:
+        #   `crudos`    — lo que entró al solver ANTES de que un SETUP heredara los
+        #                 rangos de la producción que prepara. Sirve para detectar esa
+        #                 herencia y avisarla («es una preparación...»), y por eso NO
+        #                 puede ignorar un ajuste: si lo ignorara, todo proceso ajustado
+        #                 se leería como preparación.
+        #   `guardados` — lo que figura en Recursos. Es lo único sobre lo que se puede
+        #                 calcular un cambio PERMANENTE: con un ajuste «solo en este
+        #                 plan» encima, `crudos` ya trae el rango temporal y el botón
+        #                 «Guardar en Recursos» lo escribiría en la base de rebote.
+        crudos = set(rangos_crudos.get((orden_id, proc_id), rangos))
+        guardados = set(rangos_reales_por_proceso.get(proc_id, crudos))
         d = por_proceso.setdefault(proc_id, {
             "nombre": nombre, "rangos": rangos, "candidatas": candidatas,
             "usables": usables, "personas": personas, "causa": causa,
             "total_maquinas": len(maq_nombre), "ots": set(), "minutos": 0, "procesos": 0,
-            "proc_id": proc_id, "crudos": set(rangos_crudos.get((orden_id, proc_id), rangos)),
+            "proc_id": proc_id, "crudos": crudos, "guardados": guardados,
         })
         d["ots"].add(orden_id)
         d["minutos"] += dur
@@ -1202,6 +1290,23 @@ def _procesos_sin_maquina_compatible(
             rangos_maq = sorted(nombre_rango.get(r, f"#{r}") for r in rangos_maq_ids)
             pide_maq = _listar_rangos(rangos_maq) or "ningún rango"
             pide_proc = _listar_rangos(rangos_proc) or "ningún rango"
+            # Lo mismo, pero con lo que la máquina tiene GUARDADO en Recursos.
+            #
+            # `rangos_maq_ids` sale de `maq_rangos`, que cuando hay un ajuste "solo para
+            # este plan" trae también el rango temporal. Para DETECTAR está bien —el
+            # aviso tiene que hablar del plan que se calculó—, pero hay una solución que
+            # dice «ponele al proceso el rango que la máquina ya acepta» y cuyo botón
+            # ESCRIBE EN RECURSOS. Con el rango temporal adentro, esa frase promete algo
+            # que en Recursos no está y el guardado deja cargado para siempre un dato que
+            # nadie cargó: exactamente lo que el botón de al lado promete no hacer.
+            # Sin ajustes los dos conjuntos son el mismo, así que un plan normal no cambia.
+            rangos_maq_guardados = {
+                r for m in d["candidatas"]
+                for r in (maq_rangos_reales or {}).get(m, maq_rangos.get(m, set()))
+            }
+            pide_maq_guardado = _listar_rangos(
+                sorted(nombre_rango.get(r, f"#{r}") for r in rangos_maq_guardados)
+            ) or "ningún rango"
             # Este es el caso del Excel de Lucas: "Alta · Recurso máquina · Rango ·
             # Medio oficial — el proceso Soldadura MIG requiere rango Oficial y no
             # tenemos máquina con ese rango". Lo que la máquina tiene va de un lado
@@ -1267,14 +1372,20 @@ def _procesos_sin_maquina_compatible(
                              f"único que {_concuerda(maqs, 'la', 'las')} vuelve a poner en juego.",
                     "donde": "Recursos › Recurso humano",
                 })
-            elif rangos_maq:
+            elif rangos_maq_guardados:
+                # Acá va lo GUARDADO y no lo ajustado, en el texto y en la acción a la vez:
+                # es lo que se le va a escribir al proceso en Recursos. Si la máquina sólo
+                # acepta ese rango por un ajuste de este plan, esta salida directamente no
+                # existe —no hay ningún rango real que ofrecer— y por eso la condición
+                # también mira los guardados.
                 soluciones.append({
-                    "texto": f"Ponele **{pide_maq}** al proceso: es el rango que "
+                    "texto": f"Ponele **{pide_maq_guardado}** al proceso: es el rango que "
                              + _concuerda(maqs, "la máquina ya acepta", "las máquinas ya aceptan")
                              + ", así que no se la abrís a nadie nuevo.",
                     "donde": "Recursos › Procesos",
-                    "accion": _accion_proceso(d["proc_id"], nombre_proc, d["crudos"] | rangos_maq_ids,
-                                              nombre_rango, d["crudos"]),
+                    "accion": _accion_proceso(d["proc_id"], nombre_proc,
+                                              d["guardados"] | rangos_maq_guardados,
+                                              nombre_rango, d["guardados"]),
                 })
             abre_a = _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario)
             soluciones.append({
@@ -1283,7 +1394,8 @@ def _procesos_sin_maquina_compatible(
                          + f" — ojo, se {_concuerda(maqs, 'la', 'las')} abrís a {abre_a}."
                          + _no_se_reparte(proc_id, d["personas"], prioridad_skills, nombre_operario),
                 "donde": "Recursos › Recurso maquinaria",
-                "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"], nombre_rango),
+                "accion": _accion_maquina(d["candidatas"], maq_nombre, maq_rangos, d["rangos"],
+                                          nombre_rango, maq_rangos_reales),
             })
             _como_alternativa(soluciones)
             # Va DESPUÉS del "O ", y sin "O ", porque no es una opción: es el atajo que
@@ -1349,13 +1461,19 @@ def _procesos_sin_maquina_compatible(
                              + _cuantas_personas(d["rangos"], ops_por_rango, nombre_operario) + "."
                              + _no_se_reparte(proc_id, d["personas"], prioridad_skills, nombre_operario),
                     "donde": "Recursos › Recurso maquinaria",
-                    "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"], nombre_rango),
+                    "accion": _accion_maquina(d["usables"], maq_nombre, maq_rangos, d["rangos"],
+                                              nombre_rango, maq_rangos_reales),
                 })
             _como_alternativa(soluciones)
 
         salida.append({
             "id": f"maquina-incompatible-{proc_id}",
             "tipo": "maquina_incompatible",
+            # Las cuatro causas de «pidió máquina y no la tuvo» se ven iguales desde
+            # afuera: mismo tipo, y dos de ellas hasta comparten (recurso, subtipo).
+            # Sin este campo, el resumen tenía que adivinar cuál era mirando el texto
+            # de `tiene`, que es texto para el taller y va a seguir cambiando.
+            "causa": d["causa"],
             "severidad": severidad,
             "recurso": recurso,
             "subtipo": subtipo,
@@ -1385,6 +1503,11 @@ def _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango):
 
     Un proceso sin familia de máquina (trabajo de banco) no tiene de dónde sacar la
     propuesta, y ahí el aviso queda como estaba: el rango lo decide el taller.
+
+    Y si el proceso es una PREPARACIÓN, la propuesta se avisa: es el único aviso que
+    estrena el botón «Solo en este plan» con rangos propuestos, y a una preparación el
+    solver le pisa los rangos con los del trabajo que prepara, así que el ajuste puede
+    no cambiar absolutamente nada y el que lo apretó se queda creyendo que destrabó algo.
     """
     sin_rango = {}
     for (orden_id, proc_id, _sec, _fp, _prio, dur, rangos, nombre, _um, fam, _sk) in procesos:
@@ -1392,7 +1515,8 @@ def _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango):
             continue
         d = sin_rango.setdefault(proc_id, {"nombre": _bonito(nombre) or f"#{proc_id}",
                                            "ots": set(), "minutos": 0, "procesos": 0,
-                                           "familias": set()})
+                                           "familias": set(),
+                                           "preparacion": _get_tipo_proceso(nombre) == "SETUP"})
         d["ots"].add(orden_id)
         d["minutos"] += dur
         d["procesos"] += 1
@@ -1406,6 +1530,17 @@ def _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango):
         for m in maquinas:
             propuestos |= maq_rangos.get(m, set())
         d["propuestos"] = sorted(propuestos)
+        # La misma advertencia que ya lleva el aviso de máquina incompatible, dicha
+        # igual y por el mismo motivo: si la preparación va pegada a su producción, el
+        # solver la planifica con el rango de ESA y no con el de su ficha. Va en
+        # condicional porque acá no se sabe si quedó emparejada —el aviso de máquina sí
+        # lo sabe, ahí la herencia ya ocurrió— y prometer de más es lo que se vino a
+        # arreglar.
+        d["ojo_preparacion"] = (
+            " Ojo: es una preparación, así que si va pegada al trabajo que prepara se "
+            "planifica con el rango de ese trabajo y no con el que tenga en su ficha."
+            if d["preparacion"] else ""
+        )
 
     return [{
         "id": f"sin-rango-{proc_id}",
@@ -1418,7 +1553,7 @@ def _procesos_sin_rango(procesos, maq_familia, maq_rangos, nombre_rango):
         "titulo": f"{d['nombre']}: se lo puede llevar cualquiera, sepa o no",
         "detalle": "No tiene ningún rango cargado, así que el plan se lo puede dar a "
                    "cualquiera que esté libre. Sale igual, pero nadie está mirando quién "
-                   "lo agarra.",
+                   "lo agarra." + d["ojo_preparacion"],
         "impacto": {
             "procesos": d["procesos"],
             "ots": sorted(d["ots"]),
@@ -1499,7 +1634,7 @@ def _trabajo_tercerizado(procesos, nombre_rango=None):
             "resumen": _resumen(cuantos, ots, total),
         },
         "soluciones": [{
-            "texto": "Si querés que figuren a nombre de quien los gestiona, dale el rango TERCERIZADO.",
+            "texto": "Para que figuren a cargo de alguien, dale el rango TERCERIZADO.",
             "donde": "Recursos › Recurso humano",
         }],
     }]

@@ -38,6 +38,7 @@ import { ProgresoPlanificacion } from "@/components/planning/ProgresoPlanificaci
 import { BorradoresPlan } from "@/components/planning/BorradoresPlan"
 import { useBorradorPlan } from "@/hooks/useBorradorPlan"
 import type { BorradorPlan, TandaManual } from "@/lib/borradorPlan"
+import { payloadDeAjustes, type AjusteDelPlan, type AjustesDelPlanPayload } from "@/lib/ajustesPlan"
 import { huellaRecursos } from "@/lib/huellaRecursos"
 import {
   Select,
@@ -150,7 +151,7 @@ export default function OperacionesPage() {
   const { registrarCambio, guardarYa, olvidar, adoptar, empezarNuevo, idBorradorEnBase } = useBorradorPlan()
   // Lo que devolvió el solver, para poder recomponer el borrador entero cuando lo
   // único que cambió fue una edición hecha dentro de la vista previa.
-  const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "tandasManuales" | "guardadoEn"> | null>(null)
+  const baseBorrador = useRef<Omit<BorradorPlan, "ediciones" | "forzarOrdenIds" | "tandasManuales" | "ajustesDelPlan" | "guardadoEn"> | null>(null)
   /**
    * Lo último que avisó la vista previa, para poder recomponer el borrador ENTERO
    * desde cualquiera de los dos avisos.
@@ -162,6 +163,16 @@ export default function OperacionesPage() {
    */
   const retoquesBorrador = useRef<{ ediciones: Record<string, any>; forzarOrdenIds: number[] }>({ ediciones: {}, forzarOrdenIds: [] })
   const tandasBorrador = useRef<TandaManual[]>([])
+  /**
+   * Las soluciones aplicadas SOLO a este plan (no tocan Recursos).
+   *
+   * Va en un ref por el mismo motivo que las tandas: lo que hay que guardar tiene
+   * que estar disponible en el instante en que se arma el borrador, y un estado de
+   * React llega recién en el render siguiente. Acá es peor todavía que con las
+   * tandas, porque un ajuste no existe en ningún otro lado: si el guardado lo
+   * saltea, no se puede recuperar de ninguna parte. Ver lib/ajustesPlan.
+   */
+  const ajustesBorrador = useRef<AjusteDelPlan[]>([])
   /** Cuándo se calculó el plan que se está viendo. Al retomar un borrador es la
    *  fecha del borrador, no la de ahora: es lo que permite avisar que la foto de
    *  diagnósticos puede haber quedado vieja. */
@@ -175,6 +186,7 @@ export default function OperacionesPage() {
   const [edicionesIniciales, setEdicionesIniciales] = useState<Record<string, any>>({})
   const [forzarIdsIniciales, setForzarIdsIniciales] = useState<number[]>([])
   const [tandasIniciales, setTandasIniciales] = useState<TandaManual[]>([])
+  const [ajustesIniciales, setAjustesIniciales] = useState<AjusteDelPlan[]>([])
 
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isReplanning, setIsReplanning] = useState(false)
@@ -243,11 +255,20 @@ export default function OperacionesPage() {
    * GET falló—, para que quien lo llama pueda saber si el refresco sirvió: los errores
    * se tragan a propósito (esto corre de fondo y no puede voltear la pantalla), así
    * que sin el valor de vuelta no hay forma de distinguir "no hay nada" de "no llegó".
+   *
+   * `silencioso`: refresca SIN prender el cartel de carga. Las tablas reemplazan todo
+   * su contenido por un spinner mientras `isLoading` está prendido, así que un
+   * refresco después de tocar una celda hacía desaparecer la lista entera por un rato
+   * —y con ella la OT desplegada y el lugar donde estabas parado— para volver con los
+   * mismos datos más un campo cambiado. Para eso alcanza con que la fila se actualice
+   * cuando llegue.
    */
-  const fetchData = async (): Promise<PlanificacionItem[]> => {
+  const fetchData = async (
+    { silencioso = false }: { silencioso?: boolean } = {}
+  ): Promise<PlanificacionItem[]> => {
     let filasDelPlan: PlanificacionItem[] = [];
     try {
-      setIsLoading(true);
+      if (!silencioso) setIsLoading(true);
 
       let mappedResources: Resource[] = [];
 
@@ -900,6 +921,63 @@ export default function OperacionesPage() {
     }
   };
 
+  /** Refresca de fondo, sin tapar la lista con el spinner. Para todo lo que ya se ve
+   *  cambiado en pantalla y sólo hace falta confirmar contra el servidor. */
+  const refrescarEnSilencio = () => { void fetchData({ silencioso: true }); };
+
+  /**
+   * Pisa campos sueltos de una OT en la lista que ya está en pantalla.
+   *
+   * Lo usan las celdas editables de la tabla: el valor nuevo se ve al toque y no hay
+   * que volver a pedir las 1267 órdenes para enterarse de que una fecha cambió. Si el
+   * guardado falla, la tabla vuelve a llamar con el valor viejo.
+   */
+  const parchearOrden = (ordenId: number, cambios: Record<string, any>) => {
+    setOrdenesTrabajo(prev => prev.map(o => o.id === ordenId ? { ...o, ...cambios } : o));
+  };
+
+  /**
+   * El horario de un proceso, corregido a mano desde la tabla.
+   *
+   * Lo que se guarda no es una fecha sino el minuto del plan; la cuenta la hace la
+   * tabla con la misma jornada que usó el backend (ver lib/plan-fechas) y acá llegan
+   * los minutos ya hechos.
+   *
+   * Antes esto lo guardaba la tabla y después recargaba la pantalla entera. Ahora se
+   * actualiza en el lugar, igual que cuando se arrastra el proceso en el Gantt.
+   */
+  const handleInicioEstimadoChange = async (planId: number, inicioMin: number, finMin: number) => {
+    const planViejo = rawPlanificacion;
+    const tareasViejas = tasks;
+    if (!planViejo.some(p => p.id === planId)) return;
+
+    const actualizada = planViejo.map(item => {
+      if (item.id !== planId) return item;
+      // Las fechas hechas que mandó el backend se SACAN: `inicioDeLaFila` las
+      // prefiere, así que si se dejan la celda se vuelve a dibujar con el horario
+      // viejo y parece que el cambio no hizo nada. El próximo refresco las repone.
+      const { fecha_inicio_estimada, fecha_fin_estimada, ...resto } = item;
+      return { ...resto, inicio_min: inicioMin, fin_min: finMin };
+    });
+
+    setRawPlanificacion(actualizada);
+    setTasks(convertPlanificacionToGanttTasks(actualizada, resources));
+
+    try {
+      const response = await fetch(`${API_URL}/planificacion/${planId}`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders() as Record<string, string>, "Content-Type": "application/json" },
+        body: JSON.stringify({ inicio_min: inicioMin, fin_min: finMin }),
+      });
+      if (!response.ok) throw new Error("Failed to update start date");
+    } catch (error) {
+      console.error("Error updating start date:", error);
+      setRawPlanificacion(planViejo);
+      setTasks(tareasViejas);
+      toast.error("No se pudo guardar el horario. Se revirtió; revisá la conexión e intentá de nuevo.");
+    }
+  };
+
 
   const [isStatusConfirmOpen, setIsStatusConfirmOpen] = useState(false);
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState<{ ordenId: number, procesoId: number, newStatusId: number, idOtp?: number } | null>(null);
@@ -1200,18 +1278,24 @@ export default function OperacionesPage() {
         huella,
       };
       setHuellaPlan(huella);
-      // Plan nuevo: no hay retoques ni nada agregado a mano que restaurar.
+      // Plan nuevo: no hay retoques, ni nada agregado a mano, ni ajustes que restaurar.
+      // Los ajustes valen para EL plan en el que se aplicaron, no para el próximo: si
+      // no se limpian acá, el plan nuevo saldría con la fresadora abierta del plan
+      // anterior y no habría forma de saber por qué no coincide con los datos.
       setEdicionesIniciales({});
       setForzarIdsIniciales([]);
       setTandasIniciales([]);
+      setAjustesIniciales([]);
       retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
       tandasBorrador.current = [];
+      ajustesBorrador.current = [];
       setPlanCalculadoEn(new Date().toISOString());
       void guardarYa({
         ...baseBorrador.current,
         ediciones: {},
         forzarOrdenIds: [],
         tandasManuales: [],
+        ajustesDelPlan: [],
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1283,6 +1367,7 @@ export default function OperacionesPage() {
     range: { fecha_desde?: string; fecha_hasta?: string },
     forzarIds: number[] = [],
     lineasPorOrden?: Record<number, number[]>,
+    ajustes?: AjustesDelPlanPayload,
   ) => {
     if (ids.length === 0) {
       toast.error("No hay OTs para recalcular.");
@@ -1311,6 +1396,13 @@ export default function OperacionesPage() {
           // esas OTs. Van ids de PASADA (orden_trabajo_proceso.id), no de proceso: el
           // mismo proceso puede estar varias veces en la OT y se elige de a una.
           lineas_por_orden: lineasPorOrden && Object.keys(lineasPorOrden).length > 0 ? lineasPorOrden : undefined,
+          // Las soluciones aplicadas "solo para este plan": el backend las usa en
+          // memoria para armar el cálculo y no escribe nada. Tienen que ir en TODOS
+          // los recálculos, no sólo en el que las aplica — forzar una OT, quitar
+          // otra, deshacer una tanda o la revisión automática al volver de Recursos
+          // pasan por acá también, y sin esto cualquiera de esos devolvía el plan a
+          // lo que dice la base con la tira de ajustes todavía en pantalla.
+          ajustes_del_plan: ajustes,
         }),
       });
 
@@ -1376,15 +1468,18 @@ export default function OperacionesPage() {
       setHuellaPlan(huella);
       setPlanCalculadoEn(new Date().toISOString());
       // Un recálculo NO empieza de cero: la vista previa se queda con lo agregado a
-      // mano y con los retoques, así que el borrador tiene que guardarlos también.
-      // Escribir vacío acá los borraba de la base sin que nadie hubiera deshecho
-      // nada, y este guardado limpia el debounce, así que tampoco volvían después.
-      // Para cuando llega acá los dos están al día: la vista previa avisa en el
+      // mano, con los retoques y con los ajustes de este plan, así que el borrador
+      // tiene que guardarlos también. Escribir vacío acá los borraba de la base sin
+      // que nadie hubiera deshecho nada, y este guardado limpia el debounce, así que
+      // tampoco volvían después. Con los ajustes es todavía peor: no están en
+      // Recursos, o sea que perderlos acá es perderlos para siempre.
+      // Para cuando llega acá los tres están al día: la vista previa avisa en el
       // render que sigue al click y esto corre recién cuando contestó el solver.
       void guardarYa({
         ...baseBorrador.current,
         ...retoquesBorrador.current,
         tandasManuales: tandasBorrador.current,
+        ajustesDelPlan: ajustesBorrador.current,
         guardadoEn: new Date().toISOString(),
       });
 
@@ -1424,6 +1519,7 @@ export default function OperacionesPage() {
       ...base,
       ...retoquesBorrador.current,
       tandasManuales: tandasBorrador.current,
+      ajustesDelPlan: ajustesBorrador.current,
       guardadoEn: new Date().toISOString(),
     });
   }, [registrarCambio]);
@@ -1488,6 +1584,19 @@ export default function OperacionesPage() {
     registrarBorrador();
   }, [registrarBorrador]);
 
+  /**
+   * Cada cambio en las soluciones aplicadas "solo para este plan".
+   *
+   * Es lo único del borrador que no tiene copia en ningún lado: los retoques se
+   * pueden volver a hacer mirando el plan, las tandas se pueden volver a agregar,
+   * pero un ajuste local no está en la base ni en el plan que devolvió el solver.
+   * Si no sube acá, cerrar la pestaña lo borra sin dejar rastro.
+   */
+  const handleAjustesBorrador = useCallback((ajustes: AjusteDelPlan[]) => {
+    ajustesBorrador.current = ajustes;
+    registrarBorrador();
+  }, [registrarBorrador]);
+
   /** Retomar un plan calculado y sin confirmar: se abre tal cual quedó, sin
    *  recalcular. Lo que se pierde recalculando son los minutos del solver y los
    *  retoques hechos a mano, así que se restauran los dos. */
@@ -1519,11 +1628,21 @@ export default function OperacionesPage() {
     // Lo agregado a mano vuelve con el borrador. Los guardados antes del 11/09 no lo
     // traen: ésos se abren como se abrían, sin nada marcado, y no se rompe nada.
     setTandasIniciales(borrador.tandasManuales || []);
+    // Lo mismo con las soluciones aplicadas sólo a este plan: no están en Recursos,
+    // así que si no vuelven de acá no vuelven de ningún lado, y el primer recálculo
+    // devolvería el plan a lo que dicen los datos con la traba de vuelta. Los
+    // borradores anteriores al 17/09/2026 no lo traen: se abren sin ningún ajuste,
+    // igual que antes.
+    setAjustesIniciales(borrador.ajustesDelPlan || []);
     retoquesBorrador.current = {
       ediciones: borrador.ediciones || {},
       forzarOrdenIds: borrador.forzarOrdenIds || [],
     };
     tandasBorrador.current = borrador.tandasManuales || [];
+    // El ref se pisa acá y no se espera al aviso de la vista previa: ese llega recién
+    // en el render siguiente, y si en el medio se dispara un guardado el borrador
+    // recién retomado se guardaría sin sus ajustes —o sea, borrándolos.
+    ajustesBorrador.current = borrador.ajustesDelPlan || [];
     setPlanCalculadoEn(borrador.guardadoEn);
     // El autosave pasa a pisar ESTE borrador en vez de crear uno nuevo.
     adoptar(borrador);
@@ -1553,6 +1672,21 @@ export default function OperacionesPage() {
       // faltaba acá. (Ese día confirmar todavía volvía a pasar por el solver; ya no,
       // pero la pantalla muda seguiría estando mal igual.)
       setCalculando({ activo: true, ots: selectedOrderIds.length, listo: false, modo: "guardar" });
+
+      // Con qué arreglos "solo para este plan" se calculó lo que se está por guardar.
+      //
+      // Se lee ACÁ, arriba de todo, y no cerca del fetch: el final de este mismo
+      // handler vacía `ajustesBorrador.current` y `olvidar()` borra el borrador, o
+      // sea que ésta es la última vez que los ajustes existen en algún lado —no
+      // están en Recursos ni vienen adentro del plan que devolvió el solver—.
+      //
+      // El backend NO los aplica en este camino: guardar copia el plan que se
+      // aprobó en pantalla, no lo recalcula. Van para que quede RASTRO. El log de
+      // "planificar() con ajustes" está puesto arriba del early-return del plan ya
+      // armado justo para esto, y sin mandarlos no se imprimía nunca: un plan se
+      // guardaba con una prensa que, según Recursos, esa persona no puede usar, y
+      // no había una sola línea en ningún lado que lo dijera.
+      const ajustesDelPlanGuardado = payloadDeAjustes(ajustesBorrador.current);
 
       // Distinguir entre el caso "manual plan" (array) y el nuevo "decisiones de excedentes" ({forzarOrdenIds})
       let manualPlan: any[] | undefined = undefined;
@@ -1595,6 +1729,10 @@ export default function OperacionesPage() {
           // a preguntar la hora al reloj al guardar, y un plan mirado a las 06:59 y
           // confirmado a las 07:01 se guarda con un día de más.
           inicio_base: baseBorrador.current?.inicioBase,
+          // Los arreglos con los que se calculó este plan. No cambian nada de lo que
+          // se escribe —el plan va tal cual se aprobó—: son el rastro de por qué el
+          // plan guardado no le cierra a quien mañana lo compare con Recursos.
+          ajustes_del_plan: ajustesDelPlanGuardado,
         }),
       });
 
@@ -1626,8 +1764,13 @@ export default function OperacionesPage() {
       setEdicionesIniciales({});
       setForzarIdsIniciales([]);
       setTandasIniciales([]);
+      // Los ajustes valían para ESTE plan, que ya se guardó: dejarlos colgados haría
+      // que la próxima planificación arranque con la fresadora abierta de ésta, y
+      // saliendo distinta de los datos sin que nadie hubiera pedido nada.
+      setAjustesIniciales([]);
       retoquesBorrador.current = { ediciones: {}, forzarOrdenIds: [] };
       tandasBorrador.current = [];
+      ajustesBorrador.current = [];
 
       // GUARDAR TERMINA ACÁ. El plan ya está escrito.
       //
@@ -2141,7 +2284,9 @@ export default function OperacionesPage() {
                     planificacion={filteredPlanificacion}
                     feriados={feriados}
                     onRowClick={abrirOT}
-                    onDataChange={fetchData}
+                    onDataChange={refrescarEnSilencio}
+                    onOrdenPatch={parchearOrden}
+                    onInicioEstimadoChange={handleInicioEstimadoChange}
                   />
                 </TabsContent>
 
@@ -2274,7 +2419,9 @@ export default function OperacionesPage() {
                     planificacion={filteredPlanificacion}
                     feriados={feriados}
                     onRowClick={abrirOT}
-                    onDataChange={fetchData}
+                    onDataChange={refrescarEnSilencio}
+                    onOrdenPatch={parchearOrden}
+                    onInicioEstimadoChange={handleInicioEstimadoChange}
                   />
                 </TabsContent>
 
@@ -2407,7 +2554,9 @@ export default function OperacionesPage() {
                     planificacion={filteredPlanificacion}
                     feriados={feriados}
                     onRowClick={abrirOT}
-                    onDataChange={fetchData}
+                    onDataChange={refrescarEnSilencio}
+                    onOrdenPatch={parchearOrden}
+                    onInicioEstimadoChange={handleInicioEstimadoChange}
                   />
                 </TabsContent>
 
@@ -2439,7 +2588,9 @@ export default function OperacionesPage() {
                     planificacion={filteredPlanificacion}
                     feriados={feriados}
                     onRowClick={abrirOT}
-                    onDataChange={fetchData}
+                    onDataChange={refrescarEnSilencio}
+                    onOrdenPatch={parchearOrden}
+                    onInicioEstimadoChange={handleInicioEstimadoChange}
                   />
                 </TabsContent>
 
@@ -2471,7 +2622,9 @@ export default function OperacionesPage() {
                     planificacion={filteredPlanificacion}
                     feriados={feriados}
                     onRowClick={abrirOT}
-                    onDataChange={fetchData}
+                    onDataChange={refrescarEnSilencio}
+                    onOrdenPatch={parchearOrden}
+                    onInicioEstimadoChange={handleInicioEstimadoChange}
                   />
                 </TabsContent>
 
@@ -2531,6 +2684,7 @@ export default function OperacionesPage() {
             }}
             onEdicionesChange={handleEdicionesBorrador}
             onTandasChange={handleTandasBorrador}
+            onAjustesChange={handleAjustesBorrador}
             calculadoEn={planCalculadoEn}
             inicioBase={baseBorrador.current?.inicioBase}
             feriados={feriados}
@@ -2551,6 +2705,7 @@ export default function OperacionesPage() {
             edicionesIniciales={edicionesIniciales}
             forzarIdsIniciales={forzarIdsIniciales}
             tandasIniciales={tandasIniciales}
+            ajustesIniciales={ajustesIniciales}
           />
         </div>
       ) : (

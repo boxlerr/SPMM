@@ -102,6 +102,24 @@ interface PlanningListTableProps {
      */
     diaResaltado?: Date;
     onDataChange?: () => void; // Added for refreshing data without reload
+    /**
+     * Pisa un campo de UNA orden en la copia del padre, sin volver a pedir nada.
+     *
+     * Las ocho celdas editables de la fila guardaban y después mandaban a refrescar
+     * TODO (o directamente recargaban la pantalla): la tabla se iba, volvía el
+     * spinner y había que desplegar la OT de nuevo y buscar dónde estabas. Corregir
+     * tres fechas seguidas eran tres viajes de ida y vuelta. Con esto la celda
+     * muestra el valor nuevo al toque y, si el guardado falla, se revierte y se
+     * avisa. Sin este callback se cae al refresco completo de `onDataChange`.
+     */
+    onOrdenPatch?: (ordenId: number, cambios: Record<string, any>) => void;
+    /**
+     * Lo mismo para el horario de un proceso ya planificado: `planId` es
+     * `planificacion.id` y los minutos son los del plan, no una fecha (ver
+     * lib/plan-fechas). El padre los pisa en su copia y el «Inicio Estimado» se
+     * redibuja solo.
+     */
+    onInicioEstimadoChange?: (planId: number, inicioMin: number, finMin: number) => void;
     hideStatus?: boolean; // New prop to hide status column
     highlightedIds?: number[]; // New prop for visual highlighting
     onFieldUpdate?: (ordenId: number, field: string, value: any) => Promise<void>;
@@ -203,6 +221,8 @@ function _PlanningListTable({
 
 
     onDataChange, // Added
+    onOrdenPatch,
+    onInicioEstimadoChange,
     hideStatus = false,
     highlightedIds = [],
     tableZoom = 100,
@@ -800,13 +820,37 @@ function _PlanningListTable({
             return;
         }
 
+        const { id: ordenId, field: campo, value: valor } = editingOrder;
+
+        // Lo que va al backend.
+        const paraGuardar = campo.startsWith('fecha_')
+            ? (valor ? new Date(valor).toISOString() : null)
+            : (campo === 'unidades' ? parseInt(valor) || 0 : valor);
+
+        // Lo que se ve en la celda mientras tanto, que NO es lo mismo.
+        //
+        // Al backend las fechas van con la Z de UTC y él las guarda sin zona
+        // (`FechaSinZona`): el próximo GET devuelve "2026-08-23T00:00:00" y la celda
+        // lo lee como hora local. Si acá pusiéramos el mismo texto con Z, la celda
+        // mostraría el día ANTERIOR —medianoche UTC en Argentina son las 21 del día
+        // de antes— hasta el siguiente refresco. Ver [[fechas-todas-sin-zona]].
+        const paraMostrar = campo.startsWith('fecha_')
+            ? (valor ? `${valor}T00:00:00` : null)
+            : paraGuardar;
+
+        const anterior = (data.find(o => o.id === ordenId) as any)?.[campo] ?? null;
+
+        // La celda se cierra y muestra el valor nuevo ANTES de que conteste el
+        // servidor: es lo que hace que corregir varias fechas seguidas se sienta
+        // fluido. Si el guardado falla se revierte abajo.
+        setEditingOrder(null);
+        if (onOrdenPatch) onOrdenPatch(ordenId, { [campo]: paraMostrar });
+
         try {
-            const response = await fetch(`${API_URL}/ordenes/${editingOrder.id}`, {
+            const response = await fetch(`${API_URL}/ordenes/${ordenId}`, {
                 method: 'PUT',
                 headers: { ...getAuthHeaders() as Record<string, string>, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    [editingOrder.field]: editingOrder.field.startsWith('fecha_') ? (editingOrder.value ? new Date(editingOrder.value).toISOString() : null) : (editingOrder.field === 'unidades' ? parseInt(editingOrder.value) || 0 : editingOrder.value)
-                })
+                body: JSON.stringify({ [campo]: paraGuardar })
             });
 
             if (!response.ok) {
@@ -815,17 +859,16 @@ function _PlanningListTable({
                 throw new Error(parseApiError(await response.text().catch(() => "")) || `No se pudo guardar (error ${response.status})`);
             }
 
-            setEditingOrder(null);
-
-            // If the parent provided an onDataChange callback, use it
-            if (onDataChange) {
+            // Sin `onOrdenPatch` no hay a quién pisarle el dato: ahí sí hay que pedir
+            // todo de nuevo para que la celda deje de mostrar el valor viejo.
+            if (!onOrdenPatch && onDataChange) {
                 onDataChange();
             }
 
         } catch (error) {
             console.error('Error saving date:', error);
             toast.error(error instanceof Error ? error.message : "No se pudo guardar el cambio");
-            setEditingOrder(null);
+            if (onOrdenPatch) onOrdenPatch(ordenId, { [campo]: anterior });
         }
     };
 
@@ -835,9 +878,19 @@ function _PlanningListTable({
      *  el editor, así no se queda pegada. */
     const cancelandoInicio = React.useRef(false);
 
+    /** Qué renglón tiene abierto el desplegable del horario.
+     *
+     *  Es una clave de FILA («<OT>-<paso>») y no el id de la fila del plan a propósito:
+     *  atarlo a `editingStartDate` ya se probó y no abría nunca, porque ese estado se
+     *  arma recién adentro del click y necesita encontrar la fila del plan. Con esto el
+     *  desplegable se abre siempre, y —lo que hacía falta acá— se puede CERRAR desde el
+     *  botón «Guardar»: antes lo cerraba de prepo la recarga de la pantalla. */
+    const [horarioAbierto, setHorarioAbierto] = React.useState<string | null>(null);
+
     const cancelarInicioEstimado = () => {
         cancelandoInicio.current = true;
         setEditingStartDate(null);
+        setHorarioAbierto(null);
     };
 
     const handleStartDateClick = (orderId: number, proc: { id?: number; proceso: { id: number } }) => {
@@ -883,6 +936,24 @@ function _PlanningListTable({
         const duration = item.fin_min - item.inicio_min;
         const newFinMin = newInicioMin + duration;
 
+        // El desplegable se cierra ya: el horario nuevo se ve en la celda, que es la
+        // confirmación de que se guardó. Lo que se muestra es el horario NORMALIZADO
+        // a la jornada del taller —las 09:07 caen en el desayuno y quedan 09:00—, o
+        // sea exactamente lo que va a decir el servidor.
+        setEditingStartDate(null);
+        setHorarioAbierto(null);
+
+        // Con el padre enterado, la celda se redibuja sola y la pantalla se queda
+        // donde está: la OT sigue desplegada, la solapa es la misma y no se pierde el
+        // scroll. Antes acá había un `window.location.reload()` y cambiar tres
+        // horarios seguidos eran tres recargas enteras, con la OT que había que
+        // volver a desplegar cada vez.
+        if (onInicioEstimadoChange) {
+            onInicioEstimadoChange(editingStartDate.planId, newInicioMin, newFinMin);
+            return;
+        }
+
+        // Sin el callback, la tabla lo guarda sola y pide un refresco.
         try {
             const response = await fetch(`${API_URL}/planificacion/${editingStartDate.planId}`, {
                 method: 'PUT',
@@ -895,10 +966,10 @@ function _PlanningListTable({
 
             if (!response.ok) throw new Error('Failed to update start date');
 
-            setEditingStartDate(null);
-            window.location.reload();
+            if (onDataChange) onDataChange();
         } catch (error) {
             console.error('Error saving start date:', error);
+            toast.error("No se pudo guardar el horario. Revisá la conexión e intentá de nuevo.");
         }
     };
 
@@ -915,7 +986,16 @@ function _PlanningListTable({
         return `${diffMins} min`;
     };
 
-    const renderDetails = (item: WorkOrder) => (
+    /**
+     * El detalle de una OT desplegada.
+     *
+     * `vista` dice cuál de los dos dibujos es: el de la tabla o el de la tarjeta de
+     * celular. Los DOS están siempre en el HTML —uno se esconde con CSS, no se
+     * desmonta—, así que sin esta marca los desplegables de horario de las dos copias
+     * comparten la misma clave: se abrían los dos a la vez, el escondido se daba por
+     * "clickeado afuera" y cerraba a los dos. Se veía como que el desplegable no abría.
+     */
+    const renderDetails = (item: WorkOrder, vista: "tabla" | "tarjeta" = "tabla") => (
         <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner flex flex-col">
             {/* Los archivos: abajo y PLEGADOS.
                 Arriba la galería se llevaba media pantalla —casi siempre vacía— y empujaba
@@ -1042,19 +1122,28 @@ function _PlanningListTable({
                                             {(() => {
                                                 const partes = inicioEnPartes(item.id, proc);
                                                 const relacion = relacionConElDia(item.id, proc);
+                                                // La fila, no la fila del plan: ver `horarioAbierto`.
+                                                // Con `vista` adelante, porque de este mismo renglón hay dos
+                                                // dibujos en el HTML (tabla y tarjeta) — ver `renderDetails`.
+                                                const claveDelHorario = `${vista}-${item.id}-${proc.id ?? `${proc.proceso.id}-${idx}`}`;
                                                 return (
                                                     <Popover
-                                                        // SIN `open`: lo maneja el propio desplegable.
+                                                        // `open` atado a la FILA y no a `editingStartDate`.
                                                         //
                                                         // Atándolo a `editingStartDate` no abría nunca: el estado se
                                                         // seteaba pero el desplegable seguía cerrado, porque su apertura
                                                         // dependía de que ese estado volviera a coincidir con la fila, y en
-                                                        // el medio se perdía. Acá el click abre —que es lo que el usuario
-                                                        // pidió que funcione— y el estado de edición se prepara y se limpia
-                                                        // desde el mismo aviso.
+                                                        // el medio se perdía. Con la clave de la fila el click abre —que es
+                                                        // lo que el usuario pidió que funcione— y además «Guardar» puede
+                                                        // cerrarlo, que antes lo hacía la recarga de la pantalla.
+                                                        open={horarioAbierto === claveDelHorario}
                                                         onOpenChange={(abierto) => {
-                                                            if (abierto) handleStartDateClick(item.id, proc);
-                                                            else cancelarInicioEstimado();
+                                                            if (abierto) {
+                                                                setHorarioAbierto(claveDelHorario);
+                                                                handleStartDateClick(item.id, proc);
+                                                            } else {
+                                                                cancelarInicioEstimado();
+                                                            }
                                                         }}
                                                     >
                                                         <PopoverTrigger asChild>
@@ -1259,7 +1348,11 @@ function _PlanningListTable({
                                 onOpenChange={(open) => !open && setDeliveryOrder(null)}
                                 currentOrder={deliveryOrder}
                                 onSuccess={() => {
-                                    window.location.reload();
+                                    // Refresco, no recarga: la entrega la calcula el
+                                    // servidor, pero recargando la pantalla entera se
+                                    // perdía la solapa, el scroll y la OT desplegada.
+                                    if (onDataChange) onDataChange();
+                                    else window.location.reload();
                                 }}
                             />
                             <div className="px-3 py-3 bg-gray-50 border-t border-gray-200">
@@ -1430,7 +1523,7 @@ function _PlanningListTable({
                             {/* Expanded Details for Mobile */}
                             {isRowExpanded(item.id) && (
                                 <div className="bg-gray-50 border-t p-2">
-                                    {renderDetails(item)}
+                                    {renderDetails(item, "tarjeta")}
                                 </div>
                             )}
                         </Card>

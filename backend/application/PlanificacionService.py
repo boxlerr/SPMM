@@ -2504,8 +2504,37 @@ async def planificar(
     procesos_por_orden: dict[int, list[int]] | None = None,
     lineas_por_orden: dict[int, list[int]] | None = None,
     inicio_base: datetime | None = None,
+    ajustes_del_plan: dict | None = None,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
+
+    # 🔹 ARREGLOS QUE VALEN SOLO PARA ESTE CÁLCULO.
+    #
+    # El panel de trabas propone soluciones ("a esta máquina le falta el rango
+    # OFICIAL CNC"). Hasta ahora aplicarlas quería decir escribirlas en Recursos: para
+    # destrabar UN plan había que cambiarle los datos al taller para siempre, y una
+    # excepción de un día quedaba como regla. Pedido de Julián (17/09/2026): poder
+    # aplicar la solución acá nomás.
+    #
+    # Todo lo que sigue se hace EN MEMORIA y no escribe nada. Se copian las
+    # estructuras que vienen de los repositorios en vez de mutarlas: son objetos que
+    # el repositorio puede estar reusando, y contaminarlos haría que el ajuste de un
+    # plan se le filtre al siguiente.
+    _ajustes = ajustes_del_plan or {}
+    ajustes_procesos = dict(_ajustes.get("procesos") or {})
+    ajustes_maquinarias = dict(_ajustes.get("maquinarias") or {})
+    ajustes_skills = list(_ajustes.get("skills_nativas") or [])
+    if ajustes_procesos or ajustes_maquinarias or ajustes_skills:
+        # Este log va ARRIBA del early-return del guardado a propósito. Un plan con
+        # ajustes sale distinto de lo que dicen los datos: si mañana alguien mira el
+        # plan guardado y no le cierra con Recursos, esta línea es la única
+        # explicación que va a encontrar. Puesto más abajo, el guardado —que es
+        # justo el caso que más importa— no lo imprimiría nunca.
+        logger.info(
+            f"Service - planificar() con ajustes SOLO para este plan (no se guardan "
+            f"en Recursos): {len(ajustes_procesos)} proceso(s), "
+            f"{len(ajustes_maquinarias)} máquina(s), {len(ajustes_skills)} habilidad(es)"
+        )
 
     # 🔹 Plan ya armado: se guarda TAL CUAL, sin pasar por el solver.
     #
@@ -2525,6 +2554,11 @@ async def planificar(
     # campo venía vacío — los guardados quedaban registrados sin lote.
     if not preview and plan:
         logger.info(f"Service - Guardando plan ya armado ({len(plan)} items), sin solver")
+        # Los `ajustes_del_plan` NO se aplican acá, y está bien: no hay nada que
+        # ajustar. Este camino no calcula, copia — guarda las filas que el usuario
+        # aprobó en pantalla, que ya salieron de una vista previa donde los ajustes
+        # sí se aplicaron. El plan aprobado se escribe tal cual se miró.
+        #
         # EL ARRANQUE ES EL DE LA VISTA PREVIA, no uno nuevo.
         #
         # La vista previa lo devuelve y la pantalla lo manda de vuelta al confirmar, así
@@ -2563,6 +2597,17 @@ async def planificar(
     maquinas_por_proceso = await ProcesoRepository(db).find_maquinarias_por_proceso()
     # 🔹 Nativas desactivadas (proceso_id -> {operario_id}) para excluir de la elegibilidad
     nativas_off = await repo_skill.get_nativas_deshabilitadas()
+    # Prender (o apagar) a alguien solo para este plan. Se copia el dict Y cada set:
+    # lo que devuelve el repositorio no es nuestro para mutarlo. Es un dict común, no
+    # un defaultdict, así que el alta va sí o sí por `setdefault`.
+    if ajustes_skills:
+        nativas_off = {p: set(ops) for p, ops in (nativas_off or {}).items()}
+        for _a in ajustes_skills:
+            _apagados = nativas_off.setdefault(_a["proceso_id"], set())
+            if _a.get("habilitado", True):
+                _apagados.discard(_a["operario_id"])
+            else:
+                _apagados.add(_a["operario_id"])
     # 🔹 Habilidades cargadas a mano (proceso_id -> {operario_id}): suman elegibilidad
     #    donde el rango no llega.
     skills_manuales = await repo_skill.get_manuales_por_proceso()
@@ -2596,8 +2641,25 @@ async def planificar(
     # Cargar maquinarias (con rangos)
     maquinarias_orm = await repo_maquinaria.find_with_rangos()
     maquinarias = []
+    # Lo que cada máquina tiene cargado en Recursos, guardado aparte ANTES de que le
+    # caiga el ajuste encima. El plan se calcula con los rangos ajustados —para eso se
+    # ajustaron—, pero el panel de trabas tiene además un botón que escribe en la base, y
+    # ese tiene que partir de lo que la base dice: partiendo de lo ajustado guardaría de
+    # rebote el rango temporal, y el «Solo en este plan» dejaría de ser solo de este plan.
+    maq_rangos_reales = {}
     for m in maquinarias_orm:
-        rangos_ok = {rm.id_rango for rm in (m.rango_maquinarias or [])}
+        rangos_en_recursos = {rm.id_rango for rm in (m.rango_maquinarias or [])}
+        maq_rangos_reales[m.id] = rangos_en_recursos
+        # Si la máquina vino ajustada para este plan, sus rangos son los del ajuste y
+        # no los de la base. Va como `set` porque el solver cruza esto con `&` e `in`:
+        # meter la lista tal cual no explota acá, revienta mucho más abajo y sin decir
+        # una palabra de ajustes.
+        if m.id in ajustes_maquinarias:
+            rangos_ok = set(ajustes_maquinarias[m.id])
+        else:
+            # Copia y no el mismo set: `maq_rangos_reales` tiene que seguir diciendo lo
+            # que dice Recursos aunque alguien más abajo toque el que va al solver.
+            rangos_ok = set(rangos_en_recursos)
         #maquinarias.append((m.id, rangos_ok, m.nombre)) esto funciona
         maquinarias.append((m.id, rangos_ok, m.nombre, m.cod_maquina))
 
@@ -2608,6 +2670,10 @@ async def planificar(
     preseleccion_op = {}   # (orden_id, secuencia) -> id_operario forzado (elegido al cargar la OT)
     linea_por_clave = {}   # (orden_id, secuencia) -> orden_trabajo_proceso.id (qué pasada es)
     procesos_sin_rango = {}  # id_proceso -> nombre, para avisar al final
+    # id_proceso -> rangos que tiene cargados en Recursos. Se anotan SOLO los procesos
+    # ajustados: para todos los demás, lo que entra al solver ya es el dato de Recursos,
+    # y meterlos acá cambiaría el botón permanente de avisos que hoy están bien.
+    rangos_reales_por_proceso = {}
 
     # -----------------------
     # Procesar cada orden
@@ -2657,6 +2723,25 @@ async def planificar(
             # también si el trabajo se manda afuera.
             rangos_validos = [rp.id_rango for rp in getattr(rel.proceso, "rangos", [])]
 
+            # ...salvo que este plan traiga un ajuste para ese proceso, y entonces
+            # mandan los rangos del ajuste. Se aplica ACÁ ARRIBA, antes de todo, porque
+            # de `rangos_validos` cuelga lo primero que se decide: si el trabajo se
+            # manda afuera (el cruce con TERCERIZADO, tres líneas más abajo). Aplicado
+            # después, un proceso al que el ajuste le sacó el rango TERCERIZADO se
+            # seguiría yendo afuera igual.
+            #
+            # El ajuste es por proceso del catálogo, así que vale para TODAS las
+            # pasadas de ese proceso en todo el plan, no para una OT sola.
+            proceso_ajustado = rel.proceso.id in ajustes_procesos
+            if proceso_ajustado:
+                # Antes de pisarlos, anotar los de Recursos. El diagnóstico DETECTA las
+                # trabas con los rangos ajustados —si el ajuste destrabó una, tiene que
+                # desaparecer del panel—, pero su botón «Guardar en Recursos» calcula qué
+                # escribir sobre estos: si calculara sobre los ajustados, guardaría
+                # también el rango que se agregó solo para este cálculo.
+                rangos_reales_por_proceso[rel.proceso.id] = set(rangos_validos)
+                rangos_validos = list(ajustes_procesos[rel.proceso.id])
+
             # Clasificar si usa máquina.
             #
             # La marca de la PASADA le gana a la deducción por nombre: si el que cargó
@@ -2678,7 +2763,11 @@ async def planificar(
             # Detectar máquina por coincidencia de nombre
             # SOLO si no hay rangos válidos
             # -------------------------------
-            if not rangos_validos and nombre_proceso_lower:
+            # `not proceso_ajustado`: si el ajuste dejó la lista vacía fue a propósito,
+            # y este bloque la volvería a llenar por parecido de nombre. El ajuste se
+            # revertiría solo, sin que nada lo diga. Por eso el flag y no un "si quedó
+            # vacía": el estado final de la lista no distingue las dos situaciones.
+            if not rangos_validos and nombre_proceso_lower and not proceso_ajustado:
                 for _, rangos_maquina, nombre_maquina, _cod in maquinarias:
 
                     if not rangos_maquina:
@@ -2702,7 +2791,10 @@ async def planificar(
             # de a nadie. Se acumula para avisarlo UNA vez al final —son decenas de
             # líneas y un log por línea no lo lee nadie— porque si no el problema es
             # invisible: el plan sale igual, solo que con la persona equivocada.
-            if not rangos_validos:
+            # Un proceso ajustado a mano no entra en la lista: el aviso es para los que
+            # están sin rango por olvido en Recursos, no para el que acaba de decidir
+            # en pantalla que este plan va así.
+            if not rangos_validos and not proceso_ajustado:
                 procesos_sin_rango[rel.proceso.id] = rel.proceso.nombre or f"#{rel.proceso.id}"
 
             # -------------------------------
@@ -2804,6 +2896,12 @@ async def planificar(
             # solución que habilita a nueve pueda decir quién la va a tomar: sin esto,
             # "se las abrís a 9 personas" se lee como reparto parejo (Lucas, 28/08).
             prioridad_skills=mapa_skills,
+            # Los datos SIN los ajustes «solo en este plan». Las trabas se detectan con
+            # los ajustados (ver arriba), pero lo que el botón permanente escribiría en
+            # la base —y lo que el panel de confirmación muestra como «hoy tiene»— sale
+            # de estos: son los únicos que dicen la verdad sobre Recursos.
+            maq_rangos_reales=maq_rangos_reales,
+            rangos_reales_por_proceso=rangos_reales_por_proceso,
         )
 
         # Las OTs de los diagnósticos salen con su número VISIBLE (id_otvieja), que

@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RegistroDeMovimientos } from "@/components/auditoria/RegistroDeMovimientos";
+import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
@@ -123,6 +124,10 @@ export default function AuditoriaPage() {
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [abierto, setAbierto] = useState<number | null>(null);
+    // «Actualizar» recargaba sólo la solapa de planificaciones, que es la que carga
+    // esta página. Cambiar esta llave vuelve a montar el historial de pasos, así que el
+    // botón hace lo que dice también estando parado ahí.
+    const [refresco, setRefresco] = useState(0);
 
     const cargar = useCallback(async () => {
         setCargando(true);
@@ -159,7 +164,12 @@ export default function AuditoriaPage() {
                         Lo que falla también.
                     </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={cargar} disabled={cargando}>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setRefresco((n) => n + 1); cargar(); }}
+                    disabled={cargando}
+                >
                     <RefreshCw className={cn("h-4 w-4 mr-2", cargando && "animate-spin")} />
                     Actualizar
                 </Button>
@@ -168,11 +178,24 @@ export default function AuditoriaPage() {
             <Tabs defaultValue="todo">
                 <TabsList className="mb-4">
                     <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>
+                    <TabsTrigger value="procesos">Pasos de las OT</TabsTrigger>
                     <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="todo">
                     <RegistroDeMovimientos />
+                </TabsContent>
+
+                {/* Los pasos tienen su propia solapa y no se mezclan con el resto: allá
+                    se guarda el PEDIDO (la dirección y el cuerpo que mandó el navegador)
+                    y acá el CAMBIO ya comparado, fila por fila y campo por campo. Un
+                    guardado de OT deja UNA línea allá y una por paso tocado acá. */}
+                <TabsContent value="procesos">
+                    <p className="text-sm text-muted-foreground mb-3">
+                        Cada vez que se agrega, se cambia o se saca un paso de una orden,
+                        desde cualquier pantalla: quién, qué cambió y el día y la hora exactos.
+                    </p>
+                    <HistorialDeProcesos key={refresco} />
                 </TabsContent>
 
                 <TabsContent value="planificacion">

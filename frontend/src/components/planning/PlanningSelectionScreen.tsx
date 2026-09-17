@@ -21,7 +21,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, X } from "lucide-react"
+import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, Users, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { BorradoresPlan } from "./BorradoresPlan"
@@ -220,12 +220,44 @@ export function PlanningSelectionScreen({
         setSoloTildadas(prev => (prev === null ? null : prev.filter(id => !fuera.has(id))))
     }
 
-    // Calculate estimated workload
-    const calculateEstimatedTime = () => {
+    /**
+     * Cuánto trabajo entra en el plan y cuánto va a tardar.
+     *
+     * Hasta el 17/9 esto repartía los minutos de lo tildado entre TODOS los operarios
+     * disponibles y mostraba esa división como si fueran las horas de la tanda. Con una
+     * sola OT tildada —7 procesos, 2446 minutos, uno de torno de 600— el cartel decía
+     * «0.1 días (1.1 hs)»: había dividido por los 37 operarios. Los procesos de una OT
+     * van uno atrás del otro (`_agregar_restricciones_secuencia`, en el solver), así que
+     * no hay forma de que 37 personas se repartan un torneado.
+     *
+     * Ahora son dos cuentas separadas, que es lo que realmente son:
+     *   • CARGA: los minutos de trabajo que entran al plan, por `cant_operarios` (un
+     *     proceso de a dos ocupa a dos personas ese rato). Es una suma y no depende
+     *     de cuánta gente haya.
+     *   • DURACIÓN: lo que va a tardar, y es el mayor de dos topes —
+     *       - la OT más larga, que no se acorta con más gente porque es una fila; y
+     *       - la carga repartida entre los operarios disponibles, que es el tope de
+     *         cuánto entra por día en el taller.
+     *     Con una OT tildada manda el primero; con la tanda entera, el segundo.
+     *
+     * Las dos van al cartel por separado y con su propio nombre (17/9, Julián): en una
+     * tanda de 20 o 30 OTs lo que se quiere saber primero es CUÁNTO trabajo se está
+     * metiendo, y un solo número mezclado no lo decía.
+     *
+     * Sigue siendo una cuenta de servilleta: no mira máquinas, ni skills, ni quién puede
+     * hacer qué, y da por libres a todos los operarios (lo que ya tienen encima no se
+     * descuenta). Para la cuenta fina está el planificador.
+     */
+    type Estimacion =
+        | { tipo: "aviso"; texto: string; detalle: string }
+        | { tipo: "ok"; carga: string; duracion: string; detalleCarga: string; detalleDuracion: string }
+
+    const calcularEstimacion = (): Estimacion | null => {
         if (selectedIds.length === 0) return null
 
         const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
-        let totalMinutes = 0
+        let cargaMin = 0          // minutos de trabajo (× la gente que ocupa cada proceso)
+        let otMasLargaMin = 0     // la OT que más tarda de punta a punta
         let procesosConTiempo = 0
         let totalProcesos = 0
         let otsSinProcesos = 0
@@ -233,15 +265,19 @@ export function PlanningSelectionScreen({
             const procs = o.procesos || []
             if (procs.length === 0) {
                 otsSinProcesos++
-            } else {
-                totalProcesos += procs.length
-                procs.forEach(p => {
-                    if (p.tiempo_proceso && p.tiempo_proceso > 0) {
-                        procesosConTiempo++
-                        totalMinutes += p.tiempo_proceso
-                    }
-                })
+                return
             }
+            totalProcesos += procs.length
+            let caminoOT = 0
+            procs.forEach(p => {
+                const min = Number(p.tiempo_proceso) || 0
+                if (min <= 0) return
+                procesosConTiempo++
+                caminoOT += min
+                cargaMin += min * Math.max(1, Number(p.cant_operarios) || 1)
+            })
+            // La OT tarda la suma de sus procesos: van en fila, no en paralelo.
+            otMasLargaMin = Math.max(otMasLargaMin, caminoOT)
         })
 
         // Distinguimos 3 escenarios para que el usuario sepa exactamente qué
@@ -250,17 +286,24 @@ export function PlanningSelectionScreen({
         //   2) Hay procesos cargados pero ninguno tiene tiempo → falta cargar tiempos.
         //   3) Hay tiempos → calculamos estimación.
         if (totalProcesos === 0) {
-            return `— (${otsSinProcesos} sin procesos cargados)`
+            return {
+                tipo: "aviso",
+                texto: `— (${otsSinProcesos} sin procesos cargados)`,
+                detalle: 'Ninguna de las OTs tildadas tiene procesos cargados: así no hay nada para planificar.',
+            }
         }
         if (procesosConTiempo === 0) {
-            return `— (procesos sin tiempo cargado)`
+            return {
+                tipo: "aviso",
+                texto: '— (procesos sin tiempo cargado)',
+                detalle: `Las ${selectedOrders.length} OTs tildadas tienen procesos, pero ninguno con minutos estimados.`,
+            }
         }
 
         // Solo contamos operarios marcados como disponibles. Si el array no llega
         // o queda vacio, caemos a 1 para no dividir por cero.
         const operariosDisponibles = availableOperarios.filter(op => op?.disponible !== false)
         const resourceCount = Math.max(1, operariosDisponibles.length)
-        const effectiveMinutes = totalMinutes / resourceCount
 
         // Jornada laboral promedio real de los operarios disponibles
         // (hora_fin - hora_inicio - desayuno - almuerzo). Default 495 min (8.25h)
@@ -285,13 +328,48 @@ export function PlanningSelectionScreen({
             ? jornadasMin.reduce((a, b) => a + b, 0) / jornadasMin.length
             : 495
 
-        const days = (effectiveMinutes / MIN_LABORAL_DIA).toFixed(1)
-        const hours = (effectiveMinutes / 60).toFixed(1)
+        const porCapacidadMin = cargaMin / resourceCount
+        const mandaLaOT = otMasLargaMin >= porCapacidadMin
+        const duracionMin = Math.max(otMasLargaMin, porCapacidadMin)
 
-        return `${days} días (${hours} hs)`
+        // Un decimal mientras el número es chico; de 100 para arriba el decimal no
+        // dice nada y encima estira el cartel.
+        const redondear = (n: number) => (n >= 100 ? Math.round(n).toString() : n.toFixed(1))
+        const dias = redondear(duracionMin / MIN_LABORAL_DIA)
+        const horas = redondear(cargaMin / 60)
+
+        const otMasLargaHs = redondear(otMasLargaMin / 60)
+        const jornadaHs = (MIN_LABORAL_DIA / 60).toFixed(1)
+
+        const detalleCarga = [
+            `Suma de los minutos estimados de ${procesosConTiempo} ${procesosConTiempo === 1 ? 'proceso' : 'procesos'} de ${selectedOrders.length} ${selectedOrders.length === 1 ? 'OT tildada' : 'OTs tildadas'}.`,
+            'Un proceso que va de a dos cuenta doble: ocupa a dos personas ese rato.',
+            procesosConTiempo < totalProcesos
+                ? `Ojo: ${totalProcesos - procesosConTiempo} de ${totalProcesos} procesos no tienen minutos cargados y no suman — la carga real es mayor.`
+                : '',
+            otsSinProcesos > 0
+                ? `Además, ${otsSinProcesos} ${otsSinProcesos === 1 ? 'OT tildada no tiene' : 'OTs tildadas no tienen'} ningún proceso cargado.`
+                : '',
+        ].filter(Boolean).join(' ')
+
+        const detalleDuracion = [
+            mandaLaOT
+                ? `No baja de ${dias} días aunque sobre gente: los procesos de una misma OT van uno atrás del otro y la más larga son ${otMasLargaHs} hs seguidas. Repartir la carga entre ${resourceCount} ${resourceCount === 1 ? 'operario' : 'operarios'} daría ${redondear(porCapacidadMin / MIN_LABORAL_DIA)} días, pero nadie puede partir un proceso en ${resourceCount}.`
+                : `${horas} hs de trabajo repartidas entre ${resourceCount} ${resourceCount === 1 ? 'operario disponible' : 'operarios disponibles'}, a ${jornadaHs} hs de jornada. Tampoco puede bajar de ${redondear(otMasLargaMin / MIN_LABORAL_DIA)} días, que es lo que tarda sola la OT más larga (${otMasLargaHs} hs seguidas).`,
+            `Da por libres a los ${resourceCount}: lo que ya tienen encima no se descuenta.`,
+            'Y es una cuenta gruesa — no mira máquinas ni quién sabe hacer qué. Para la fina, planificá.',
+        ].join(' ')
+
+        return {
+            tipo: "ok",
+            carga: `${horas} hs`,
+            duracion: `≈ ${dias} ${dias === '1.0' ? 'día' : 'días'} con ${resourceCount} ${resourceCount === 1 ? 'operario' : 'operarios'}`,
+            detalleCarga,
+            detalleDuracion,
+        }
     }
 
-    const estimatedTime = calculateEstimatedTime()
+    const estimacion = calcularEstimacion()
 
     return (
         <PantallaPlanificador
@@ -318,11 +396,46 @@ export function PlanningSelectionScreen({
                                 su propia fila: eran 40px de alto para cuatro controles chicos
                                 que entran de sobra al lado del título, y esos 40px son media
                                 fila más de lista. */}
-                        {estimatedTime && (
-                            <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-3 py-1 text-sm font-medium">
+                        {estimacion?.tipo === "aviso" && (
+                            <Badge
+                                variant="secondary"
+                                className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-3 py-1 text-sm font-medium cursor-help"
+                                title={estimacion.detalle}
+                            >
                                 <Clock className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Est:</span> {estimatedTime}
+                                <span className="hidden sm:inline">Est:</span> {estimacion.texto}
                             </Badge>
+                        )}
+                        {/* Dos carteles y no uno: son dos cosas distintas y mezclarlas fue
+                            justo el problema. El de la izquierda es el trabajo que estás
+                            metiendo —una suma, no depende de nadie—; el de la derecha, lo
+                            que eso tarda con la gente que hay. */}
+                        {estimacion?.tipo === "ok" && (
+                            <>
+                                {/* Del tamaño de los chips vecinos y no del de antes: con dos
+                                    carteles, el `text-sm` empujaba «Salir» a un renglón nuevo,
+                                    y ese renglón son 30px menos de lista. */}
+                                <Badge
+                                    variant="secondary"
+                                    className="bg-blue-50 text-blue-700 border-blue-200 gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help"
+                                    title={estimacion.detalleCarga}
+                                >
+                                    <Clock className="w-3 h-3 shrink-0" />
+                                    {/* «de trabajo» es lo que lo hace legible, pero en una
+                                        pantalla angosta es lo que empuja la fila a dos
+                                        renglones: ahí queda el número solo, que al lado del
+                                        cartel de los días se entiende igual. */}
+                                    {estimacion.carga}<span className="hidden 2xl:inline"> de trabajo</span>
+                                </Badge>
+                                <Badge
+                                    variant="secondary"
+                                    className="bg-indigo-50 text-indigo-700 border-indigo-200 gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help"
+                                    title={estimacion.detalleDuracion}
+                                >
+                                    <Users className="w-3 h-3 shrink-0" />
+                                    {estimacion.duracion}
+                                </Badge>
+                            </>
                         )}
                         {sinMaterial.length > 0 && (
                             <button

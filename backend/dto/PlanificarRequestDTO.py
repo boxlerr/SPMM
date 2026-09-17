@@ -3,6 +3,32 @@ from datetime import date, datetime
 from pydantic import BaseModel, model_validator
 from typing import Dict, List, Optional
 
+class AjusteSkillNativaDTO(BaseModel):
+    """Prender o apagar a una persona en un proceso, SOLO para este cálculo."""
+    operario_id: int
+    proceso_id: int
+    habilitado: bool = True
+
+
+class AjustesDelPlanDTO(BaseModel):
+    """Cambios que valen SOLO para este cálculo y no se guardan en Recursos.
+
+    Nacen del panel de trabas del planificador (pedido de Julián, 17/09/2026). Ahí
+    cada aviso propone una solución, y hasta ahora la única forma de aplicarla era
+    escribirla en Recursos: para destrabar UN plan había que cambiarle los datos al
+    taller para siempre. Con esto el plan se calcula como si el cambio existiera,
+    pero en la base no se toca nada.
+
+    Los diccionarios son el conjunto FINAL de rangos de ese proceso / esa máquina,
+    no un agregado: lo que venga acá reemplaza lo que dice la base, no se suma.
+    Las claves llegan como texto en el JSON; el `Dict[int, ...]` es lo que las
+    convierte a int, que es como se comparan después contra los ids del ORM.
+    """
+    procesos: Dict[int, List[int]] = {}        # proceso_id -> conjunto FINAL de rangos
+    maquinarias: Dict[int, List[int]] = {}     # maquinaria_id -> conjunto FINAL de rangos
+    skills_nativas: List[AjusteSkillNativaDTO] = []
+
+
 class PlanificarRequestDTO(BaseModel):
     ordenes_ids: Optional[List[int]] = None
     preview: Optional[bool] = False
@@ -33,6 +59,10 @@ class PlanificarRequestDTO(BaseModel):
     # backend le volvía a preguntar la hora al reloj: una previa armada a las 06:59 y
     # confirmada a las 07:01 se guardaba con un día de más.
     inicio_base: Optional[datetime] = None
+    # Los arreglos que el usuario aplicó "solo para este plan" desde el panel de
+    # trabas. Opcional a propósito: una pestaña con el bundle viejo no lo manda y
+    # tiene que seguir planificando igual que siempre. Ver AjustesDelPlanDTO.
+    ajustes_del_plan: Optional[AjustesDelPlanDTO] = None
 
     @model_validator(mode="after")
     def _validar_rango(self):

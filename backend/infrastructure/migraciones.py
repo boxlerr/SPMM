@@ -145,6 +145,31 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "2026-09-17_auditoria_proceso_ot",
+        [
+            "CREATE TABLE IF NOT EXISTS auditoria_proceso_ot ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "creado_en TIMESTAMP NOT NULL, "
+            "id_usuario INTEGER, "
+            "usuario VARCHAR(120), "
+            "origen VARCHAR(60), "
+            "id_orden_trabajo INTEGER NOT NULL, "
+            "id_otp BIGINT, "
+            "id_proceso INTEGER, "
+            "nombre_proceso VARCHAR(200), "
+            "accion VARCHAR(10) NOT NULL, "
+            "paso INTEGER, "
+            "cambios TEXT, "
+            "descripcion TEXT NOT NULL, "
+            "metodo VARCHAR(10), "
+            "ruta VARCHAR(300))",
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_proc_ot "
+            "ON auditoria_proceso_ot (id_orden_trabajo, creado_en DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_proc_creado_en "
+            "ON auditoria_proceso_ot (creado_en DESC)",
+        ],
+    ),
+    (
         "2026-09-11_inicio_base_del_plan",
         [
             "ALTER TABLE planificacion ADD COLUMN IF NOT EXISTS inicio_base TIMESTAMP",

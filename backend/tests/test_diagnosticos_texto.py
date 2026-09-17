@@ -525,3 +525,117 @@ def test_todos_los_diagnosticos_traen_resumen_y_es_corto():
         # el párrafo que nadie lee.
         assert len(d["resumen"]) <= 90, f"{d['tipo']}: «{d['resumen']}» ({len(d['resumen'])})"
         assert len(d["resumen"]) <= 160, f"{d['tipo']}: {len(d['resumen'])} caracteres"
+
+
+# --------------------------------------------------------------------------
+# El resumen elige la frase por FAMILIA de aviso, no solo por (recurso, subtipo)
+#
+# Los cuatro tests de arriba le pasan un dict armado a mano, y por ahí se coló el
+# problema: el par (recurso, subtipo) alcanza para clasificar pero no para
+# escribir. CUATRO familias distintas caen en humano/rango, y tres de ellas
+# mostraban —con el aviso cerrado, que es lo único que se ve— «La gente que hace
+# este trabajo no puede usar esa máquina». Templado es un trabajo manual y no
+# tiene ninguna máquina de la que hablar, un puesto vacante tampoco, y un proceso
+# sin rango no tiene nada trabado. Del otro lado, el tercerizado decía «no
+# alcanzan las máquinas» mientras su propio detalle dice que no hay nada que
+# corregir.
+#
+# Vivió meses con la suite en verde porque del resumen solo se miraba el LARGO
+# (`test_todos_los_diagnosticos_traen_resumen_y_es_corto`). Estos miran lo que
+# dice, y lo miran sobre el diagnóstico armado de verdad.
+# --------------------------------------------------------------------------
+
+TERCERIZADO = 13
+
+
+def test_cada_familia_de_aviso_dice_lo_suyo_y_no_inventa_maquinas():
+    nombre_rango = {**NOMBRE_RANGO, TERCERIZADO: "TERCERIZADO"}
+    diags = construir_diagnosticos(
+        [
+            _proc(1, 30, "CONTROL DE MEDIDAS", [AYUDANTE, INGRESANTE]),  # habilidad apagada
+            _proc(2, 99, "TEMPLADO", [OFICIAL + 90]),                    # rango que no tiene nadie
+            _proc(3, 77, "PULIDO", []),                                  # sin ningún rango
+            _proc(4, 22, "CILINDRADO DE CHAPA", [TERCERIZADO]),          # sale del taller
+        ],
+        OPERARIOS, [], [], nombre_rango, NOMBRE_OPERARIO,
+        nativas_off={30: {45, 46}},
+    )
+    dicho = {d["tipo"]: d["resumen"] for d in diags}
+    assert dicho["proceso_sin_operarios"] == "Nadie de los disponibles puede hacerlo."
+    assert dicho["proceso_sin_rango"] == "Nadie controla quién lo agarra."
+    assert dicho["trabajo_tercerizado"] == "Lo hace alguien de afuera. No hay nada que corregir."
+    # Ninguno de los cuatro procesos usa máquina: si alguno nombra una, volvió el bug.
+    for tipo, frase in dicho.items():
+        assert "máquina" not in frase.lower(), f"{tipo}: «{frase}»"
+
+
+def test_el_puesto_vacante_dice_que_esta_vacio_y_no_habla_de_maquinas():
+    nombre_operario = {**NOMBRE_OPERARIO, 18: "VACANTE MEDIO OFICIAL"}
+    res = [{"orden_id": 1, "secuencia": 1, "id_operario": 18, "duracion_min": 200,
+            "excedente": False, "usa_maquina": False, "id_maquinaria": None,
+            "slot_extra": False}]
+    diags = construir_diagnosticos([], OPERARIOS, [], res, NOMBRE_RANGO, nombre_operario)
+    d = _por_tipo(diags, "puestos_vacantes")
+    assert d["resumen"] == "Se lo cargó a un puesto que está vacío."
+
+
+def test_el_cuello_que_entra_no_dice_que_no_alcanzan_las_maquinas():
+    """El cuello Media es el que ENTRA: su detalle dice «No hay nada roto — es la
+    capacidad real del taller», y cerrado mostraba «No alcanzan las máquinas para
+    todo este trabajo», que es lo contrario."""
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR)]
+    proc = (15279, 87, 2, None, 5, 2000, [OFICIAL_PLEGADOR], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": 15, "excedente": False, "slot_extra": False}]
+
+    diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
+    d = _por_tipo(diags, "cuello_de_maquina")
+    assert d["severidad"] == "advertencia"
+    assert d["resumen"] == "Entra todo, pero por turnos: hay 1 máquina para todo esto."
+
+
+def test_el_cuello_que_muerde_si_dice_que_no_alcanzan():
+    """La contracara del anterior: cuando el trabajo NO entra, la frase vieja es la
+    correcta y tiene que seguir saliendo."""
+    nombre_rango = {**NOMBRE_RANGO, OFICIAL_PLEGADOR: "OFICIAL PLEGADOR"}
+    operarios = OPERARIOS + [(31, OFICIAL_PLEGADOR)]
+    proc = (15279, 87, 2, None, 5, 2000, [OFICIAL_PLEGADOR], "PLEGADO", True, "PLEGADORA", {})
+    maqs = [_maquina(15, [OFICIAL_PLEGADOR], "PLEGADORA")]
+    res = [{"orden_id": 15279, "secuencia": 2, "usa_maquina": True,
+            "id_maquinaria": None, "excedente": True, "slot_extra": False}]
+
+    diags = construir_diagnosticos([proc], operarios, maqs, res, nombre_rango, NOMBRE_OPERARIO)
+    d = _por_tipo(diags, "cuello_de_maquina")
+    assert d["severidad"] == "bloqueante"
+    assert d["resumen"] == "No alcanzan las máquinas para todo este trabajo."
+
+
+def test_las_dos_causas_de_quedarse_sin_maquina_no_se_cuentan_igual():
+    """«No hay ninguna máquina cargada» y «no se sabe cuál usa» son el mismo tipo de
+    aviso y hasta el mismo (recurso, subtipo); lo que las distingue es la causa, y
+    por eso viaja en el aviso en vez de deducirse del texto de `tiene`."""
+    engomado = (7, 55, 1, None, 5, 120, [OFICIAL], "ENGOMADO", True, "", {})
+    preparacion = (8, 56, 1, None, 5, 120, [OFICIAL], "PREPARACION DE SOLDADORA TIG", True, "", {})
+    res = [{"orden_id": o, "secuencia": 1, "usa_maquina": True, "id_maquinaria": None,
+            "excedente": False, "slot_extra": False} for o in (7, 8)]
+
+    diags = construir_diagnosticos([engomado, preparacion], OPERARIOS, [], res,
+                                   NOMBRE_RANGO, NOMBRE_OPERARIO)
+    dicho = {d["causa"]: d["resumen"] for d in diags if d["tipo"] == "maquina_incompatible"}
+    assert dicho["sin_familia"] == "No se sabe qué máquina usa."
+    assert dicho["sin_maquina"] == "No hay ninguna máquina cargada para esto."
+
+
+# --------------------------------------------------------------------------
+# El chip del impacto
+# --------------------------------------------------------------------------
+
+def test_el_impacto_no_se_abrevia_y_concuerda_en_singular():
+    """Decía «1 proc · 1 OT · 20 min». «proc» no está escrita en ninguna otra
+    pantalla y encima no concordaba. «OT» se queda: esa sí se dice en el taller."""
+    uno = _diagnosticar([_proc(2, 77, "PULIDO", [])])
+    assert _por_tipo(uno, "proceso_sin_rango")["impacto"]["resumen"] == "1 proceso · 1 OT · 20 min"
+    dos = _diagnosticar([_proc(2, 77, "PULIDO", []), _proc(3, 77, "PULIDO", [])])
+    assert _por_tipo(dos, "proceso_sin_rango")["impacto"]["resumen"] == "2 procesos · 2 OT · 40 min"

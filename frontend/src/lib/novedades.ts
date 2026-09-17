@@ -47,6 +47,56 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "editar-los-procesos-desde-la-planificacion",
+        fecha: "2026-09-17",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Los procesos se editan en la misma planificación: cambiás el paso por otro, lo movés, lo sacás o agregás uno nuevo",
+        detalle:
+            "Cuando desplegás una OT en la vista previa del plan, cada paso se puede tocar ahí mismo. Al lado del nombre hay un lápiz para cambiarlo por otro proceso, y a la derecha de cada renglón están las flechitas para subirlo o bajarlo y el tacho para sacarlo. Abajo de la lista, «Agregar proceso a la OT» suma uno nuevo. Antes todo esto era salir del plan, abrir la orden y volver a empezar. Dos cosas para tener en cuenta: los cambios se guardan en la ORDEN, no sólo en este plan, así que quedan aunque descartes el borrador; y el plan no se rehace solo. El paso que tocaste y su hora quedan marcados en naranja y arriba aparece el cartel con el botón «Recalcular el plan» para cuando quieras que el motor lo acomode. Si guardás sin recalcular, se guarda el plan tal como lo estás viendo, y te lo avisa antes. Los minutos de cada paso siguen sin tocarse desde acá: se cargan en la orden.",
+        href: "/operaciones",
+    },
+    {
+        id: "destrabar-un-aviso-solo-para-esta-planificacion",
+        fecha: "2026-09-17",
+        tipo: "nuevo",
+        seccion: "Operaciones",
+        titulo: "Podés destrabar un aviso solo para esta planificación, sin que cambie nada en Recursos",
+        detalle:
+            "Cuando el planificador te avisaba que algo trababa el plan, el botón que lo resolvía de una guardaba el cambio en Recursos: le sumabas un rango a una máquina para que este plan saliera, y ese rango le quedaba puesto para siempre, también para todas las OTs que vinieran después. Si lo único que querías era ver cómo quedaba el plan suponiendo que esta vez esa máquina también hace el trabajo, no había manera: o lo cargabas en serio, o te quedabas con la traba. Ahora el de siempre se llama «Guardar en Recursos» y al lado apareció otro, «Solo en este plan»: el plan se calcula de nuevo como si el dato estuviera cargado, pero no se escribe nada en ningún lado. El botón del aviso te queda diciendo «Puesto en este plan», y arriba de la lista de avisos se abre «Ajustes solo para este plan», con todos los que pusiste y un «Deshacer» en cada uno. Ojo: valen para este cálculo y nada más. En Recursos queda todo como estaba, y si descartás el borrador se pierden. Aunque pliegues los avisos, arriba te queda el contador de los que tenés puestos. Si deshacés uno puede llevarse los que aplicaste después sobre esa misma máquina o ese mismo proceso —se calcularon encima del primero—, y te dice cuántos se fueron; y si al final lo cargás en serio con «Guardar en Recursos», el ajuste temporal sobre eso se da de baja solo, para que el próximo cálculo no te pise lo que guardaste. Al guardar el plan, si quedó alguno puesto te lo avisa antes de escribir: podés guardar igual o volver y cargarlos.",
+        href: "/operaciones",
+    },
+    {
+        id: "cambiar-horarios-sin-que-se-recargue-todo",
+        fecha: "2026-09-17",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Cambiás un horario o una fecha y la pantalla se queda donde está",
+        detalle:
+            "Cada vez que le cambiabas el horario a un paso, la pantalla se recargaba entera: volvías al principio, con la OT cerrada y la solapa donde no estabas, y para corregir el paso de abajo había que desplegar todo de nuevo. Corregir cinco horarios eran cinco vueltas. Ahora el horario nuevo aparece en el renglón al toque, el cuadrito se cierra solo y seguís con el que sigue. Lo mismo con las fechas de la fila —entrada, prometida, entrega— y con el número de pedido o la cantidad: antes la lista desaparecía atrás del cartel de carga y volvía unos segundos después. Si algo no se llega a guardar, el dato vuelve como estaba y te avisa: lo que ves en pantalla es lo que quedó guardado.",
+        href: "/operaciones",
+    },
+    {
+        id: "estimado-del-planificador-en-horas-reales",
+        fecha: "2026-09-17",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Arriba del planificador ahora hay dos números: las horas de trabajo que estás metiendo y los días que eso lleva",
+        detalle:
+            "Tildabas una sola OT de 40 horas de trabajo y el cartel decía «0.1 días (1.1 hs)». Lo que hacía era repartir esas horas entre todos los operarios disponibles, como si un torneado de 600 minutos lo pudieran hacer 37 personas a la vez: los pasos de una OT van uno atrás del otro, así que esa cuenta no podía dar. Y mezclados en un solo número no se entendía cuál era cuál. Ahora son dos carteles separados: «40.8 hs de trabajo», que es la suma de lo que tildaste y no depende de cuánta gente haya, y «≈ 4.9 días con 37 operarios», que es lo que eso tarda con la gente que está disponible. Pasando el mouse por cada uno te cuenta de dónde sale: si el número lo manda la OT más larga (que no se acorta con más gente) o la capacidad del taller, si hay pasos sin minutos cargados que no están sumando, y que la cuenta da por libres a todos los operarios — lo que ya tienen encima no se descuenta.",
+        href: "/operaciones",
+    },
+    {
+        id: "historial-de-los-pasos-de-la-orden",
+        fecha: "2026-09-17",
+        tipo: "nuevo",
+        seccion: "Auditoría",
+        titulo: "Cada paso que se agrega, se cambia o se saca de una orden queda con nombre y hora",
+        detalle:
+            "La orden tiene una solapa nueva, «5. Historial», con todo lo que se hizo con sus pasos: «Julián agregó el paso 4 — TORNO CNC», «Lucas cambió el paso 2 — SOLDADURA: minutos 60 → 2700». Dice quién fue, qué cambió de cada campo y el día y la hora con segundos, porque dos pasos agregados en el mismo guardado caen en el mismo minuto y a veces lo que se quiere saber es cuál vino primero. Al costado dice también por dónde entró el cambio: si fue el planificador, un deshacer, una acción sobre varias OT o el borrado de un proceso del catálogo. Lo mismo, pero de todas las órdenes juntas, está en Auditoría › Pasos de las OT, y ahí se puede buscar por persona, por proceso o por número de OT. Sirve para cuando un proceso aparece dos veces y hay que saber si lo cargó alguien o si vino así: hasta ahora lo único que quedaba era que «alguien editó la orden #1081», sin decir qué paso, y en una orden de doce pasos eso no alcanzaba para nada. Ojo: empieza hoy. Lo de antes no aparece porque nunca se guardó — esos pasos vinieron del sistema viejo.",
+        href: "/auditoria",
+    },
+    {
         id: "cerrar-una-ot-sin-cambios-no-pregunta",
         fecha: "2026-09-16",
         tipo: "arreglo",

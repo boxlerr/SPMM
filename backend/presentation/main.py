@@ -32,6 +32,7 @@ import asyncio
 from backend.scripts.sync_db import main as sync_main, run_sync as run_sync_once
 from backend.infrastructure.migraciones import aplicar_migraciones
 from backend.infrastructure import auditoria_movimientos as auditoria_mov
+from backend.infrastructure import auditoria_procesos as auditoria_proc
 from backend.infrastructure.db import SessionLocal
 import json
 import os
@@ -79,7 +80,32 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 async def auditar_movimientos(request: Request, call_next):
     metodo = request.method
     ruta = request.url.path
+    usuario = _quien_es(request)
 
+    # Quién está pidiendo, disponible para todo lo que pase de acá para abajo.
+    #
+    # Va SIEMPRE, aunque esta ruta no se audite en `auditoria_movimiento`: lo usa la
+    # auditoría de procesos (infrastructure/auditoria_procesos.py), que no mira el
+    # pedido sino lo que quedó en la base, y necesita el autor ahí abajo. La mitad de
+    # los caminos que tocan procesos no reciben el usuario por parámetro aunque el
+    # endpoint sí pida token — borrar una OT, borrar un proceso del catálogo—, y sin
+    # esto esos cambios quedarían sin autor.
+    #
+    # Se setea antes de `call_next` a propósito: el endpoint corre en una tarea hija,
+    # que copia el contexto en el momento en que se crea. Al revés no funcionaría.
+    token = auditoria_proc.poner_contexto(
+        usuario=usuario,
+        metodo=metodo,
+        ruta=ruta,
+        parametros=dict(request.query_params),
+    )
+    try:
+        return await _auditar(request, call_next, metodo, ruta, usuario)
+    finally:
+        auditoria_proc.limpiar_contexto(token)
+
+
+async def _auditar(request, call_next, metodo, ruta, usuario):
     if not auditoria_mov.se_audita(metodo, ruta):
         return await call_next(request)
 
@@ -108,14 +134,14 @@ async def auditar_movimientos(request: Request, call_next):
     except Exception:
         # Lo que explota sin handler termina en un 500: queda registrado igual, que es
         # justo lo que se busca cuando alguien pregunta "guardé y no pasó nada".
-        await _guardar_movimiento(request, metodo, ruta, 500, arranque, cuerpo)
+        await _guardar_movimiento(request, metodo, ruta, 500, arranque, cuerpo, usuario)
         raise
 
-    await _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo)
+    await _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo, usuario)
     return respuesta
 
 
-async def _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo):
+async def _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo, usuario):
     """Sesión propia y corta: la del endpoint ya se cerró, y si el pedido terminó en
     rollback esa sesión está envenenada — escribir ahí sería perder la fila justo en
     el caso que más interesa. Nada de esto puede levantar."""
@@ -123,7 +149,7 @@ async def _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo):
         async with SessionLocal() as sesion:
             await auditoria_mov.registrar(
                 sesion,
-                usuario=_quien_es(request),
+                usuario=usuario,
                 metodo=metodo,
                 ruta=ruta,
                 estado=estado,

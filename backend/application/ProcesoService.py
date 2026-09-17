@@ -10,6 +10,7 @@ from backend.commons.exceptions.ApplicationException import ApplicationException
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.ConfirmacionRequeridaException import ConfirmacionRequeridaException
+from backend.infrastructure import auditoria_procesos as auditoria_proc
 
 
 
@@ -227,6 +228,20 @@ class ProcesoService:
             )
 
         try:
+            # Qué pasos de qué OT se lleva puestos, anotado ANTES de borrarlos.
+            #
+            # Va antes del DELETE del catálogo a propósito: después el proceso ya no
+            # existe y el registro no podría decir cómo se llamaba, que es lo único que
+            # le sirve al que mañana pregunta por qué a esa orden le falta un paso. Es
+            # también la diferencia entre "alguien sacó este paso de la orden" y "se
+            # fue de arrastre al limpiar el catálogo": el origen lo dice.
+            desaparecidas = await auditoria_proc.leer_pasadas(
+                db, "id_proceso = :p", {"p": id}
+            )
+            await auditoria_proc.anotar(
+                db, desaparecidas, "baja", origen="Al borrar el proceso del catálogo",
+            )
+
             # A mano y en la misma transacción: estas dos FK son NO ACTION, así que sin
             # esto el borrado revienta con un error de constraint que en pantalla se ve
             # como "error de conexión" y no dice nada.

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle, History, Info } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { cn, capitalizeName } from "@/lib/utils";
@@ -79,7 +80,7 @@ interface MateriaPrimaItem {
  * final quería decir tocar los dos y acordarse de los dos; escrito una sola vez acá, no
  * hay forma de que queden diciendo cosas distintas.
  */
-const ORDEN_SOLAPAS = ["general", "materias", "procesos", "planos"] as const;
+const ORDEN_SOLAPAS = ["general", "materias", "procesos", "planos", "historial"] as const;
 type Solapa = (typeof ORDEN_SOLAPAS)[number];
 
 /**
@@ -1439,7 +1440,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     solapas a cuatro cada celda perdió un cuarto de ancho, así que lo
                                     que antes zafaba raspando ahora se pisa. Abajo de lg queda
                                     "1. General · 2. Materias · 3. Procesos · 4. Planos". */}
-                                <TabsList className="grid w-full grid-cols-4 mb-4 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm">
+                                <TabsList className={`grid w-full ${orderToEdit ? "grid-cols-5" : "grid-cols-4"} mb-4 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm`}>
                                     <TabsTrigger value="general" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
                                         <FileText size={16} className="mr-1 md:mr-2 shrink-0" />
                                         <span className="truncate">1. <span className="hidden lg:inline">Información </span>General</span>
@@ -1465,6 +1466,17 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             </span>
                                         )}
                                     </TabsTrigger>
+                                    {/* Sólo en una orden que ya existe: en un alta no hay historial
+                                        que mirar, y así las otras cuatro no pierden ancho al cargar. */}
+                                    {orderToEdit && (
+                                        <TabsTrigger value="historial" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                            <History size={16} className="mr-1 md:mr-2 shrink-0" />
+                                            {/* Abajo de lg queda "5." y el reloj: la quinta solapa
+                                                le saca un quinto de ancho a cada celda, y los
+                                                rótulos de las otras cuatro ya venían raspando. */}
+                                            <span className="truncate">5.<span className="hidden lg:inline"> Historial</span></span>
+                                        </TabsTrigger>
+                                    )}
                                 </TabsList>
 
                                 {/* Tab: General */}
@@ -2130,6 +2142,24 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         </>
                                     )}
                                 </TabsContent>
+
+                                {/* Tab: Historial */}
+                                {orderToEdit && (
+                                    <TabsContent value="historial" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
+                                        <div className="space-y-1">
+                                            <h3 className="text-lg font-semibold text-gray-900">
+                                                Qué se hizo con los pasos de esta orden
+                                            </h3>
+                                            <p className="text-sm text-gray-500">
+                                                Cada vez que alguien agrega, cambia o saca un paso queda acá:
+                                                quién fue, desde qué pantalla y el día y la hora exactos. Sirve
+                                                para cuando un proceso aparece dos veces o falta uno y hay que
+                                                saber qué pasó.
+                                            </p>
+                                        </div>
+                                        <HistorialDeProcesos idOrden={orderToEdit.id} />
+                                    </TabsContent>
+                                )}
                             </Tabs>
                         </div>
 
@@ -2170,9 +2200,11 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     )}
 
                                     {/* Guardar se puede desde Procesos (como siempre) y también desde
-                                        Planos: es la última solapa, y quedar ahí sin más botón que
-                                        "Anterior" obliga a volver solo para apretar Guardar. */}
-                                    {activeTab === "procesos" || activeTab === "planos" ? (
+                                        Planos e Historial: son las últimas solapas, y quedar ahí sin
+                                        más botón que "Anterior" obliga a volver solo para apretar
+                                        Guardar. En Historial, además, sin este botón el pie se
+                                        quedaba mostrando un "Siguiente" que no llevaba a ningún lado. */}
+                                    {activeTab === "procesos" || activeTab === "planos" || activeTab === "historial" ? (
                                         <Button
                                             key="submit-button"
                                             type="submit"

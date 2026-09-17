@@ -17,16 +17,34 @@
  *    tabla del plan quedaba abajo de todo y había que scrollear para verla.
  *  - El "dónde" dejó de ser un cartelito muerto: te lleva a la pantalla, a la
  *    pestaña y a la fila del dato que hay que arreglar, ya desplegada.
+ *
+ * Pedido de Julián (17/09/2026), copiado tal cual se escribió —tipeos incluidos, y por
+ * lo mismo que en `lib/ajustesPlan`: una cita "arreglada" ya no se puede buscar ni
+ * verificar contra el original—: *"si por ejemplo esas medianas solo se quieren
+ * solucionar para esa planificacion un boton para aplicar la solucion solo para esta
+ * pla ificacion y no me cambie todo en la base de datos"*, y *"quiero las explicaciones
+ * mas faciles de entender"*. De ahí salen las dos cosas nuevas:
+ *
+ *  - CADA SOLUCIÓN TIENE DOS CAMINOS y hay que poder distinguirlos sin leer un
+ *    manual: **Guardar en Recursos** (verde, con ícono de guardar) escribe el dato
+ *    y queda para siempre; **Solo en este plan** (índigo, punteado) no escribe
+ *    nada, vale para este cálculo y se deshace. El verde conserva su confirmación
+ *    en dos pasos —el 18/08 un cambio así, sin preguntar, abrió la PLEGADORA de 1
+ *    persona a 10—; el índigo va de un click, justamente porque no toca ningún dato.
+ *  - Un color = un significado: verde lleno SOLO para lo que toca la base. El
+ *    "dar por resuelto", que no cambia nada, dejó de ser verde lleno y pasó a
+ *    borde: competía de igual a igual con el botón que sí cambia el dato.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Cog, Info, ListChecks, Loader2, RefreshCw, RotateCcw, Users, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Cog, HelpCircle, Info, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { antiguedadTexto } from "@/lib/borradorPlan";
+import { claveDeAjuste, descripcionDeAccion, type AccionDeSolucion, type AjusteDelPlan } from "@/lib/ajustesPlan";
 
 /** Cuántas líneas se ven antes de "Ver todas". */
 // Con la tarjeta compacta seis avisos ocupan casi lo mismo que ocupaban cuatro filas
@@ -128,23 +146,14 @@ const subtipoDe = (d: Diagnostico) => SUBTIPO[d.subtipo ?? SUBTIPO_POR_TIPO[d.ti
  * gente se le abre la máquina) más la confirmación del botón.
  *
  * `id`/`rangos` sueltos quedan por compatibilidad con lo ya desplegado.
+ *
+ * La forma vive en `@/lib/ajustesPlan` y acá queda el alias con el nombre de
+ * siempre: la misma acción viaja ahora por dos caminos —el que escribe en Recursos
+ * y el que vale solo para este cálculo— y con dos definiciones iguales pero
+ * separadas era cuestión de tiempo que una se corriera de la otra. La dependencia
+ * va en un solo sentido: el componente importa de la lib, la lib no importa de acá.
  */
-export interface DiagnosticoAccion {
-    tipo: "proceso" | "maquinaria" | "skill_nativa";
-    id: number;
-    nombre: string;
-    rangos?: number[];
-    /** Para skill_nativa: a qué estado se lleva la habilidad. */
-    habilitado?: boolean;
-    /**
-     * Cada cosa a tocar. Para skill_nativa son operarios; si no, procesos o máquinas.
-     *
-     * `suma` y `tenia` vienen con los NOMBRES de los rangos, no con ids: son lo que se
-     * muestra antes de aplicar. `rangos` es el conjunto final que se manda al endpoint
-     * (reemplaza), y un conjunto final no se puede leer — no dice si agrega uno o tres.
-     */
-    objetivos?: { id: number; nombre: string; rangos?: number[]; suma?: string[]; tenia?: string[] }[];
-}
+export type DiagnosticoAccion = AccionDeSolucion;
 
 export interface DiagnosticoSolucion {
     texto: string;
@@ -273,6 +282,44 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
 }
 
 /**
+ * La acción que se puede probar "solo en este plan", venga o no con botón propio.
+ *
+ * Los avisos Media casi nunca traen `accion` —qué rango va lo sabe el taller, no el
+ * planificador— pero varios sí traen `objetivo` con los rangos PROPUESTOS: es el
+ * mismo dato, solo que pensado para armar un link a Recursos y no un botón. Para
+ * probarlo en el cálculo alcanza y sobra, y son justamente los avisos que Julián
+ * nombró ("esas medianas"), así que se arma la acción acá con lo que ya vino.
+ *
+ * No se arma cuando el objetivo es un operario ni cuando no trae rangos: no hay
+ * nada que ajustar, y un botón que no cambia nada es peor que no tener botón.
+ */
+function accionDelObjetivo(sol: DiagnosticoSolucion): AccionDeSolucion | null {
+    const o = sol.objetivo;
+    if (!o || o.tipo === "operario" || !o.rangos?.length) return null;
+    return {
+        tipo: o.tipo === "maquinaria" ? "maquinaria" : "proceso",
+        id: o.id,
+        nombre: o.nombre,
+        rangos: o.rangos,
+        objetivos: [{ id: o.id, nombre: o.nombre, rangos: o.rangos }],
+    };
+}
+
+/** La acción aplicable de una solución: la propia, o la que se deduce del objetivo. */
+const accionAjustable = (sol: DiagnosticoSolucion): AccionDeSolucion | null =>
+    sol.accion ?? accionDelObjetivo(sol);
+
+/**
+ * Dónde se recuerda que la leyenda "¿Cómo se lee esto?" ya se mostró una vez.
+ *
+ * v2 y no v1 porque cambió lo que significa el valor: antes guardaba "abierta" /
+ * "cerrada" (el estado del último click) y ahora guarda "vista" (que ya se le mostró
+ * a esta máquina). Con la misma clave, un "abierta" viejo se leería como un valor
+ * válido de lo nuevo.
+ */
+const CLAVE_LEYENDA = "spmm.diagnosticos.leyenda.v2";
+
+/**
  * Qué toca la solución, dicho ANTES de aplicarla.
  *
  * Lucas, 28/08: *"te da miedo apretar"*. El botón decía "Aplicar y recalcular" y no
@@ -337,9 +384,12 @@ function ResumenDelCambio({ accion }: { accion: DiagnosticoAccion }) {
                     </li>
                 ))}
             </ul>
+            {/* La frase tiene que decir el ALCANCE, no el mecanismo: desde que hay un
+                botón que aplica lo mismo sin guardar nada, lo único que distingue a
+                este es que el dato queda para todos los planes que vengan. */}
             <p className="mt-1 text-[10.5px] text-amber-800/80">
-                Se guarda en Recursos y el plan se calcula de nuevo. Se puede volver a cambiar
-                desde Recursos cuando quieras.
+                Queda guardado en Recursos para <strong>todos</strong> los planes, no solo para
+                este. Se puede volver a cambiar desde Recursos cuando quieras.
             </p>
         </div>
     );
@@ -358,10 +408,23 @@ export function DiagnosticosPlan({
     onMarcadosChange,
     numeroDeOT,
     onVerOT,
+    nombreDeRango,
+    ajustes: ajustesProp,
+    onAplicarSoloEstePlan,
+    onQuitarAjuste,
 }: {
     diagnosticos?: Diagnostico[];
-    /** Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo. */
-    onResuelto?: () => void;
+    /**
+     * Se llama después de aplicar un cambio, para recalcular el plan con el dato nuevo.
+     *
+     * Va con la acción que se acaba de guardar en Recursos, y no vacía como antes,
+     * porque la pantalla necesita saber QUÉ objetivos tocó: si sobre esa misma máquina
+     * había un ajuste "solo en este plan", ese ajuste manda un conjunto de rangos que
+     * ya quedó viejo y en el recálculo pisaría lo que se acaba de guardar. Con la
+     * acción en la mano la pantalla lo saca (`claveDeAjuste` de `lib/ajustesPlan` da
+     * la identidad de los dos lados). Es opcional: quien no la use sigue andando.
+     */
+    onResuelto?: (accionAplicada?: AccionDeSolucion) => void;
     /**
      * Volver a calcular para ver si lo que se arregló afuera (en Recursos) ya está.
      *
@@ -424,8 +487,70 @@ export function DiagnosticosPlan({
      * porque es la que tiene la tabla; el aviso sólo sabe a qué OT apunta.
      */
     onVerOT?: (ordenId: number) => void;
+    /**
+     * El nombre de un rango, a partir del id.
+     *
+     * Los avisos que traen `accion` ya vienen con los nombres puestos desde el backend
+     * (`suma` / `tenia`). Los Media no traen acción —qué rango va lo sabe el taller, no
+     * el planificador— y la acción se arma acá con el `objetivo`, donde sólo hay ids.
+     * Sin traductor, la frase que dice qué va a hacer el botón queda en "le cambio
+     * quién la puede usar", que no dice nada. El catálogo lo tiene la pantalla.
+     */
+    nombreDeRango?: (id: number) => string;
+    /**
+     * Los ajustes que valen SOLO para este cálculo (pedido de Julián, 17/09/2026).
+     *
+     * El caso es "esas medianas solo se quieren solucionar para esa planificacion":
+     * querés ver cómo sale el plan si esa fresadora aceptara ese rango, pero no
+     * querés que el dato quede cargado en Recursos para todos los planes que vengan.
+     * El ajuste se manda al solver y el plan sale como si el dato estuviera; en la
+     * base no se escribe nada.
+     *
+     * Viven en la pantalla y no acá: los estados locales del panel (`aplicadas`,
+     * `confirmando`) se limpian con cada lista nueva de diagnósticos, y un ajuste
+     * que se borrara en el recálculo que él mismo disparó no serviría para nada.
+     * Además tienen que viajar al borrador para poder retomarlo mañana.
+     *
+     * Las tres props son opcionales: sin ellas el panel anda como antes, con el
+     * único camino que había (guardar en Recursos).
+     */
+    ajustes?: AjusteDelPlan[];
+    onAplicarSoloEstePlan?: (ajuste: AjusteDelPlan) => void;
+    onQuitarAjuste?: (clave: string) => void;
 }) {
     const todos = diagnosticos ?? [];
+    const ajustes = ajustesProp ?? [];
+    /**
+     * Un ajuste se reconoce por lo que TOCA, no por el renglón donde se apretó.
+     *
+     * La clave salía de `${d.id}-${índice de la solución}` y ese índice no es estable
+     * entre recálculos: en los avisos de máquina incompatible el orden de las
+     * soluciones lo deciden los rangos de cada máquina, que es justamente lo que el
+     * ajuste cambia. Bastaba un recálculo para que el botón quedara marcado "Puesto en
+     * este plan" arriba de una solución que nunca se aplicó. La identidad la da ahora
+     * `claveDeAjuste`, que se arma con los objetivos: la misma cosa tocada del mismo
+     * modo es el mismo ajuste, venga del renglón que venga.
+     *
+     * La clave del botón PERMANENTE sigue siendo `${d.id}-${i}`: ése no viaja a ningún
+     * lado ni sobrevive al recálculo, sólo marca qué botón de ESTA lista se apretó.
+     */
+    const clavesAjustadas = new Set(ajustes.map((a) => a.clave));
+    /** Si alguno de los caminos de este aviso ya está puesto como ajuste de este plan. */
+    const tieneAjuste = (d: Diagnostico) =>
+        d.soluciones.some((s) => {
+            const accion = accionAjustable(s);
+            return !!accion && clavesAjustadas.has(claveDeAjuste(accion));
+        });
+    /**
+     * Los ajustes, mirados desde el efecto de la tira verde sin ser dependencia suya.
+     *
+     * Ese efecto corre cuando cambian los diagnósticos, no cuando cambian los
+     * ajustes: meterlos en las dependencias lo haría recalcular de gusto cada vez
+     * que alguien aplica o deshace uno, y esa función ACUMULA estado (los resueltos
+     * de recálculos anteriores), así que correrla de más no es gratis.
+     */
+    const tieneAjusteRef = useRef(tieneAjuste);
+    tieneAjusteRef.current = tieneAjuste;
 
     // Controlado por la pantalla si le pasan la prop; con estado propio si no.
     const [marcadosLocal, setMarcadosLocal] = useState<Set<string>>(new Set());
@@ -440,7 +565,11 @@ export function DiagnosticosPlan({
         cambiarMarcados(siguiente);
         // "A ver si ponés resuelto y no te dice qué resolvió. Estaría bueno que te
         // diga qué resolvió" (Lucas, 28/08). Por eso va el título y no un "Listo".
-        toast.success("Marcado como resuelto", { description: d.titulo });
+        //
+        // Y dice "no lo muestro más" y no "resuelto": esto no arregla nada, solo lo
+        // baja de la lista. Con el botón que guarda en Recursos al lado, la palabra
+        // "resuelto" en los dos lados hacía parecer que hacían lo mismo.
+        toast.success("Listo, no lo muestro más", { description: d.titulo });
     };
     const desmarcar = (id: string) => {
         const siguiente = new Set(marcados);
@@ -468,6 +597,16 @@ export function DiagnosticosPlan({
     const [aplicando, setAplicando] = useState<string | null>(null);
     const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
     /**
+     * Cuál de los botones índigo disparó el recálculo que está corriendo.
+     *
+     * El botón no pega en ningún endpoint —el ajuste viaja adentro del pedido del
+     * plan— así que no tiene un "aplicando" propio: lo que tarda es el recálculo, y de
+     * eso se entera el panel por `revisando`. Sin esto el botón se quedaba quieto
+     * mientras el plan se rehacía y, como el velo de recálculo es `pointer-events-none`,
+     * el segundo click pasaba igual y salían dos POST encimados.
+     */
+    const [ajustando, setAjustando] = useState<string | null>(null);
+    /**
      * Botón en dos pasos: el primer click pregunta, el segundo aplica.
      *
      * Estos cambios tocan quién puede usar una máquina — el 18/08 un cambio así,
@@ -476,6 +615,70 @@ export function DiagnosticosPlan({
      * es donde se lee el "ojo, esto la habilita para N personas".
      */
     const [confirmando, setConfirmando] = useState<string | null>(null);
+
+    /**
+     * La leyenda de cómo se lee el panel: abierta la primera vez, cerrada después.
+     *
+     * El criterio Alta/Media, qué son los chips del impacto y en qué se diferencian
+     * los dos botones eran las tres cosas que más falta hacen para entender la
+     * pantalla, y las tres vivían escondidas en un `title=`: invisibles al barrer la
+     * lista y, en una tablet, inalcanzables. Acá se leen sin mouse; y el que ya sabe
+     * no las ve nunca más.
+     *
+     * Eso último lo prometía este comentario y no lo hacía el código: sólo escribía en
+     * localStorage si alguien tocaba el botón, así que el que nunca lo tocó —o sea
+     * casi todo el mundo— se comía los 58-88px de la leyenda en cada plan, para
+     * siempre. Ahora se marca como vista cuando SE MUESTRA, que es cuando dejó de
+     * hacer falta: la primera vez se abre sola, de ahí en más arranca plegada y sigue
+     * a un click del "¿Cómo se lee esto?".
+     *
+     * Se marca sólo con el panel desplegado: plegado la leyenda no se dibuja, y
+     * darla por vista sin que nadie la haya visto es quemarla.
+     *
+     * Arranca cerrada en el render y se abre en el efecto a propósito: leer
+     * localStorage al armar el estado rompe la hidratación de Next (el servidor no
+     * tiene localStorage y pinta otra cosa). Y todo va en try/catch porque en ventana
+     * privada o con los datos del sitio bloqueados el acceso tira excepción: en ese
+     * caso queda cerrada, que es un renglón menos, nunca una pantalla rota.
+     */
+    const [leyenda, setLeyenda] = useState(false);
+    useEffect(() => {
+        if (colapsado) return;
+        try {
+            if (localStorage.getItem(CLAVE_LEYENDA) === "vista") return;
+            setLeyenda(true);
+            localStorage.setItem(CLAVE_LEYENDA, "vista");
+        } catch { /* sin localStorage: queda cerrada y el botón sigue estando */ }
+    }, [colapsado]);
+    const alternarLeyenda = () => setLeyenda((v) => !v);
+
+    /**
+     * Aplicar la solución SOLO a este cálculo, o sacarla si ya estaba aplicada.
+     *
+     * De un click y sin confirmar, al revés que el botón que guarda en Recursos. No
+     * es descuido: este no escribe absolutamente nada —el dato viaja con el pedido al
+     * solver y muere ahí—, se ve en la tira de arriba y se deshace con un botón. La
+     * confirmación en dos pasos existe para lo que NO se puede deshacer de un click,
+     * y pedirla también acá haría que los dos caminos se sintieran igual de pesados,
+     * que es justo lo contrario de lo que hay que transmitir.
+     */
+    const aplicarSoloEstePlan = (d: Diagnostico, clave: string, accion: AccionDeSolucion) => {
+        // Poner y sacar disparan los dos un recálculo, así que los dos tienen que dejar
+        // el botón trabajando hasta que vuelva el plan.
+        setAjustando(clave);
+        if (clavesAjustadas.has(clave)) {
+            onQuitarAjuste?.(clave);
+            return;
+        }
+        const descripcion = descripcionDeAccion(accion, nombreDeRango);
+        // El aviso del toast lo da la pantalla, no el panel. Acá había uno propio
+        // ("Ajustado solo para este plan") y la pantalla tira el suyo al aplicar el
+        // ajuste, así que un click dejaba DOS carteles pisados diciendo lo mismo con
+        // dos verbos distintos —ajustado / aplicado—, que se lee como dos cosas que
+        // pasaron. Avisa la pantalla porque es la dueña del estado: sabe si el
+        // ajuste entró de verdad y traduce los rangos a nombres, que acá no se puede.
+        onAplicarSoloEstePlan?.({ clave, titulo: d.titulo, descripcion, accion });
+    };
 
     /**
      * Los que estaban en el cálculo anterior y ya no están: se arreglaron.
@@ -500,8 +703,16 @@ export function DiagnosticosPlan({
 
             // Los que se acaban de ir. En el primer render no hay nada resuelto: hay
             // un plan recién calculado, y `antes` está vacío.
+            //
+            // Los que destrabó un ajuste de "solo en este plan" NO entran acá: se
+            // fueron de la lista igual que los otros, pero decir "Resuelto" y ofrecer
+            // "Ver cómo quedó" apuntando a Recursos sería afirmar que se guardó algo
+            // que no se guardó. Esos ya se cuentan, con su nombre, en la tira índigo
+            // de ajustes, que además es la única que se puede deshacer.
             const yaEstan = new Set(siguen.map((d) => d.id));
-            const recien = antes.filter((d) => !ahora.has(d.id) && !yaEstan.has(d.id));
+            const recien = antes.filter(
+                (d) => !ahora.has(d.id) && !yaEstan.has(d.id) && !tieneAjusteRef.current(d)
+            );
 
             // Se ACUMULAN entre recálculos. Antes cada cálculo pisaba la lista con los
             // de esa vuelta, así que arreglar dos cosas de a una dejaba ver sólo la
@@ -538,9 +749,13 @@ export function DiagnosticosPlan({
      * con el teclado: al tabular hacia "Sí, aplicalo" el blur lo desmontaba. Ahora el
      * panel tiene su propio "Cancelar" y lo que hay que cubrir es el otro caso: que la
      * lista se renueve y el aviso que estabas por confirmar ya no exista.
+     *
+     * Lo mismo con el botón índigo que quedó trabajando: la lista nueva ES el plan que
+     * ese click pidió, así que ahí termina de trabajar.
      */
     useEffect(() => {
         setConfirmando(null);
+        setAjustando(null);
     }, [diagnosticos]);
 
     const aplicar = async (clave: string, accion: DiagnosticoAccion) => {
@@ -605,7 +820,11 @@ export function DiagnosticosPlan({
                     : `Listo: ${objetivos.length} actualizados`,
                 { description: "Recalculando el plan con el cambio…" },
             );
-            onResuelto?.();
+            // Con la acción y no vacío: lo que se acaba de guardar en Recursos puede ser
+            // lo mismo que alguien había puesto como ajuste "solo en este plan", y ese
+            // ajuste lleva el conjunto de rangos de ANTES. Si no se saca, el próximo
+            // recálculo lo manda igual y pisa en memoria lo recién guardado.
+            onResuelto?.(accion);
         } catch {
             toast.error(`No se pudo actualizar ${accion.nombre}`, {
                 description: "Probá desde Recursos.",
@@ -617,7 +836,12 @@ export function DiagnosticosPlan({
 
     // Antes se iba en null apenas la lista quedaba vacía. Justo el caso en que se
     // resolvió lo último: el aviso desaparecía sin decir que se había arreglado.
-    if (items.length === 0 && resueltos.length === 0 && aMano.length === 0) return null;
+    //
+    // Los ajustes cuentan igual que los resueltos: si destrabaste las últimas dos
+    // trabas con ajustes de este plan, el panel se llevaría puesta la única tira
+    // que dice que este plan está calculado con datos que NO están cargados, y con
+    // ella el botón para deshacerlos.
+    if (items.length === 0 && resueltos.length === 0 && aMano.length === 0 && ajustes.length === 0) return null;
 
     const toggle = (id: string) =>
         setAbiertos((prev) => {
@@ -632,7 +856,11 @@ export function DiagnosticosPlan({
         // Marcado a mano no es lo mismo que resuelto, y el encabezado no puede
         // decir "sin trabas" cuando las trabas siguen ahí: lo único que pasó es
         // que alguien las dio por vistas.
-        ? (aMano.length > 0 ? "Todo listo, marcado por vos" : "Sin trabas ni avisos")
+        ? (aMano.length > 0
+            ? "Todo listo, marcado por vos"
+            // Sin trabas PERO con datos inventados para este cálculo no es lo mismo
+            // que sin trabas: la primera línea del panel no puede callar eso.
+            : ajustes.length > 0 ? "Sin trabas, con ajustes de este plan" : "Sin trabas ni avisos")
         : [
             bloqueantes.length > 0 && `${bloqueantes.length} ${bloqueantes.length === 1 ? "traba detectada" : "trabas detectadas"}`,
             avisos.length > 0 && `${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"}`,
@@ -640,6 +868,29 @@ export function DiagnosticosPlan({
 
     const visibles = verTodas ? ordenados : ordenados.slice(0, VISIBLES);
     const ocultas = ordenados.length - visibles.length;
+
+    /**
+     * Cuántos datos de este plan NO están cargados en Recursos.
+     *
+     * Lo mismo, plegado y desplegado: la tira índigo vive adentro del panel y el panel
+     * se pliega —es sticky y tapa la tabla, así que plegarlo es lo normal—, con lo cual
+     * en el estado más común no quedaba NADA en pantalla diciendo que el plan de abajo
+     * se calculó con rangos que nadie cargó. El encabezado los nombraba sólo cuando ya
+     * no quedaban trabas ("Sin trabas, con ajustes de este plan"), que es justo el caso
+     * en que menos se mira.
+     *
+     * De alto no cuesta un píxel: h-7 contra los ~36px que ya mide la fila plegada,
+     * igual que "+N más" y "Marcar todo listo".
+     */
+    const chipAjustes = (
+        <>
+            <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+            {ajustes.length} {ajustes.length === 1 ? "ajuste" : "ajustes"}
+            {/* Abajo de lg el encabezado ya pelea por el ancho con los otros botones:
+                el número y el ícono son lo que no se puede perder. */}
+            <span className="hidden lg:inline">de este plan</span>
+        </>
+    );
 
     return (
         <div className="mx-4 mt-4 mb-2 rounded-xl border border-gray-200 overflow-hidden bg-white">
@@ -680,9 +931,12 @@ export function DiagnosticosPlan({
                                     ? (aMano.length > 0
                                         ? "Los diste por resueltos. Al recalcular, los que sigan trabando vuelven a la lista."
                                         : "Quedó todo resuelto.")
+                                    // "Resolvelas para optimizar tu planificación" no concordaba
+                                    // ("lo rojo… resolvelas") y encima era una frase de folleto:
+                                    // no decía qué pasa si lo arreglás ni qué pasa si no.
                                     : hayBloqueantes
-                                        ? "Lo rojo quedó sin resolver en el plan. Resolvelas para optimizar tu planificación."
-                                        : "El plan sale igual. Resolvelos para optimizar tu planificación."}
+                                        ? "Lo rojo salió mal en el plan. Arreglalo y el plan mejora."
+                                        : "El plan sale igual: esto es para afinarlo."}
                             </span>
                         )}
                     </span>
@@ -697,15 +951,43 @@ export function DiagnosticosPlan({
                     />
                 </button>
 
+                {/* Plegado es un botón y abre el panel, porque ahí abajo está el
+                    "Deshacer" de cada ajuste: sin esto, para sacar uno había que
+                    acordarse de que existían. Desplegado deja de ser botón —la tira con
+                    el detalle y los "Deshacer" está dos renglones más abajo, y un botón
+                    que no lleva a ningún lado es el cartelito muerto de siempre. */}
+                {ajustes.length > 0 && (colapsado ? (
+                    <button
+                        type="button"
+                        onClick={alternarColapso}
+                        className="shrink-0 h-7 inline-flex items-center gap-1 rounded-md border border-dashed border-indigo-300 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 whitespace-nowrap transition-colors"
+                        title="Este plan se calculó con datos que NO están cargados en Recursos. Tocá para verlos y deshacerlos."
+                    >
+                        {chipAjustes}
+                    </button>
+                ) : (
+                    <span
+                        className="shrink-0 h-7 inline-flex items-center gap-1 rounded-md border border-dashed border-indigo-300 bg-indigo-50 px-2 text-[12px] font-semibold text-indigo-700 whitespace-nowrap"
+                        title="Este plan se calculó con datos que NO están cargados en Recursos. Abajo está cada uno, con su Deshacer."
+                    >
+                        {chipAjustes}
+                    </span>
+                ))}
+
                 {/* Con borde, como en el mockup: es la salida a "las veo todas" y tiene
-                    que verse como acción, no como texto suelto. */}
+                    que verse como acción, no como texto suelto.
+
+                    Dice las que FALTAN y no el total: este botón y el de abajo de la
+                    lista hacen exactamente lo mismo, y decían dos números distintos
+                    ("Ver las 9" arriba, "Ver las 3 restantes" abajo). Se leía como dos
+                    acciones distintas y obligaba a pararse a pensar cuál era cuál. */}
                 {ocultas > 0 && !colapsado && (
                     <button
                         type="button"
                         onClick={() => setVerTodas(true)}
                         className="shrink-0 h-7 inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white/70 px-2.5 text-[12px] font-medium text-gray-700 hover:bg-white hover:text-gray-900 whitespace-nowrap transition-colors"
                     >
-                        Ver las {ordenados.length} <span aria-hidden="true">→</span>
+                        +{ocultas} más <span aria-hidden="true">→</span>
                     </button>
                 )}
 
@@ -721,7 +1003,7 @@ export function DiagnosticosPlan({
                             ordenados.forEach((d) => siguiente.add(d.id));
                             cambiarMarcados(siguiente);
                             toast.success(
-                                `${ordenados.length} ${ordenados.length === 1 ? "aviso marcado" : "avisos marcados"} como resueltos`,
+                                `Listo: ${ordenados.length} ${ordenados.length === 1 ? "aviso" : "avisos"} fuera de la lista`,
                                 { description: "Siguen en el plan: al recalcular vuelven los que no se hayan arreglado." },
                             );
                         }}
@@ -760,28 +1042,120 @@ export function DiagnosticosPlan({
                    un "tocá Volver a revisar" que aparecía recién a la hora; ahora la
                    revisión corre sola al volver a la pantalla y lo único que falta
                    decir es eso, para que nadie quede esperando un botón. */
-                <div className="border-t bg-slate-50 px-3 py-1.5 text-[11.5px] leading-snug text-slate-600 flex items-center gap-2">
-                    {revisionAuto === "mirando" && <Loader2 className="w-3 h-3 animate-spin text-slate-400 shrink-0" />}
-                    {revisionAuto === "recalculando" && <RefreshCw className="w-3 h-3 animate-spin text-blue-500 shrink-0" />}
-                    {revisionAuto === "con-retoques" && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
-                    <span>
-                        {revisionAuto === "mirando"
-                            ? "Fijándose si cambió algo en Recursos…"
-                            : revisionAuto === "recalculando"
-                                ? <>Cambió algo en Recursos: <strong>recalculando el plan</strong> para ver qué quedó resuelto.</>
-                                : revisionAuto === "con-retoques"
-                                    ? <>
-                                        Cambió algo en Recursos, pero <strong>no recalculo solo</strong> porque tenés
-                                        cambios hechos a mano en este plan y el recálculo los rehace.
-                                        {" "}Tocá <strong>Volver a revisar</strong> cuando quieras.
-                                    </>
-                                    : revisionAuto === "no-disponible"
-                                        ? <>No se pudo consultar Recursos{calculadoEn ? <> (esta revisión es {antiguedadTexto(calculadoEn)})</> : null}. Si arreglaste algo, tocá <strong>Volver a revisar</strong>.</>
-                                        : <>
-                                            Revisión del plan {calculadoEn ? antiguedadTexto(calculadoEn) : "recién"}.
-                                            {" "}Si vas a Recursos y arreglás algo, al volver acá se revisa y se recalcula solo.
-                                        </>}
-                    </span>
+                <div className="border-t bg-slate-50 px-3 py-1.5 text-[11.5px] leading-snug text-slate-600">
+                    <div className="flex items-center gap-2">
+                      {revisionAuto === "mirando" && <Loader2 className="w-3 h-3 animate-spin text-slate-400 shrink-0" />}
+                      {revisionAuto === "recalculando" && <RefreshCw className="w-3 h-3 animate-spin text-blue-500 shrink-0" />}
+                      {revisionAuto === "con-retoques" && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
+                      <span>
+                          {revisionAuto === "mirando"
+                              ? "Fijándose si cambió algo en Recursos…"
+                              : revisionAuto === "recalculando"
+                                  ? <>Cambió algo en Recursos: <strong>recalculando el plan</strong> para ver qué quedó resuelto.</>
+                                  : revisionAuto === "con-retoques"
+                                      ? <>
+                                          Cambió algo en Recursos, pero <strong>no recalculo solo</strong> porque tenés
+                                          cambios hechos a mano en este plan y el recálculo los rehace.
+                                          {" "}Tocá <strong>Volver a revisar</strong> cuando quieras.
+                                      </>
+                                      : revisionAuto === "no-disponible"
+                                          ? <>No se pudo consultar Recursos{calculadoEn ? <> (esta revisión es {antiguedadTexto(calculadoEn)})</> : null}. Si arreglaste algo, tocá <strong>Volver a revisar</strong>.</>
+                                          : <>
+                                              Revisión del plan {calculadoEn ? antiguedadTexto(calculadoEn) : "recién"}.
+                                              {" "}Si vas a Recursos y arreglás algo, al volver acá se revisa y se recalcula solo.
+                                          </>}
+                      </span>
+                      {/* Se cuelga de esta fila, que ya existe y tiene lugar libre a la
+                          derecha: cerrada no cuesta un solo píxel de alto. */}
+                      <button
+                          type="button"
+                          aria-expanded={leyenda}
+                          onClick={alternarLeyenda}
+                          className="ml-auto shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-800 transition-colors"
+                      >
+                          <HelpCircle className="w-3 h-3 shrink-0" />
+                          ¿Cómo se lee esto?
+                      </button>
+                    </div>
+
+                    {/* Tres renglones y se acabó: las tres cosas que hay que saber para
+                        usar el panel y que hasta hoy vivían adentro de un `title=`, o
+                        sea invisibles para el que no sabe que tiene que dejar el mouse
+                        quieto encima. Nada de esto es nuevo: es lo mismo que ya estaba,
+                        puesto donde se puede leer. */}
+                    {leyenda && (
+                      <ul className="mt-1.5 space-y-0.5 border-t border-slate-200 pt-1.5 text-[11px] text-slate-600">
+                          <li>
+                              <strong className="text-rose-700">Alta</strong> = algo del plan salió mal.
+                              {" "}<strong className="text-amber-700">Media</strong> = sugerencia, el plan sale igual.
+                          </li>
+                          {/* Descrito, no citado: el texto exacto del chip lo arma el
+                              backend y se despliega a mano, a destiempo de esta pantalla.
+                              Una leyenda que cita palabra por palabra algo que todavía
+                              no salió es peor que no tener leyenda. */}
+                          <li>
+                              Los cuadraditos grises de la derecha dicen cuánto trabajo toca ese aviso:
+                              {" "}cuántos procesos, cuántas OT y cuánto tiempo.
+                          </li>
+                          {/* La última línea solo si el botón existe: el panel se puede usar
+                              sin las props nuevas, y explicar un botón que no está es marear. */}
+                          {onAplicarSoloEstePlan ? (
+                              <li>
+                                  <strong className="text-emerald-700">Guardar en Recursos</strong> cambia el dato para
+                                  {" "}siempre, para todos los planes. <strong className="text-indigo-700">Solo en este plan</strong>
+                                  {" "}no guarda nada: es para ver cómo saldría, y se deshace.
+                              </li>
+                          ) : (
+                              <li>
+                                  <strong className="text-emerald-700">Guardar en Recursos</strong> cambia el dato para
+                                  {" "}siempre, para todos los planes.
+                              </li>
+                          )}
+                      </ul>
+                    )}
+                </div>
+            )}
+
+            {/* ── Lo que se está probando sin guardar ──
+                Tiene que estar arriba de todo y ser imposible de no ver: mientras esta
+                tira exista, el plan de abajo NO es el plan que sale de los datos
+                cargados. Índigo y punteado, el mismo par que el botón que los crea:
+                sin leer una palabra se ata un ajuste de la tira con el botón del aviso. */}
+            {!colapsado && ajustes.length > 0 && (
+                <div className="border-t border-indigo-200 bg-indigo-50/60 px-3 py-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-900">
+                        Ajustes solo para este plan ({ajustes.length})
+                    </p>
+                    <ul className="mt-1 space-y-1">
+                        {ajustes.map((a) => (
+                            <li key={a.clave} className="flex items-start gap-2">
+                                <SlidersHorizontal className="mt-[3px] w-3 h-3 shrink-0 text-indigo-500" />
+                                <span className="min-w-0 flex-1 text-[11.5px] leading-snug text-indigo-950">
+                                    {a.descripcion}
+                                    <span className="block text-[10.5px] text-indigo-800/70">{a.titulo}</span>
+                                </span>
+                                {onQuitarAjuste && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onQuitarAjuste(a.clave)}
+                                        className="shrink-0 inline-flex items-center gap-1 rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
+                                        title="Sacar este ajuste y volver a calcular el plan con los datos como están"
+                                    >
+                                        <RotateCcw className="w-3 h-3" />
+                                        Deshacer
+                                    </button>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                    {/* La frase más importante del panel entero: alguien puede mirar este
+                        plan mañana, ver que entra todo y salir a prometer fechas que se
+                        apoyan en un rango que nadie cargó nunca. */}
+                    <p className="mt-1.5 text-[10.5px] leading-snug text-indigo-900/80">
+                        Esto <strong>no quedó guardado en Recursos</strong>: el plan se calculó como si el
+                        dato estuviera, pero en el sistema sigue como antes. Se pierde si descartás el
+                        borrador. Para dejarlo cargado de verdad, usá <strong>Guardar en Recursos</strong>.
+                    </p>
                 </div>
             )}
 
@@ -817,8 +1191,13 @@ export function DiagnosticosPlan({
                                     className="flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-emerald-50/60 transition-colors"
                                 >
                                     <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                                    {/* "Se arregló" y no "Resuelto": abajo, en la misma tira,
+                                        están los que alguien dio por resueltos a mano, y con
+                                        los dos diciendo lo mismo no había forma de saber cuál
+                                        de las dos filas era un problema que ya no existe y
+                                        cuál un problema que sigue ahí. */}
                                     <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
-                                        Resuelto
+                                        Se arregló
                                     </span>
                                     <span className={cn(
                                         "flex-1 min-w-0 text-[13px] leading-tight text-gray-500 decoration-emerald-600/40",
@@ -876,7 +1255,11 @@ export function DiagnosticosPlan({
                         >
                             <Check className="w-4 h-4 shrink-0 text-emerald-600" />
                             <span className="shrink-0 min-w-[96px] inline-flex items-center justify-center gap-1 rounded border border-emerald-200 bg-emerald-50/70 px-1.5 text-[10px] font-semibold leading-[15px] text-emerald-700 whitespace-nowrap">
-                                Lo diste listo
+                                {/* Dice QUIÉN lo cerró, que es la única diferencia con la fila
+                                    de arriba: el problema sigue en el plan, lo único que pasó es
+                                    que alguien lo dio por visto. Y usa la misma palabra que el
+                                    botón ("Listo") para que se lea como la misma acción. */}
+                                Lo diste por listo
                             </span>
                             <span className="flex-1 min-w-0 truncate text-[13px] leading-tight text-gray-500 line-through decoration-emerald-600/30" title={d.titulo}>
                                 {d.titulo}
@@ -929,13 +1312,27 @@ export function DiagnosticosPlan({
                         // Plegada se muestra UNA solución: la primera que se puede aplicar
                         // de un botón y, si ninguna se puede, la primera a secas. Las demás
                         // se cuentan al lado del texto y salen enteras al desplegar.
+                        // Manda la que se puede guardar en Recursos; si ninguna se puede,
+                        // la que al menos se puede probar en este plan; si tampoco, la
+                        // primera a secas. El orden importa: mostrar plegada una solución
+                        // que solo se puede probar, teniendo otra que se puede dejar
+                        // cargada, escondería el arreglo de verdad detrás de un click.
                         const conBoton = d.soluciones.findIndex((s) => s.accion);
-                        const iSol = conBoton >= 0 ? conBoton : (d.soluciones.length > 0 ? 0 : -1);
+                        const conAjuste = conBoton >= 0 ? conBoton : d.soluciones.findIndex((s) => accionAjustable(s));
+                        const iSol = conAjuste >= 0 ? conAjuste : (d.soluciones.length > 0 ? 0 : -1);
                         const sol = iSol >= 0 ? d.soluciones[iSol] : null;
                         // Misma clave que la lista desplegada: aplicar desde cualquiera de
                         // los dos lados marca el mismo botón.
                         const claveSol = `${d.id}-${iSol}`;
                         const hecha = aplicadas.has(claveSol);
+                        // Lo que se puede probar sin guardar. Puede venir de la acción del
+                        // aviso o deducirse del objetivo (los Media con rangos propuestos).
+                        const accionSol = sol ? accionAjustable(sol) : null;
+                        // Por lo que TOCA y no por el renglón (ver `clavesAjustadas`): el
+                        // índice de la solución se corre entre recálculos y el botón
+                        // terminaba marcado arriba de la solución equivocada.
+                        const claveAjuste = accionSol ? claveDeAjuste(accionSol) : "";
+                        const ajustada = !!claveAjuste && clavesAjustadas.has(claveAjuste);
                         // La solución de ESTA tarjeta que está esperando confirmación, si
                         // hay alguna. La clave es `${d.id}-${i}` y el id del aviso trae
                         // guiones ("maquina-incompatible-101"), así que se parte por el
@@ -947,7 +1344,9 @@ export function DiagnosticosPlan({
                         const link = sol ? enlaceDe(sol.donde, sol.accion, sol.objetivo) : null;
                         const otras = d.soluciones.length - 1;
 
-                        // El backend ya manda el impacto masticado ("3 proc · 2 OT · 4 h").
+                        // El backend ya manda el impacto masticado ("3 procesos · 2 OT · 4h").
+                        // Decía «3 proc» hasta el 17/09/2026, cuando se escribió entero del
+                        // lado del backend (ver `_resumen`); el corte por «·» es el mismo.
                         // Se parte en chips en vez de reescribirlo: mismos datos, sin
                         // inventar campos y sin decir dos veces lo mismo.
                         const impacto = d.impacto.resumen.split("·").map((t) => t.trim()).filter(Boolean);
@@ -987,9 +1386,10 @@ export function DiagnosticosPlan({
                                 {/* El corte va en 2xl y no en lg: el panel NUNCA tiene el ancho
                                     del viewport. En un notebook de 1366 con la barra de navegación
                                     abierta el contenedor real ronda los 700px, así que la columna
-                                    de la solución quedaba en ~250px y partía "Aplicar y recalcular"
+                                    de la solución quedaba en ~250px y partía el botón de guardar
                                     en tres renglones. Una sola columna se lee mejor que dos
-                                    ahogadas. */}
+                                    ahogadas. Con dos botones en la fila —el que guarda y el que
+                                    prueba— el corte en 2xl pesa todavía más. */}
                                 <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 2xl:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
                                     {/* ── Qué pasa ──
                                         Es un <button> entero para que el bloque del problema
@@ -1013,13 +1413,16 @@ export function DiagnosticosPlan({
                                                     )}
                                                     /* El criterio, con las palabras de Lucas (28/08) y no
                                                        con las nuestras: "alta = sin esto no puedo
-                                                       planificar, media = recomendación". Estaba
-                                                       acordado y aplicado, pero en ningún lado escrito:
-                                                       el que abría la pantalla por primera vez tenía que
-                                                       deducirlo del color. */
+                                                       planificar, media = recomendación".
+
+                                                       Eran 250 caracteres adentro de un tooltip: el
+                                                       criterio del panel entero, escrito donde solo lo
+                                                       encuentra el que ya sabe que está ahí. Ahora la
+                                                       explicación larga vive en "¿Cómo se lee esto?",
+                                                       arriba y sin mouse, y acá queda la línea. */
                                                     title={esBloq
-                                                        ? "Alta: por esto algo del plan salió mal — trabajo sin recurso humano, recurso maquinaria sin reservar o trabajo que no entró en el período. A veces se arregla cargando un dato en Recursos y a veces es la capacidad real del taller; el aviso te dice cuál de las dos."
-                                                        : "Media: recomendación para afinar. El plan sale igual con el aviso o sin él; lo que falta lo sabe el taller."}
+                                                        ? "Alta: algo del plan salió mal, por un dato que falta o porque no da la capacidad."
+                                                        : "Media: recomendación. El plan sale igual."}
                                                 >
                                                     {esBloq ? "Alta" : "Media"}
                                                 </span>
@@ -1076,9 +1479,18 @@ export function DiagnosticosPlan({
                                                 {d.tiene && (
                                                     <span
                                                         className="mt-px hidden shrink-0 max-w-[260px] items-center gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 lg:inline-flex"
+                                                        /* "el proceso pide" era mentira en la mitad de los
+                                                           avisos: en los de rango de persona el lado
+                                                           derecho es lo que pide la MÁQUINA, no el
+                                                           proceso, y en los de cuello son jornadas de
+                                                           trabajo. Y sin el lado derecho quedaban frases
+                                                           sueltas como "Tiene no lo tiene nadie" o "Tiene
+                                                           se hace afuera". "Hoy / Hace falta" es cierto
+                                                           en los nueve casos y se entiende sin saber qué
+                                                           es un rango. */
                                                         title={d.pide
-                                                            ? `Tiene ${d.tiene} · el proceso pide ${d.pide}`
-                                                            : `Tiene ${d.tiene}`}
+                                                            ? `Hoy: ${d.tiene} · Hace falta: ${d.pide}`
+                                                            : `Hoy: ${d.tiene}`}
                                                     >
                                                         {/* Los dos lados se achican, ninguno es intocable.
                                                             Medido en el plan real: con «pide» fijo, el
@@ -1154,10 +1566,20 @@ export function DiagnosticosPlan({
                                                                 #{o.numero}
                                                             </button>
                                                         ))}
+                                                        {/* Era un <span> muerto con la lista entera escondida
+                                                            en el tooltip, pegadito a los "#1234" que sí se
+                                                            tocan: parecía un botón y no hacía nada. Ahora
+                                                            despliega la tarjeta, donde las OTs ya están
+                                                            todas y cada una se abre de un click. */}
                                                         {onVerOT && !activo && otsDelAviso.length > otsVisibles.length && (
-                                                            <span className="shrink-0 text-[10px] leading-[15px] text-gray-400" title={otsTexto}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => toggle(d.id)}
+                                                                className="shrink-0 rounded px-1 text-[10px] leading-[15px] text-gray-400 hover:bg-slate-100 hover:text-gray-700 transition-colors"
+                                                                title={otsTexto ? `${otsTexto} — tocá para verlas todas` : "Tocá para verlas todas"}
+                                                            >
                                                                 +{otsDelAviso.length - otsVisibles.length}
-                                                            </span>
+                                                            </button>
                                                         )}
                                                         {/* El "dónde" vive siempre en el mismo lugar y lleva a
                                                             la pantalla, la pestaña y la fila que hay que tocar.
@@ -1174,7 +1596,13 @@ export function DiagnosticosPlan({
                                                                 <ArrowUpRight className="w-2.5 h-2.5 shrink-0" />
                                                             </a>
                                                         ) : (
-                                                            <span className="ml-auto min-w-0 truncate rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-500" title={sol.donde}>
+                                                            /* Sin fondo ni borde cuando no lleva a ningún lado
+                                                               (el caso real es "Al elegir las OTs", que no es
+                                                               una pantalla de Recursos): con forma de cartelito
+                                                               prometía un click que no pasaba nada, que es
+                                                               exactamente el cartelito muerto que ya se había
+                                                               sacado del resto del panel. */
+                                                            <span className="ml-auto min-w-0 truncate px-1 text-[10px] leading-[15px] text-slate-400" title={sol.donde}>
                                                                 {sol.donde}
                                                             </span>
                                                         ))}
@@ -1198,15 +1626,98 @@ export function DiagnosticosPlan({
 
                                         {/* Los botones van en su propia columnita: así quedan
                                             alineados de tarjeta en tarjeta y no empujan el alto con
-                                            un renglón más. */}
+                                            un renglón más.
+
+                                            Y de 2xl para arriba las etiquetas largas se acortan. Es
+                                            el mismo criterio que "Marcar todo listo" en el
+                                            encabezado, pero al revés de lo que uno esperaría, y por
+                                            geometría: el corte en dos columnas empieza JUSTO en 2xl,
+                                            así que de ahí para arriba la columna de la derecha pasa
+                                            de tener el ancho entero del panel a 4/11 de él —unos
+                                            450-510px— y es donde los botones ahogan al texto de la
+                                            solución. Con los nombres largos, dos botones se comían
+                                            ~276px de esos 510 y la recomendación (line-clamp-2)
+                                            quedaba cortada a la mitad; acortados son ~201px, o sea
+                                            unos 14 caracteres más por renglón. Abajo de 2xl la fila
+                                            ocupa el panel entero y no hay nada que ahorrar. */}
                                         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                                            {/* Sin botón que lo aplique solo, la única salida era el
-                                                chip gris del "dónde", que no se lee como acción. Los
-                                                Media son justamente los que nunca traen botón —"los
-                                                de media van a estar siempre porque es una
-                                                recomendación", Lucas 28/08— y son los que más
-                                                necesitan una puerta: se abre en otra pestaña, así el
-                                                borrador queda donde está y al volver se revisa solo. */}
+                                            {/* ── El camino que NO toca nada ──
+                                                Va primero de la fila, y es de otro color, otro borde
+                                                y otro ícono que el que guarda: los dos hacen lo mismo
+                                                con el plan y cosas opuestas con los datos, así que la
+                                                única forma de que no se confundan es que no se
+                                                parezcan en nada. Punteado = provisorio, el mismo par
+                                                (índigo + punteado) que la tira de arriba.
+
+                                                Ya aplicado, el mismo botón lo saca: un "Deshacer"
+                                                aparte serían tres botones en la fila, y el de la
+                                                tira de arriba ya hace exactamente eso. */}
+                                            {accionSol && onAplicarSoloEstePlan && (
+                                                <button
+                                                    type="button"
+                                                    /* `revisando` también, y no sólo `aplicando`: `aplicando` es
+                                                       el estado del botón verde (el que pega en los endpoints) y
+                                                       este no pega en ninguno, así que mientras el plan se
+                                                       recalculaba quedaba vivo. El velo de recálculo es
+                                                       `pointer-events-none`, o sea que el click pasaba igual y
+                                                       salían dos POST /planificar encimados. */
+                                                    disabled={aplicando !== null || revisando}
+                                                    onClick={() => aplicarSoloEstePlan(d, claveAjuste, accionSol)}
+                                                    title={ajustada
+                                                        ? "Sacar este ajuste y volver a calcular con los datos como están"
+                                                        : `${descripcionDeAccion(accionSol, nombreDeRango)} — solo para este cálculo, en Recursos no se guarda nada.`}
+                                                    /* Lo que el botón HACE, para el lector de pantalla y para el
+                                                       que llega con el teclado: la etiqueta de la cara puesta es
+                                                       un estado ("Puesto en este plan") y sola no dice que se
+                                                       puede tocar para desarmarlo. */
+                                                    aria-label={ajustada
+                                                        ? `Sacar de este plan: ${d.titulo}`
+                                                        : `Aplicar solo en este plan: ${d.titulo}`}
+                                                    className={cn(
+                                                        "group inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border px-2 text-[10.5px] font-semibold transition-colors disabled:opacity-50",
+                                                        ajustada
+                                                            ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
+                                                            : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
+                                                    )}
+                                                >
+                                                    {ajustando === claveAjuste && revisando
+                                                        ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
+                                                        : ajustada
+                                                            ? <Check className="w-3 h-3 shrink-0" />
+                                                            : <SlidersHorizontal className="w-3 h-3 shrink-0" />}
+                                                    {ajustada ? (
+                                                        /* "Puesto en este plan" es un estado, pero el botón que lo
+                                                           dice es el que lo SACA, y eso vivía sólo en el `title=`:
+                                                           el que se arrepiente lo lee como etiqueta y no lo toca.
+                                                           Al pasar el mouse o al enfocarlo con el teclado pasa a
+                                                           decir qué hace. Las dos frases miden casi lo mismo a
+                                                           propósito (19 y 20 caracteres): así el botón no cambia
+                                                           de ancho y no empuja a los de al lado. Y no es un botón
+                                                           más en la fila, que ya tiene tres. */
+                                                        <>
+                                                            <span className="group-hover:hidden group-focus:hidden">Puesto en este plan</span>
+                                                            <span className="hidden group-hover:inline group-focus:inline">Sacarlo de este plan</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span className="2xl:hidden">Solo en este plan</span>
+                                                            <span className="hidden 2xl:inline">Solo este plan</span>
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                            {/* La puerta a Recursos para los Media, que casi nunca
+                                                traen botón —"los de media van a estar siempre porque
+                                                es una recomendación", Lucas 28/08— y cuya única salida
+                                                era el chip gris del "dónde", que no se lee como acción.
+                                                Se abre en otra pestaña: el borrador queda donde está y
+                                                al volver se revisa solo.
+
+                                                Va DESPUÉS del de "solo en este plan" a propósito: el
+                                                orden de la fila es siempre el mismo —primero lo que se
+                                                prueba y se deshace, después lo que queda cargado,
+                                                último lo que solo esconde el aviso—, así la mano
+                                                aprende la fila una vez y no una por tipo de aviso. */}
                                             {!sol?.accion && link && (
                                                 <a
                                                     href={link}
@@ -1215,10 +1726,18 @@ export function DiagnosticosPlan({
                                                     className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-[10.5px] font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
                                                     title={`Abre ${sol?.donde} en otra pestaña, ya parado en lo que hay que tocar. Al volver acá se revisa solo.`}
                                                 >
-                                                    Ir a arreglarlo
+                                                    <span className="2xl:hidden">Ir a arreglarlo</span>
+                                                    <span className="hidden 2xl:inline">Arreglarlo</span>
                                                     <ArrowUpRight className="w-3 h-3 shrink-0" />
                                                 </a>
                                             )}
+                                            {/* ── El camino que SÍ toca la base ──
+                                                Verde lleno y con ícono de guardar, que en esta
+                                                pantalla es ahora lo único que quiere decir "esto
+                                                queda cargado". El nombre dice DÓNDE queda: "Aplicar
+                                                y recalcular" no decía nada de eso, y al lado de un
+                                                botón que aplica y recalcula sin guardar era
+                                                directamente indistinguible. */}
                                             {sol?.accion && (
                                                 <Button
                                                     size="sm"
@@ -1226,9 +1745,13 @@ export function DiagnosticosPlan({
                                                     onClick={() => aplicar(claveSol, sol.accion!)}
                                                     title={confirmando === claveSol
                                                         ? "Abajo está el detalle de lo que va a cambiar"
-                                                        : "Aplica el cambio en Recursos y recalcula el plan"}
+                                                        : "Queda guardado en Recursos para siempre, para todos los planes"}
+                                                    /* Sin ancho fijo: con dos botones en la fila, dos
+                                                       anchos fijos no entran abajo de 2xl y el par se
+                                                       partía en dos renglones. La alineación de tarjeta
+                                                       en tarjeta se la queda ahora el par entero. */
                                                     className={cn(
-                                                        "h-6 w-[8.5rem] justify-center gap-1 px-1.5 text-[10.5px] font-semibold shadow-none",
+                                                        "h-6 justify-center gap-1 px-2 text-[10.5px] font-semibold shadow-none",
                                                         hecha
                                                             ? "bg-transparent text-emerald-700 hover:bg-transparent"
                                                             : confirmando === claveSol
@@ -1240,18 +1763,33 @@ export function DiagnosticosPlan({
                                                         <Loader2 className="w-3 h-3 animate-spin" />
                                                     ) : hecha ? (
                                                         <Check className="w-3 h-3" />
-                                                    ) : null}
+                                                    ) : (
+                                                        <Save className="w-3 h-3" />
+                                                    )}
                                                     {hecha
-                                                        ? "Aplicado"
+                                                        ? "Guardado"
                                                         : confirmando === claveSol
-                                                            ? "Mirá abajo qué cambia"
-                                                            : "Aplicar y recalcular"}
+                                                            ? "Mirá y confirmá"
+                                                            : (
+                                                                /* De 2xl para arriba queda "Guardar" a secas. Se
+                                                                   pierde el DÓNDE, que es justo lo que este nombre
+                                                                   vino a decir, pero no se pierde del todo: el paso
+                                                                   de confirmación —que sale sí o sí antes de tocar
+                                                                   un dato— lo dice con todas las letras, y el
+                                                                   título y la leyenda también. Lo que se gana son
+                                                                   ~60px para el texto de la solución, que ahí
+                                                                   arriba se lee cortado a la mitad. */
+                                                                <>
+                                                                    <span className="2xl:hidden">Guardar en Recursos</span>
+                                                                    <span className="hidden 2xl:inline">Guardar</span>
+                                                                </>
+                                                            )}
                                                 </Button>
                                             )}
                                             {/* Darlo por resuelto, SOLO donde no hay un botón que lo
                                                 arregle de verdad.
 
-                                                Al lado de "Aplicar y recalcular" no tiene sentido y
+                                                Al lado de "Guardar en Recursos" no tiene sentido y
                                                 confunde (Julián, 31/08): son dos botones verdes pegados
                                                 que hacen cosas opuestas —uno cambia el dato, el otro
                                                 dice "no me lo muestres más"— y el chiquito parecía el
@@ -1260,20 +1798,38 @@ export function DiagnosticosPlan({
 
                                                 Donde SÍ va es en los Media, que no traen botón porque
                                                 qué corregir lo sabe el taller: es la única acción de la
-                                                tarjeta y por eso va con nombre y en verde lleno, no un
-                                                tilde gris que nadie encuentra. Para las Alta con botón,
-                                                el "Marcar como resuelto" sigue estando adentro de la
-                                                tarjeta desplegada. */}
+                                                tarjeta y por eso va con nombre, no un tilde gris que
+                                                nadie encuentra. Para las Alta con botón, el "Listo"
+                                                sigue estando adentro de la tarjeta desplegada.
+
+                                                Dejó de ser verde lleno: el verde lleno quedó reservado
+                                                para lo único que toca la base ("Guardar en Recursos").
+                                                Este no cambia nada y competía de igual a igual con el
+                                                que sí cambia el dato — en una tarjeta Media puede
+                                                aparecer al lado de "Solo en este plan", y dos botones
+                                                pintados igual que hacen cosas tan distintas es
+                                                exactamente lo que había que sacar.
+
+                                                Sin borde tampoco: al lado de "Ir a arreglarlo", que es
+                                                blanco con borde, dos botones iguales que hacen cosas
+                                                opuestas serían el mismo problema de nuevo, solo que en
+                                                gris. De las tres acciones de una tarjeta Media esta es
+                                                la que menos hace, y el peso visual lo dice. */}
                                             {!sol?.accion && (
                                                 <button
                                                     type="button"
                                                     onClick={() => marcar(d)}
-                                                    title="Darlo por resuelto: lo baja a la tira verde de arriba. No cambia el plan ni los datos, y se deshace."
-                                                    aria-label={`Marcar como resuelto: ${d.titulo}`}
-                                                    className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md bg-emerald-600 px-2 text-[10.5px] font-semibold text-white hover:bg-emerald-700 transition-colors"
+                                                    title="No lo muestres más. No cambia el plan ni los datos: lo baja a la tira verde de arriba, y se deshace."
+                                                    aria-label={`Listo, no mostrar más: ${d.titulo}`}
+                                                    className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
                                                 >
                                                     <Check className="w-3.5 h-3.5 shrink-0" />
-                                                    Listo
+                                                    {/* De 2xl para arriba, el tilde solo: es la tercera acción
+                                                        de una tarjeta Media y la que menos hace, así que es la
+                                                        primera que cede el ancho. El nombre entero sigue
+                                                        estando en el `aria-label`, en el `title` y en el botón
+                                                        de adentro de la tarjeta desplegada. */}
+                                                    <span className="2xl:hidden">Listo</span>
                                                 </button>
                                             )}
                                             <button
@@ -1300,6 +1856,16 @@ export function DiagnosticosPlan({
                                                     const clave = `${d.id}-${idx}`;
                                                     const hechaEsta = aplicadas.has(clave);
                                                     const linkEste = enlaceDe(s.donde, s.accion, s.objetivo);
+                                                    // Los dos caminos, también acá: desplegada la tarjeta
+                                                    // salen TODAS las soluciones, y si el botón de probar
+                                                    // solo estuviera en la plegada, las alternativas ("O
+                                                    // ponele el rango a la otra fresadora") no se podrían
+                                                    // probar sin guardarlas.
+                                                    const accionEsta = accionAjustable(s);
+                                                    // Mismo criterio que arriba: el ajuste se reconoce por lo
+                                                    // que toca, no por el número de renglón.
+                                                    const claveAjusteEsta = accionEsta ? claveDeAjuste(accionEsta) : "";
+                                                    const ajustadaEsta = !!claveAjusteEsta && clavesAjustadas.has(claveAjusteEsta);
                                                     return (
                                                         <li key={idx} className="flex items-start gap-1.5 text-[11.5px] leading-[1.4]">
                                                             <Wrench className="w-3 h-3 mt-[3px] shrink-0 text-emerald-600" />
@@ -1323,10 +1889,52 @@ export function DiagnosticosPlan({
                                                                                 <ArrowUpRight className="w-2.5 h-2.5" />
                                                                             </a>
                                                                         ) : (
-                                                                            <span className="inline-block rounded bg-slate-100 text-slate-600 text-[10px] px-1.5 py-px whitespace-nowrap align-baseline">
+                                                                            /* Mismo criterio que arriba: sin forma de
+                                                                               cartelito, porque no lleva a ningún lado. */
+                                                                            <span className="inline-block text-slate-400 text-[10px] px-1 py-px whitespace-nowrap align-baseline">
                                                                                 {s.donde}
                                                                             </span>
                                                                         )}
+                                                                    </>
+                                                                )}
+                                                                {accionEsta && onAplicarSoloEstePlan && (
+                                                                    <>
+                                                                        {" "}
+                                                                        <button
+                                                                            type="button"
+                                                                            /* Igual que el de la tarjeta plegada: mientras el plan
+                                                                               se recalcula este botón no se puede tocar, o salen
+                                                                               dos POST /planificar encimados. */
+                                                                            disabled={aplicando !== null || revisando}
+                                                                            onClick={() => aplicarSoloEstePlan(d, claveAjusteEsta, accionEsta)}
+                                                                            title={ajustadaEsta
+                                                                                ? "Sacar este ajuste y volver a calcular con los datos como están"
+                                                                                : `${descripcionDeAccion(accionEsta, nombreDeRango)} — solo para este cálculo, en Recursos no se guarda nada.`}
+                                                                            aria-label={ajustadaEsta
+                                                                                ? `Sacar de este plan: ${d.titulo}`
+                                                                                : `Aplicar solo en este plan: ${d.titulo}`}
+                                                                            className={cn(
+                                                                                "group inline-flex h-5 items-center gap-1 whitespace-nowrap rounded border px-1.5 align-baseline text-[10px] font-medium transition-colors disabled:opacity-50",
+                                                                                ajustadaEsta
+                                                                                    ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
+                                                                                    : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:bg-indigo-100"
+                                                                            )}
+                                                                        >
+                                                                            {ajustando === claveAjusteEsta && revisando
+                                                                                ? <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                                                                : ajustadaEsta
+                                                                                    ? <Check className="w-2.5 h-2.5" />
+                                                                                    : <SlidersHorizontal className="w-2.5 h-2.5" />}
+                                                                            {ajustadaEsta ? (
+                                                                                /* Mismo cambio de cara que arriba: puesto dice el
+                                                                                   estado, y con el mouse encima o con el foco del
+                                                                                   teclado dice que ése es el botón que lo saca. */
+                                                                                <>
+                                                                                    <span className="group-hover:hidden group-focus:hidden">Puesto en este plan</span>
+                                                                                    <span className="hidden group-hover:inline group-focus:inline">Sacarlo de este plan</span>
+                                                                                </>
+                                                                            ) : "Solo en este plan"}
+                                                                        </button>
                                                                     </>
                                                                 )}
                                                                 {s.accion && (
@@ -1337,6 +1945,9 @@ export function DiagnosticosPlan({
                                                                             variant={hechaEsta ? "ghost" : "outline"}
                                                                             disabled={hechaEsta || aplicando !== null}
                                                                             onClick={() => aplicar(clave, s.accion!)}
+                                                                            title={confirmando === clave
+                                                                                ? "Abajo está el detalle de lo que va a cambiar"
+                                                                                : "Queda guardado en Recursos para siempre, para todos los planes"}
                                                                             className={cn(
                                                                                 "h-5 px-1.5 text-[10px] gap-1 align-baseline",
                                                                                 hechaEsta
@@ -1350,20 +1961,65 @@ export function DiagnosticosPlan({
                                                                                 <Loader2 className="w-2.5 h-2.5 animate-spin" />
                                                                             ) : hechaEsta ? (
                                                                                 <Check className="w-2.5 h-2.5" />
-                                                                            ) : null}
+                                                                            ) : (
+                                                                                <Save className="w-2.5 h-2.5" />
+                                                                            )}
+                                                                            {/* Mismo texto que el botón de la tarjeta plegada:
+                                                                                es el mismo cambio y la misma clave, y con dos
+                                                                                nombres distintos para el mismo botón —"Tocá de
+                                                                                nuevo para confirmar" acá, "Mirá abajo qué
+                                                                                cambia" arriba— el paso del medio parecía otra
+                                                                                cosa según de dónde lo hubieras tocado. */}
                                                                             {hechaEsta
-                                                                                ? "Aplicado"
+                                                                                ? "Guardado"
                                                                                 : confirmando === clave
-                                                                                    ? "Tocá de nuevo para confirmar"
-                                                                                    : "Aplicar y recalcular"}
+                                                                                    ? "Mirá y confirmá"
+                                                                                    : "Guardar en Recursos"}
                                                                         </Button>
                                                                     </>
+                                                                )}
+                                                                {/* Qué hace exactamente el botón índigo, escrito.
+                                                                    Hasta acá eso vivía sólo en un `title=`: en una
+                                                                    tablet no hay hover, y es el mismo argumento con
+                                                                    el que este cambio sacó el criterio Alta/Media de
+                                                                    un tooltip. Va en la tarjeta DESPLEGADA, que es
+                                                                    donde hay alto para gastar; plegada sigue
+                                                                    alcanzando el nombre del botón, porque la
+                                                                    tarjeta plegada es para barrer la lista. */}
+                                                                {accionEsta && onAplicarSoloEstePlan && (
+                                                                    <span className="mt-0.5 flex items-start gap-1 text-[10.5px] leading-snug text-indigo-800/90">
+                                                                        <SlidersHorizontal className="mt-[2px] w-2.5 h-2.5 shrink-0" />
+                                                                        <span className="min-w-0">
+                                                                            <strong className="font-semibold">
+                                                                                {ajustadaEsta ? "Puesto solo en este plan: " : "Solo en este plan: "}
+                                                                            </strong>
+                                                                            {descripcionDeAccion(accionEsta, nombreDeRango)}. En Recursos no se guarda nada.
+                                                                        </span>
+                                                                    </span>
                                                                 )}
                                                             </span>
                                                         </li>
                                                     );
                                                 })}
                                             </ul>
+                                        )}
+                                        {/* El chip «hoy → hace falta» de la tarjeta vive en un
+                                            `lg:inline-flex`, o sea que abajo de 1024px NO EXISTE — y en
+                                            un notebook de 1366 con la barra de navegación abierta el
+                                            panel ronda los 700px. Justo ahí desaparecía la respuesta a
+                                            la pregunta que hizo Lucas mirando la soldadora ("¿cuál es el
+                                            rango que tiene?"). Acá se escribe con los dos lados
+                                            rotulados, y solo en los anchos donde el chip no está. */}
+                                        {d.tiene && (
+                                            <p className="text-[10.5px] leading-snug text-gray-500 lg:hidden">
+                                                <span className="font-semibold text-gray-600">Hoy: </span>{d.tiene}
+                                                {d.pide && (
+                                                    <>
+                                                        {" · "}
+                                                        <span className="font-semibold text-gray-600">Hace falta: </span>{d.pide}
+                                                    </>
+                                                )}
+                                            </p>
                                         )}
                                         <div className="flex items-end justify-between gap-3">
                                             <p className="text-[10.5px] text-gray-500">
@@ -1396,17 +2052,23 @@ export function DiagnosticosPlan({
                                                     </>
                                                 )}
                                             </p>
-                                            {/* El mismo "dar por resuelto" del tilde de arriba, pero
-                                                con el nombre puesto: el ícono solo no se descubre, y
-                                                acá adentro hay lugar para decir qué hace. */}
+                                            {/* El mismo "Listo" del botón de arriba, pero acá adentro
+                                                hay lugar para decir qué hace de verdad: no arregla
+                                                nada, deja de mostrarlo. Se llamaba "Marcar como
+                                                resuelto", que era el quinto nombre distinto para la
+                                                misma acción en la misma pantalla —"Marcar todo listo",
+                                                "Listo", "Marcar como resuelto", "Lo diste listo",
+                                                "Marcado como resuelto"—: ahora todos empiezan igual.
+                                                En gris y no en verde por lo mismo que el de arriba: el
+                                                verde quedó para lo que toca la base. */}
                                             <button
                                                 type="button"
                                                 onClick={() => marcar(d)}
-                                                className="shrink-0 inline-flex items-center gap-1 rounded border border-emerald-200 bg-white px-1.5 py-0.5 text-[10.5px] font-semibold text-emerald-800 hover:bg-emerald-50 transition-colors"
+                                                className="shrink-0 inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10.5px] font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors"
                                                 title="No cambia el plan ni los datos: lo baja a la tira verde de arriba. Se deshace."
                                             >
                                                 <Check className="w-3 h-3" />
-                                                Marcar como resuelto
+                                                Listo, no lo muestres más
                                             </button>
                                         </div>
                                     </div>
@@ -1458,7 +2120,7 @@ export function DiagnosticosPlan({
                     onClick={() => setVerTodas(true)}
                     className="w-full border-t px-3 py-1.5 text-[12px] font-medium text-gray-600 hover:bg-slate-50 transition-colors"
                 >
-                    Ver las {ocultas} restantes
+                    Ver los {ocultas} que faltan
                 </button>
             )}
             {!colapsado && verTodas && ordenados.length > VISIBLES && (

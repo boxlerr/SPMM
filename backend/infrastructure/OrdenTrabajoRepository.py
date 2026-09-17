@@ -13,6 +13,7 @@ from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.Proceso import Proceso
 from backend.domain.Cliente import Cliente
 from backend.infrastructure.AuditoriaRepository import nombre_de
+from backend.infrastructure import auditoria_procesos as auditoria_proc
 from zoneinfo import ZoneInfo
 
 # El contenedor de Cloud Run no fija TZ, así que datetime.now() da UTC y todo lo que
@@ -223,7 +224,17 @@ class OrdenTrabajoRepository:
             await self.db.execute(text("DELETE FROM planificacion WHERE orden_id = :id"), {"id": id})
             
             # 2. Delete from OrdenTrabajoProceso
-            await self.db.execute(text("DELETE FROM orden_trabajo_proceso WHERE id_orden_trabajo = :id"), {"id": id})
+            #
+            # Por ORM y no con un DELETE suelto: así queda registrado qué pasos se
+            # llevó puestos el borrado de la OT, que es la pregunta del día después
+            # ("¿y los procesos que había cargado?"). Son los de UNA orden, así que
+            # cargarlos no cambia el costo de nada.
+            # Ver infrastructure/auditoria_procesos.py.
+            pasadas = (await self.db.execute(
+                select(OrdenTrabajoProceso).where(OrdenTrabajoProceso.id_orden_trabajo == id)
+            )).scalars().all()
+            for pasada in pasadas:
+                await self.db.delete(pasada)
             
             # 3. Delete from Plano
             await self.db.execute(text("DELETE FROM plano WHERE id_orden_trabajo = :id"), {"id": id})
@@ -827,6 +838,16 @@ class OrdenTrabajoRepository:
                 return {"ordenes": 0, "procesos": 0}
 
             ahora = _ahora_ar()
+
+            # Lo que se está por pisar, leído ANTES: este UPDATE va en SQL crudo —son
+            # todos los pasos de varias OT y cargarlos por ORM para tocarles un campo
+            # cambiaría el costo de la acción— así que la auditoría de procesos no lo
+            # ve sola y hay que anotarlo a mano. Las pasadas que ya estaban en ese
+            # estado no dejan renglón: `anotar` descarta lo que no cambió.
+            previas = await auditoria_proc.leer_pasadas(
+                self.db, "id_orden_trabajo = ANY(:ordenes)", {"ordenes": ids}
+            )
+
             resultado = await self.db.execute(text("""
                 UPDATE orden_trabajo_proceso
                    SET id_estado   = :estado,
@@ -837,6 +858,22 @@ class OrdenTrabajoRepository:
                  WHERE id_orden_trabajo = ANY(:ordenes)
             """), {"estado": id_estado, "ahora": ahora, "ordenes": ids})
             procesos = resultado.rowcount or 0
+
+            # El estado NO es lo único que pisa este UPDATE: también blanquea las marcas
+            # de trabajo real (inicio_real/fin_real), que no se pueden reconstruir. Se
+            # registran las tres cosas, con la misma cuenta que hace el SQL de arriba —
+            # si sólo se anotara el estado, la única acción irreversible del sistema
+            # sería la menos auditada.
+            def _como_queda(fila):
+                if id_estado == 1:
+                    return {"id_estado": id_estado, "inicio_real": None, "fin_real": None}
+                if id_estado == 2:
+                    return {"id_estado": id_estado,
+                            "inicio_real": fila.get("inicio_real") or ahora,
+                            "fin_real": None}
+                return {"id_estado": id_estado, "fin_real": ahora}
+
+            await auditoria_proc.anotar(self.db, previas, "edicion", nuevos=_como_queda)
 
             # La OT queda entregada sólo si TODOS sus pasos quedaron terminados, que es
             # exactamente lo que acaba de pasar cuando el estado pedido es "finalizado".
@@ -1224,11 +1261,11 @@ class OrdenTrabajoRepository:
                 {"otp": linea.id, "oid": id_orden, "pid": id_proceso}
             )
 
-            # Después el registro de orden_trabajo_proceso.
-            await self.db.execute(
-                text("DELETE FROM orden_trabajo_proceso WHERE id = :otp"),
-                {"otp": linea.id}
-            )
+            # Después la pasada. Se borra por ORM y no con un DELETE suelto para que
+            # quede registrado quién la sacó: la auditoría de procesos se engancha al
+            # ciclo del ORM, y lo que se escribe en SQL crudo no lo ve nadie.
+            # Ver infrastructure/auditoria_procesos.py.
+            await self.db.delete(linea)
 
             await self._sellar_modificacion(id_orden, usuario)
 

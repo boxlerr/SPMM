@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
+from backend.infrastructure import auditoria_procesos as auditoria_proc
 
 
 class MaquinariaService:
@@ -95,6 +96,18 @@ class MaquinariaService:
             )
 
         try:
+            # Qué pasos quedan sin su máquina elegida, anotado ANTES de blanquearlos:
+            # después ya no hay a quién preguntarle cuál tenían. Va a mano porque esto
+            # es un UPDATE masivo en SQL crudo y la auditoría de procesos se engancha
+            # al ORM. Ver infrastructure/auditoria_procesos.py.
+            con_esta_maquina = await auditoria_proc.leer_pasadas(
+                db, "id_maquinaria = :m", {"m": id}
+            )
+            await auditoria_proc.anotar(
+                db, con_esta_maquina, "edicion", nuevos={"id_maquinaria": None},
+                origen="Al borrar una máquina",
+            )
+
             # A mano y en la misma transacción: `orden_trabajo_proceso.id_maquinaria`
             # es NO ACTION, así que sin esto el borrado revienta con un error de
             # constraint. Las otras dos son CASCADE y se van solas.
