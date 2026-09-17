@@ -118,7 +118,9 @@ async def main():
         print(__doc__)
         return
 
-    c = await asyncpg.connect(_url())
+    # Igual que los demás scripts: sin esto sólo anda por el 5432, que tiene 15 clientes
+    # para todo el proyecto y le saca el lugar a la app. Ver migrar_procesos_faltantes.
+    c = await asyncpg.connect(_url(), statement_cache_size=0)
     try:
         por_vieja = await _objetivo(c)
         if not por_vieja:

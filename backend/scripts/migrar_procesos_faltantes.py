@@ -62,7 +62,15 @@ def _minutos(total: str) -> int:
 
 
 async def main():
-    c = await asyncpg.connect(_url())
+    # `statement_cache_size=0`, como el resto de los scripts que hablan con Supabase.
+    #
+    # Sin esto el script sólo anda por el puerto 5432 (session pooler), que admite 15
+    # clientes para TODO el proyecto: un script corriendo ahí le come el lugar a la app
+    # y producción empieza a tirar 500. Los scripts van por el 6543 (transaction), y ahí
+    # los prepared statements con nombre no sobreviven de una transacción a la otra:
+    # «prepared statement __asyncpg_stmt_1__ already exists». La corrida en seco no se
+    # daba cuenta —lee poco y no repite— y explotaba recién al escribir, el 17/09/2026.
+    c = await asyncpg.connect(_url(), statement_cache_size=0)
     try:
         objetivo = await c.fetch("""
             select ot.id, ot.id_otvieja
