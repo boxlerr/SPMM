@@ -37,7 +37,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Cog, Info, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, Cog, Info, Layers, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,7 @@ import { claveDeAjuste, descripcionDeAccion, type AccionDeSolucion, type AjusteD
 // Con la tarjeta compacta seis avisos ocupan casi lo mismo que ocupaban cuatro filas
 // de las viejas (384px contra 356px, medido en Chrome): mostrar cuatro sería dejar
 // pantalla sin usar y hacer tocar "Ver todas" de gusto.
-const VISIBLES = 6;
+const VISIBLES = 4;
 
 /**
  * Resalta lo que viene entre **dobles asteriscos** desde el backend.
@@ -1273,169 +1273,154 @@ export function DiagnosticosPlan({
                         // Plegada entran dos sin empujar el "dónde"; abierta van todas.
                         const otsVisibles = activo ? otsDelAviso : otsDelAviso.slice(0, 2);
 
+                        /* Los datos del aviso, cada uno con su etiqueta, como en el mockup.
+                           El impacto viene del backend masticado y en orden («2 procesos · 3 OT
+                           · 4 jornadas»): procesos y OT se juntan en una caja —son la misma
+                           pregunta, cuánto trabajo toca— y el tiempo va en la suya. */
+                        const [impProcesos, impOts, impTiempo] = impacto;
+                        const trabajo = [impProcesos, impOts].filter(Boolean).join(" · ");
+                        const datos = [
+                            d.tiene && { etiqueta: "Hoy", valor: d.tiene, icono: Icono },
+                            d.pide && { etiqueta: "Necesita", valor: d.pide, icono: Wrench },
+                            trabajo && { etiqueta: "Trabajo", valor: trabajo, icono: Layers },
+                            impTiempo && { etiqueta: "Tiempo", valor: impTiempo, icono: Clock },
+                        ].filter(Boolean) as { etiqueta: string; valor: string; icono: LucideIcon }[];
+
                         return (
                             <li
                                 key={d.id}
-                                /* Sin riel de color ni numerito a la izquierda: eran dos
-                                   adornos por tarjeta que no agregaban nada —"ese detalle que
-                                   tienen a la izquierda son muy molestas", Julián 31/08— y
-                                   empujaban el título, que es lo único que hay que poder leer
-                                   de un vistazo. La severidad no se pierde: ya está dicha con
-                                   todas las letras en el chip Alta/Media, que además es rojo o
-                                   ámbar, así que la lista se sigue barriendo por color. */
+                                /* La barra de color vuelve, pero fina y sin numerito.
+                                   Julián devolvió el 31/08 «ese detalle que tienen a la
+                                   izquierda son muy molestas» —era un riel grueso MÁS un
+                                   número de orden que empujaban el título—; el mockup que
+                                   pasó el 17/09 tiene una barra de 3px y nada más, que es
+                                   lo que deja barrer la lista por color sin robarle ancho
+                                   a lo único que hay que leer. */
                                 className={cn(
-                                    "rounded-lg border border-gray-200 bg-white overflow-hidden",
-                                    activo && "shadow-sm"
+                                    "overflow-hidden rounded-xl border border-gray-200 border-l-[3px] bg-white transition-shadow",
+                                    esBloq ? "border-l-rose-500" : "border-l-amber-400",
+                                    activo ? "shadow-sm" : "hover:shadow-sm",
                                 )}
                             >
-                                {/* La tarjeta en dos franjas: arriba QUÉ PASA, abajo QUÉ HACER.
+                                {/* La tarjeta, con la anatomía del mockup que pasó Julián el
+                                    17/09/2026: círculo de color, severidad, título grande, una
+                                    frase en criollo, los datos en cajas con etiqueta y la acción
+                                    en una franja propia abajo.
 
-                                    Antes eran dos COLUMNAS, problema a la izquierda y
-                                    solución a la derecha. Entraban justo en una pantalla
-                                    ancha y se ahogaban en cualquier otra —con el sidebar
-                                    abierto en un notebook de 1366 la columna de la derecha
-                                    quedaba en ~250px—, pero el problema de fondo era otro:
-                                    la acción competía de igual a igual con el título, así
-                                    que en los avisos que no traen botón verde —los Media,
-                                    que son la mayoría— no se veía que hubiera algo para
-                                    tocar. Julián, 17/09/2026, mirando un Media: «me
-                                    sacaste los botones para arreglarlo desde ahí».
-
-                                    Ahora lo que se puede hacer vive en una franja propia,
-                                    pegada abajo y pintada del color del aviso: se ve antes
-                                    de leer una palabra. Cuesta un renglón por tarjeta y lo
-                                    vale. */}
+                                    Es más alta que la anterior —unos 145px contra 76— y eso es
+                                    una decisión, no un descuido: Lucas había pedido lo contrario
+                                    el 26/08 («pueden entrar más trabas»), pero con la lista de
+                                    hoy se ven uno o dos avisos por plan, no once, y lo que
+                                    costaba caro era no entenderlos. Por eso además bajan de seis
+                                    a cuatro los que se muestran antes del «Ver todas»: la tabla
+                                    del plan tiene que seguir entrando en la pantalla. */}
                                 <button
                                     type="button"
                                     aria-expanded={activo}
                                     onClick={() => toggle(d.id)}
-                                    className="flex w-full min-w-0 items-start gap-2 px-2.5 py-1.5 text-left"
+                                    className="flex w-full min-w-0 items-start gap-3 px-3 py-2.5 text-left"
                                 >
-                                    {/* El círculo de color: lo único que hay que mirar para
-                                        barrer la lista. Hace lo que hacía el riel de la
-                                        izquierda que Julián devolvió el 31/08 («ese detalle
-                                        que tienen a la izquierda son muy molestas»), pero sin
-                                        empujar el título ni partir la tarjeta al medio. */}
                                     <span className={cn(
-                                        "mt-px grid h-5 w-5 shrink-0 place-items-center rounded-full",
+                                        "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full",
                                         esBloq ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
                                     )}>
-                                        {esBloq ? <AlertTriangle className="h-3 w-3" /> : <Info className="h-3 w-3" />}
+                                        {esBloq ? <AlertTriangle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
                                     </span>
 
                                     <span className="min-w-0 flex-1">
-                                        {/* Renglón 1: severidad, categoría, título y el tamaño
-                                            del problema. Todo en una línea: son cuatro cosas
-                                            cortas y darle un renglón a cada una era la mitad
-                                            del alto de la tarjeta. */}
-                                        <span className="flex items-center gap-1.5">
+                                        {/* Severidad y categoría arriba, chiquitas: son para
+                                            clasificar, no para leer. El título va abajo y grande. */}
+                                        <span className="flex items-center gap-2">
                                             <span
                                                 className={cn(
-                                                    "shrink-0 w-[38px] text-center rounded px-1 text-[9px] font-bold uppercase leading-[15px] tracking-wide",
+                                                    "shrink-0 rounded-full px-2 text-[10px] font-bold uppercase leading-[18px] tracking-wide",
                                                     esBloq ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"
                                                 )}
-                                                /* El criterio, con las palabras de Lucas (28/08) y no
-                                                   con las nuestras: "alta = sin esto no puedo
-                                                   planificar, media = recomendación". */
                                                 title={esBloq
                                                     ? "Alta: por esto algo del plan salió mal — trabajo sin recurso humano, recurso maquinaria sin reservar o trabajo que no entró en el período."
                                                     : "Media: recomendación para afinar. El plan sale igual con el aviso o sin él; lo que falta lo sabe el taller."}
                                             >
                                                 {esBloq ? "Alta" : "Media"}
                                             </span>
-                                            <span className={cn(
-                                                "shrink-0 min-w-[152px] inline-flex items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-semibold leading-[15px] whitespace-nowrap",
-                                                esBloq
-                                                    ? "bg-rose-50 text-rose-700 border-rose-200"
-                                                    : "bg-amber-50 text-amber-800 border-amber-200"
-                                            )}>
-                                                <Icono className="w-3 h-3 shrink-0" />
-                                                {recurso?.texto ?? "Plan"}
-                                                {subtipo && (
-                                                    <>
-                                                        <span className={esBloq ? "text-rose-300" : "text-amber-300"}>·</span>
-                                                        {subtipo}
-                                                    </>
-                                                )}
+                                            <span className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-gray-500">
+                                                <Icono className="h-3 w-3 shrink-0" />
+                                                <span className="truncate">
+                                                    {recurso?.texto ?? "Plan"}{subtipo ? ` · ${subtipo}` : ""}
+                                                </span>
                                             </span>
-                                            <span
-                                                className={cn(
-                                                    "min-w-0 flex-1 text-[13.5px] font-semibold leading-tight text-gray-900",
-                                                    !activo && "line-clamp-2"
-                                                )}
-                                                title={d.titulo}
-                                            >
-                                                {d.titulo}
-                                            </span>
-                                            <span className="mt-px hidden shrink-0 items-center gap-1 md:flex" title={otsTexto}>
-                                                {impacto.map((t) => (
-                                                    <span key={t} className="rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 tabular-nums">
-                                                        {t}
+                                            <span className="flex-1" />
+                                            <ChevronDown className={cn(
+                                                "h-4 w-4 shrink-0 text-gray-400 transition-transform",
+                                                activo && "rotate-180"
+                                            )} />
+                                        </span>
+
+                                        <span className={cn(
+                                            "mt-1 block text-[15px] font-semibold leading-snug text-gray-900",
+                                            !activo && "line-clamp-2"
+                                        )} title={d.titulo}>
+                                            {d.titulo}
+                                        </span>
+
+                                        {/* El texto de acá NO cambia al abrir la tarjeta. Antes
+                                            cerrada mostraba el `resumen` y abierta lo REEMPLAZABA
+                                            por el `detalle`: la frase que estabas leyendo se
+                                            convertía en otra (Julián, 17/09/2026). El detalle
+                                            aparece abajo al desplegar: no se reemplaza nada. */}
+                                        <span className={cn(
+                                            "mt-0.5 block text-[12px] leading-snug text-gray-600",
+                                            !activo && !d.resumen && "line-clamp-2"
+                                        )}>
+                                            {d.resumen ? d.resumen : conNegritas(d.detalle)}
+                                        </span>
+
+                                        {/* Los datos, cada uno con su etiqueta. Antes eran chips
+                                            grises sueltos —«OPERARIO CALIFIC… → AYUDANTE o
+                                            INGRESA…», «1 proc · 1 OT · 1 min»— donde había que
+                                            adivinar qué era cada número y de qué lado de la flecha
+                                            estaba cada rango. Es lo que hace el mockup y es lo que
+                                            contesta la pregunta que hizo Lucas mirando la
+                                            soldadora: «¿cuál es el rango que tiene?». */}
+                                        {datos.length > 0 && (
+                                            <span className="mt-2 flex flex-wrap gap-1.5">
+                                                {datos.map((dato) => (
+                                                    <span
+                                                        key={dato.etiqueta}
+                                                        className="inline-flex min-w-0 max-w-[15rem] items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50/70 px-2 py-1"
+                                                        title={`${dato.etiqueta}: ${dato.valor}`}
+                                                    >
+                                                        <dato.icono className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                                                        <span className="min-w-0">
+                                                            <span className="block text-[9.5px] uppercase leading-none tracking-wide text-gray-400">
+                                                                {dato.etiqueta}
+                                                            </span>
+                                                            <span className="mt-0.5 block truncate text-[11.5px] font-medium leading-none text-gray-700">
+                                                                {dato.valor}
+                                                            </span>
+                                                        </span>
                                                     </span>
                                                 ))}
                                             </span>
-                                        </span>
-
-                                        {/* Renglón 2: la frase en criollo y, si el aviso compara
-                                            dos cosas, qué hay hoy contra qué hace falta.
-
-                                            Ese par iba antes en un solo chip —«OPERARIO CALIFIC…
-                                            → AYUDANTE o INGRESA…»— sin decir cuál de los dos
-                                            lados era cuál: había que deducirlo de la flecha, y
-                                            encima los dos venían cortados. Ahora cada lado lleva
-                                            su etiqueta, que es lo que hace el mockup que pasó
-                                            Julián y lo que contesta la pregunta que hizo Lucas
-                                            mirando la soldadora: «¿cuál es el rango que tiene?». */}
-                                        <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                                            {/* El texto de acá NO cambia al abrir la tarjeta.
-                                                Antes cerrada mostraba el `resumen` y abierta lo
-                                                REEMPLAZABA por el `detalle`: abrías el aviso y la
-                                                frase que estabas leyendo se convertía en otra
-                                                (Julián, 17/09/2026: *"cuando le doy click y abro el
-                                                texto de la alerta media se cambia el texto"*). Y en
-                                                algún aviso las dos ni siquiera decían lo mismo —el
-                                                tercerizado resumía «no alcanzan las máquinas»,
-                                                cuando el detalle explica que sale del taller a
-                                                propósito—, así que parecía que la pantalla se
-                                                contradecía sola.
-                                                Ahora la frase corta se queda donde está y el detalle
-                                                aparece ABAJO, al desplegar: no se reemplaza nada, se
-                                                agrega. */}
-                                            <span className={cn(
-                                                "min-w-0 flex-1 text-[11.5px] leading-[1.35] text-gray-600",
-                                                !activo && !d.resumen && "line-clamp-2"
-                                            )}>
-                                                {d.resumen ? d.resumen : conNegritas(d.detalle)}
-                                            </span>
-                                            {d.tiene && (
-                                                <span className="hidden shrink-0 items-center gap-1 lg:inline-flex">
-                                                    <span className="inline-flex max-w-[170px] items-baseline gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[16px]">
-                                                        <span className="shrink-0 text-slate-400">Hoy</span>
-                                                        <span className="min-w-0 truncate font-medium text-slate-700">{d.tiene}</span>
-                                                    </span>
-                                                    {d.pide && (
-                                                        <span className="inline-flex max-w-[190px] items-baseline gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[16px]">
-                                                            <span className="shrink-0 text-slate-400">Necesita</span>
-                                                            <span className="min-w-0 truncate font-medium text-slate-700">{d.pide}</span>
-                                                        </span>
-                                                    )}
-                                                </span>
-                                            )}
-                                        </span>
+                                        )}
                                     </span>
                                 </button>
 
                                 {/* ── Qué hacer ──
-                                    Franja propia, del color del aviso y separada por una
-                                    línea: es lo que hace que un Media sin botón verde deje
-                                    de parecer un cartel que sólo informa. */}
+                                    Franja propia, del color del aviso: es lo que hace que un
+                                    Media sin botón verde deje de parecer un cartel que sólo
+                                    informa. */}
                                 <div className={cn(
-                                    "flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t px-2.5 py-1.5",
-                                    esBloq ? "border-rose-100 bg-rose-50/80" : "border-amber-100 bg-amber-50/70"
+                                    "flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t px-3 py-2",
+                                    esBloq ? "border-rose-100 bg-rose-50/50" : "border-amber-100 bg-amber-50/50"
                                 )}>
-                                    <Wrench className={cn("h-3.5 w-3.5 shrink-0", esBloq ? "text-rose-500" : "text-amber-600")} />
+                                    <span className={cn(
+                                        "grid h-6 w-6 shrink-0 place-items-center rounded-md",
+                                        esBloq ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-700"
+                                    )}>
+                                        <Wrench className="h-3.5 w-3.5" />
+                                    </span>
                                     <p className={cn(
-                                        "min-w-0 flex-[3] basis-[15rem] text-[11.5px] font-medium leading-[1.35] text-gray-800",
+                                        "min-w-0 flex-[3] basis-[15rem] text-[12px] font-medium leading-snug text-gray-800",
                                         !activo && "line-clamp-2"
                                     )}>
                                         {sol ? (
@@ -1453,15 +1438,13 @@ export function DiagnosticosPlan({
                                     </p>
 
                                     {/* La OT, de un click: "y vas a buscarla acá… estaría bueno
-                                        que hagas clic acá" (Lucas 28/08, sobre la 15678). Acá
-                                        adentro sí se puede: la franja es un div, no el botón que
-                                        despliega la tarjeta. */}
+                                        que hagas clic acá" (Lucas 28/08, sobre la 15678). */}
                                     {onVerOT && otsVisibles.map((o) => (
                                         <button
                                             key={o.id}
                                             type="button"
                                             onClick={() => onVerOT(o.id)}
-                                            className="shrink-0 rounded bg-white/70 px-1.5 text-[10px] font-medium leading-[17px] text-slate-600 tabular-nums ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-indigo-700 transition-colors"
+                                            className="shrink-0 rounded-md bg-white/80 px-1.5 text-[10.5px] font-medium leading-[19px] text-slate-600 tabular-nums ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-indigo-700 transition-colors"
                                             title={`Abrir la OT #${o.numero} en la tabla del plan`}
                                         >
                                             #{o.numero}
@@ -1471,7 +1454,7 @@ export function DiagnosticosPlan({
                                         <button
                                             type="button"
                                             onClick={() => toggle(d.id)}
-                                            className="shrink-0 rounded px-1 text-[10px] leading-[17px] text-gray-400 hover:bg-white hover:text-gray-700 transition-colors"
+                                            className="shrink-0 rounded px-1 text-[10.5px] leading-[19px] text-gray-400 hover:bg-white hover:text-gray-700 transition-colors"
                                             title={otsTexto ? `${otsTexto} — tocá para verlas todas` : "Tocá para verlas todas"}
                                         >
                                             +{otsDelAviso.length - otsVisibles.length}
@@ -1486,18 +1469,17 @@ export function DiagnosticosPlan({
                                             href={link}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="inline-flex min-w-0 shrink-0 items-center gap-0.5 rounded bg-white/70 px-1.5 text-[10px] leading-[17px] text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-blue-700 transition-colors"
+                                            className="inline-flex min-w-0 shrink-0 items-center gap-0.5 rounded-md bg-white/80 px-1.5 text-[10.5px] leading-[19px] text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-blue-700 transition-colors"
                                             title={`${sol.donde} — se abre en otra pestaña, ya parado en lo que hay que tocar`}
                                         >
                                             <span className="truncate">{sol.donde}</span>
                                             <ArrowUpRight className="w-2.5 h-2.5 shrink-0" />
                                         </a>
                                     ) : (
-                                        <span className="min-w-0 shrink-0 truncate rounded bg-white/70 px-1.5 text-[10px] leading-[17px] text-slate-500">
+                                        <span className="min-w-0 shrink-0 truncate rounded-md bg-white/80 px-1.5 text-[10.5px] leading-[19px] text-slate-500">
                                             {sol.donde}
                                         </span>
                                     ))}
-
                                     {/* Los botones, al final de la franja y siempre en el mismo
                                         orden: primero lo que se prueba y se deshace, después lo
                                         que queda cargado, último lo que sólo esconde el aviso.
@@ -1712,9 +1694,14 @@ export function DiagnosticosPlan({
                                                 {conNegritas(d.detalle)}
                                             </p>
                                         )}
-                                        {d.soluciones.length > 0 && (
+                                        {/* Las OTRAS opciones, no todas: la que se ve en la
+                                            franja de arriba se saltea. Estaba dos veces, una
+                                            arriba y otra acá, palabra por palabra — se ve en la
+                                            captura que mandó Julián el 17/09/2026. */}
+                                        {d.soluciones.some((_, idx) => idx !== iSol) && (
                                             <ul className="space-y-1">
                                                 {d.soluciones.map((s, idx) => {
+                                                    if (idx === iSol) return null;
                                                     const clave = `${d.id}-${idx}`;
                                                     const hechaEsta = aplicadas.has(clave);
                                                     const linkEste = enlaceDe(s.donde, s.accion, s.objetivo);
