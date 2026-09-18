@@ -14,7 +14,7 @@
  */
 
 import React from "react";
-import { ArrowDown, ArrowUp, Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -187,20 +187,12 @@ export function MinutosDelProceso({ minutos }: { minutos: number }) {
  * lista de Operaciones).
  */
 export function AccionesDeProcesoEnPlan({
-    nombre, esPrimero, esUltimo, sinMover, bloqueado, motivoBloqueo, trabajando,
-    onSubir, onBajar, onBorrar,
+    nombre, bloqueado, motivoBloqueo, trabajando, onBorrar,
 }: {
     nombre: string;
-    esPrimero: boolean;
-    esUltimo: boolean;
-    /** Sin flechitas: el paso recién agregado va al final hasta que se recalcule, y
-     *  moverlo antes de que el plan lo ubique no significa nada. */
-    sinMover?: boolean;
     bloqueado?: boolean;
     motivoBloqueo?: string;
     trabajando?: boolean;
-    onSubir: () => void;
-    onBajar: () => void;
     onBorrar: () => void;
 }) {
     const [confirmando, setConfirmando] = React.useState(false);
@@ -224,28 +216,6 @@ export function AccionesDeProcesoEnPlan({
                 className="flex items-center justify-end gap-0.5 text-gray-300 transition-colors group-hover/row:text-gray-500"
                 onClick={(e) => e.stopPropagation()}
             >
-                {!sinMover && (
-                    <>
-                        <button
-                            type="button"
-                            className={cn(boton, "hover:bg-blue-50 hover:text-blue-600")}
-                            disabled={apagado || esPrimero}
-                            onClick={onSubir}
-                            title={esPrimero ? "Ya es el primer paso" : (motivoBloqueo || "Subir un paso")}
-                        >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                            type="button"
-                            className={cn(boton, "hover:bg-blue-50 hover:text-blue-600")}
-                            disabled={apagado || esUltimo}
-                            onClick={onBajar}
-                            title={esUltimo ? "Ya es el último paso" : (motivoBloqueo || "Bajar un paso")}
-                        >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                        </button>
-                    </>
-                )}
                 <button
                     type="button"
                     className={cn(boton, "hover:bg-red-50 hover:text-red-600")}
@@ -259,6 +229,75 @@ export function AccionesDeProcesoEnPlan({
                 </button>
             </div>
         </>
+    );
+}
+
+/**
+ * El número de paso, escribible, en la columna «#».
+ *
+ * Antes mover un proceso eran dos flechitas al final de la fila, en la columna PASO.
+ * Julián, 17/09/2026: *"el orden del proceso quiero cambiarlo desde el numero a la
+ * izquierda no a la derecha"*. Y es el mismo gesto que ya existe en el alta de la OT
+ * (ProcesosEditor, columna «#»), así que ahora se escribe el número en los dos lados en
+ * vez de tener dos maneras distintas de hacer lo mismo.
+ *
+ * Lo tipeado vive acá y no en la fila: mientras se escribe "1" para llegar a "12", la
+ * fila no tiene que saltar al primer lugar.
+ */
+export function PasoEnPlanEditable({
+    paso, total, fijo, bloqueado, motivoBloqueo, trabajando, onMover,
+}: {
+    paso: number;
+    total: number;
+    /** El paso recién agregado va al final hasta que se recalcule: moverlo antes de que
+     *  el plan lo ubique no significa nada, así que se muestra pero no se edita. */
+    fijo?: boolean;
+    bloqueado?: boolean;
+    motivoBloqueo?: string;
+    trabajando?: boolean;
+    onMover: (posicion: number) => void;
+}) {
+    const [tipeado, setTipeado] = React.useState<string | null>(null);
+    const apagado = bloqueado || trabajando || fijo;
+
+    const confirmar = () => {
+        const crudo = (tipeado ?? "").trim();
+        setTipeado(null);
+        const n = parseInt(crudo, 10);
+        // Vacío o basura se descarta y vuelve el número real; fuera de rango se lleva al
+        // extremo más cercano, igual que en el alta de la OT.
+        if (!crudo || Number.isNaN(n) || n === paso) return;
+        onMover(Math.min(Math.max(n, 1), total));
+    };
+
+    if (apagado) {
+        return (
+            <span
+                className="w-7 text-center tabular-nums text-gray-400"
+                title={fijo ? "Se agregó recién: se acomoda cuando recalcules el plan" : motivoBloqueo}
+            >
+                {trabajando ? <Loader2 className="mx-auto h-3 w-3 animate-spin" /> : paso}
+            </span>
+        );
+    }
+
+    return (
+        <input
+            type="text"
+            inputMode="numeric"
+            aria-label={`Paso ${paso}. Escribí otro número para mover este proceso.`}
+            title="Escribí el número y el proceso se mueve a ese lugar"
+            value={tipeado ?? String(paso)}
+            onChange={(e) => setTipeado(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={confirmar}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                if (e.key === "Escape") { setTipeado(null); e.currentTarget.blur(); }
+            }}
+            className="w-7 h-6 px-0 text-center text-xs font-medium tabular-nums rounded-full border border-transparent bg-transparent text-gray-500 hover:border-gray-300 hover:bg-white focus:border-blue-400 focus:bg-white focus:text-gray-900 focus:outline-none transition-colors"
+        />
     );
 }
 

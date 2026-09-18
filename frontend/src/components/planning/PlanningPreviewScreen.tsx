@@ -9,7 +9,7 @@ import {
     Calendar, Clock, User, Cog, AlertCircle, CalendarClock, Edit2, RotateCcw,
     ChevronDown, ChevronRight, AlertTriangle, Search, X as XIcon,
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
-    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, X, ArrowLeft} from "lucide-react";
+    Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, X, ArrowLeft, Pencil} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import EditarProcesosOTModal from "@/components/planning/EditarProcesosOTModal";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ import {
 } from "@/components/planning/useProcesosEnPlan";
 import {
     NombreDeProcesoEditable, MinutosDelProceso, AccionesDeProcesoEnPlan,
-    AgregarProcesoEnPlan, type ProcesoDelCatalogo,
+    PasoEnPlanEditable, AgregarProcesoEnPlan, type ProcesoDelCatalogo,
 } from "@/components/planning/ProcesoEnPlanEditable";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -3341,12 +3341,20 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                 {/* Se le tocaron los procesos y el plan todavía no se rehizo. Va en la
                                                                     fila cerrada para poder encontrar la OT sin desplegarlas todas. */}
                                                                 {cambiosDeLaOT && (
+                                                                    /* Era una pastilla en MAYÚSCULA con un triángulo de peligro que
+                                                                       decía «PROCESOS CAMBIADOS» y nada más: gritaba, no informaba, y
+                                                                       encima parecía otra cosa que las demás marcas de la fila. Julián,
+                                                                       17/09/2026: *"ese cartel de procesos cambiados chiquito me parece
+                                                                       horrible"*. Ahora dice CUÁNTOS son y con qué falta hacer —que es
+                                                                       el dato— en el mismo tono que los otros chips de la fila. */
                                                                     <span
-                                                                        className="text-[9px] uppercase tracking-wider bg-orange-100 text-orange-900 border border-orange-400 px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-1"
-                                                                        title={`Procesos editados desde el plan (${resumirCambios(cambiosDeLaOT)}). Están guardados en la OT, pero los horarios son los del último cálculo.`}
+                                                                        className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[11px] font-medium text-orange-800"
+                                                                        title={`${resumirCambios(cambiosDeLaOT)}. Está guardado en la orden; lo que falta es recalcular para que los horarios valgan.`}
                                                                     >
-                                                                        <AlertTriangle className="w-2.5 h-2.5" />
-                                                                        Procesos cambiados
+                                                                        <Pencil className="h-2.5 w-2.5 shrink-0" />
+                                                                        {contarCambios(cambiosDeLaOT) === 1
+                                                                            ? "1 cambio sin recalcular"
+                                                                            : `${contarCambios(cambiosDeLaOT)} cambios sin recalcular`}
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -3512,16 +3520,39 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
                                                                             <AlertTriangle className="w-4 h-4 shrink-0 text-orange-600" />
                                                                             <span className="flex-1 min-w-[260px] leading-snug">
+                                                                                {/* «Cambiaste N procesos» contaba mal y se contradecía con lo que
+                                                                                    venía entre paréntesis: mover un paso mostraba «Cambiaste 0
+                                                                                    procesos de esta OT (cambió el orden de los pasos)». Ahora el
+                                                                                    número cuenta el reordenamiento (contarCambios) y la frase habla
+                                                                                    de CAMBIOS y no de procesos, que es lo que se está contando. */}
                                                                                 <strong>
                                                                                     {contarCambios(cambiosDeLaOT) === 1
-                                                                                        ? "Cambiaste un proceso de esta OT"
-                                                                                        : `Cambiaste ${contarCambios(cambiosDeLaOT)} procesos de esta OT`}
+                                                                                        ? "Hiciste 1 cambio en los pasos de esta OT"
+                                                                                        : `Hiciste ${contarCambios(cambiosDeLaOT)} cambios en los pasos de esta OT`}
                                                                                 </strong>
                                                                                 {` (${resumirCambios(cambiosDeLaOT)}). `}
                                                                                 <strong>Queda guardado en la orden aunque descartes el borrador.</strong>
                                                                                 {" "}Lo que falta es el plan: los horarios de abajo se calcularon antes del cambio,
                                                                                 así que hay que recalcular para que valgan.
                                                                             </span>
+                                                                            {/* Deshacer va ANTES de recalcular: primero la salida barata —volver
+                                                                                atrás lo último— y después la cara, que rehace el plan entero.
+                                                                                Cada acción se deshace con su inversa exacta (ver `deshacer` en
+                                                                                useProcesosEnPlan), así que si la OT vuelve a quedar como estaba,
+                                                                                este cartel desaparece solo. */}
+                                                                            {procesosEnPlan.sePuedeDeshacer(ordenId) && (
+                                                                                <Button
+                                                                                    size="sm"
+                                                                                    variant="ghost"
+                                                                                    className="h-7 shrink-0 px-2 text-xs text-orange-900 hover:bg-orange-100"
+                                                                                    disabled={isCalculating || isConfirming || editandoEstaOT}
+                                                                                    onClick={() => void procesosEnPlan.deshacer(ordenId)}
+                                                                                    title="Volver atrás el último cambio que hiciste en los pasos de esta OT"
+                                                                                >
+                                                                                    <RotateCcw className={cn("mr-1 h-3 w-3", editandoEstaOT && "animate-spin")} />
+                                                                                    Deshacer
+                                                                                </Button>
+                                                                            )}
                                                                             <Button
                                                                                 size="sm"
                                                                                 variant="outline"
@@ -3536,11 +3567,17 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                         </div>
                                                                     )}
 
-                                                                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm w-max max-w-full">
-                                                                        <div className="grid grid-cols-[auto_minmax(200px,340px)_auto_auto_auto_auto] gap-0 text-sm">
+                                                                    {/* `w-full` y no `w-max`: con el panel de carga abierto la tabla se
+                                                                        quedaba en su ancho mínimo y sobraba media pantalla en blanco a la
+                                                                        derecha (Julián, 17/09/2026: *"se me hace rarisimo que quede un
+                                                                        espacio en blanco tan grande ahi"*). El sobrante se lo lleva la
+                                                                        columna del proceso, que es la que más lo necesita: es donde se
+                                                                        cortan los nombres largos. */}
+                                                                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm w-full">
+                                                                        <div className="grid grid-cols-[auto_minmax(200px,1fr)_auto_auto_auto_auto] gap-0 text-sm">
                                                                             {/* Inner Header */}
                                                                             <div className="contents text-xs font-bold text-gray-500 uppercase bg-gray-100/50">
-                                                                                <div className="px-3 py-1.5 border-b">#</div>
+                                                                                <div className="px-3 py-1.5 border-b" title="Paso. Escribí el número para mover el proceso de lugar">#</div>
                                                                                 <div className="px-3 py-1.5 border-b">Proceso</div>
                                                                                 <div className="px-3 py-1.5 border-b">Recurso humano</div>
                                                                                 <div className="px-3 py-1.5 border-b">Recurso maquinaria</div>
@@ -3594,7 +3631,15 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     cambio ? "bg-orange-500" : "bg-indigo-500",
                                                                                                 )} />
                                                                                             )}
-                                                                                            {idx + 1}
+                                                                                            <PasoEnPlanEditable
+                                                                                                paso={idx + 1}
+                                                                                                total={pasadasVisibles.length}
+                                                                                                bloqueado={noSeEdita}
+                                                                                                motivoBloqueo={motivoNoSeEdita}
+                                                                                                trabajando={editandoEstaOT}
+                                                                                                onMover={(pos) => void procesosEnPlan.moverAPosicion(
+                                                                                                    ordenId, lineaId!, pos, pasadasVisibles)}
+                                                                                            />
                                                                                         </div>
                                                                                         {/* Nombre y minutos en la MISMA línea: apilados sumaban un renglón
                                                                                             por proceso para un dato de cuatro caracteres. */}
@@ -3609,7 +3654,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                     motivoBloqueo={motivoNoSeEdita}
                                                                                                     trabajando={editandoEstaOT}
                                                                                                     onCambiar={(id, nombre) => void procesosEnPlan.cambiarProceso(
-                                                                                                        ordenId, lineaId!, id, nombre, effectiveItem.nombre_proceso)}
+                                                                                                        ordenId, lineaId!, id, nombre, effectiveItem.nombre_proceso, idProcesoActual)}
                                                                                                 />
                                                                                                 <MinutosDelProceso minutos={effectiveItem.duracion_min} />
                                                                                                 {/* Lo agregado a mano se distingue de lo que trajo la OT.
@@ -3762,14 +3807,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                         <div className="px-2 py-1.5 border-b flex items-center">
                                                                                             <AccionesDeProcesoEnPlan
                                                                                                 nombre={nombreProceso}
-                                                                                                esPrimero={vecinoArriba == null}
-                                                                                                esUltimo={vecinoAbajo == null}
                                                                                                 bloqueado={noSeEdita}
                                                                                                 motivoBloqueo={motivoNoSeEdita}
                                                                                                 trabajando={editandoEstaOT}
-                                                                                                onSubir={() => void procesosEnPlan.moverLinea(ordenId, lineaId!, vecinoArriba!, "arriba")}
-                                                                                                onBajar={() => void procesosEnPlan.moverLinea(ordenId, lineaId!, vecinoAbajo!, "abajo")}
-                                                                                                onBorrar={() => void procesosEnPlan.borrarLinea(ordenId, idProcesoActual, lineaId!, nombreProceso)}
+                                                                                                onBorrar={() => void procesosEnPlan.borrarLinea(
+                                                                                                    ordenId, idProcesoActual, lineaId!, nombreProceso,
+                                                                                                    effectiveItem.duracion_min ?? 0)}
                                                                                             />
                                                                                         </div>
                                                                                     </div>
@@ -3797,7 +3840,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                 bloqueado={isCalculating || isConfirming}
                                                                                                 trabajando={editandoEstaOT}
                                                                                                 onCambiar={(id, nombre) => void procesosEnPlan.cambiarProceso(
-                                                                                                    ordenId, nueva.idOtp, id, nombre, nueva.nombre)}
+                                                                                                    ordenId, nueva.idOtp, id, nombre, nueva.nombre, nueva.idProceso)}
                                                                                             />
                                                                                             <MinutosDelProceso minutos={nueva.minutos} />
                                                                                         </div>
@@ -3814,15 +3857,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                     <div className="px-2 py-1.5 border-b flex items-center">
                                                                                         <AccionesDeProcesoEnPlan
                                                                                             nombre={nueva.nombre}
-                                                                                            sinMover
-                                                                                            esPrimero
-                                                                                            esUltimo
                                                                                             bloqueado={isCalculating || isConfirming}
                                                                                             trabajando={editandoEstaOT}
-                                                                                            onSubir={() => { }}
-                                                                                            onBajar={() => { }}
                                                                                             onBorrar={() => void procesosEnPlan.borrarLinea(
-                                                                                                ordenId, nueva.idProceso, nueva.idOtp, nueva.nombre)}
+                                                                                                ordenId, nueva.idProceso, nueva.idOtp, nueva.nombre, nueva.minutos)}
                                                                                         />
                                                                                     </div>
                                                                                 </div>
