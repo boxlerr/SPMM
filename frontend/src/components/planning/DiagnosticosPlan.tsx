@@ -1387,13 +1387,25 @@ export function DiagnosticosPlan({
                                             Julián y lo que contesta la pregunta que hizo Lucas
                                             mirando la soldadora: «¿cuál es el rango que tiene?». */}
                                         <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                            {/* El texto de acá NO cambia al abrir la tarjeta.
+                                                Antes cerrada mostraba el `resumen` y abierta lo
+                                                REEMPLAZABA por el `detalle`: abrías el aviso y la
+                                                frase que estabas leyendo se convertía en otra
+                                                (Julián, 17/09/2026: *"cuando le doy click y abro el
+                                                texto de la alerta media se cambia el texto"*). Y en
+                                                algún aviso las dos ni siquiera decían lo mismo —el
+                                                tercerizado resumía «no alcanzan las máquinas»,
+                                                cuando el detalle explica que sale del taller a
+                                                propósito—, así que parecía que la pantalla se
+                                                contradecía sola.
+                                                Ahora la frase corta se queda donde está y el detalle
+                                                aparece ABAJO, al desplegar: no se reemplaza nada, se
+                                                agrega. */}
                                             <span className={cn(
                                                 "min-w-0 flex-1 text-[11.5px] leading-[1.35] text-gray-600",
                                                 !activo && !d.resumen && "line-clamp-2"
                                             )}>
-                                                {activo || !d.resumen
-                                                    ? conNegritas(d.detalle)
-                                                    : d.resumen}
+                                                {d.resumen ? d.resumen : conNegritas(d.detalle)}
                                             </span>
                                             {d.tiene && (
                                                 <span className="hidden shrink-0 items-center gap-1 lg:inline-flex">
@@ -1692,6 +1704,14 @@ export function DiagnosticosPlan({
                                     cada una con su link y su botón, más las OTs. */}
                                 {activo && (
                                     <div className="border-t bg-slate-50/70 px-2 py-1.5 space-y-1.5">
+                                        {/* El porqué largo. Sólo si hay un `resumen`: cuando no lo
+                                            hay, el detalle YA se está leyendo arriba y repetirlo
+                                            sería decir dos veces lo mismo. */}
+                                        {d.resumen && (
+                                            <p className="text-[11.5px] leading-[1.4] text-gray-600">
+                                                {conNegritas(d.detalle)}
+                                            </p>
+                                        )}
                                         {d.soluciones.length > 0 && (
                                             <ul className="space-y-1">
                                                 {d.soluciones.map((s, idx) => {

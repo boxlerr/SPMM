@@ -11,7 +11,6 @@ import {
     HelpCircle, Sparkles, RefreshCw, ListPlus, Info, Lightbulb,
     Columns3, Layers, ListFilter, ListChecks, LogOut, Users, ArrowUp, Printer, X, ArrowLeft, Pencil} from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import EditarProcesosOTModal from "@/components/planning/EditarProcesosOTModal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1118,25 +1117,19 @@ export function PlanningPreviewScreen({
 
     /** Saca una OT del plan y recalcula (sin esa OT). Pensado para el botón "x"
      *  de cada fila en la tabla de resultados. */
-    /**
-     * Arreglar los procesos de una OT sin salir de acá (Lucas, 10/09).
-     *
-     * Es distinto de la X de la fila: esa saca la OT del plan y no toca la orden, así
-     * que al recalcular vuelve igual. Esto edita la OT de verdad — el historial trajo
-     * procesos que no van, faltan preparaciones y hay pasos en el orden equivocado— y
-     * después recalcula para ver cómo queda.
-     */
-    const [editandoProcesosDe, setEditandoProcesosDe] = React.useState<{ id: number; visible: number | string } | null>(null);
 
     /**
      * Lo mismo, pero sobre la fila que estás mirando (Julián, 17/09).
      *
-     * El modal de arriba sigue estando —es donde está el «Deshacer» y donde se ve la OT
-     * entera, incluidos los pasos que no entraron al plan—, pero para corregir los
-     * minutos de un paso o sacar uno que no va, abrir la OT completa es demasiado
-     * camino. Acá se edita el renglón: el nombre, los minutos, el orden, y se agrega o
-     * se saca. Se guarda en la OT y el plan NO se recalcula solo: ver el comentario
-     * largo en `useProcesosEnPlan`.
+     * Acá se edita el renglón: el nombre, los minutos, el orden, y se agrega o se saca.
+     * Se guarda en la OT y el plan NO se recalcula solo: ver el comentario largo en
+     * `useProcesosEnPlan`.
+     *
+     * Había un botón más que abría la OT entera en un modal (EditarProcesosOTModal), y
+     * se fue el 17/09/2026 con el archivo entero: *"ese botón ya no nos sirve, es lo
+     * mismo de modificarla con todo lo que armamos"*. Hacía lo mismo que la fila pero
+     * con un viaje de más, y encima su «Deshacer» iba contra versiones que los
+     * endpoints de a una pasada no escriben — o sea que restauraba de más.
      */
     const procesosEnPlan = useProcesosEnPlan();
     // Suelta para el efecto que limpia las marcas: en el array de dependencias,
@@ -1168,38 +1161,32 @@ export function PlanningPreviewScreen({
         }
     }, [catalogoProcesos.length]);
 
-    const handleProcesosEditados = (ordenId: number) => {
-        // Los procesos elegidos a mano de ESTA OT dejan de valer: apuntaban a pasadas
-        // por id y la edición pudo borrarlas o crear otras. La OT vuelve entera, que es
-        // lo único que se puede afirmar después de tocarle los procesos.
-        setTandasManuales(prev => prev.map(t => ({
-            ...t,
-            lineas: Object.fromEntries(Object.entries(t.lineas).filter(([oid]) => Number(oid) !== ordenId)),
-        })));
-        // Armar el "salto de carga" a mano.
-        //
-        // El aviso de quién saltó de horas se dispara cuando crece `tandasManuales`,
-        // y este camino no agrega ninguna tanda: edita la OT y recalcula. Sin esto,
-        // agregarle a una OT un proceso de seis horas movía la carga de alguien y
-        // nadie se enteraba — que es exactamente el caso de Pablo (8,9 → 15 h) para el
-        // que se hizo el aviso, sólo que por la puerta nueva.
-        esperandoSalto.current = { antes: minutosPorOperario, tandas: tandasManuales.length };
-
-        toast.success("Procesos guardados en la OT. Recalculando el plan…");
-        if (!onRecalculate) return;
-        const forcedArr = Array.from(forzarOrdenIds);
-        const mergedIds = buildOrdenIdsForRecalc(forcedArr);
-        // Sin `lineasParaEnviar`: acaba de cambiar justo lo que esas restricciones
-        // referenciaban. El resto de las OT conserva las suyas porque salen de
-        // `lineasVigentes`, que ya quedó sin las de esta.
-        onRecalculate(mergedIds, planningRange, forcedArr, lineasParaEnviar(mergedIds), ajustesParaEnviar());
-    };
+    /**
+     * La X de la fila saca una OT del plan, y hasta el 17/09/2026 lo hacía de una.
+     *
+     * Es el botón más caro de la pantalla —se lleva la OT y dispara un recálculo de
+     * varios minutos— y está a un click del que despliega la fila. Julián: *"si toco
+     * la X para eliminar una OT quiero que me aparezca un cartel de si estoy seguro y
+     * la posibilidad de deshacerlo"*. Las dos cosas: se pregunta antes, y después queda
+     * un «Deshacer» en el aviso por si igual no era ésa.
+     */
+    const [quitandoOT, setQuitandoOT] = React.useState<{ id: number; numero: string } | null>(null);
 
     const handleRemoveOrderAndRecalculate = (ordenId: number) => {
         if (!onRecalculate) {
             toast.error("Eliminar no está disponible en este contexto.");
             return;
         }
+        // Todo lo que hay que poder devolver si se arrepiente. Se saca ANTES de tocar
+        // nada: después de los setState de abajo ya no se puede reconstruir.
+        const antesDeQuitar = {
+            forzar: Array.from(forzarOrdenIds),
+            sticky: stickyExcedentes,
+            tandas: tandasManuales,
+        };
+        const numeroVisible = String(
+            results.find(r => r.orden_id === ordenId)?.id_otvieja ?? ordenId);
+
         // También quitamos la decisión de forzar si la tenía y la sacamos de los excedentes sticky.
         const newForzar = Array.from(forzarOrdenIds).filter(id => id !== ordenId);
         setForzarOrdenIds(new Set(newForzar));
@@ -1231,6 +1218,32 @@ export function PlanningPreviewScreen({
             Object.keys(lineasFiltradas).length > 0 ? lineasFiltradas : undefined,
             ajustesParaEnviar(),
         );
+
+        // Deshacer: vuelve el plan al lote de antes y recalcula. No es "cancelar" —el
+        // recálculo ya salió—, es volver a pedirlo con la OT adentro; por eso el aviso
+        // dura más de lo normal, que es lo que tarda alguien en darse cuenta de que no
+        // era ésa.
+        const idsConLaOT = Array.from(new Set([...mergedIds, ordenId]));
+        toast.success(`La OT #${numeroVisible} salió del plan`, {
+            duration: 12000,
+            description: "Se está recalculando sin ella. La orden no se tocó: sigue disponible para planificar.",
+            action: {
+                label: "Deshacer",
+                onClick: () => {
+                    setForzarOrdenIds(new Set(antesDeQuitar.forzar));
+                    setStickyExcedentes(antesDeQuitar.sticky);
+                    setTandasManuales(antesDeQuitar.tandas);
+                    toast.info(`Vuelve la OT #${numeroVisible} al plan`, { description: "Recalculando…" });
+                    onRecalculate(
+                        idsConLaOT,
+                        planningRange,
+                        antesDeQuitar.forzar,
+                        lineasParaEnviar(idsConLaOT),
+                        ajustesParaEnviar(),
+                    );
+                },
+            },
+        });
     };
 
     /**
@@ -3482,23 +3495,13 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon"
-                                                                className="h-7 w-7 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setEditandoProcesosDe({ id: ordenId, visible: firstItem.id_otvieja || ordenId });
-                                                                }}
-                                                                disabled={isCalculating || isConfirming}
-                                                                title="Ver TODOS los procesos de la OT —también los que no entraron al plan— y deshacer el último cambio. Para tocar los que ya están en el plan, se editan directamente en la fila."
-                                                            >
-                                                                <ListChecks className="w-4 h-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
                                                                 className="h-7 w-7 text-gray-400 hover:text-red-600 hover:bg-red-50"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    handleRemoveOrderAndRecalculate(ordenId);
+                                                                    setQuitandoOT({
+                                                                        id: ordenId,
+                                                                        numero: String(firstItem.id_otvieja || ordenId),
+                                                                    });
                                                                 }}
                                                                 disabled={isCalculating || isConfirming || !onRecalculate}
                                                                 title="Quitar esta OT del plan y recalcular"
@@ -3594,6 +3597,13 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                             {/* Inner Body: procesos auto-asignados (editables) */}
                                                                             {procesosVisibles.map((item, idx) => {
                                                                                 const effectiveItem = getEffectiveItem(item);
+                                                                                /* Un retoque a mano —persona, máquina u horario— también es un
+                                                                                   cambio de esta fila y se marca igual (Julián, 17/09/2026: *"si un
+                                                                                   cambio de recurso humano maquinaria u horario también quiero que se
+                                                                                   marque el renglón en rojo"*). Hasta acá sólo se marcaba lo que
+                                                                                   tocaba la ORDEN —cambiar el proceso, moverlo de lugar—, y quedaba
+                                                                                   la mitad de lo que uno toca sin ninguna señal. */
+                                                                                const retocadaAMano = !!(editedResults[claveDeEdicion(item)] || editedResults[claveVieja(item)]);
                                                                                 const limitacionElegida = limitacionDeMaquina(
                                                                                     availableMachines.find((m: any) => m.id === effectiveItem.id_maquinaria)
                                                                                 );
@@ -3630,7 +3640,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                 const filaMovida = !!ordenOriginalVisible && lineaId != null
                                                                                     && ordenOriginalVisible.indexOf(lineaId) !== posPasada;
                                                                                 /** Algo de ESTA fila cambió: el proceso, o el lugar que ocupa. */
-                                                                                const filaEditada = !!cambio || filaMovida;
+                                                                                const filaEditada = !!cambio || filaMovida || retocadaAMano;
                                                                                 const vecinoArriba = posPasada > 0 ? pasadasVisibles[posPasada - 1] : null;
                                                                                 const vecinoAbajo = posPasada >= 0 && posPasada < pasadasVisibles.length - 1
                                                                                     ? pasadasVisibles[posPasada + 1]
@@ -3656,7 +3666,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                                         filaEditada ? "bg-[#DC143C]" : "bg-indigo-500",
                                                                                                     )}
                                                                                                     title={filaEditada
-                                                                                                        ? (cambio ? "Le cambiaste el proceso a este paso" : "Este paso cambió de lugar")
+                                                                                                        ? (cambio ? "Le cambiaste el proceso a este paso"
+                                                                                                            : filaMovida ? "Este paso cambió de lugar"
+                                                                                                                : "Le cambiaste a mano la persona, la máquina o el horario")
                                                                                                         : "Lo agregaste vos al plan"}
                                                                                                 />
                                                                                             )}
@@ -4385,20 +4397,19 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
             confirmText="Guardar igual"
             cancelText="Volver a revisar"
         />
-        {/* Editar los procesos de una OT sin salir del plan. Va acá afuera, hermano de
-            los diálogos, y no adentro de la fila: la tabla se vuelve a dibujar en cada
-            recálculo y el modal se cerraría solo. */}
-        <EditarProcesosOTModal
-            ordenId={editandoProcesosDe?.id ?? null}
-            numeroVisible={editandoProcesosDe?.visible}
-            maquinarias={(availableMachines || []).map((m: any) => ({
-                id: m.id, nombre: m.nombre, cod_maquina: m.cod_maquina,
-            }))}
-            operarios={(availableOperators || []).map((o: any) => ({
-                id: o.id, nombre: o.nombre, apellido: o.apellido,
-            }))}
-            onClose={() => setEditandoProcesosDe(null)}
-            onGuardado={handleProcesosEditados}
+        <ConfirmationDialog
+            isOpen={quitandoOT !== null}
+            onClose={() => setQuitandoOT(null)}
+            onConfirm={() => {
+                const ot = quitandoOT;
+                setQuitandoOT(null);
+                if (ot) handleRemoveOrderAndRecalculate(ot.id);
+            }}
+            title={`Sacar la OT #${quitandoOT?.numero ?? ""} del plan`}
+            description="El plan se recalcula sin ella y el reparto de las otras OT puede cambiar. La orden NO se toca: sigue como estaba y se puede volver a planificar cuando quieras. Si te arrepentís, el aviso que sale después trae un «Deshacer»."
+            confirmText="Sí, sacarla"
+            cancelText="Volver"
+            variant="destructive"
         />
         </>
     );
