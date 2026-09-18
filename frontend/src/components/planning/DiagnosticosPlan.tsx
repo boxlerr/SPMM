@@ -37,7 +37,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Cog, HelpCircle, Info, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Cog, Info, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -309,15 +309,6 @@ function accionDelObjetivo(sol: DiagnosticoSolucion): AccionDeSolucion | null {
 const accionAjustable = (sol: DiagnosticoSolucion): AccionDeSolucion | null =>
     sol.accion ?? accionDelObjetivo(sol);
 
-/**
- * Dónde se recuerda que la leyenda "¿Cómo se lee esto?" ya se mostró una vez.
- *
- * v2 y no v1 porque cambió lo que significa el valor: antes guardaba "abierta" /
- * "cerrada" (el estado del último click) y ahora guarda "vista" (que ya se le mostró
- * a esta máquina). Con la misma clave, un "abierta" viejo se leería como un valor
- * válido de lo nuevo.
- */
-const CLAVE_LEYENDA = "spmm.diagnosticos.leyenda.v2";
 
 /**
  * Qué toca la solución, dicho ANTES de aplicarla.
@@ -616,41 +607,6 @@ export function DiagnosticosPlan({
      */
     const [confirmando, setConfirmando] = useState<string | null>(null);
 
-    /**
-     * La leyenda de cómo se lee el panel: abierta la primera vez, cerrada después.
-     *
-     * El criterio Alta/Media, qué son los chips del impacto y en qué se diferencian
-     * los dos botones eran las tres cosas que más falta hacen para entender la
-     * pantalla, y las tres vivían escondidas en un `title=`: invisibles al barrer la
-     * lista y, en una tablet, inalcanzables. Acá se leen sin mouse; y el que ya sabe
-     * no las ve nunca más.
-     *
-     * Eso último lo prometía este comentario y no lo hacía el código: sólo escribía en
-     * localStorage si alguien tocaba el botón, así que el que nunca lo tocó —o sea
-     * casi todo el mundo— se comía los 58-88px de la leyenda en cada plan, para
-     * siempre. Ahora se marca como vista cuando SE MUESTRA, que es cuando dejó de
-     * hacer falta: la primera vez se abre sola, de ahí en más arranca plegada y sigue
-     * a un click del "¿Cómo se lee esto?".
-     *
-     * Se marca sólo con el panel desplegado: plegado la leyenda no se dibuja, y
-     * darla por vista sin que nadie la haya visto es quemarla.
-     *
-     * Arranca cerrada en el render y se abre en el efecto a propósito: leer
-     * localStorage al armar el estado rompe la hidratación de Next (el servidor no
-     * tiene localStorage y pinta otra cosa). Y todo va en try/catch porque en ventana
-     * privada o con los datos del sitio bloqueados el acceso tira excepción: en ese
-     * caso queda cerrada, que es un renglón menos, nunca una pantalla rota.
-     */
-    const [leyenda, setLeyenda] = useState(false);
-    useEffect(() => {
-        if (colapsado) return;
-        try {
-            if (localStorage.getItem(CLAVE_LEYENDA) === "vista") return;
-            setLeyenda(true);
-            localStorage.setItem(CLAVE_LEYENDA, "vista");
-        } catch { /* sin localStorage: queda cerrada y el botón sigue estando */ }
-    }, [colapsado]);
-    const alternarLeyenda = () => setLeyenda((v) => !v);
 
     /**
      * Aplicar la solución SOLO a este cálculo, o sacarla si ya estaba aplicada.
@@ -1065,54 +1021,8 @@ export function DiagnosticosPlan({
                                               {" "}Si vas a Recursos y arreglás algo, al volver acá se revisa y se recalcula solo.
                                           </>}
                       </span>
-                      {/* Se cuelga de esta fila, que ya existe y tiene lugar libre a la
-                          derecha: cerrada no cuesta un solo píxel de alto. */}
-                      <button
-                          type="button"
-                          aria-expanded={leyenda}
-                          onClick={alternarLeyenda}
-                          className="ml-auto shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-500 hover:bg-white hover:text-slate-800 transition-colors"
-                      >
-                          <HelpCircle className="w-3 h-3 shrink-0" />
-                          ¿Cómo se lee esto?
-                      </button>
                     </div>
 
-                    {/* Tres renglones y se acabó: las tres cosas que hay que saber para
-                        usar el panel y que hasta hoy vivían adentro de un `title=`, o
-                        sea invisibles para el que no sabe que tiene que dejar el mouse
-                        quieto encima. Nada de esto es nuevo: es lo mismo que ya estaba,
-                        puesto donde se puede leer. */}
-                    {leyenda && (
-                      <ul className="mt-1.5 space-y-0.5 border-t border-slate-200 pt-1.5 text-[11px] text-slate-600">
-                          <li>
-                              <strong className="text-rose-700">Alta</strong> = algo del plan salió mal.
-                              {" "}<strong className="text-amber-700">Media</strong> = sugerencia, el plan sale igual.
-                          </li>
-                          {/* Descrito, no citado: el texto exacto del chip lo arma el
-                              backend y se despliega a mano, a destiempo de esta pantalla.
-                              Una leyenda que cita palabra por palabra algo que todavía
-                              no salió es peor que no tener leyenda. */}
-                          <li>
-                              Los cuadraditos grises de la derecha dicen cuánto trabajo toca ese aviso:
-                              {" "}cuántos procesos, cuántas OT y cuánto tiempo.
-                          </li>
-                          {/* La última línea solo si el botón existe: el panel se puede usar
-                              sin las props nuevas, y explicar un botón que no está es marear. */}
-                          {onAplicarSoloEstePlan ? (
-                              <li>
-                                  <strong className="text-emerald-700">Guardar en Recursos</strong> cambia el dato para
-                                  {" "}siempre, para todos los planes. <strong className="text-indigo-700">Solo en este plan</strong>
-                                  {" "}no guarda nada: es para ver cómo saldría, y se deshace.
-                              </li>
-                          ) : (
-                              <li>
-                                  <strong className="text-emerald-700">Guardar en Recursos</strong> cambia el dato para
-                                  {" "}siempre, para todos los planes.
-                              </li>
-                          )}
-                      </ul>
-                    )}
                 </div>
             )}
 
@@ -1378,268 +1288,209 @@ export function DiagnosticosPlan({
                                     activo && "shadow-sm"
                                 )}
                             >
-                                {/* 7fr/4fr y no 5fr/4fr: con 5fr el título entraba en ~250px y se
-                                    cortaba en los cinco avisos del plan real ("Soldadura con MIG: sus
-                                    3 máquina…"), que es justo lo que tiene que leerse de un vistazo.
-                                    Verificado en producción. La columna de la derecha se banca 4fr: le
-                                    alcanza para dos líneas de solución y el botón. */}
-                                {/* El corte va en 2xl y no en lg: el panel NUNCA tiene el ancho
-                                    del viewport. En un notebook de 1366 con la barra de navegación
-                                    abierta el contenedor real ronda los 700px, así que la columna
-                                    de la solución quedaba en ~250px y partía el botón de guardar
-                                    en tres renglones. Una sola columna se lee mejor que dos
-                                    ahogadas. Con dos botones en la fila —el que guarda y el que
-                                    prueba— el corte en 2xl pesa todavía más. */}
-                                <div className="grid grid-cols-1 gap-x-3 gap-y-1.5 px-2 py-1 2xl:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
-                                    {/* ── Qué pasa ──
-                                        Es un <button> entero para que el bloque del problema
-                                        despliegue el detalle sin apuntarle al chevron. Adentro
-                                        solo van spans: no se puede anidar nada clickeable. */}
-                                    <button
-                                        type="button"
-                                        aria-expanded={activo}
-                                        onClick={() => toggle(d.id)}
-                                        className="flex min-w-0 items-start gap-2 text-left"
-                                    >
-                                        <span className="min-w-0 flex-1">
-                                            {/* Severidad, categoría y título en el mismo renglón: son
-                                                tres cosas cortas y darle una línea a cada una era la
-                                                mitad del alto de la tarjeta. */}
-                                            <span className="flex items-center gap-1.5">
-                                                <span
-                                                    className={cn(
-                                                        "shrink-0 w-[38px] text-center rounded px-1 text-[9px] font-bold uppercase leading-[15px] tracking-wide",
-                                                        esBloq ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"
-                                                    )}
-                                                    /* El criterio, con las palabras de Lucas (28/08) y no
-                                                       con las nuestras: "alta = sin esto no puedo
-                                                       planificar, media = recomendación".
+                                {/* La tarjeta en dos franjas: arriba QUÉ PASA, abajo QUÉ HACER.
 
-                                                       Eran 250 caracteres adentro de un tooltip: el
-                                                       criterio del panel entero, escrito donde solo lo
-                                                       encuentra el que ya sabe que está ahí. Ahora la
-                                                       explicación larga vive en "¿Cómo se lee esto?",
-                                                       arriba y sin mouse, y acá queda la línea. */
-                                                    title={esBloq
-                                                        ? "Alta: algo del plan salió mal, por un dato que falta o porque no da la capacidad."
-                                                        : "Media: recomendación. El plan sale igual."}
-                                                >
-                                                    {esBloq ? "Alta" : "Media"}
-                                                </span>
-                                                {/* Recurso y subtipo en UN chip y no en dos: leído en voz
-                                                    alta es la frase que dijo Lucas —"alta, recurso máquina,
-                                                    rango"—, y dos chips separados costaban 30px más de
-                                                    ancho que salían del título, que es lo que de verdad
-                                                    hay que poder leer sin abrir la tarjeta. Ancho fijo y
-                                                    siempre en la misma columna: sin eso la lista no se
-                                                    puede barrer, hay que leerla entera. */}
-                                                <span className={cn(
-                                                    "shrink-0 min-w-[152px] inline-flex items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-semibold leading-[15px] whitespace-nowrap",
-                                                    esBloq
-                                                        ? "bg-rose-50 text-rose-700 border-rose-200"
-                                                        : "bg-amber-50 text-amber-800 border-amber-200"
-                                                )}>
-                                                    <Icono className="w-3 h-3 shrink-0" />
-                                                    {recurso?.texto ?? "Plan"}
-                                                    {subtipo && (
-                                                        <>
-                                                            <span className={esBloq ? "text-rose-300" : "text-amber-300"}>·</span>
-                                                            {subtipo}
-                                                        </>
-                                                    )}
-                                                </span>
-                                                <span
-                                                    className={cn(
-                                                        // Dos renglones y no `truncate`: con una sola línea se cortaban
-                                                        // cuatro de los seis títulos del plan real, y en «Control de
-                                                        // medidas: hoy no lo puede hacer n…» lo que se perdía era
-                                                        // justo «nadie». El título es lo único que tiene que
-                                                        // entenderse sin abrir la tarjeta; que crezca un renglón
-                                                        // cuesta menos que dejarlo a medias.
-                                                        "min-w-0 flex-1 text-[13px] font-semibold leading-tight text-gray-900",
-                                                        !activo && "line-clamp-2"
-                                                    )}
-                                                    title={d.titulo}
-                                                >
-                                                    {d.titulo}
-                                                </span>
-                                            </span>
+                                    Antes eran dos COLUMNAS, problema a la izquierda y
+                                    solución a la derecha. Entraban justo en una pantalla
+                                    ancha y se ahogaban en cualquier otra —con el sidebar
+                                    abierto en un notebook de 1366 la columna de la derecha
+                                    quedaba en ~250px—, pero el problema de fondo era otro:
+                                    la acción competía de igual a igual con el título, así
+                                    que en los avisos que no traen botón verde —los Media,
+                                    que son la mayoría— no se veía que hubiera algo para
+                                    tocar. Julián, 17/09/2026, mirando un Media: «me
+                                    sacaste los botones para arreglarlo desde ahí».
 
-                                            {/* El detalle es lo que dice QUÉ máquina y QUÉ rango tocar:
-                                                se lee siempre, sin abrir nada. Plegado, dos líneas.
-                                                Los números del impacto van al final del mismo renglón:
-                                                así no le comen ancho al título y no cuestan alto. */}
-                                            <span className="mt-0.5 flex items-start gap-2">
-                                                {/* Qué tiene hoy → qué le piden. Es la pregunta textual de
-                                                    Lucas mirando la soldadora: "¿cuál es el rango que tiene?
-                                                    Medio oficial. Debería decir qué tiene la máquina". El
-                                                    detalle ya lo explica en una frase, pero la frase hay que
-                                                    leerla; esto se ve. Solo sale cuando el backend lo manda:
-                                                    hay avisos donde no hay dos cosas que comparar. */}
-                                                {d.tiene && (
-                                                    <span
-                                                        className="mt-px hidden shrink-0 max-w-[260px] items-center gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 lg:inline-flex"
-                                                        /* "el proceso pide" era mentira en la mitad de los
-                                                           avisos: en los de rango de persona el lado
-                                                           derecho es lo que pide la MÁQUINA, no el
-                                                           proceso, y en los de cuello son jornadas de
-                                                           trabajo. Y sin el lado derecho quedaban frases
-                                                           sueltas como "Tiene no lo tiene nadie" o "Tiene
-                                                           se hace afuera". "Hoy / Hace falta" es cierto
-                                                           en los nueve casos y se entiende sin saber qué
-                                                           es un rango. */
-                                                        title={d.pide
-                                                            ? `Hoy: ${d.tiene} · Hace falta: ${d.pide}`
-                                                            : `Hoy: ${d.tiene}`}
-                                                    >
-                                                        {/* Los dos lados se achican, ninguno es intocable.
-                                                            Medido en el plan real: con «pide» fijo, el
-                                                            «OFICIAL» de la izquierda quedaba en 0px de ancho y
-                                                            el chip se leía «→ MEDIO OFICIAL o OPERARIO
-                                                            CALIFICADO», que es justo la mitad que NO contesta
-                                                            la pregunta de Lucas ("¿cuál es el rango que
-                                                            tiene?"). Sin `shrink-0` y con `min-w-0` los dos
-                                                            ceden en proporción a lo que ocupan: el corto queda
-                                                            entero y el largo se recorta. El texto completo
-                                                            está en el tooltip y en el detalle de al lado. */}
-                                                        <span className="min-w-0 truncate">{d.tiene}</span>
-                                                        {d.pide && (
-                                                            <>
-                                                                <span className="shrink-0 text-slate-400" aria-hidden="true">→</span>
-                                                                <span className="min-w-0 truncate font-medium text-slate-700">{d.pide}</span>
-                                                            </>
-                                                        )}
-                                                    </span>
+                                    Ahora lo que se puede hacer vive en una franja propia,
+                                    pegada abajo y pintada del color del aviso: se ve antes
+                                    de leer una palabra. Cuesta un renglón por tarjeta y lo
+                                    vale. */}
+                                <button
+                                    type="button"
+                                    aria-expanded={activo}
+                                    onClick={() => toggle(d.id)}
+                                    className="flex w-full min-w-0 items-start gap-2 px-2.5 py-1.5 text-left"
+                                >
+                                    {/* El círculo de color: lo único que hay que mirar para
+                                        barrer la lista. Hace lo que hacía el riel de la
+                                        izquierda que Julián devolvió el 31/08 («ese detalle
+                                        que tienen a la izquierda son muy molestas»), pero sin
+                                        empujar el título ni partir la tarjeta al medio. */}
+                                    <span className={cn(
+                                        "mt-px grid h-5 w-5 shrink-0 place-items-center rounded-full",
+                                        esBloq ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
+                                    )}>
+                                        {esBloq ? <AlertTriangle className="h-3 w-3" /> : <Info className="h-3 w-3" />}
+                                    </span>
+
+                                    <span className="min-w-0 flex-1">
+                                        {/* Renglón 1: severidad, categoría, título y el tamaño
+                                            del problema. Todo en una línea: son cuatro cosas
+                                            cortas y darle un renglón a cada una era la mitad
+                                            del alto de la tarjeta. */}
+                                        <span className="flex items-center gap-1.5">
+                                            <span
+                                                className={cn(
+                                                    "shrink-0 w-[38px] text-center rounded px-1 text-[9px] font-bold uppercase leading-[15px] tracking-wide",
+                                                    esBloq ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"
                                                 )}
-                                                {/* Cerrado va el resumen —una frase, entera—; abierto, el
-                                                    detalle completo. Antes cerrado mostraba las dos primeras
-                                                    líneas del detalle, o sea un párrafo cortado a la mitad:
-                                                    para saber de qué hablaba había que abrirlo igual. */}
-                                                <span className={cn(
-                                                    "min-w-0 flex-1 text-[11.5px] leading-[1.35] text-gray-600",
-                                                    !activo && !d.resumen && "line-clamp-2"
-                                                )}>
-                                                    {activo || !d.resumen
-                                                        ? conNegritas(d.detalle)
-                                                        : d.resumen}
-                                                </span>
-                                                <span className="mt-px hidden shrink-0 items-center gap-1 md:flex" title={otsTexto}>
-                                                    {impacto.map((t) => (
-                                                        <span key={t} className="rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 tabular-nums">
-                                                            {t}
-                                                        </span>
-                                                    ))}
-                                                </span>
+                                                /* El criterio, con las palabras de Lucas (28/08) y no
+                                                   con las nuestras: "alta = sin esto no puedo
+                                                   planificar, media = recomendación". */
+                                                title={esBloq
+                                                    ? "Alta: por esto algo del plan salió mal — trabajo sin recurso humano, recurso maquinaria sin reservar o trabajo que no entró en el período."
+                                                    : "Media: recomendación para afinar. El plan sale igual con el aviso o sin él; lo que falta lo sabe el taller."}
+                                            >
+                                                {esBloq ? "Alta" : "Media"}
+                                            </span>
+                                            <span className={cn(
+                                                "shrink-0 min-w-[152px] inline-flex items-center justify-center gap-1 rounded border px-1.5 text-[10px] font-semibold leading-[15px] whitespace-nowrap",
+                                                esBloq
+                                                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                                                    : "bg-amber-50 text-amber-800 border-amber-200"
+                                            )}>
+                                                <Icono className="w-3 h-3 shrink-0" />
+                                                {recurso?.texto ?? "Plan"}
+                                                {subtipo && (
+                                                    <>
+                                                        <span className={esBloq ? "text-rose-300" : "text-amber-300"}>·</span>
+                                                        {subtipo}
+                                                    </>
+                                                )}
+                                            </span>
+                                            <span
+                                                className={cn(
+                                                    "min-w-0 flex-1 text-[13.5px] font-semibold leading-tight text-gray-900",
+                                                    !activo && "line-clamp-2"
+                                                )}
+                                                title={d.titulo}
+                                            >
+                                                {d.titulo}
+                                            </span>
+                                            <span className="mt-px hidden shrink-0 items-center gap-1 md:flex" title={otsTexto}>
+                                                {impacto.map((t) => (
+                                                    <span key={t} className="rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 tabular-nums">
+                                                        {t}
+                                                    </span>
+                                                ))}
                                             </span>
                                         </span>
-                                    </button>
 
-                                    {/* ── Qué hacer ──
-                                        Columna propia con divisor. Abajo de lg no hay dos columnas:
-                                        pasa abajo, separada por una línea. */}
-                                    <div className="flex min-w-0 items-start gap-2 border-t pt-1.5 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-3">
-                                        <div className="min-w-0 flex-1">
-                                            {sol ? (
-                                                <>
-                                                    <span className="flex items-center gap-2">
-                                                        <span className={cn(
-                                                            "shrink-0 whitespace-nowrap text-[9px] font-bold uppercase leading-[15px] tracking-wider",
-                                                            esBloq ? "text-rose-600" : "text-amber-600"
-                                                        )}>
-                                                            Solución
-                                                        </span>
-                                                        {/* La OT, de un click, en el mismo renglón: "y vas a
-                                                            buscarla acá… estaría bueno que hagas clic acá"
-                                                            (Lucas 28/08, sobre la 15678). Va acá y no del lado
-                                                            del problema porque ese bloque entero es un botón
-                                                            que despliega la tarjeta y no se puede anidar nada
-                                                            clickeable adentro. Sin renglón propio: el alto de
-                                                            la tarjeta es lo que se cuida. */}
-                                                        {onVerOT && otsVisibles.map((o) => (
-                                                            <button
-                                                                key={o.id}
-                                                                type="button"
-                                                                onClick={() => onVerOT(o.id)}
-                                                                className="shrink-0 rounded bg-slate-100 px-1.5 text-[10px] font-medium leading-[15px] text-slate-600 tabular-nums hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
-                                                                title={`Abrir la OT #${o.numero} en la tabla del plan y asignarle ahí el recurso humano`}
-                                                            >
-                                                                #{o.numero}
-                                                            </button>
-                                                        ))}
-                                                        {/* Era un <span> muerto con la lista entera escondida
-                                                            en el tooltip, pegadito a los "#1234" que sí se
-                                                            tocan: parecía un botón y no hacía nada. Ahora
-                                                            despliega la tarjeta, donde las OTs ya están
-                                                            todas y cada una se abre de un click. */}
-                                                        {onVerOT && !activo && otsDelAviso.length > otsVisibles.length && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => toggle(d.id)}
-                                                                className="shrink-0 rounded px-1 text-[10px] leading-[15px] text-gray-400 hover:bg-slate-100 hover:text-gray-700 transition-colors"
-                                                                title={otsTexto ? `${otsTexto} — tocá para verlas todas` : "Tocá para verlas todas"}
-                                                            >
-                                                                +{otsDelAviso.length - otsVisibles.length}
-                                                            </button>
-                                                        )}
-                                                        {/* El "dónde" vive siempre en el mismo lugar y lleva a
-                                                            la pantalla, la pestaña y la fila que hay que tocar.
-                                                            Acá arriba no lo puede comer el clamp del texto. */}
-                                                        {sol.donde && (link ? (
-                                                            <a
-                                                                href={link}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="ml-auto inline-flex min-w-0 items-center gap-0.5 rounded bg-slate-100 px-1.5 text-[10px] leading-[15px] text-slate-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-                                                                title={`${sol.donde} — se abre en otra pestaña, ya parado en lo que hay que tocar`}
-                                                            >
-                                                                <span className="truncate">{sol.donde}</span>
-                                                                <ArrowUpRight className="w-2.5 h-2.5 shrink-0" />
-                                                            </a>
-                                                        ) : (
-                                                            /* Sin fondo ni borde cuando no lleva a ningún lado
-                                                               (el caso real es "Al elegir las OTs", que no es
-                                                               una pantalla de Recursos): con forma de cartelito
-                                                               prometía un click que no pasaba nada, que es
-                                                               exactamente el cartelito muerto que ya se había
-                                                               sacado del resto del panel. */
-                                                            <span className="ml-auto min-w-0 truncate px-1 text-[10px] leading-[15px] text-slate-400" title={sol.donde}>
-                                                                {sol.donde}
-                                                            </span>
-                                                        ))}
+                                        {/* Renglón 2: la frase en criollo y, si el aviso compara
+                                            dos cosas, qué hay hoy contra qué hace falta.
+
+                                            Ese par iba antes en un solo chip —«OPERARIO CALIFIC…
+                                            → AYUDANTE o INGRESA…»— sin decir cuál de los dos
+                                            lados era cuál: había que deducirlo de la flecha, y
+                                            encima los dos venían cortados. Ahora cada lado lleva
+                                            su etiqueta, que es lo que hace el mockup que pasó
+                                            Julián y lo que contesta la pregunta que hizo Lucas
+                                            mirando la soldadora: «¿cuál es el rango que tiene?». */}
+                                        <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                            <span className={cn(
+                                                "min-w-0 flex-1 text-[11.5px] leading-[1.35] text-gray-600",
+                                                !activo && !d.resumen && "line-clamp-2"
+                                            )}>
+                                                {activo || !d.resumen
+                                                    ? conNegritas(d.detalle)
+                                                    : d.resumen}
+                                            </span>
+                                            {d.tiene && (
+                                                <span className="hidden shrink-0 items-center gap-1 lg:inline-flex">
+                                                    <span className="inline-flex max-w-[170px] items-baseline gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[16px]">
+                                                        <span className="shrink-0 text-slate-400">Hoy</span>
+                                                        <span className="min-w-0 truncate font-medium text-slate-700">{d.tiene}</span>
                                                     </span>
-                                                    <p className={cn(
-                                                        "mt-0.5 text-[11.5px] font-medium leading-[1.35] text-gray-800",
-                                                        !activo && "line-clamp-2"
-                                                    )}>
-                                                        {conNegritas(sol.texto)}
-                                                        {otras > 0 && !activo && (
-                                                            <span className="ml-1 font-normal text-gray-400">
-                                                                +{otras} {otras === 1 ? "opción" : "opciones"}
-                                                            </span>
-                                                        )}
-                                                    </p>
-                                                </>
-                                            ) : (
-                                                <span className="text-[11px] text-gray-400">Este aviso no trae una solución sugerida.</span>
+                                                    {d.pide && (
+                                                        <span className="inline-flex max-w-[190px] items-baseline gap-1 rounded bg-slate-100 px-1.5 text-[10px] leading-[16px]">
+                                                            <span className="shrink-0 text-slate-400">Necesita</span>
+                                                            <span className="min-w-0 truncate font-medium text-slate-700">{d.pide}</span>
+                                                        </span>
+                                                    )}
+                                                </span>
                                             )}
-                                        </div>
+                                        </span>
+                                    </span>
+                                </button>
 
-                                        {/* Los botones van en su propia columnita: así quedan
-                                            alineados de tarjeta en tarjeta y no empujan el alto con
-                                            un renglón más.
+                                {/* ── Qué hacer ──
+                                    Franja propia, del color del aviso y separada por una
+                                    línea: es lo que hace que un Media sin botón verde deje
+                                    de parecer un cartel que sólo informa. */}
+                                <div className={cn(
+                                    "flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t px-2.5 py-1.5",
+                                    esBloq ? "border-rose-100 bg-rose-50/80" : "border-amber-100 bg-amber-50/70"
+                                )}>
+                                    <Wrench className={cn("h-3.5 w-3.5 shrink-0", esBloq ? "text-rose-500" : "text-amber-600")} />
+                                    <p className={cn(
+                                        "min-w-0 flex-[3] basis-[15rem] text-[11.5px] font-medium leading-[1.35] text-gray-800",
+                                        !activo && "line-clamp-2"
+                                    )}>
+                                        {sol ? (
+                                            <>
+                                                {conNegritas(sol.texto)}
+                                                {otras > 0 && !activo && (
+                                                    <span className="ml-1 font-normal text-gray-400">
+                                                        +{otras} {otras === 1 ? "opción" : "opciones"}
+                                                    </span>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <span className="font-normal text-gray-400">Este aviso no trae una solución sugerida.</span>
+                                        )}
+                                    </p>
 
-                                            Y de 2xl para arriba las etiquetas largas se acortan. Es
-                                            el mismo criterio que "Marcar todo listo" en el
-                                            encabezado, pero al revés de lo que uno esperaría, y por
-                                            geometría: el corte en dos columnas empieza JUSTO en 2xl,
-                                            así que de ahí para arriba la columna de la derecha pasa
-                                            de tener el ancho entero del panel a 4/11 de él —unos
-                                            450-510px— y es donde los botones ahogan al texto de la
-                                            solución. Con los nombres largos, dos botones se comían
-                                            ~276px de esos 510 y la recomendación (line-clamp-2)
-                                            quedaba cortada a la mitad; acortados son ~201px, o sea
-                                            unos 14 caracteres más por renglón. Abajo de 2xl la fila
-                                            ocupa el panel entero y no hay nada que ahorrar. */}
+                                    {/* La OT, de un click: "y vas a buscarla acá… estaría bueno
+                                        que hagas clic acá" (Lucas 28/08, sobre la 15678). Acá
+                                        adentro sí se puede: la franja es un div, no el botón que
+                                        despliega la tarjeta. */}
+                                    {onVerOT && otsVisibles.map((o) => (
+                                        <button
+                                            key={o.id}
+                                            type="button"
+                                            onClick={() => onVerOT(o.id)}
+                                            className="shrink-0 rounded bg-white/70 px-1.5 text-[10px] font-medium leading-[17px] text-slate-600 tabular-nums ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-indigo-700 transition-colors"
+                                            title={`Abrir la OT #${o.numero} en la tabla del plan`}
+                                        >
+                                            #{o.numero}
+                                        </button>
+                                    ))}
+                                    {onVerOT && !activo && otsDelAviso.length > otsVisibles.length && (
+                                        <button
+                                            type="button"
+                                            onClick={() => toggle(d.id)}
+                                            className="shrink-0 rounded px-1 text-[10px] leading-[17px] text-gray-400 hover:bg-white hover:text-gray-700 transition-colors"
+                                            title={otsTexto ? `${otsTexto} — tocá para verlas todas` : "Tocá para verlas todas"}
+                                        >
+                                            +{otsDelAviso.length - otsVisibles.length}
+                                        </button>
+                                    )}
+
+                                    {/* El "dónde" sólo cuando NO hay un botón que lleve ahí: con
+                                        "Ir a arreglarlo" al lado, el chip decía dos veces lo
+                                        mismo y le comía ancho a la solución. */}
+                                    {sol?.accion && sol.donde && (link ? (
+                                        <a
+                                            href={link}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex min-w-0 shrink-0 items-center gap-0.5 rounded bg-white/70 px-1.5 text-[10px] leading-[17px] text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-white hover:text-blue-700 transition-colors"
+                                            title={`${sol.donde} — se abre en otra pestaña, ya parado en lo que hay que tocar`}
+                                        >
+                                            <span className="truncate">{sol.donde}</span>
+                                            <ArrowUpRight className="w-2.5 h-2.5 shrink-0" />
+                                        </a>
+                                    ) : (
+                                        <span className="min-w-0 shrink-0 truncate rounded bg-white/70 px-1.5 text-[10px] leading-[17px] text-slate-500">
+                                            {sol.donde}
+                                        </span>
+                                    ))}
+
+                                    {/* Los botones, al final de la franja y siempre en el mismo
+                                        orden: primero lo que se prueba y se deshace, después lo
+                                        que queda cargado, último lo que sólo esconde el aviso.
+                                        Así la mano aprende la fila una vez y no una por tipo de
+                                        aviso. */}
                                         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                                             {/* ── El camino que NO toca nada ──
                                                 Va primero de la fila, y es de otro color, otro borde
@@ -1674,7 +1525,7 @@ export function DiagnosticosPlan({
                                                         ? `Sacar de este plan: ${d.titulo}`
                                                         : `Aplicar solo en este plan: ${d.titulo}`}
                                                     className={cn(
-                                                        "group inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border px-2 text-[10.5px] font-semibold transition-colors disabled:opacity-50",
+                                                        "group inline-flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border px-2 text-[10.5px] font-semibold transition-colors disabled:opacity-50",
                                                         ajustada
                                                             ? "border-indigo-400 bg-indigo-100 text-indigo-800 hover:bg-indigo-200"
                                                             : "border-dashed border-indigo-300 bg-indigo-50/60 text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100"
@@ -1700,8 +1551,7 @@ export function DiagnosticosPlan({
                                                         </>
                                                     ) : (
                                                         <>
-                                                            <span className="2xl:hidden">Solo en este plan</span>
-                                                            <span className="hidden 2xl:inline">Solo este plan</span>
+                                                            Solo en este plan
                                                         </>
                                                     )}
                                                 </button>
@@ -1723,11 +1573,10 @@ export function DiagnosticosPlan({
                                                     href={link}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-[10.5px] font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                                    className="inline-flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-[10.5px] font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition-colors"
                                                     title={`Abre ${sol?.donde} en otra pestaña, ya parado en lo que hay que tocar. Al volver acá se revisa solo.`}
                                                 >
-                                                    <span className="2xl:hidden">Ir a arreglarlo</span>
-                                                    <span className="hidden 2xl:inline">Arreglarlo</span>
+                                                    Ir a arreglarlo
                                                     <ArrowUpRight className="w-3 h-3 shrink-0" />
                                                 </a>
                                             )}
@@ -1751,7 +1600,7 @@ export function DiagnosticosPlan({
                                                        partía en dos renglones. La alineación de tarjeta
                                                        en tarjeta se la queda ahora el par entero. */
                                                     className={cn(
-                                                        "h-6 justify-center gap-1 px-2 text-[10.5px] font-semibold shadow-none",
+                                                        "h-7 justify-center gap-1 px-2.5 text-[10.5px] font-semibold shadow-none",
                                                         hecha
                                                             ? "bg-transparent text-emerald-700 hover:bg-transparent"
                                                             : confirmando === claveSol
@@ -1780,8 +1629,7 @@ export function DiagnosticosPlan({
                                                                    ~60px para el texto de la solución, que ahí
                                                                    arriba se lee cortado a la mitad. */
                                                                 <>
-                                                                    <span className="2xl:hidden">Guardar en Recursos</span>
-                                                                    <span className="hidden 2xl:inline">Guardar</span>
+                                                                    Guardar en Recursos
                                                                 </>
                                                             )}
                                                 </Button>
@@ -1821,15 +1669,10 @@ export function DiagnosticosPlan({
                                                     onClick={() => marcar(d)}
                                                     title="No lo muestres más. No cambia el plan ni los datos: lo baja a la tira verde de arriba, y se deshace."
                                                     aria-label={`Listo, no mostrar más: ${d.titulo}`}
-                                                    className="inline-flex h-6 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
+                                                    className="inline-flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[10.5px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors"
                                                 >
                                                     <Check className="w-3.5 h-3.5 shrink-0" />
-                                                    {/* De 2xl para arriba, el tilde solo: es la tercera acción
-                                                        de una tarjeta Media y la que menos hace, así que es la
-                                                        primera que cede el ancho. El nombre entero sigue
-                                                        estando en el `aria-label`, en el `title` y en el botón
-                                                        de adentro de la tarjeta desplegada. */}
-                                                    <span className="2xl:hidden">Listo</span>
+                                                    Listo
                                                 </button>
                                             )}
                                             <button
@@ -1838,11 +1681,10 @@ export function DiagnosticosPlan({
                                                 onClick={() => toggle(d.id)}
                                                 title={activo ? "Ocultar detalles" : "Ver detalles"}
                                                 aria-label={activo ? "Ocultar detalles" : "Ver detalles"}
-                                                className="grid h-6 w-6 shrink-0 place-items-center rounded text-gray-400 hover:bg-slate-100 hover:text-gray-600 transition-colors"
+                                                className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-400 hover:bg-slate-100 hover:text-gray-600 transition-colors"
                                             >
                                                 <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", activo && "rotate-180")} />
                                             </button>
-                                        </div>
                                     </div>
                                 </div>
 

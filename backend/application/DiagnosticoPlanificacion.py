@@ -1249,9 +1249,20 @@ def _procesos_sin_maquina_compatible(
                 f"{_quien_lo_hace(n_hacen, rangos_proc)} No hay ninguna máquina cargada "
                 "que le corresponda, así que va sin reservar ninguna."
             )
+            # El «dónde» es PROCESOS, no Maquinarias.
+            #
+            # Lo que falta acá no es una máquina: es el vínculo entre este proceso y las
+            # máquinas en las que se hace, y ese vínculo se carga desplegando el proceso
+            # en Recursos › Procesos (EditorMaquinasDe vive ahí, al lado del editor de
+            # rangos). Decía «Recursos › Recurso maquinaria», que abre la lista de
+            # máquinas: la pantalla equivocada, sin nada que tocar cuando llegabas. Con
+            # el objetivo puesto, el botón cae en la fila del proceso, ya desplegada.
+            # Julián, 17/09/2026, mirando este mismo aviso: «no están los botones para
+            # arreglarlo desde ahí».
             soluciones = [{
-                "texto": "Si este trabajo usa una máquina, cargala con los mismos rangos que el proceso.",
-                "donde": "Recursos › Recurso maquinaria",
+                "texto": "Decile en qué máquinas se hace: se cargan desplegando el proceso.",
+                "donde": "Recursos › Procesos",
+                "objetivo": {"tipo": "proceso", "id": proc_id, "nombre": d["nombre"]},
             }, {
                 "texto": "Si va a mano, dejalo así: el aviso no molesta.",
                 "donde": "",
