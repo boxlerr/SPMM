@@ -246,9 +246,13 @@ export function AccionesDeProcesoEnPlan({
  */
 export function PasoEnPlanEditable({
     paso, total, fijo, bloqueado, motivoBloqueo, trabajando, onMover,
+    claseHover = "group-hover/row:opacity-100",
 }: {
     paso: number;
     total: number;
+    /** Con qué hover aparecen las flechitas. Cada tabla nombra su grupo distinto
+     *  (`group/row` en el plan, `group/proc` en las órdenes sin planificar). */
+    claseHover?: string;
     /** El paso recién agregado va al final hasta que se recalcule: moverlo antes de que
      *  el plan lo ubique no significa nada, así que se muestra pero no se edita. */
     fijo?: boolean;
@@ -310,7 +314,7 @@ export function PasoEnPlanEditable({
                 siempre encendidas son seis pares de flechitas compitiendo con el número,
                 que es lo único que hay que leer al barrer la lista. Siguen alcanzables
                 con el teclado (`focus-within`). */}
-            <span className="flex flex-col opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+            <span className={cn("flex flex-col opacity-0 transition-opacity focus-within:opacity-100", claseHover)}>
                 <button
                     type="button"
                     className={flecha}

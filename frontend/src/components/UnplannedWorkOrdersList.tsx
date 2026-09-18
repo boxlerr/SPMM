@@ -25,9 +25,18 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
-import { cn, getWorkOrderRowColor } from "@/lib/utils";
+import { cn, getWorkOrderRowColor, parseApiError } from "@/lib/utils";
+import { toast } from "sonner";
+import { API_URL } from "@/config";
+
+const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === "undefined") return {};
+    const token = localStorage.getItem("access_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+};
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
-import { ProcessRowActions } from "@/components/planning/ProcessRowActions";
+import { ProcessRowActions, MinutosEditables } from "@/components/planning/ProcessRowActions";
+import { PasoEnPlanEditable } from "@/components/planning/ProcesoEnPlanEditable";
 import { AddProcessRow } from "./planning/AddProcessRow";
 import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 import { PlanoDeOrden } from "./common/PlanoDeOrden";
@@ -123,6 +132,46 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
             else if (sortConfig.direction === 'desc') direction = null;
         }
         setSortConfig({ key: direction ? key : null, direction });
+    };
+
+    /**
+     * Mover un paso de lugar dentro de la OT, desde la propia lista.
+     *
+     * Renumera la orden entera y la manda de una: el backend guarda la POSICIÓN, así
+     * que mandar la lista a medias le cambiaría el paso a filas que nadie tocó. Va sin
+     * `motivo` a propósito —esto no es el planificador— para que el registro de cambios
+     * diga que se editó desde la ficha de la orden.
+     */
+    const [moviendo, setMoviendo] = useState<number | null>(null);
+    const moverPaso = async (order: WorkOrder, idOtp: number, posicion: number) => {
+        const lineas = [...(order.procesos ?? [])].sort((a, b) => a.orden - b.orden);
+        const desde = lineas.findIndex((l) => (l as any).id === idOtp);
+        if (desde < 0) return;
+        // Fuera de rango se lleva al extremo más cercano, como en el alta de la OT.
+        const hasta = Math.min(Math.max(posicion, 1), lineas.length) - 1;
+        if (hasta === desde) return;
+        const sinLa = lineas.filter((_, i) => i !== desde);
+        const ordenada = [...sinLa.slice(0, hasta), lineas[desde], ...sinLa.slice(hasta)];
+
+        setMoviendo(order.id);
+        try {
+            const res = await fetch(`${API_URL}/ordenes/${order.id}/procesos/reorder`, {
+                method: "PUT",
+                headers: { ...(getAuthHeaders() as Record<string, string>), "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ordenes: ordenada.map((l, i) => ({
+                        id_otp: (l as any).id, id_proceso: l.proceso.id, orden: i + 1,
+                    })),
+                }),
+            });
+            if (!res.ok) throw new Error(parseApiError(await res.text().catch(() => "")) || `error ${res.status}`);
+            toast.success(`«${lineas[desde].proceso?.nombre ?? "El proceso"}» pasó al paso ${hasta + 1}`);
+            onDataChange && onDataChange();
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : "No se pudo cambiar el orden de los pasos");
+        } finally {
+            setMoviendo(null);
+        }
     };
 
     const getEditableProductDescription = (order: WorkOrder) => {
@@ -667,7 +716,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                     <div className="flex flex-col">
                                                                         {order.procesos && order.procesos.length > 0 ? (
                                                                             <>
-                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[30px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
+                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[58px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
                                                                                     <div>#</div>
                                                                                     <div>Proceso</div>
                                                                                     <div>Estado</div>
@@ -678,10 +727,24 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                 </div>
                                                                                 {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
                                                                                     <div key={`${order.id}-${(proc as any).id ?? proc.proceso.id}`} className={cn(
-                                                                                        "group/proc grid grid-cols-[30px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
+                                                                                        "group/proc grid grid-cols-[58px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
                                                                                         pIdx === order.procesos!.length - 1 && "border-b-0"
                                                                                     )}>
-                                                                                        <div className="text-gray-300 font-mono text-[10px]">{pIdx + 1}</div>
+                                                                                        {/* El paso se mueve desde acá, igual que en la vista previa del
+                                                                                            plan: se escribe el número o se usan las flechitas. Julián,
+                                                                                            17/09/2026: *"eso también lo quiero acá en órdenes no
+                                                                                            planificadas"*. Acá la lista es la COMPLETA de la OT —no hay
+                                                                                            pasadas escondidas como en el plan—, así que la posición que se
+                                                                                            escribe es directamente la de la orden. */}
+                                                                                        <div className="text-gray-300 font-mono text-[10px]">
+                                                                                            <PasoEnPlanEditable
+                                                                                                paso={pIdx + 1}
+                                                                                                total={order.procesos!.length}
+                                                                                                claseHover="group-hover/proc:opacity-100"
+                                                                                                trabajando={moviendo === order.id}
+                                                                                                onMover={(pos) => void moverPaso(order, (proc as any).id, pos)}
+                                                                                            />
+                                                                                        </div>
                                                                                         <div className="font-semibold text-xs text-gray-800 truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
                                                                                         <div>
                                                                                             <Badge className={cn(
@@ -693,7 +756,15 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                                 {proc.estado_proceso?.id === 3 ? "OK" : proc.estado_proceso?.id === 2 ? "Producc." : "Pend."}
                                                                                             </Badge>
                                                                                         </div>
-                                                                                        <div className="text-center text-gray-500 tabular-nums text-[10px]">{proc.tiempo_proceso || "-"}</div>
+                                                                                        <div className="text-center">
+                                                                                            <MinutosEditables
+                                                                                                orderId={order.id}
+                                                                                                idOtp={(proc as any).id}
+                                                                                                nombre={proc.proceso?.nombre || "el proceso"}
+                                                                                                minutos={proc.tiempo_proceso}
+                                                                                                onChanged={() => onDataChange && onDataChange()}
+                                                                                            />
+                                                                                        </div>
                                                                                         <div className="text-center font-bold text-blue-600 tabular-nums text-[10px]">
                                                                                             {proc.inicio_real && proc.fin_real
                                                                                                 ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)}`
@@ -708,7 +779,6 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                             idOtp={(proc as any).id}
                                                                                             idProceso={proc.proceso.id}
                                                                                             nombre={proc.proceso?.nombre || "el proceso"}
-                                                                                            minutos={proc.tiempo_proceso}
                                                                                             onChanged={() => onDataChange && onDataChange()}
                                                                                         />
                                                                                     </div>

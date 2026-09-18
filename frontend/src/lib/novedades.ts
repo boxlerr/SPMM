@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "mover-pasos-y-minutos-desde-la-lista",
+        fecha: "2026-09-17",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "Los pasos de una orden se mueven desde el número, y los minutos se cambian donde están",
+        detalle:
+            "En el número de la izquierda de cada paso: escribís otro número y el paso se va a ese lugar, o usás las flechitas para moverlo de a uno. Antes había que arrastrar o buscar dos flechas al final del renglón. Los minutos se cambian tocando el número en la columna «Min. Est.»: hasta ahora se editaban desde un lápiz que estaba en la otra punta de la fila y abría una cajita lejos de los minutos, que no se entendía qué era. Vale en las dos pantallas: en Órdenes no planificadas y adentro de la vista previa del planificador. En el planificador, además, lo que tocaste queda marcado en rojo y hay un «Deshacer» para volver atrás el último cambio.",
+        href: "/operaciones",
+    },
+    {
         id: "editar-los-procesos-desde-la-planificacion",
         fecha: "2026-09-17",
         tipo: "nuevo",
