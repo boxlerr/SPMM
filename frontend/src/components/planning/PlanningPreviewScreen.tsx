@@ -3348,13 +3348,19 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                        horrible"*. Ahora dice CUÁNTOS son y con qué falta hacer —que es
                                                                        el dato— en el mismo tono que los otros chips de la fila. */
                                                                     <span
-                                                                        className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[11px] font-medium text-orange-800"
-                                                                        title={`${resumirCambios(cambiosDeLaOT)}. Está guardado en la orden; lo que falta es recalcular para que los horarios valgan.`}
+                                                                        /* `whitespace-nowrap`: la columna del ID es angosta y «1 cambio sin
+                                                                           recalcular» se partía en tres renglones, con el lápiz colgando
+                                                                           en el medio. Julián, 17/09/2026: *"es horrible y se corta"*. El
+                                                                           texto queda en dos palabras y el resto se lee en el globito.
+
+                                                                           Y va en el rojo de Longchamps, el mismo #DC143C de los botones
+                                                                           de la app: es la marca de «esto lo editó alguien» y se repite
+                                                                           igual en las filas de adentro, así que el ojo la ata sola. */
+                                                                        className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-[#DC143C]/25 bg-[#DC143C]/[0.07] px-1.5 py-0.5 text-[11px] font-semibold text-[#DC143C]"
+                                                                        title={`${resumirCambios(cambiosDeLaOT)}. Está guardado en la orden; lo que falta es recalcular para que los horarios de esta OT valgan.`}
                                                                     >
                                                                         <Pencil className="h-2.5 w-2.5 shrink-0" />
-                                                                        {contarCambios(cambiosDeLaOT) === 1
-                                                                            ? "1 cambio sin recalcular"
-                                                                            : `${contarCambios(cambiosDeLaOT)} cambios sin recalcular`}
+                                                                        {contarCambios(cambiosDeLaOT) === 1 ? "1 cambio" : `${contarCambios(cambiosDeLaOT)} cambios`}
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -3612,7 +3618,19 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                     : item.slot_extra
                                                                                         ? "Es otra persona en el mismo paso: se edita en el renglón de arriba."
                                                                                         : undefined;
+                                                                                /* El orden original, dejado sólo con las pasadas que se ven: es
+                                                                                   contra ésta que se sabe si ESTA fila se movió. `ordenOriginal`
+                                                                                   es la lista COMPLETA de la OT y el plan puede mostrar menos,
+                                                                                   así que comparar posiciones sin filtrar daría cualquier cosa. */
+                                                                                const ordenOriginalVisible = cambiosDeLaOT?.ordenOriginal
+                                                                                    ? cambiosDeLaOT.ordenOriginal.filter(id => pasadasVisibles.includes(id))
+                                                                                    : null;
                                                                                 const posPasada = lineaId != null ? pasadasVisibles.indexOf(lineaId) : -1;
+                                                                                /** Se movió de lugar: estaba en otro paso antes de que tocaran la OT. */
+                                                                                const filaMovida = !!ordenOriginalVisible && lineaId != null
+                                                                                    && ordenOriginalVisible.indexOf(lineaId) !== posPasada;
+                                                                                /** Algo de ESTA fila cambió: el proceso, o el lugar que ocupa. */
+                                                                                const filaEditada = !!cambio || filaMovida;
                                                                                 const vecinoArriba = posPasada > 0 ? pasadasVisibles[posPasada - 1] : null;
                                                                                 const vecinoAbajo = posPasada >= 0 && posPasada < pasadasVisibles.length - 1
                                                                                     ? pasadasVisibles[posPasada + 1]
@@ -3622,14 +3640,25 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                                         "contents group/row",
                                                                                         // El cambio sin recalcular gana sobre el violeta de "a mano":
                                                                                         // es lo que hay que ver antes de guardar el plan.
-                                                                                        cambio ? "[&>div]:bg-orange-50/70" : procesoAMano && "[&>div]:bg-indigo-50/60",
+                                                                                        /* El rojo de Longchamps para lo editado (Julián, 17/09/2026:
+                                                                                           *"un pequeño color rojo […] para que de a entender que algo
+                                                                                           fue editado o modificado"*). El violeta de «agregado a mano»
+                                                                                           se queda: es otra cosa —no lo editaron, lo puso el que
+                                                                                           armaba el plan— y tenerlas separadas es lo que permite
+                                                                                           distinguirlas de un vistazo. */
+                                                                                        filaEditada ? "[&>div]:bg-[#DC143C]/[0.045]" : procesoAMano && "[&>div]:bg-indigo-50/60",
                                                                                     )}>
                                                                                         <div className="px-3 py-1.5 border-b flex items-center gap-1 text-gray-400 font-mono text-xs">
-                                                                                            {(cambio || procesoAMano) && (
-                                                                                                <span className={cn(
-                                                                                                    "w-0.5 self-stretch -ml-3 mr-1 rounded-r",
-                                                                                                    cambio ? "bg-orange-500" : "bg-indigo-500",
-                                                                                                )} />
+                                                                                            {(filaEditada || procesoAMano) && (
+                                                                                                <span
+                                                                                                    className={cn(
+                                                                                                        "w-0.5 self-stretch -ml-3 mr-1 rounded-r",
+                                                                                                        filaEditada ? "bg-[#DC143C]" : "bg-indigo-500",
+                                                                                                    )}
+                                                                                                    title={filaEditada
+                                                                                                        ? (cambio ? "Le cambiaste el proceso a este paso" : "Este paso cambió de lugar")
+                                                                                                        : "Lo agregaste vos al plan"}
+                                                                                                />
                                                                                             )}
                                                                                             <PasoEnPlanEditable
                                                                                                 paso={idx + 1}

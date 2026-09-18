@@ -14,7 +14,7 @@
  */
 
 import React from "react";
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -281,23 +281,58 @@ export function PasoEnPlanEditable({
         );
     }
 
+    const flecha = "grid h-3 w-4 place-items-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-0 transition-colors";
+
     return (
-        <input
-            type="text"
-            inputMode="numeric"
-            aria-label={`Paso ${paso}. Escribí otro número para mover este proceso.`}
-            title="Escribí el número y el proceso se mueve a ese lugar"
-            value={tipeado ?? String(paso)}
-            onChange={(e) => setTipeado(e.target.value)}
-            onFocus={(e) => e.currentTarget.select()}
-            onBlur={confirmar}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
-                if (e.key === "Escape") { setTipeado(null); e.currentTarget.blur(); }
-            }}
-            className="w-7 h-6 px-0 text-center text-xs font-medium tabular-nums rounded-full border border-transparent bg-transparent text-gray-500 hover:border-gray-300 hover:bg-white focus:border-blue-400 focus:bg-white focus:text-gray-900 focus:outline-none transition-colors"
-        />
+        // Las flechitas vuelven, pero de ESTE lado. Estaban al final de la fila, en la
+        // columna PASO; Julián las quiso en el número —«y acá agregá flechitas»— y
+        // tiene razón: mover un paso es tocar su número, no un control que vive a seis
+        // columnas de distancia. Escribir el número sigue estando para saltos largos
+        // (de 9 a 2 son siete clicks), las flechitas para el movimiento de a uno, que
+        // es el 90% de las veces.
+        <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <input
+                type="text"
+                inputMode="numeric"
+                aria-label={`Paso ${paso}. Escribí otro número para mover este proceso.`}
+                title="Escribí el número y el proceso se mueve a ese lugar"
+                value={tipeado ?? String(paso)}
+                onChange={(e) => setTipeado(e.target.value)}
+                onFocus={(e) => e.currentTarget.select()}
+                onBlur={confirmar}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                    if (e.key === "Escape") { setTipeado(null); e.currentTarget.blur(); }
+                }}
+                className="w-7 h-6 px-0 text-center text-xs font-medium tabular-nums rounded-full border border-transparent bg-transparent text-gray-500 hover:border-gray-300 hover:bg-white focus:border-blue-400 focus:bg-white focus:text-gray-900 focus:outline-none transition-colors"
+            />
+            {/* Apagadas hasta que el mouse entra en la fila: seis pares de flechitas
+                siempre encendidas son seis pares de flechitas compitiendo con el número,
+                que es lo único que hay que leer al barrer la lista. Siguen alcanzables
+                con el teclado (`focus-within`). */}
+            <span className="flex flex-col opacity-0 transition-opacity group-hover/row:opacity-100 focus-within:opacity-100">
+                <button
+                    type="button"
+                    className={flecha}
+                    disabled={paso <= 1}
+                    onClick={() => onMover(paso - 1)}
+                    title="Subir un paso"
+                    aria-label={`Subir el paso ${paso}`}
+                >
+                    <ChevronUp className="h-3 w-3" />
+                </button>
+                <button
+                    type="button"
+                    className={flecha}
+                    disabled={paso >= total}
+                    onClick={() => onMover(paso + 1)}
+                    title="Bajar un paso"
+                    aria-label={`Bajar el paso ${paso}`}
+                >
+                    <ChevronDown className="h-3 w-3" />
+                </button>
+            </span>
+        </div>
     );
 }
 
