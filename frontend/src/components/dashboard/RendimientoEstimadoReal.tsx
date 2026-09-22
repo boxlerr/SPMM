@@ -73,7 +73,7 @@ export default function RendimientoEstimadoReal() {
 
     return (
         <section className="bg-white rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-gray-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between gap-3 flex-wrap">
+            <div className="px-4 sm:px-6 py-4 border-b border-gray-50 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100/50">
                         <Gauge className="h-5 w-5" />
@@ -99,7 +99,7 @@ export default function RendimientoEstimadoReal() {
                 </div>
             </div>
 
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
                 {loading ? (
                     <div className="flex items-center justify-center py-10">
                         <div className="animate-spin rounded-full h-7 w-7 border-4 border-gray-200 border-t-blue-500" />
@@ -116,19 +116,21 @@ export default function RendimientoEstimadoReal() {
                     </div>
                 ) : (
                     <>
-                        {/* Resumen */}
-                        <div className="grid grid-cols-3 gap-3 mb-4">
-                            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
-                                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Estimado</p>
-                                <p className="text-xl font-bold text-gray-800">{fmtHoras(totalEst)}</p>
+                        {/* Resumen. Las tres cifras siguen en fila en el teléfono —se leen
+                            juntas, es una comparación—, pero con letra y aire más chicos
+                            (RF-27): «123h 45m» en text-xl no entraba en una celda de 90px. */}
+                        <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
+                            <div className="min-w-0 bg-gray-50 border border-gray-100 rounded-xl p-2.5 sm:p-3">
+                                <p className="text-[10px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Estimado</p>
+                                <p className="text-base sm:text-xl font-bold text-gray-800 tabular-nums">{fmtHoras(totalEst)}</p>
                             </div>
-                            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
-                                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Real</p>
-                                <p className="text-xl font-bold text-blue-700">{fmtHoras(totalReal)}</p>
+                            <div className="min-w-0 bg-gray-50 border border-gray-100 rounded-xl p-2.5 sm:p-3">
+                                <p className="text-[10px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Real</p>
+                                <p className="text-base sm:text-xl font-bold text-blue-700 tabular-nums">{fmtHoras(totalReal)}</p>
                             </div>
-                            <div className="bg-gray-50 border border-gray-100 rounded-xl p-3">
-                                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Desvío</p>
-                                <p className="text-xl font-bold"><DesvioBadge d={desvioTotal} /></p>
+                            <div className="min-w-0 bg-gray-50 border border-gray-100 rounded-xl p-2.5 sm:p-3">
+                                <p className="text-[10px] sm:text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Desvío</p>
+                                <p className="text-base sm:text-xl font-bold"><DesvioBadge d={desvioTotal} /></p>
                             </div>
                         </div>
 

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import LayoutWrapper from "../components/LayoutWrapper";
@@ -25,13 +25,29 @@ export const metadata: Metadata = {
   description: "Sistema de Planificacion Metalurgica Metlo",
 };
 
+// RF-27 (interfaz responsive, de teléfono a escritorio). Next ya inyecta este mismo
+// viewport por defecto, pero dejarlo escrito acá es lo que evita que alguien lo pise
+// sin darse cuenta: sin `width=device-width` el teléfono dibuja la página a 980px y
+// la achica, y todos los `sm:`/`lg:` de la app dejan de valer.
+//
+// Sin `maximumScale` ni `userScalable: false`, a propósito: el riel de cifras del plan
+// y las tablas con zoom usan letra de 10-11px, y en el taller hay quien necesita
+// agrandar con dos dedos. Bloquear el zoom sería esconderle eso.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // `es` y no `en`: la app entera está en castellano. Con `en`, Chrome en el teléfono
+    // ofrecía «traducir esta página» cada vez que se abría, y el lector de pantalla
+    // leía los textos con pronunciación inglesa.
+    <html lang="es">
       <head>
         <script src="/hydration-fix.js" />
       </head>

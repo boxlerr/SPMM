@@ -365,7 +365,7 @@ export default function UsuariosTable() {
     <div className="space-y-6">
       {/* Header con búsqueda y botón crear */}
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative w-full flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
           <Input
             placeholder="Buscar usuarios..."
@@ -542,7 +542,10 @@ export default function UsuariosTable() {
                 <p className="text-xs text-red-500">{formErrors.password}</p>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            {/* Un campo por renglón en el teléfono (RF-27): de a dos quedaban de 140px y la
+                contraseña, con el ojito adentro, no se leía. Desde `sm`, de a dos como siempre.
+                Igual en los otros tres pares de este archivo. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="nombre">Nombre *</Label>
                 <Input
@@ -570,7 +573,7 @@ export default function UsuariosTable() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="rol">Rol</Label>
                 <Select value={formData.rol} onValueChange={(value) => setFormData({ ...formData, rol: value })}>
@@ -668,7 +671,7 @@ export default function UsuariosTable() {
                 <p className="text-xs text-red-500">{formErrors.password}</p>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-nombre">Nombre *</Label>
                 <Input
@@ -694,7 +697,7 @@ export default function UsuariosTable() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-rol">Rol</Label>
                 <Select value={formData.rol} onValueChange={(value) => setFormData({ ...formData, rol: value })}>

@@ -1407,8 +1407,12 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                         baja de 24 a 20px, el título de 2xl a xl, y la bajada —"Modifica la
                         información de la OT existente"— se va: no dice nada que el título no
                         diga ya. Son unos 40px que pasan a ser dos filas más de proceso. */}
-                    <DialogHeader className="px-6 py-3 border-b bg-white flex-shrink-0">
-                        <DialogTitle className="text-xl font-bold text-gray-900 flex items-center gap-2.5">
+                    {/* RF-27: en el teléfono, márgenes de 12px y la cabecera que baja de
+                        renglón (número, tipo de trabajo y «modificada el…» no entran en una
+                        fila de 343px y se salían por la derecha). `pr-10` para no pisar la X
+                        de cerrar del diálogo, que es absoluta arriba a la derecha. */}
+                    <DialogHeader className="px-3 sm:px-6 pr-10 sm:pr-10 py-3 border-b bg-white flex-shrink-0">
+                        <DialogTitle className="text-lg sm:text-xl font-bold text-gray-900 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
                             <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-md shadow-blue-500/20">
                                 <CalendarIcon className="h-5 w-5 text-white" />
                             </div>
@@ -1438,7 +1442,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                 todas las que trajo el sistema viejo— y eso también es una
                                 respuesta, así que no se pone ningún cartel. */}
                             {orderToEdit?.modificado_en && (
-                                <span className="ml-auto flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-500">
+                                <span className="sm:ml-auto flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-500">
                                     <History className="h-3 w-3 shrink-0" />
                                     Modificada el {formatearMomento(orderToEdit.modificado_en)}
                                     {orderToEdit.modificado_por ? ` por ${capitalizeName(orderToEdit.modificado_por)}` : ""}
@@ -1448,7 +1452,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                     </DialogHeader>
 
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-                        <div className="flex-1 overflow-y-auto px-6 py-3 relative">
+                        <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 relative">
                             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                                 {/* Los rótulos se acortan abajo de lg y no se dejan enteros.
                                     El TabsTrigger es `whitespace-nowrap` y la columna del grid mide
@@ -1457,26 +1461,32 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     solapas a cuatro cada celda perdió un cuarto de ancho, así que lo
                                     que antes zafaba raspando ahora se pisa. Abajo de lg queda
                                     "1. General · 2. Materias · 3. Procesos · 4. Planos". */}
+                                {/* En el teléfono (RF-27) las solapas van sin ícono, sin el número
+                                    de paso y con 4px de costado en vez de 12: cada celda mide ~60-75px
+                                    y «1. General» con su ícono pedía 100; salía «1. Gen…». La que
+                                    está elegida ya se ve resaltada, y Anterior/Siguiente siguen el
+                                    mismo orden. La de Historial es al revés: ahí queda sólo el reloj
+                                    (sin él no diría qué es), con el nombre para el lector de pantalla. */}
                                 <TabsList className={`grid w-full ${orderToEdit ? "grid-cols-5" : "grid-cols-4"} mb-4 bg-gray-100/50 p-1 rounded-xl sticky top-0 z-10 backdrop-blur-sm`}>
-                                    <TabsTrigger value="general" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <FileText size={16} className="mr-1 md:mr-2 shrink-0" />
-                                        <span className="truncate">1. <span className="hidden lg:inline">Información </span>General</span>
+                                    <TabsTrigger value="general" className="min-w-0 px-1 sm:px-3 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <FileText size={16} className="mr-1 md:mr-2 shrink-0 hidden sm:block" />
+                                        <span className="truncate"><span className="hidden sm:inline">1. </span><span className="hidden lg:inline">Información </span>General</span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="materias" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <Layers size={16} className="mr-1 md:mr-2 shrink-0" />
-                                        <span className="truncate">2. Materias<span className="hidden lg:inline"> Primas</span></span>
+                                    <TabsTrigger value="materias" className="min-w-0 px-1 sm:px-3 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Layers size={16} className="mr-1 md:mr-2 shrink-0 hidden sm:block" />
+                                        <span className="truncate"><span className="hidden sm:inline">2. </span>Materias<span className="hidden lg:inline"> Primas</span></span>
                                     </TabsTrigger>
-                                    <TabsTrigger value="procesos" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <Settings size={16} className="mr-1 md:mr-2 shrink-0" />
-                                        <span className="truncate">3. Procesos<span className="hidden lg:inline"> (Opcional)</span></span>
+                                    <TabsTrigger value="procesos" className="min-w-0 px-1 sm:px-3 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Settings size={16} className="mr-1 md:mr-2 shrink-0 hidden sm:block" />
+                                        <span className="truncate"><span className="hidden sm:inline">3. </span>Procesos<span className="hidden lg:inline"> (Opcional)</span></span>
                                     </TabsTrigger>
                                     {/* Los planos son parte de planificar, no un anexo: el que arma los pasos
                                         los está mirando. La cuenta va en la solapa para no tener que entrar a
                                         ver si hay algo —y para que "0" se lea de una, que es el caso de los
                                         122 productos que solo tienen fotos. */}
-                                    <TabsTrigger value="planos" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                        <Paperclip size={16} className="mr-1 md:mr-2 shrink-0" />
-                                        <span className="truncate">4. Planos</span>
+                                    <TabsTrigger value="planos" className="min-w-0 px-1 sm:px-3 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                        <Paperclip size={16} className="mr-1 md:mr-2 shrink-0 hidden sm:block" />
+                                        <span className="truncate"><span className="hidden sm:inline">4. </span>Planos</span>
                                         {!planosCargando && planosVisibles.length > 0 && (
                                             <span className="ml-1.5 shrink-0 px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 text-[10px] font-bold tabular-nums">
                                                 {resumirArchivos(planosVisibles)}
@@ -1486,12 +1496,12 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     {/* Sólo en una orden que ya existe: en un alta no hay historial
                                         que mirar, y así las otras cuatro no pierden ancho al cargar. */}
                                     {orderToEdit && (
-                                        <TabsTrigger value="historial" className="min-w-0 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
-                                            <History size={16} className="mr-1 md:mr-2 shrink-0" />
+                                        <TabsTrigger value="historial" aria-label="Historial" title="Historial" className="min-w-0 px-1 sm:px-3 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-blue-600 transition-all text-xs md:text-sm">
+                                            <History size={16} className="sm:mr-1 md:mr-2 shrink-0" />
                                             {/* Abajo de lg queda "5." y el reloj: la quinta solapa
                                                 le saca un quinto de ancho a cada celda, y los
                                                 rótulos de las otras cuatro ya venían raspando. */}
-                                            <span className="truncate">5.<span className="hidden lg:inline"> Historial</span></span>
+                                            <span className="truncate"><span className="hidden sm:inline">5.</span><span className="hidden lg:inline"> Historial</span></span>
                                         </TabsTrigger>
                                     )}
                                 </TabsList>
@@ -1622,7 +1632,10 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 «Sin Cargo» faltaba y el taller la usa (Camilo, 14/09: "y lo de
                                                 sin cargo no está"): en el sistema viejo es la tercera opción del
                                                 mismo grupo de radios, junto a Fabricación y Reparación. */}
-                                            <div className="col-span-2 md:col-span-3 flex items-center gap-1 px-2 py-1 h-8">
+                                            {/* `flex-wrap` y alto libre en el teléfono: «Trabajo:» y las
+                                                tres opciones piden ~300px y ahí hay 260; se salían del
+                                                recuadro. Desde `md` es la fila de 32px de siempre. */}
+                                            <div className="col-span-2 md:col-span-3 flex flex-wrap md:flex-nowrap items-center gap-1 px-2 py-1 min-h-8 md:h-8">
                                                 <span className="text-xs text-gray-500 font-medium tracking-tight mr-1 shrink-0">Trabajo:</span>
                                                 {([
                                                     ["fabricacion", "Fabricación"],
@@ -1695,8 +1708,12 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             </Label>
                                         </div>
 
-                                        {/* Status block (Row 7) */}
-                                        <div className="md:col-span-4 xl:col-span-6 flex items-center justify-between gap-4 py-2 border-t border-gray-100 mt-1">
+                                        {/* Status block (Row 7).
+                                            RF-27: las cinco casillas en fila piden ~440px; en el teléfono
+                                            «En Proceso» y «Revisada» quedaban afuera y el formulario entero
+                                            scrolleaba de costado. Ahí bajan de renglón; desde `md`, la fila
+                                            repartida de siempre. */}
+                                        <div className="md:col-span-4 xl:col-span-6 flex flex-wrap md:flex-nowrap items-center justify-start md:justify-between gap-x-3 gap-y-1 md:gap-4 py-2 border-t border-gray-100 mt-1">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
                                                 <Checkbox id="tiene_plano" disabled={isLegacyOT} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c, no_lleva_plano: c ? false : generalData.no_lleva_plano })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Tiene Plano</span>
@@ -1732,7 +1749,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             <Textarea id="nota_taller" disabled={isLegacyOT} value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
                                         </div>
                                         
-                                        <div className="md:col-span-4 xl:col-span-6 grid grid-cols-3 gap-3">
+                                        <div className="md:col-span-4 xl:col-span-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_1" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 1</Label>
                                                 <Input id="nota_1" disabled={isLegacyOT} value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
@@ -1986,12 +2003,19 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 <tbody className="divide-y divide-gray-100">
                                                     {materiasPrimas.length === 0 ? (
                                                         <tr>
-                                                            <td colSpan={consumo.estado === "si" ? 13 : 12} className="px-4 py-8 text-center text-sm text-gray-500">
-                                                                Esta orden no tiene materias primas cargadas en el sistema viejo.
-                                                                <br />
-                                                                <span className="text-xs text-gray-400">
-                                                                    Si no lleva material, marcalo abajo — así deja de figurar como que falta cargarla.
-                                                                </span>
+                                                            <td colSpan={consumo.estado === "si" ? 13 : 12} className="p-0">
+                                                                {/* Del ancho de la caja y pegado a la izquierda (RF-27): la
+                                                                    tabla mide ~900px y, centrado en todo ese ancho, en el
+                                                                    teléfono el cartel quedaba cortado a la mitad y había que
+                                                                    deslizar la tabla vacía para leerlo. Mismo `100cqw` que la
+                                                                    fila de consumo. */}
+                                                                <div className="sticky left-0 w-[100cqw] px-4 py-8 text-center text-sm text-gray-500">
+                                                                    Esta orden no tiene materias primas cargadas en el sistema viejo.
+                                                                    <br />
+                                                                    <span className="text-xs text-gray-400">
+                                                                        Si no lleva material, marcalo abajo — así deja de figurar como que falta cargarla.
+                                                                    </span>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     ) : (
@@ -2277,14 +2301,17 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                             </Tabs>
                         </div>
 
-                        <DialogFooter className="px-6 py-3 border-t bg-gray-50/50 flex-shrink-0">
-                            <div className="flex items-center justify-between w-full">
-                                <div className="flex items-center gap-3">
+                        {/* RF-27: en el teléfono los cuatro botones del pie pedían ~560px. Ahí
+                            van con menos relleno, «Imprimir» queda en el ícono, y si igual no
+                            entran, los de avanzar bajan a un segundo renglón, a la derecha. */}
+                        <DialogFooter className="px-3 sm:px-6 py-3 border-t bg-gray-50/50 flex-shrink-0">
+                            <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+                                <div className="flex items-center gap-2 sm:gap-3">
                                     <Button
                                         type="button"
                                         variant="outline"
                                         onClick={handleAttemptClose}
-                                        className="h-10 px-8 hover:bg-white hover:text-red-600 hover:border-red-200 transition-colors"
+                                        className="h-10 px-4 sm:px-8 hover:bg-white hover:text-red-600 hover:border-red-200 transition-colors"
                                     >
                                         Cancelar
                                     </Button>
@@ -2292,21 +2319,22 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         type="button"
                                         variant="outline"
                                         onClick={handlePrint}
-                                        className="h-10 px-5 gap-2 hover:bg-white hover:text-blue-600 hover:border-blue-200 transition-colors"
+                                        className="h-10 px-3 sm:px-5 gap-2 hover:bg-white hover:text-blue-600 hover:border-blue-200 transition-colors"
                                         title="Imprimir esta OT (procesos + materias primas)"
+                                        aria-label="Imprimir"
                                     >
                                         <Printer className="w-4 h-4" />
-                                        Imprimir
+                                        <span className="hidden sm:inline">Imprimir</span>
                                     </Button>
                                 </div>
-                                <div className="flex gap-3">
+                                <div className="flex gap-2 sm:gap-3 ml-auto">
                                     {activeTab !== "general" && (
                                         <Button
                                             key="prev-button"
                                             type="button"
                                             variant="outline"
                                             onClick={handlePrevStep}
-                                            className="h-10 px-6"
+                                            className="h-10 px-3 sm:px-6"
                                         >
                                             <ArrowLeft className="w-4 h-4 mr-2" />
                                             Anterior
@@ -2323,7 +2351,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             key="submit-button"
                                             type="submit"
                                             disabled={submitting || loading}
-                                            className="h-10 px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
+                                            className="h-10 px-4 sm:px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
                                         >
                                             {submitting ? (
                                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -2337,7 +2365,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             key="next-button"
                                             type="button"
                                             onClick={handleNextStep}
-                                            className="h-10 px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
+                                            className="h-10 px-4 sm:px-8 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.02]"
                                         >
                                             Siguiente
                                             <ArrowRight className="ml-2 h-4 w-4" />

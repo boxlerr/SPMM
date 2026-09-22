@@ -1,6 +1,10 @@
 export default function OperariosPage() {
   return (
-    <div className="p-6">
+    // Página suelta de la época de las pruebas: no está en el menú, pero se puede
+    // abrir con la dirección. Responsive como el resto (RF-27): el layout ya pone
+    // su margen, así que en el teléfono ésta casi no suma, y los campos van en una
+    // columna en vez de dos de 150px.
+    <div className="p-1 sm:p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Recurso humano</h1>
         <p className="text-gray-600 mt-2">
@@ -8,7 +12,7 @@ export default function OperariosPage() {
         </p>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
         <div className="mb-4">
           <h2 className="text-xl font-semibold text-gray-900 mb-2">
             Endpoints Disponibles
@@ -39,7 +43,7 @@ export default function OperariosPage() {
           <h3 className="text-lg font-semibold text-gray-900 mb-3">
             Campos del Operario
           </h3>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <div className="text-sm">
                 <span className="font-medium">nombre:</span> string (requerido)

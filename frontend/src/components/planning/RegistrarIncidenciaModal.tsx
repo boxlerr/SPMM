@@ -99,7 +99,10 @@ export function RegistrarIncidenciaModal({
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="grid grid-cols-2 gap-4 py-2">
+                {/* Uno abajo del otro en el teléfono (RF-27): el rótulo del segundo campo
+                    es largo y, de a dos, se partía en tres renglones y los campos quedaban
+                    desparejos. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
                     <div className="space-y-1.5">
                         <Label className="text-xs font-medium text-gray-600">Minutos perdidos</Label>
                         <Input

@@ -49,12 +49,30 @@ export default function LayoutWrapper({ children }: LayoutWrapperProps) {
   return (
     <AuthGuard>
       <PanelProvider>
-        <div className="flex h-screen bg-gray-50">
+        {/* `dvh` y no `vh` donde el navegador lo entiende (RF-27, teléfonos). En Safari de
+            iPhone 100vh es el alto con la barra de direcciones ESCONDIDA: con la barra a
+            la vista, el último pedazo de <main> —justo donde se pegan los pies fijos, con
+            Confirmar y Volver— quedaba debajo de la barra y no se podía tocar. `dvh` sigue
+            a la barra. El `h-screen` queda de base para el navegador que no lo conoce. */}
+        <div className="flex h-screen supports-[height:100dvh]:h-dvh bg-gray-50">
           <Sidebar />
           <main className="flex-1 overflow-auto flex flex-col">
             {/* Mostrar Topbar en todas las páginas excepto configuración */}
             {pathname !== "/configuracion" && <Topbar />}
-            <div className="p-6">
+            {/* El margen de todas las pantallas, y cuánto mide queda en `--pad-app`.
+                Era un `p-6` fijo: en un teléfono de 375px se llevaba 48 de ancho antes
+                de que empezara nada, y varias pantallas suman el suyo encima. Ahora es
+                12px en teléfono, 16 en tableta y los 24 de siempre desde `lg`, así que
+                en la computadora del taller no cambia nada.
+                La variable existe porque hay pantallas que ocupan exactamente el alto
+                de la ventana (el planificador, Operaciones) y descuentan este margen:
+                antes lo tenían escrito a mano como `3rem` y, con el margen variable,
+                ese número habría quedado mal en el teléfono.
+                Abajo, 72px de más hasta `lg`: ahí el menú es el botón redondo que flota
+                abajo a la izquierda (Sidebar) y tapaba para siempre la punta del último
+                renglón de cada pantalla. Con ese aire, lo último se puede subir por
+                encima del botón. */}
+            <div className="[--pad-app:0.75rem] sm:[--pad-app:1rem] lg:[--pad-app:1.5rem] p-[var(--pad-app)] pb-[calc(var(--pad-app)+4.5rem)] lg:pb-[var(--pad-app)]">
               {children}
             </div>
             {/* El cartel de novedades al entrar. Va acá adentro y no en el layout raíz

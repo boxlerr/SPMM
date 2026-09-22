@@ -358,7 +358,10 @@ export function BibliotecaPlanos({
     return (
         <div className={cn("space-y-4", className)}>
             {conEncabezado ? (
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                // RF-27: 16px de relleno en el teléfono en vez de 24, y el contador con los
+                // dos botones puede bajar de renglón: en una fila, «Actualizar» se salía
+                // de la tarjeta por la derecha.
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-red-100 rounded-lg">
@@ -370,7 +373,7 @@ export function BibliotecaPlanos({
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
                             <div className="text-right">
                                 <p className="text-2xl font-bold text-gray-900 tabular-nums leading-none">
                                     {cargando ? "—" : total}

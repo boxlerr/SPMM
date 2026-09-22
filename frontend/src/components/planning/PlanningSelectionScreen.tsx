@@ -376,9 +376,16 @@ export function PlanningSelectionScreen({
             visible={isOpen}
             cabecera={
                 <>
-                    <div className="px-6 pt-2 pb-2 flex items-center justify-between gap-x-4 gap-y-1 flex-wrap">
+                    {/* `px-3` en el teléfono y `px-6` desde `sm` (RF-27): los 24px de cada
+                        lado, sumados al margen del layout, eran 72px de 375. Mismo criterio
+                        en los filtros y en el pie.
+                        `pr-14` abajo de `lg`: la campana de avisos flota arriba a la derecha
+                        y, con la cabecera en dos renglones, se sentaba encima del «Paso 1
+                        de 2». Desde `lg` los botones bajan a su renglón y la esquina queda
+                        libre, como siempre. */}
+                    <div className="px-3 sm:px-6 pr-14 sm:pr-14 lg:pr-6 pt-2 pb-2 flex items-center justify-between gap-x-4 gap-y-1 flex-wrap">
                         <div className="min-w-0 flex items-baseline gap-3">
-                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2 shrink-0">
+                            <h1 className="text-xl font-bold text-gray-900 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 min-w-0 sm:shrink-0">
                                 <ListChecks className="w-5 h-5 text-blue-600 shrink-0" />
                                 Planificar órdenes
                                 <span className="text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
@@ -584,8 +591,13 @@ export function PlanningSelectionScreen({
                                 vista previa lo tiraba entero. Acá se retoma sin recalcular.
                                 El componente no se dibuja si no hay borradores guardados. */}
                             {onAbrirBorrador && <BorradoresPlan onAbrir={onAbrirBorrador} refrescar={isOpen ? 1 : 0} />}
-                            {/* Zoom control: afecta a la tabla de selección. */}
-                            <ZoomControl value={zoom} onChange={setZoom} />
+                            {/* Zoom control: afecta a la tabla de selección.
+                                Escondido abajo de `md` (RF-27), igual que en Operaciones: ahí
+                                la lista se ve en tarjetas, el zoom no les hace nada y en el
+                                teléfono se llevaba un renglón entero de la cabecera. */}
+                            <div className="hidden md:block">
+                                <ZoomControl value={zoom} onChange={setZoom} />
+                            </div>
                             {/* La salida, arriba y en el mismo lugar que en la vista previa.
                                 Estaba sola en el pie y Lucas no la encontraba: buscaba la
                                 vuelta arriba, que es donde está en el paso siguiente. Dos
@@ -627,7 +639,7 @@ export function PlanningSelectionScreen({
 
 
                     {/* Filter Toolbar Section - Symmetric & Compact */}
-                    <div className="px-6 py-0 border-t bg-slate-50/80">
+                    <div className="px-3 sm:px-6 py-0 border-t bg-slate-50/80">
                     <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders} compacto>
                         {/* Misma estética que el resto de filtros: "Categoría: valor"
                             con el valor en negrita cuando hay algo aplicado. */}
@@ -654,7 +666,7 @@ export function PlanningSelectionScreen({
             }
             pie={
                 <>
-                    <div className="px-6 py-3 flex flex-wrap items-center justify-end gap-2">
+                    <div className="px-3 sm:px-6 py-3 flex flex-wrap items-center justify-end gap-2">
                     <Button
                         onClick={() => {
                             const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id));

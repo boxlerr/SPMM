@@ -80,15 +80,17 @@ export default function PlanificacionGanttWrapper({
     return (
         <div ref={containerRef} className="flex flex-col w-full">
             <Tabs defaultValue="weekly" className="flex-1 flex flex-col min-w-0">
-                <div className="px-4 pt-4 pb-0">
-                    <div className="flex flex-wrap items-center justify-between gap-4 bg-gray-50 p-2 rounded-lg border border-gray-100">
-                        <TabsList className="bg-white border border-gray-200 shadow-sm">
+                {/* RF-27: en el teléfono los márgenes achican y las tres solapas y los dos
+                    botones de vista bajan de fila en vez de salirse por la derecha. */}
+                <div className="px-2 pt-2 sm:px-4 sm:pt-4 pb-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-4 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                        <TabsList className="bg-white border border-gray-200 shadow-sm max-w-full h-auto flex-wrap justify-start">
                             <TabsTrigger value="weekly" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Semanal Detallado</TabsTrigger>
                             <TabsTrigger value="monthly" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Mensual General</TabsTrigger>
                             <TabsTrigger value="orders" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Procesos</TabsTrigger>
                         </TabsList>
 
-                        <div className="flex bg-white rounded-md border border-gray-200 shadow-sm p-1">
+                        <div className="flex flex-wrap bg-white rounded-md border border-gray-200 shadow-sm p-1">
                             <Button
                                 variant="ghost"
                                 size="sm"
@@ -109,7 +111,7 @@ export default function PlanificacionGanttWrapper({
                     </div>
                 </div>
 
-                <div className="flex-1 p-4 pt-2">
+                <div className="flex-1 p-2 sm:p-4 pt-2">
                     <TabsContent value="weekly" className="mt-0">
                         <GanttWeeklyDetailed
                             key={`weekly-${containerWidth}`}

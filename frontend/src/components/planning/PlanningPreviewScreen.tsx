@@ -2277,8 +2277,23 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                         text-xl (28px de línea) → text-[17px] (24px) no cambia nada de
                         lo que se ve y el `items-center` deja de reservar alto para una
                         bajada que ya no existe. */}
-                    <div className="px-6 py-2 flex items-center justify-between gap-4">
-                        <div className="min-w-0 flex-1">
+                    {/* Las acciones bajan a un segundo renglón cuando no entran al lado del
+                        título, y adentro de ese renglón van de a varias filas si hace falta
+                        (RF-27). Por ANCHO y no por breakpoint: Hoja del pañol, Agregar OTs,
+                        el zoom, Volver, Salir y la X piden ~820px, y en 1024 con el menú
+                        abierto hay ~620 — la fila fija se salía de la tarjeta y la página
+                        entera scrolleaba de costado (en el teléfono, con la X afuera).
+                        Donde entran (una pantalla ancha) es la misma fila de siempre.
+                        La campana de avisos flota arriba a la derecha: abajo de `lg` le
+                        deja lugar el `pr-11` del título; desde `lg`, el `lg:pr-16` de acá,
+                        porque ahí la que queda en esa esquina es la X de cerrar y la
+                        campana le tapaba un tercio (medido en 1440: 11px de 32). */}
+                    <div className="px-3 sm:px-6 lg:pr-16 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                        {/* El título nunca baja de 12rem: es lo que decide si las acciones
+                            le entran al lado o se van al renglón de abajo. Con `min-w-0`
+                            solo, las acciones se quedaban en la fila y el título quedaba
+                            aplastado a cero. */}
+                        <div className="min-w-[12rem] grow basis-0 pr-11 lg:pr-0">
                             {/* `min-w-0 overflow-hidden` en vez de `whitespace-nowrap` a secas:
                                 con el título entero sin poder achicarse, en 1024 empujaba a
                                 los botones de la derecha fuera de la tarjeta. Ahora el que
@@ -2289,13 +2304,13 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 {/* Que se lea que esto TODAVÍA no es el plan: es lo que
                                     distingue esta pantalla de Operaciones, que se le
                                     parece bastante y sí muestra lo ya guardado. */}
-                                <span className="text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                                <span className="shrink-0 whitespace-nowrap text-[10px] font-bold uppercase tracking-widest bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
                                     En revisión
                                 </span>
                             </h1>
 
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 max-w-full">
                             {/* Lo que quedó afuera, y el botón para arreglarlo, compartiendo
                                 fila con las acciones. Antes eran una TERCERA fila de chips de
                                 11px bajo el título: 30px de alto reservados siempre para dos
@@ -2740,7 +2755,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                         eso cada celda quedaba en ~130px y los números se leían apretados
                         contra su rótulo; en dos o tres filas entran holgadas y el riel
                         sigue siendo un riel (los separadores los sigue dibujando el
-                        `gap-px` sobre el fondo). */}
+                        `gap-px` sobre el fondo).
+                        Cinco celdas en dos o tres columnas dejaban un hueco gris al final
+                        (el fondo del riel asomando). En el teléfono la fecha, que es la
+                        cifra más ancha, ocupa su renglón entero; en dos columnas quedan
+                        tres renglones llenos. En tres columnas (`md`) la que se estira es
+                        la de trabas, que además tiene el «Ver detalles» (RF-27). */}
                     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1.3fr] gap-px bg-gray-200 border-t border-gray-200">
                         {/* La fecha primero y la celda más ancha del riel.
 
@@ -2753,6 +2773,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             que es el único caso en que dice algo ("pediste hasta el 5/9
                             pero el plan cierra el 31/8"); si coincide, va en el title. */}
                         <CifraPlan
+                            className="col-span-2 md:col-span-1"
                             tono="fecha"
                             icono={<Calendar className="w-4 h-4" />}
                             valor={spanPlan
@@ -2786,6 +2807,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             icono={<AlertTriangle className="w-4 h-4" />}
                             valor={trabasSinResolver}
                             etiqueta={trabasSinResolver === 1 ? "Traba sin resolver" : "Trabas sin resolver"}
+                            className="md:col-span-2 xl:col-span-1"
                             tono={trabasSinResolver > 0 ? "alerta" : "ok"}
                             accion={diagnosticos.length > 0 ? (
                                 <button
@@ -2802,7 +2824,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                 </>
             }
             pie={
-                <div className="px-6 py-4 flex items-center justify-between gap-3">
+                <div className="px-3 py-3 sm:px-6 sm:py-4 flex items-center justify-between gap-3">
                     {/* Lado izquierdo: contexto + Volver */}
                     <div className="flex items-center gap-3 text-xs text-gray-500">
                         <Button variant="outline" onClick={onBack} disabled={isConfirming || isCalculating} className="border-gray-300 text-gray-700 hover:bg-gray-50">
@@ -2818,7 +2840,7 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     <Button
                         onClick={onClickConfirmar}
                         disabled={isConfirming || isCalculating || (results.length === 0 && displayedExcedentes.length === 0)}
-                        className="bg-blue-600 hover:bg-blue-700 shadow-md px-6"
+                        className="bg-blue-600 hover:bg-blue-700 shadow-md px-4 sm:px-6"
                     >
                         {isConfirming ? (
                             <span className="flex items-center gap-2">
@@ -2826,13 +2848,24 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 Confirmando...
                             </span>
                         ) : (
-                            <>Confirmar y guardar planificación</>
+                            // En el teléfono la frase entera (270px) no entraba al lado de
+                            // «Volver» y el botón se salía del pie. Dice lo mismo, más corto.
+                            <>
+                                <span className="sm:hidden">Confirmar plan</span>
+                                <span className="hidden sm:inline">Confirmar y guardar planificación</span>
+                            </>
                         )}
                     </Button>
                 </div>
             }
         >
-                <div className="flex flex-1 min-w-0 items-start">
+                {/* Tabla y panel de carga, uno al lado del otro desde `lg`; abajo de eso,
+                    uno ABAJO del otro (RF-27). En fila, en un teléfono el panel se llevaba
+                    la mitad de los 327px y la tabla quedaba en una tira. Apilados, cada uno
+                    usa el ancho entero y el panel queda después del plan, que es lo primero
+                    que se revisa. `items-stretch` abajo de `lg` porque en columna el
+                    `items-start` los dejaba del ancho de su contenido. */}
+                <div className="flex flex-col lg:flex-row flex-1 min-w-0 items-stretch lg:items-start">
                     <div className="flex-1 flex flex-col min-w-0 bg-white">
                         {/* Scroll nativo en lugar de Radix ScrollArea: la versión Radix no rendea
                             scrollbar horizontal por default y la tabla (min-w 1000px) quedaba pisada
@@ -4123,7 +4156,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                         vez, que es lo contrario de acompañar. Ni ancho fluido a secas:
                         en la pantalla chica, que es donde duele, no devuelve nada. */}
                     <div className={cn(
-                        "bg-gray-50 border-l border-gray-200 flex flex-col shrink-0 transition-[width] duration-200",
+                        // Borde arriba cuando va apilado abajo de la tabla, a la izquierda
+                        // cuando va al costado.
+                        "bg-gray-50 border-t lg:border-t-0 lg:border-l border-gray-200 flex flex-col shrink-0 transition-[width] duration-200",
                         // Sticky con alto propio: la carga de operarios queda a la vista
                         // mientras la lista corre al lado, en vez de irse para arriba a los
                         // dos scrolls. `top-[136px]` la deja justo abajo de la cabecera
@@ -4133,32 +4168,38 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                         // pisando el pie. Con max-h se estira hasta donde hay lugar y no más.
                         // `flex flex-col` para que la lista de adentro pueda tomar el resto
                         // y ser la única que scrollea.
-                        "sticky top-[var(--alto-cabecera)] max-h-[calc(100svh-var(--alto-cabecera)-5rem)] self-start overflow-hidden flex flex-col",
-                        !cargaAbierta ? "w-11"
-                            : cargaCompleta ? "w-[min(34vw,520px)]"
-                                // El piso de 300px solo de lg para arriba: en un teléfono de
-                                // 375 el panel se llevaba 301 de los 327 de la fila y la tabla
-                                // del plan quedaba en 26px.
-                                : "w-[min(24vw,380px)] lg:min-w-[300px]"
+                        // Todo eso sólo desde `lg`, que es cuando va al costado: apilado
+                        // abajo de la tabla no hay nada que acompañar, y pegado se habría
+                        // montado encima de la lista.
+                        "lg:sticky lg:top-[var(--alto-cabecera)] lg:max-h-[calc(100svh-var(--alto-cabecera)-5rem)] lg:self-start overflow-hidden flex flex-col",
+                        // Apilado (abajo de `lg`) ocupa el ancho entero; al costado, los
+                        // anchos de siempre. El piso de 300px es sólo de `lg` para arriba:
+                        // en un teléfono se llevaba 301 de los 327 de la fila.
+                        !cargaAbierta ? "w-full lg:w-11"
+                            : cargaCompleta ? "w-full lg:w-[min(34vw,520px)]"
+                                : "w-full lg:w-[min(24vw,380px)] lg:min-w-[300px]"
                     )}>
                         {!cargaAbierta ? (
                             /* El riel plegado no es una franja muerta: sigue diciendo
                                cuántos operarios quedan pasados de las 44h. Plegar resume,
                                no esconde. */
+                            /* Al costado (`lg`) es un riel vertical con el texto parado;
+                               apilado abajo de la tabla, una barra acostada que se despliega
+                               para abajo: la flecha apunta hacia donde se abre. */
                             <button
                                 type="button"
                                 onClick={alternarCarga}
                                 title="Mostrar la carga de recurso humano"
-                                className="flex-1 w-full flex flex-col items-center gap-3 py-3 hover:bg-gray-100 transition-colors"
+                                className="flex-1 w-full flex flex-row lg:flex-col items-center gap-3 px-4 lg:px-0 py-3 hover:bg-gray-100 transition-colors"
                             >
-                                <ChevronRight className="w-4 h-4 text-gray-400 rotate-180 shrink-0" />
+                                <ChevronRight className="w-4 h-4 text-gray-400 rotate-90 lg:rotate-180 shrink-0 order-last ml-auto lg:order-none lg:ml-0" />
                                 <User className="w-4 h-4 text-gray-500 shrink-0" />
                                 {sobrecargados > 0 && (
                                     <span className="rounded-full bg-rose-600 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center tabular-nums shrink-0">
                                         {sobrecargados}
                                     </span>
                                 )}
-                                <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-500 [writing-mode:vertical-rl]">
+                                <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-500 lg:[writing-mode:vertical-rl]">
                                     Carga de recurso humano
                                 </span>
                             </button>
@@ -4183,7 +4224,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 title="Plegar el panel y darle el ancho a la tabla"
                                 className="p-1 -mr-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-700 shrink-0"
                             >
-                                <ChevronRight className="w-4 h-4" />
+                                {/* Apilado se pliega para arriba; al costado, hacia la derecha. */}
+                                <ChevronRight className="w-4 h-4 -rotate-90 lg:rotate-0" />
                             </button>
                         </div>
                         {/* Scroll nativo, tercera vez en este archivo que Radix no sirve acá
@@ -4195,7 +4237,10 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             `overflow-y-auto` nativo no necesita resolver ningún porcentaje —al
                             item flex lo clampea el max-height del contenedor— y scrollea. */}
                         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4">
-                            <div className={cn(cargaCompleta ? "grid grid-cols-2 gap-3" : "space-y-4")}>
+                            {/* Apilado abajo de la tabla (abajo de `lg`) el panel tiene todo el
+                                ancho: las tarjetas van de a dos desde `sm` en vez de una
+                                debajo de la otra. Al costado, como siempre. */}
+                            <div className={cn(cargaCompleta ? "grid grid-cols-1 sm:grid-cols-2 gap-3" : "grid grid-cols-1 sm:grid-cols-2 gap-3 lg:flex lg:flex-col lg:gap-4")}>
                                 {availableOperators
                                     .filter(op => op.sector?.toUpperCase() !== 'PRUEBAS') // Filter 'PRUEBAS' if hidden
                                     .sort((a, b) => {

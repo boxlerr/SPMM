@@ -160,8 +160,9 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
 
     return (
         <div className="flex flex-col h-full bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            {/* Filters Header */}
-            <div className="p-4 border-b bg-gray-50/50 flex flex-wrap gap-4 items-center">
+            {/* Filters Header. Menos aire en el teléfono (RF-27): los dos filtros van uno
+                abajo del otro y cada píxel de costado es ancho del selector. */}
+            <div className="p-3 sm:p-4 border-b bg-gray-50/50 flex flex-wrap gap-3 sm:gap-4 items-center">
                 <div className="flex-1 min-w-[200px]">
                     <div className="flex items-center gap-2 mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                         <User className="h-3 w-3" />
@@ -201,9 +202,14 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                 </div>
             </div>
 
-            {/* Table Content */}
-            <div className="flex-1 overflow-auto">
-                <Table>
+            {/* Table Content.
+                `min-w-[760px]` (RF-27): son siete columnas, y en un teléfono la tabla se
+                apretaba a 340px, los nombres se partían en tres renglones y los números
+                quedaban pegados. Con piso, la tabla se desliza de costado (el `Table`
+                ya trae su contenedor con scroll) y cada columna se lee entera. En la
+                computadora el ancho disponible pasa los 760 y no cambia nada. */}
+            <div className="flex-1 overflow-auto @container">
+                <Table className="min-w-[760px]">
                     <TableHeader className="bg-gray-50 sticky top-0 z-10">
                         <TableRow>
                             <TableHead className="w-[200px] font-semibold">Recurso humano</TableHead>
@@ -278,8 +284,13 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                             })
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={7} className="h-32 text-center text-gray-500 italic">
-                                    No se encontraron asignaciones para los filtros aplicados.
+                                <TableCell colSpan={7} className="p-0">
+                                    {/* Del ancho de lo que se ve y pegado a la izquierda: centrado
+                                        en los 760px de la tabla, en el teléfono el cartel quedaba
+                                        cortado a la mitad (el `@container` de arriba da el ancho). */}
+                                    <div className="sticky left-0 w-[100cqw] h-32 flex items-center justify-center px-4 text-center text-gray-500 italic">
+                                        No se encontraron asignaciones para los filtros aplicados.
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         )}

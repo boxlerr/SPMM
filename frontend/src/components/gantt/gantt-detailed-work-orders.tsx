@@ -182,17 +182,27 @@ export function GanttDetailedWorkOrders({ tasks, onTaskClick, onTaskMove }: Gant
                 </div>
             </div>
 
-            {/* Main Content */}
+            {/* Main Content.
+                `overflow-x-auto` (RF-27): el arrastre con el mouse movía `scrollLeft`, pero
+                este div no era un contenedor con scroll, así que no movía nada, y en un
+                teléfono no había NINGUNA manera de ver los días de la derecha. Con scroll
+                de verdad el dedo lo desliza solo, sin escribir eventos táctiles, y el
+                arrastre con el mouse empieza a funcionar. Es lo mismo que ya hace el Gantt
+                semanal (gantt-weekly-detailed.tsx).
+                `svh` y no `vh`: en iPhone 100vh es más alto que lo que se ve. */}
             <div
-                className="cursor-grab pb-4 px-1"
+                className="cursor-grab pb-4 px-1 overflow-x-auto"
                 ref={containerRef}
                 onMouseDown={handleMouseDown}
                 onMouseLeave={handleMouseLeave}
                 onMouseUp={handleMouseUp}
                 onMouseMove={handleMouseMove}
-                style={{ minHeight: 'calc(100vh - 240px)' }}
+                style={{ minHeight: 'calc(100svh - 240px)' }}
             >
-                <div style={{ width: `${zoom * 100}%`, minWidth: '100%' }} className="bg-white/60 backdrop-blur-md rounded-3xl shadow-xl border border-white/40 overflow-hidden">
+                {/* Nunca menos de 900px: en un teléfono el 100% eran ~340px para la columna
+                    de la OT más cinco días, y cada día quedaba de 38px, ilegible. En una
+                    pantalla de computadora el 100% ya pasa los 900 y se ve igual que antes. */}
+                <div style={{ width: `${zoom * 100}%`, minWidth: 'max(100%, 900px)' }} className="bg-white/60 backdrop-blur-md rounded-3xl shadow-xl border border-white/40 overflow-hidden">
                     <div>
                         {/* Table Header */}
                         <div className="grid grid-cols-[150px_repeat(5,1fr)] gap-px bg-gray-50/50 border-b border-gray-200/60 backdrop-blur-sm sticky top-0 z-40">

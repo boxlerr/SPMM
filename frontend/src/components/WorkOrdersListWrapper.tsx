@@ -159,7 +159,11 @@ export default function WorkOrdersListWrapper({
                 {/* Cabecera: tabs + ZoomControl alineado a la derecha. El zoom aplica a las
                     tres listas, que ahora son la misma tabla. */}
                 <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-                    <TabsList className="bg-gray-100 p-1 rounded-xl w-fit">
+                    {/* `flex-wrap h-auto`: en un teléfono las cuatro solapas no entran en una
+                        fila y se salían de la pantalla por la derecha, con «Todas» afuera
+                        (RF-27). Ahora bajan a una segunda fila. En la computadora entran y
+                        se ven igual que antes: una fila de 40px, que es lo que medía el `h-10`. */}
+                    <TabsList className="bg-gray-100 p-1 rounded-xl w-fit max-w-full h-auto flex-wrap justify-start">
                         <TabsTrigger value="no_planificadas" className="px-4 rounded-lg data-[state=active]:bg-white data-[state=active]:text-orange-600 data-[state=active]:shadow-sm">
                             No Planificadas ({unplannedOrders.length})
                         </TabsTrigger>
@@ -178,7 +182,15 @@ export default function WorkOrdersListWrapper({
                         </TabsTrigger>
                     </TabsList>
                     <div className="flex items-center gap-2">
-                        {subTab !== "planificadas" && <ZoomControl value={zoom} onChange={setZoom} />}
+                        {/* El zoom se esconde abajo de `md` (RF-27): ahí las listas se ven
+                            como tarjetas y el zoom sólo actúa sobre la tabla, así que en el
+                            teléfono no hacía nada y además empujaba «Nueva orden» afuera
+                            del recuadro. */}
+                        {subTab !== "planificadas" && (
+                            <div className="hidden md:block">
+                                <ZoomControl value={zoom} onChange={setZoom} />
+                            </div>
+                        )}
                         {/* Dar de alta una OT es lo que hace Carolina, y no entra nunca a
                             planificar: el botón tiene que estar en ESTA pantalla, no en la
                             cabecera de Operaciones, que se va con el scroll y se lee como

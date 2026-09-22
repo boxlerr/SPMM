@@ -107,9 +107,12 @@ const TIPO_LABEL: Record<string, string> = {
     re_planificar: "Re-planificar",
 };
 
+// Reloj de 24 horas, igual que en RegistroDeMovimientos: con el de 12 el es-AR
+// escribe «10:15 a. m.», que no entra en la columna de 96px y parte la fecha en dos
+// renglones (se veía así en la computadora y, más apretado, en el teléfono).
 const fmtFecha = (iso: string) =>
     new Date(iso).toLocaleString("es-AR", {
-        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     });
 
 const fmtDur = (ms: number | null) => {
@@ -152,8 +155,13 @@ export default function AuditoriaPage() {
     }, [cargar]);
 
     return (
-        <div className="container mx-auto py-8 px-4 max-w-5xl">
-            <div className="flex items-center justify-between mb-6">
+        // Márgenes chicos y cabecera apilada en el teléfono (RF-27). Era la única
+        // pantalla del menú sin un solo corte: el botón Actualizar le comía el ancho
+        // al título y las solapas se salían de la pantalla por la derecha.
+        <div className="container mx-auto py-4 sm:py-8 px-1 sm:px-4 max-w-5xl">
+            {/* `pr-12` abajo de `lg`: deja libre la columna de la campana de avisos, que
+                flota arriba a la derecha. */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6 pr-12 lg:pr-0">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <ClipboardList className="h-7 w-7 text-muted-foreground" />
@@ -167,6 +175,7 @@ export default function AuditoriaPage() {
                 <Button
                     variant="outline"
                     size="sm"
+                    className="self-start sm:self-auto shrink-0"
                     onClick={() => { setRefresco((n) => n + 1); cargar(); }}
                     disabled={cargando}
                 >
@@ -176,7 +185,11 @@ export default function AuditoriaPage() {
             </div>
 
             <Tabs defaultValue="todo">
-                <TabsList className="mb-4">
+                {/* `flex-wrap h-auto`: «Todo lo que se hizo», «Pasos de las OT» y
+                    «Planificaciones» suman ~430px y en un teléfono la tercera quedaba
+                    afuera sin forma de llegar. Ahora baja a otra fila; en la computadora
+                    entran en una y miden los mismos 40px de siempre. */}
+                <TabsList className="mb-4 max-w-full h-auto flex-wrap justify-start">
                     <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>
                     <TabsTrigger value="procesos">Pasos de las OT</TabsTrigger>
                     <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>
@@ -232,7 +245,11 @@ export default function AuditoriaPage() {
                                                 type="button"
                                                 onClick={() => setAbierto(activo ? null : it.id)}
                                                 className={cn(
-                                                    "w-full px-4 py-2 flex items-center gap-3 text-left transition-colors",
+                                                    // `flex-wrap` sólo en el teléfono: fecha, tipo,
+                                                    // cuántas OT, quién, trabas y duración no entran en
+                                                    // 340px y el renglón se salía por la derecha. Ahí
+                                                    // bajan a un segundo renglón.
+                                                    "w-full px-3 sm:px-4 py-2 flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 text-left transition-colors",
                                                     activo ? "bg-muted/40" : "hover:bg-muted/30"
                                                 )}
                                             >
@@ -283,7 +300,7 @@ export default function AuditoriaPage() {
                                                 )}
                                             </button>
                                             {activo && (
-                                                <div className="px-4 pb-3 pl-11 space-y-1.5 text-sm">
+                                                <div className="px-3 sm:px-4 pb-3 pl-9 sm:pl-11 space-y-1.5 text-sm break-words">
                                                     {it.ordenes_visibles && (
                                                         <p className="text-muted-foreground">
                                                             <span className="font-medium text-gray-700">OTs:</span>{" "}
@@ -332,14 +349,17 @@ export default function AuditoriaPage() {
                         ) : (
                             <ul className="divide-y">
                                 {borrados.map((b) => (
-                                    <li key={b.id} className="px-4 py-2 flex items-center gap-3 text-sm">
+                                    <li key={b.id} className="px-3 sm:px-4 py-2 flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 text-sm">
                                         <span className="tabular-nums text-muted-foreground shrink-0 w-24">
                                             {fmtFecha(b.borrado_en)}
                                         </span>
                                         <Badge variant="outline" className="text-xs font-normal shrink-0">
                                             {b.alcance === "lote" ? "Lote entero" : "OTs sueltas"}
                                         </Badge>
-                                        <span className="text-gray-700 flex-1 min-w-0">
+                                        {/* En el teléfono, la frase en su propio renglón y a todo
+                                            el ancho: entre la fecha, el cartel y quién, le quedaban
+                                            40px y salía una palabra por renglón. */}
+                                        <span className="text-gray-700 min-w-0 order-last basis-full sm:order-none sm:flex-1">
                                             {b.filas_borradas} fila{b.filas_borradas !== 1 ? "s" : ""} de {b.ots_borradas} OT{b.ots_borradas !== 1 ? "s" : ""}
                                             {b.descripcion_lote && (
                                                 <span className="text-muted-foreground"> · {b.descripcion_lote}</span>

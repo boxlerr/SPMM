@@ -88,7 +88,7 @@ export default function ConfiguracionPage() {
     switch (activeTab) {
       case 'usuarios':
         return (
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <div className="mb-6">
               <h3 className="text-xl font-semibold text-gray-900 mb-1">Gestión de Usuarios</h3>
               <p className="text-sm text-gray-500">
@@ -213,8 +213,12 @@ export default function ConfiguracionPage() {
         };
 
         return (
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-6">
+          <div className="p-4 sm:p-6">
+            {/* En el teléfono (RF-27) los dos botones van abajo del título y bajan de
+                renglón si no entran: al lado, «Marcar todas como leídas» y «Limpiar todo»
+                empujaban la caja 150px afuera de la pantalla. Las cuatro solapas de esta
+                pantalla pasan de 24 a 16px de margen en el teléfono. */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
               <div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-1">Historial de Notificaciones</h3>
                 <p className="text-sm text-gray-500">
@@ -225,7 +229,7 @@ export default function ConfiguracionPage() {
                 </p>
               </div>
               {notifications.length > 0 && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {unreadCount > 0 && (
                     <Button
                       variant="outline"
@@ -266,12 +270,12 @@ export default function ConfiguracionPage() {
                       : 'bg-white border-blue-200 shadow-sm'
                       }`}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3 flex-1">
+                    <div className="flex items-start justify-between gap-2 sm:gap-4">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
                         <div className={`mt-0.5 ${notification.read ? 'opacity-60' : ''}`}>
                           {getNotificationIcon(notification.type)}
                         </div>
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 break-words">
                           <div className="flex items-center gap-2 mb-1">
                             {getNotificationBadge(notification.type)}
                             {!notification.read && (
@@ -311,7 +315,7 @@ export default function ConfiguracionPage() {
         );
       case 'mi-cuenta':
         return (
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <div className="mb-6">
               <h3 className="text-xl font-semibold text-gray-900 mb-1">Mi cuenta</h3>
               <p className="text-sm text-gray-500">
@@ -337,7 +341,7 @@ export default function ConfiguracionPage() {
         };
 
         return (
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <div className="mb-6">
               <h3 className="text-xl font-semibold text-gray-900 mb-1">Información del Sistema</h3>
               <p className="text-sm text-gray-500">

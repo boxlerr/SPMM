@@ -65,10 +65,13 @@ export default function PlanificacionPage() {
   }, []);
 
   return (
-    <div className="container mx-auto py-8 px-4">
-      <div className="flex items-center justify-between mb-8">
+    // Página suelta, fuera del menú. En el teléfono (RF-27): menos margen, título más
+    // chico y el botón abajo del título en vez de apretarlo; `pr-12` para no quedar
+    // debajo de la campana de avisos, que flota arriba a la derecha.
+    <div className="container mx-auto py-4 sm:py-8 px-1 sm:px-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-8 pr-12 lg:pr-0">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight">Planificación</h1>
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">Planificación</h1>
           <p className="text-muted-foreground mt-2">
             Gestión de procesos del sistema
           </p>
@@ -78,6 +81,7 @@ export default function PlanificacionPage() {
           disabled={loading}
           variant="outline"
           size="sm"
+          className="self-start sm:self-auto"
         >
           <RefreshCw
             className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}

@@ -69,9 +69,14 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50/50">
       {/* Header sticky mejorado */}
       <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
-        <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
+        <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-4 sm:py-6">
+          {/* RF-27. Esta cabecera se pega arriba al scrollear y la campana de avisos flota
+              en la esquina de arriba a la derecha: en el teléfono, «Actualizar» quedaba
+              justo debajo de ella, y en 320px además se salía de la cabecera (el título
+              no achica). Abajo de `sm` el botón va debajo del título, a la izquierda;
+              el `pr-12` (hasta `lg`) le deja a la campana su esquina. */}
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between pr-12 lg:pr-0">
+            <div className="min-w-0">
               <h1 className="text-3xl md:text-4xl font-bold text-gray-900 flex items-center gap-3">
                 <div className="p-2 bg-gradient-to-br from-[#DC143C] to-[#B8112E] rounded-xl shadow-lg">
                   <BarChart3 className="h-7 w-7 text-white" />
@@ -85,10 +90,12 @@ export default function DashboardPage() {
             <button
               onClick={refreshAll}
               disabled={isRefreshing}
-              className="flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-[#DC143C] to-[#B8112E] text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              className="shrink-0 flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-[#DC143C] to-[#B8112E] text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Actualizar</span>
+              {/* Con rótulo también en el teléfono: ahí va solo en su renglón, y un
+                  botón rojo con dos flechitas y nada más no dice qué hace. */}
+              <span>Actualizar</span>
             </button>
           </div>
         </div>

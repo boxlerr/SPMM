@@ -849,12 +849,18 @@ export function DiagnosticosPlan({
     );
 
     return (
-        <div className="mx-4 mt-4 mb-2 rounded-xl border border-gray-200 overflow-hidden bg-white">
+        <div className="mx-3 sm:mx-4 mt-4 mb-2 rounded-xl border border-gray-200 overflow-hidden bg-white">
             {/* La fila es un div y no un <button>: adentro van "Ver todas" y "Volver a
-                revisar", y no se pueden anidar botones. El toggle queda como botón propio. */}
+                revisar", y no se pueden anidar botones. El toggle queda como botón propio.
+
+                `flex-wrap` (RF-27): los botones de la derecha no achican, y cuando no les
+                queda lugar al lado del resumen bajan a un renglón propio. Antes se quedaban
+                en la fila y el resumen se apretaba hasta leerse una palabra por renglón
+                (en un teléfono le quedaban ~70px). El `basis-56` del resumen es lo que
+                decide cuándo bajan; en una pantalla ancha, todo en una fila como siempre. */}
             <div
                 className={cn(
-                    "w-full flex items-center gap-2",
+                    "w-full flex flex-wrap items-center gap-x-2",
                     items.length === 0 ? "bg-emerald-50/70"
                         : hayBloqueantes ? "bg-rose-50/70" : "bg-amber-50/60"
                 )}
@@ -864,7 +870,7 @@ export function DiagnosticosPlan({
                     aria-expanded={!colapsado}
                     onClick={alternarColapso}
                     className={cn(
-                        "flex-1 min-w-0 px-3 flex gap-2.5 text-left",
+                        "flex-1 basis-56 min-w-0 px-3 flex gap-2.5 text-left",
                         // Plegada la tira es UNA línea de ~36px. Lo que sobrevive es lo
                         // que importa: el color (rojo = hay trabas), el resumen ("3 trabas
                         // detectadas y 2 avisos") y el chevron. La explicación de qué hacer
@@ -912,6 +918,7 @@ export function DiagnosticosPlan({
                     acordarse de que existían. Desplegado deja de ser botón —la tira con
                     el detalle y los "Deshacer" está dos renglones más abajo, y un botón
                     que no lleva a ningún lado es el cartelito muerto de siempre. */}
+                <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 pl-3 pb-1.5 sm:pb-0">
                 {ajustes.length > 0 && (colapsado ? (
                     <button
                         type="button"
@@ -991,6 +998,7 @@ export function DiagnosticosPlan({
                 ) : (
                     <span className="w-2 shrink-0" />
                 )}
+                </div>
             </div>
 
             {!colapsado && (

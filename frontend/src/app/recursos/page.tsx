@@ -451,9 +451,12 @@ export default function RecursosPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
+    // RF-27: en el teléfono casi sin margen propio, porque el layout ya pone el suyo
+    // (sumados eran 28px de cada lado de 375). Desde `sm`, los de siempre. El `pr-12`
+    // del título, abajo de `lg`, deja libre la esquina de la campana de avisos.
+    <div className="min-h-screen bg-background p-1 sm:p-4 md:p-6">
       <div className="mb-4 md:mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4">
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4 pr-12 lg:pr-0">
           Administración de Recursos
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
@@ -487,12 +490,15 @@ export default function RecursosPage() {
       {/* Grilla y no `flex gap-2` con `flex-1`: los Button de shadcn traen
           `whitespace-nowrap` y no achican, así que "Recurso maquinaria" y los demás
           pedían ~820px y abajo de eso la fila se iba de la pantalla. Con
-          grilla el ancho lo pone la columna y los rótulos se acomodan solos. */}
+          grilla el ancho lo pone la columna y los rótulos se acomodan solos.
+          En el teléfono (RF-27) cada celda mide ~150px y «Recurso maquinaria» con su
+          ícono pide ~155: el botón se estiraba y descuadraba la grilla. Ahí el rótulo
+          puede bajar a un segundo renglón; desde `sm` vuelve a ir en una línea. */}
       <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
-          className={`flex-1 ${tabActiva === "operarios" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "operarios" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <User className="h-4 w-4 mr-2" />
           <span>Recurso humano</span>
@@ -500,7 +506,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "maquinas" ? "default" : "outline"}
           onClick={() => setTabActiva("maquinas")}
-          className={`flex-1 ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Factory className="h-4 w-4 mr-2" />
           <span>Recurso maquinaria</span>
@@ -508,7 +514,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "procesos" ? "default" : "outline"}
           onClick={() => setTabActiva("procesos")}
-          className={`flex-1 ${tabActiva === "procesos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "procesos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Layers className="h-4 w-4 mr-2" />
           <span>Procesos</span>
@@ -516,7 +522,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "rangos" ? "default" : "outline"}
           onClick={() => setTabActiva("rangos")}
-          className={`flex-1 ${tabActiva === "rangos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "rangos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Target className="h-4 w-4 mr-2" />
           <span>Rangos</span>
@@ -524,7 +530,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "sectores" ? "default" : "outline"}
           onClick={() => setTabActiva("sectores")}
-          className={`flex-1 ${tabActiva === "sectores" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "sectores" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <MapPin className="h-4 w-4 mr-2" />
           <span>Sectores</span>
@@ -532,7 +538,7 @@ export default function RecursosPage() {
         <Button
           variant={tabActiva === "planos" ? "default" : "outline"}
           onClick={() => setTabActiva("planos")}
-          className={`flex-1 ${tabActiva === "planos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
+          className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "planos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Ruler className="h-4 w-4 mr-2" />
           <span>Planos</span>

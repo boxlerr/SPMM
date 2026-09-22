@@ -87,8 +87,10 @@ function Detalle({ m }: { m: Movimiento }) {
         /* si quedó cortado por el tope, se muestra tal cual */
     }
     return (
-        <div className="px-4 pb-3 pl-11 space-y-2 text-sm">
-            <p className="text-xs text-muted-foreground font-mono">
+        <div className="px-3 sm:px-4 pb-3 pl-9 sm:pl-11 space-y-2 text-sm">
+            {/* `break-all`: la ruta es una sola palabra larga (/ordenes-trabajo/123/procesos…)
+                y en un teléfono no tenía dónde cortarse, así que empujaba la pantalla. */}
+            <p className="text-xs text-muted-foreground font-mono break-all">
                 {m.metodo} {m.ruta}
                 {m.estado != null && ` → ${m.estado}`}
                 {m.duracion_ms != null && ` · ${m.duracion_ms} ms`}
@@ -299,7 +301,7 @@ export function RegistroDeMovimientos() {
                                         type="button"
                                         onClick={() => setAbierto(activo ? null : m.id)}
                                         className={cn(
-                                            "w-full px-4 py-2 flex items-center gap-3 text-left transition-colors",
+                                            "w-full px-3 sm:px-4 py-2 flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 text-left transition-colors",
                                             activo ? "bg-muted/40" : "hover:bg-muted/30"
                                         )}
                                     >
@@ -307,9 +309,13 @@ export function RegistroDeMovimientos() {
                                         <span className="text-sm tabular-nums text-muted-foreground shrink-0 w-[5.5rem]">
                                             {fmtFecha(m.cuando)}
                                         </span>
-                                        {/* La frase entera, que es lo único que hay que leer. */}
+                                        {/* La frase entera, que es lo único que hay que leer.
+                                            En el teléfono (RF-27) va en su propio renglón, abajo
+                                            de la fecha y a todo el ancho: al lado de la fecha y
+                                            del reloj le quedaban 90px y se leía una palabra por
+                                            renglón. Desde `sm`, en la fila y cortada, como antes. */}
                                         <span className={cn(
-                                            "text-sm truncate",
+                                            "text-sm min-w-0 break-words order-last basis-full pl-7 sm:order-none sm:basis-auto sm:pl-0 sm:truncate",
                                             m.salio_bien ? "text-gray-700" : "text-rose-700"
                                         )}>
                                             {m.descripcion}

@@ -120,7 +120,11 @@ export default function Sidebar() {
   // No renderizar nada hasta que el componente esté montado
   if (!isMounted) {
     return (
-      <div className="fixed lg:relative top-0 left-0 h-full bg-white border-r border-gray-200 w-16 overflow-hidden">
+      // `hidden lg:block`: antes de saber el ancho, el riel se dibujaba `fixed` también
+      // en el teléfono y se sentaba encima del borde izquierdo del contenido hasta que
+      // corría el efecto. Abajo de `lg` la barra real arranca escondida (se abre con el
+      // botón flotante), así que el esqueleto tampoco tiene nada que mostrar ahí.
+      <div className="hidden lg:block relative top-0 left-0 h-full bg-white border-r border-gray-200 w-16 overflow-hidden">
         <div className="flex items-center border-b border-gray-200 justify-center p-4">
           <div className="flex items-center justify-center w-8 h-8 bg-gray-100 rounded-lg">
             <div className="w-3 h-3 bg-gray-400 rounded-sm"></div>
@@ -326,11 +330,15 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Botón flotante para móvil cuando sidebar está cerrada */}
+      {/* Botón flotante para móvil cuando sidebar está cerrada.
+          `z-40` y no `z-[60]` (RF-27): por encima de la pantalla (las cabeceras y pies
+          pegados van en z-30) pero por DEBAJO de los diálogos, que van en z-50. Con 60 el
+          botón quedaba arriba del diálogo abierto y, en el teléfono, tapaba justo el
+          «Cancelar» de la orden de trabajo y de cualquier formulario con el pie abajo. */}
       {isMobile && !isMobileOpen && (
         <button
           onClick={toggleSidebar}
-          className="fixed bottom-4 left-4 z-[60] flex items-center justify-center w-14 h-14 bg-white border-2 border-[#DC143C] rounded-full shadow-lg hover:shadow-xl hover:border-[#B8112E] transition-all duration-200"
+          className="fixed bottom-4 left-4 z-40 flex items-center justify-center w-14 h-14 bg-white border-2 border-[#DC143C] rounded-full shadow-lg hover:shadow-xl hover:border-[#B8112E] transition-all duration-200"
           title="Abrir menú"
         >
           <Image

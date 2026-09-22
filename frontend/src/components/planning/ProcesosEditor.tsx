@@ -370,10 +370,13 @@ export function ProcesosEditor({
                         ({incluidos} {incluidos === 1 ? "activo" : "activos"} de {rows.length})
                     </span>
                 </div>
-                <div className="flex items-center gap-2">
+                {/* `flex-wrap` (RF-27): el selector de «Toda la OT la hace», Traer historial
+                    y Agregar proceso suman ~600px; en un teléfono se salían del diálogo y
+                    «Agregar proceso», que es lo que más se toca, quedaba afuera. */}
+                <div className="flex flex-wrap items-center gap-2">
                     {/* Sale sólo con dos procesos o más: con uno la pregunta no existe. */}
                     {incluidos > 1 && operarios.length > 0 && (
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5 max-w-full">
                             {/* "La hace" no decía qué: parecía referirse a la fila de al lado y no
                                 a la OT entera. Y el valor por defecto —"La reparte el planificador"—
                                 no entraba en 190px y se leía "La reparte el pla…", o sea nada. */}
@@ -390,7 +393,7 @@ export function ProcesosEditor({
                                 ]}
                                 placeholder="elegir un recurso humano…"
                                 disabled={disabled}
-                                className="w-[220px]"
+                                className="w-[220px] max-w-full"
                                 triggerClassName="h-8 text-xs"
                             />
                         </div>

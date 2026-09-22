@@ -224,8 +224,13 @@ export default function CatalogoSimple({
 
   return (
     <div className="rounded-lg border bg-card">
-      <div className="p-4 md:p-6 border-b flex items-start justify-between gap-2">
-        <div>
+      {/* `flex-wrap` (RF-27): en un teléfono angosto el título con su bajada y «Nuevo
+          Sector» + Actualizar no entraban en una fila y los botones se salían de la
+          tarjeta. Ahora bajan abajo del título cuando no hay lugar. `basis-56` para que
+          la bajada larga no se lleve la fila entera en la computadora: ahí se sigue
+          cortando en renglones al lado de los botones, como siempre. */}
+      <div className="p-4 md:p-6 border-b flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1 basis-56">
           <div className="flex items-center gap-2">
             {icon}
             <h2 className="text-lg font-semibold">{titulo}</h2>

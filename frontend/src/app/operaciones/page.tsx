@@ -2226,8 +2226,13 @@ export default function OperacionesPage() {
                     );
                   })()}
                   {/* Zoom control compartido (mismo storage key que No Planificadas,
-                      Historial, Planificar y Vista Previa). */}
-                  <ZoomControl value={planZoom} onChange={setPlanZoom} />
+                      Historial, Planificar y Vista Previa).
+                      Escondido abajo de `md` (RF-27): ahí el plan se ve en tarjetas y el
+                      zoom sólo actúa sobre la tabla; en el teléfono no hacía nada y, al
+                      lado del selector de semana, se salía de la pantalla. */}
+                  <div className="hidden md:block">
+                    <ZoomControl value={planZoom} onChange={setPlanZoom} />
+                  </div>
                 </div>
               </div>
 
@@ -2699,12 +2704,12 @@ export default function OperacionesPage() {
            costado. Las dos conviven montadas (la que no toca queda en `hidden`)
            para que "Volver" no pierda el rango de fechas ni lo tildado.
 
-           Sin padding propio: el layout de la app ya envuelve todo en un `p-6`
-           (LayoutWrapper). El `px-8` que había acá se sumaba a ese y dejaba 56px de
+           Sin padding propio: el layout de la app ya envuelve todo en su margen
+           (LayoutWrapper, `--pad-app`). El `px-8` que había acá se sumaba a ese y dejaba 56px de
            margen muerto de cada lado —"aprovechar mejor el espacio de la derecha y la
            izquierda", Julián 26/08—, y el `pt-2` sumaba 8px de alto que el shell no
-           descuenta (usa 100vh-3rem, que son justo los 48px del p-6): el pie quedaba
-           mordido y el contenedor scrolleaba de a poquito. */
+           descuenta (descuenta justo los dos márgenes del layout, `--pad-app`): el pie
+           quedaba mordido y el contenedor scrolleaba de a poquito. */
         <div className="w-full">
           <PlanningSelectionScreen
             isOpen={isSelectionModalOpen}
@@ -2769,7 +2774,7 @@ export default function OperacionesPage() {
           sigue scrolleando de una sola manera —nada de scroll adentro de scroll,
           que es lo que incomodaba— y lo que tiene que quedar a la vista se
           resuelve con `sticky`. `svh` y no `vh` por la barra de Safari en iOS. */}
-      <div className="min-h-[calc(100svh-3rem)] w-full flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="min-h-[calc(100svh-2*var(--pad-app,1.5rem))] w-full flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm">
         {/* Cabecera fija: título, acciones y solapas quedan a la vista mientras
             corren las OTs por abajo. z-30 para pasarle por encima a los
             encabezados de las tablas, que están en z-10/z-20. */}
@@ -2928,8 +2933,12 @@ export default function OperacionesPage() {
       </>
       )}
 
-      {/* Sidebar rendered as Fixed Sidebar (Full Height) */}
-      <div className={"fixed inset-y-0 right-0 w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'translate-x-0' : 'translate-x-full')}>
+      {/* Sidebar rendered as Fixed Sidebar (Full Height).
+          `max-w-full`: en un teléfono los 400px fijos eran más que la pantalla y el
+          panel quedaba cortado del lado izquierdo, con el título afuera (RF-27). Ahora
+          ocupa el ancho que haya; desde 400px en adelante, igual que siempre. Abajo de
+          `xl` se superpone al contenido en vez de correrlo (el `xl:mr-[400px]` de arriba). */}
+      <div className={"fixed inset-y-0 right-0 w-[400px] max-w-full bg-white shadow-2xl transform transition-transform duration-300 ease-in-out z-[60] " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'translate-x-0' : 'translate-x-full')}>
         <TaskDetailsModal
           isOpen={isDetailsPanelOpen}
           selectedItem={selectedTask}

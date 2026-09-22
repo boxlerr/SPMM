@@ -366,8 +366,16 @@ const MateriaPrimaTab = ({ piezaInicial = null, onPiezaInicialUsada }: MateriaPr
                     )}
                 </CardHeader>
                 <CardContent className="px-0">
-                    <div className="rounded-md border">
-                        <Table>
+                    {/* `min-w-[1100px]` abajo de `lg` (RF-27): son doce columnas y en un
+                        teléfono se apretaban a 340px — la descripción partida letra por
+                        letra y el mínimo editable sin lugar para tocarlo. Con piso, la tabla
+                        se desliza de costado dentro de su borde. Desde `lg` queda como
+                        estaba: se acomoda al ancho que haya.
+                        El `@container` es para los carteles de «Cargando» y «No se
+                        encontraron»: van del ancho de la caja y pegados a la izquierda,
+                        porque centrados en los 1100px quedaban fuera de la pantalla. */}
+                    <div className="rounded-md border @container">
+                        <Table className="min-w-[1100px] lg:min-w-0">
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Código</TableHead>
@@ -388,8 +396,8 @@ const MateriaPrimaTab = ({ piezaInicial = null, onPiezaInicialUsada }: MateriaPr
                             <TableBody>
                                 {loading ? (
                                     <TableRow>
-                                        <TableCell colSpan={columnas} className="h-24 text-center">
-                                            <div className="flex justify-center items-center gap-2">
+                                        <TableCell colSpan={columnas} className="p-0">
+                                            <div className="sticky left-0 w-[100cqw] h-24 flex justify-center items-center gap-2">
                                                 <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
                                                 <span>Cargando datos...</span>
                                             </div>
@@ -445,12 +453,14 @@ const MateriaPrimaTab = ({ piezaInicial = null, onPiezaInicialUsada }: MateriaPr
                                     })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={columnas} className="text-center py-6 text-muted-foreground">
-                                            {filtroStock === "bajo_minimo"
-                                                ? "Ningún insumo está abajo de su mínimo"
-                                                : filtroStock === "con_minimo"
-                                                    ? "Todavía no hay insumos con stock mínimo cargado"
-                                                    : "No se encontraron piezas"}
+                                        <TableCell colSpan={columnas} className="p-0">
+                                            <div className="sticky left-0 w-[100cqw] px-4 py-6 text-center text-muted-foreground whitespace-normal">
+                                                {filtroStock === "bajo_minimo"
+                                                    ? "Ningún insumo está abajo de su mínimo"
+                                                    : filtroStock === "con_minimo"
+                                                        ? "Todavía no hay insumos con stock mínimo cargado"
+                                                        : "No se encontraron piezas"}
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 )}

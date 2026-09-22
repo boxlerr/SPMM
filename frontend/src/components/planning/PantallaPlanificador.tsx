@@ -13,11 +13,15 @@
  * estornuda y que obliga a bloquear el click de afuera y la tecla Escape para no
  * perder media hora de trabajo. Todo eso desaparece siendo una pantalla.
  *
- * Por qué la altura es `calc(100vh - 3rem)`: el layout de la app (LayoutWrapper)
- * mete el contenido de cada página dentro de un `p-6`, o sea 24px arriba y 24px
- * abajo. Descontando esos 48px, la pantalla llega justo hasta el borde de la
- * ventana sin generar scroll del documento — el único scroll queda adentro, que es
- * lo que hace que la cabecera y el pie estén SIEMPRE a la vista.
+ * Por qué la altura es `calc(100svh - 2 × --pad-app)`: el layout de la app
+ * (LayoutWrapper) mete el contenido de cada página dentro de un margen que mide
+ * `--pad-app` arriba y otro abajo (24px en la computadora, 12 en el teléfono).
+ * Descontando los dos, la pantalla llega justo hasta el borde de la ventana sin
+ * generar scroll del documento — el único scroll queda adentro, que es lo que hace
+ * que la cabecera y el pie estén SIEMPRE a la vista. Antes decía `3rem` a mano, que
+ * eran los 48px del `p-6` fijo; con el margen que achica en el teléfono (RF-27) ese
+ * número sobraba y el pie quedaba 24px más abajo de la ventana. El `1.5rem` de
+ * respaldo es el de siempre, por si esto se monta fuera del layout.
  *
  * Por qué `hidden` en vez de no renderizar: las dos pantallas conviven montadas.
  * Yendo de la vista previa a "Volver" y de nuevo a planificar, desmontar perdería
@@ -76,15 +80,22 @@ export function PantallaPlanificador({
                 //
                 // `svh` y no `vh`: en iOS la barra de Safari hace que 100vh no entre en
                 // pantalla. Mismo motivo que allá.
-                "min-h-[calc(100svh-3rem)] flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm",
+                "min-h-[calc(100svh-2*var(--pad-app,1.5rem))] flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm",
                 !visible && "hidden",
                 className,
             )}
         >
             {/* Sticky y no shrink-0: la cabecera queda a la vista mientras la lista corre por
                 abajo, sin necesidad de que el contenedor tenga alto fijo. z-30 para pasarle
-                por encima a los encabezados sticky de las tablas, que están en z-10/z-20. */}
-            <div ref={cabeceraRef} className="sticky top-0 z-30 border-b border-gray-100 bg-white rounded-t-xl">
+                por encima a los encabezados sticky de las tablas, que están en z-10/z-20.
+
+                Pegada recién desde `md` (RF-27). En un teléfono los botones y los filtros
+                bajan de renglón y la cabecera pasa a medir 300px o más: fija, se comía la
+                mitad de la pantalla y la lista quedaba en una ranura. Ahí se va con el
+                scroll como cualquier página; el pie con Confirmar sí queda pegado abajo.
+                El alto se sigue midiendo igual (ResizeObserver de arriba), así que cuando
+                la cabecera cambia de renglones la variable `--alto-cabecera` acompaña. */}
+            <div ref={cabeceraRef} className="md:sticky md:top-0 z-30 border-b border-gray-100 bg-white rounded-t-xl">
                 {cabecera}
             </div>
             {/* `min-w-0`: sin eso, este flex item no puede achicarse por debajo del
@@ -93,9 +104,13 @@ export function PantallaPlanificador({
                 costado en vez de scrollear ella sola. */}
             <div className="relative flex-1 min-w-0 flex items-start">{children}</div>
             {/* El pie se pega abajo: Confirmar y Volver siempre alcanzables sin scrollear
-                hasta el final de 11 OTs. */}
+                hasta el final de 11 OTs.
+                `pl-16` abajo de `lg`: ahí el menú de la app es un botón redondo flotante
+                abajo a la izquierda (Sidebar), y se sentaba justo encima de «Volver» — el
+                toque abría el menú en vez de volver. Desde `lg` el menú es la barra
+                lateral y el pie queda como siempre. */}
             {pie && (
-                <div className="sticky bottom-0 z-30 border-t border-gray-200 bg-white rounded-b-xl">
+                <div className="sticky bottom-0 z-30 border-t border-gray-200 bg-white rounded-b-xl pl-16 lg:pl-0">
                     {pie}
                 </div>
             )}
@@ -117,6 +132,7 @@ export function CifraPlan({
     tono = "neutral",
     accion,
     title,
+    className,
 }: {
     icono: React.ReactNode;
     valor: React.ReactNode;
@@ -126,6 +142,8 @@ export function CifraPlan({
     tono?: "neutral" | "alerta" | "ok" | "fecha";
     accion?: React.ReactNode;
     title?: string;
+    /** Para que el riel reparta las celdas (p. ej. `col-span-2` en el teléfono). */
+    className?: string;
 }) {
     return (
         // Sin flex-1 ni min-w: el ancho lo reparte la grilla del riel, y el fondo
@@ -138,6 +156,7 @@ export function CifraPlan({
             className={cn(
                 "min-w-0 flex items-center gap-2.5 px-3 py-2",
                 tono === "alerta" ? "bg-rose-50" : "bg-white",
+                className,
             )}
         >
             <div

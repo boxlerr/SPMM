@@ -114,18 +114,21 @@ export function DeliveryProgress({ total, delivered, compact = false, className 
                     />
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 pt-1">
-                    <div className="flex flex-col">
+                {/* Las tres cifras siguen en fila (se leen juntas), pero con menos aire en
+                    el teléfono (RF-27): con 16px de hueco y 16 de sangría, «ENTREGADAS» no
+                    entraba en su tercio de una tarjeta angosta. */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 pt-1">
+                    <div className="flex flex-col min-w-0">
                         <span className="text-[10px] uppercase text-gray-400 font-semibold tracking-wide">Total</span>
                         <span className="text-base font-bold text-gray-900">{total}</span>
                     </div>
-                    <div className="flex flex-col border-l border-gray-100 pl-4">
+                    <div className="flex flex-col min-w-0 border-l border-gray-100 pl-2 sm:pl-4">
                         <span className="text-[10px] uppercase text-gray-400 font-semibold tracking-wide">Entregadas</span>
                         <span className={cn("text-base font-bold", isOverflow ? "text-orange-600" : "text-gray-900")}>
                             {deliveredVal}
                         </span>
                     </div>
-                    <div className="flex flex-col border-l border-gray-100 pl-4">
+                    <div className="flex flex-col min-w-0 border-l border-gray-100 pl-2 sm:pl-4">
                         <span className="text-[10px] uppercase text-gray-400 font-semibold tracking-wide">Pendientes</span>
                         <span className="text-base font-bold text-gray-400">{pending}</span>
                     </div>

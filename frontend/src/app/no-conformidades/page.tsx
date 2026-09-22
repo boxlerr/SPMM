@@ -234,11 +234,16 @@ export default function NoConformidadesPage() {
     const hayFiltros = !!(ot || tipo || gravedad || estado || desde || hasta);
 
     return (
-        <div className="container mx-auto py-8 px-4 max-w-6xl">
-            <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+        // Márgenes chicos en el teléfono (RF-27): el layout ya pone los suyos, y sumados
+        // a estos se llevaban 56px de los 375.
+        <div className="container mx-auto py-4 sm:py-8 px-1 sm:px-4 max-w-6xl">
+            {/* `pr-12` abajo de `lg`: la campana de avisos flota arriba a la derecha
+                (Topbar) y, con los márgenes más chicos del teléfono, el título largo y los
+                botones le quedaban justo debajo. Desde `lg` hay aire de sobra. */}
+            <div className="flex items-start justify-between gap-3 mb-6 flex-wrap pr-12 lg:pr-0">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-                        <FileWarning className="h-7 w-7 text-amber-600" />
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+                        <FileWarning className="h-6 w-6 sm:h-7 sm:w-7 text-amber-600 shrink-0" />
                         No conformidades
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
@@ -277,12 +282,20 @@ export default function NoConformidadesPage() {
                             className="pl-8 h-9"
                         />
                     </div>
-                    <label className="text-xs text-muted-foreground">Desde</label>
-                    <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
-                           className="h-9 w-40" />
-                    <label className="text-xs text-muted-foreground">Hasta</label>
-                    <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
-                           className="h-9 w-40" />
+                    {/* Cada rótulo envuelve su fecha: así, cuando la fila no entra (en el
+                        teléfono no entra), «Desde» baja de renglón JUNTO con su campo. Sueltos,
+                        el rótulo quedaba al final de un renglón y la fecha al principio del
+                        otro, y no se sabía cuál era cuál. */}
+                    <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                        Desde
+                        <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
+                               className="h-9 w-40" />
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                        Hasta
+                        <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
+                               className="h-9 w-40" />
+                    </label>
                     {hayFiltros && (
                         <Button variant="ghost" size="sm" className="h-9" onClick={limpiar}>
                             Limpiar filtros

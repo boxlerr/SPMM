@@ -122,12 +122,17 @@ export default function Topbar() {
     router.push("/configuracion?tab=notificaciones");
   };
 
-  // Ajustar la posición derecha basado en si el panel está abierto
-  const rightPosition = isDetailsPanelOpen ? 416 : 16; // 400px (panel) + 16px (margen)
+  // Con el panel de detalle de Operaciones abierto (400px contra el borde derecho), la
+  // campana se corre a su izquierda para no quedar tapada. Pero sólo desde `sm`: en un
+  // teléfono ese panel ocupa la pantalla entera, y correrla 416px la mandaba afuera de
+  // la pantalla (RF-27). Ahí queda en su lugar, debajo del panel, que tiene su propia X.
+  // Clases y no `style`, porque el corrimiento depende del ancho y un estilo en línea no
+  // sabe de anchos.
+  const posicion = isDetailsPanelOpen ? "right-4 sm:right-[416px]" : "right-4";
 
   return createPortal(
     (
-      <div className="fixed z-50 transition-all duration-300" style={{ top: 16, right: rightPosition }}>
+      <div className={`fixed top-4 z-50 transition-all duration-300 ${posicion}`}>
         <button
           ref={buttonRef}
           type="button"
@@ -147,7 +152,9 @@ export default function Topbar() {
         {isOpen && (
           <div
             ref={dropdownRef}
-            className="absolute top-14 right-0 w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 max-h-96 overflow-hidden flex flex-col"
+            // Los 320px de siempre, pero nunca más anchos que la pantalla menos un margen:
+            // en un teléfono de 320 la lista se salía 16px por la izquierda.
+            className="absolute top-14 right-0 w-[min(20rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-lg shadow-xl z-50 max-h-96 overflow-hidden flex flex-col"
           >
             <div className="p-4 border-b border-gray-200 bg-gray-50">
               <div className="flex items-center justify-between">

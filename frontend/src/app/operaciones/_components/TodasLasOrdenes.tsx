@@ -186,7 +186,9 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                         Las que entraron al plan y las que quedaron afuera, juntas.
                     </p>
                 </div>
-                <div className="flex gap-2">
+                {/* `flex-wrap` (RF-27): Actualizar y «Nueva orden de trabajo» piden ~330px
+                    y en un teléfono angosto el segundo se salía del recuadro. */}
+                <div className="flex flex-wrap gap-2">
                     <Button variant="outline" onClick={cargar} disabled={cargando}>
                         <RefreshCw className={cn("h-4 w-4 mr-2", cargando && "animate-spin")} />
                         Actualizar

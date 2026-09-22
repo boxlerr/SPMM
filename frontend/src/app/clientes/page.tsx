@@ -91,9 +91,11 @@ export default function ClientesPage() {
     };
 
     return (
-        <div className="min-h-screen bg-background p-4 md:p-6">
+        // RF-27: mismo criterio que Recursos — casi sin margen propio en el teléfono
+        // (el layout ya pone el suyo) y el título sin meterse debajo de la campana.
+        <div className="min-h-screen bg-background p-1 sm:p-4 md:p-6">
             <div className="mb-4 md:mb-6">
-                <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4">
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4 pr-12 lg:pr-0">
                     Administración de Clientes
                 </h1>
                 <div className="flex flex-col sm:flex-row gap-2">

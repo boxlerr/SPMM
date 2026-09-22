@@ -225,9 +225,13 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
             {/* En compacto los selects arrancan más angostos para que los siete entren
                 en UNA fila: con min-w 160 el séptimo ("Orden") se caía solo a una
                 segunda fila casi vacía y se llevaba 40px de alto por nada. */}
+            {/* En el teléfono (RF-27), dos por renglón y del ancho que haya: con el mínimo
+                de 160 y el tope de 200 entraba UNO por renglón y los siete selectores eran
+                siete renglones con media pantalla vacía a la derecha. Desde `sm`, igual que
+                siempre. */}
             <div className={cn(
-                "flex flex-wrap gap-2 [&>*]:flex-1 [&>*]:max-w-[200px]",
-                compacto ? "[&>*]:min-w-[132px]" : "[&>*]:min-w-[160px]",
+                "flex flex-wrap gap-2 [&>*]:flex-1 [&>*]:min-w-[132px] sm:[&>*]:max-w-[200px]",
+                !compacto && "sm:[&>*]:min-w-[160px]",
             )}>
                 {/* Client Selector */}
                 <Popover>
