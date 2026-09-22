@@ -32,6 +32,19 @@ REGLAS
   importante. Si el .sql crea un índice o deja un COMMENT y acá van sólo las
   columnas, la base de producción queda distinta del archivo que la documenta y el
   log dice "aplicada" igual. La primera versión de este módulo tenía ese bug.
+- **Cada COMMENT es UN solo literal SQL**, aunque en Python vaya partido en varias
+  strings: la comilla simple abre en la primera y cierra en la última, nada en el
+  medio. El .sql sí puede partirlo en varios literales, porque ahí cada trozo va en
+  su renglón y Postgres los pega. Acá quedan pegados sin salto de línea, y Postgres
+  lee el `''` del medio como una comilla escapada: el comentario sale con apóstrofos
+  sueltos y distinto del .sql, sin error y con el log diciendo "aplicada". Pasó en
+  cinco migraciones hasta el 22/09. Las dos del 22/09 ya están corregidas: todavía
+  no corrieron en producción, así que el primer arranque escribe el texto bueno.
+  Las tres anteriores (09-11 no_lleva_materia_prima, 09-11 inicio_base_del_plan,
+  09-15 proceso_no_lleva_maquina) ya corrieron en Supabase y se dejaron como están
+  a propósito, hasta que se decida: como acá no hay registro de aplicadas y todo se
+  repite en cada arranque, corregirlas reescribe su COMMENT en el próximo deploy
+  (sólo el texto, ninguna fila). El test las marca como defecto conocido.
 - Sólo Postgres. Producción es Supabase; los tests corren sobre SQLite, donde las
   tablas salen de `Base.metadata` y ya traen todas las columnas.
 
@@ -184,10 +197,10 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         [
             "ALTER TABLE notificacion ADD COLUMN IF NOT EXISTS id_orden_trabajo INTEGER",
             "COMMENT ON COLUMN notificacion.id_orden_trabajo IS "
-            "'De qué orden de trabajo habla esta notificación. NULL = no habla de ninguna '"
-            "'(altas de personas, cambios de usuario). Sin FK a propósito: borrar una OT no '"
-            "'tiene que fallar por un aviso viejo. Es además lo que evita repetir el aviso de '"
-            "'retraso en cada corrida del detector.'",
+            "'De qué orden de trabajo habla esta notificación. NULL = no habla de ninguna "
+            "(altas de personas, cambios de usuario). Sin FK a propósito: borrar una OT no "
+            "tiene que fallar por un aviso viejo. Es además lo que evita repetir el aviso de "
+            "retraso en cada corrida del detector.'",
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_notificacion_retraso_ot "
             "ON notificacion (id_orden_trabajo) WHERE tipo = 'OT_RETRASADA'",
         ],
@@ -204,30 +217,30 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ADD COLUMN IF NOT EXISTS usuario VARCHAR(120), "
             "ADD COLUMN IF NOT EXISTS fecha_cierre TIMESTAMP",
             "COMMENT ON COLUMN incidencia_proceso.gravedad IS "
-            "'Qué tan grave fue: LEVE, MEDIA o GRAVE. NULL = sin clasificar, que es como '"
-            "'quedan las cargadas antes del 22/09/2026, cuando el campo no existía en '"
-            "'pantalla. Nunca se completa por default: sería inventar una evaluación que "
+            "'Qué tan grave fue: LEVE, MEDIA o GRAVE. NULL = sin clasificar, que es como "
+            "quedan las cargadas antes del 22/09/2026, cuando el campo no existía en "
+            "pantalla. Nunca se completa por default: sería inventar una evaluación que "
             "nadie hizo.'",
             "COMMENT ON COLUMN incidencia_proceso.estado IS "
-            "'ABIERTA o CERRADA. Arranca ABIERTA y sólo pasa a CERRADA cuando alguien la '"
-            "'cierra desde la pantalla, que es además cuando se llena fecha_cierre. Las '"
-            "'viejas quedan ABIERTA porque nunca existió la forma de cerrarlas: eso es un "
+            "'ABIERTA o CERRADA. Arranca ABIERTA y sólo pasa a CERRADA cuando alguien la "
+            "cierra desde la pantalla, que es además cuando se llena fecha_cierre. Las "
+            "viejas quedan ABIERTA porque nunca existió la forma de cerrarlas: eso es un "
             "hecho, no un default.'",
             "COMMENT ON COLUMN incidencia_proceso.piezas_afectadas IS "
-            "'Cuántas piezas salieron afectadas. NULL = no se registró, que NO es lo mismo '"
-            "'que 0 (ninguna): la diferencia importa para contar rechazos.'",
+            "'Cuántas piezas salieron afectadas. NULL = no se registró, que NO es lo mismo "
+            "que 0 (ninguna): la diferencia importa para contar rechazos.'",
             "COMMENT ON COLUMN incidencia_proceso.accion_correctiva IS "
             "'Qué se hizo para resolverla, en texto libre. NULL = todavía nada.'",
             "COMMENT ON COLUMN incidencia_proceso.id_usuario IS "
-            "'Quién la reportó, tomado del token. NULL = no se registró (las anteriores al '"
-            "'22/09/2026 y las que entren por script); nunca un autor inventado.'",
+            "'Quién la reportó, tomado del token. NULL = no se registró (las anteriores al "
+            "22/09/2026 y las que entren por script); nunca un autor inventado.'",
             "COMMENT ON COLUMN incidencia_proceso.usuario IS "
-            "'Nombre y apellido de quien la reportó, congelado al momento de reportarla: si '"
-            "'después se renombra el usuario, el registro de calidad tiene que seguir '"
-            "'diciendo lo que decía.'",
+            "'Nombre y apellido de quien la reportó, congelado al momento de reportarla: si "
+            "después se renombra el usuario, el registro de calidad tiene que seguir "
+            "diciendo lo que decía.'",
             "COMMENT ON COLUMN incidencia_proceso.fecha_cierre IS "
-            "'Cuándo se cerró, en hora local del taller y sin zona (como todas las fechas '"
-            "'de esta base). NULL mientras siga abierta.'",
+            "'Cuándo se cerró, en hora local del taller y sin zona (como todas las fechas "
+            "de esta base). NULL mientras siga abierta.'",
             "CREATE INDEX IF NOT EXISTS ix_incidencia_ot "
             "ON incidencia_proceso (id_orden_trabajo, fecha_registro DESC)",
             "CREATE INDEX IF NOT EXISTS ix_incidencia_estado "

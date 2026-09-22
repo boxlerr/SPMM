@@ -74,6 +74,106 @@ def test_lo_que_se_aplica_solo_es_todo_el_sql(nombre, sentencias):
     )
 
 
+def _literal_sql(sql: str, i: int) -> tuple[str, int]:
+    """Lee el literal que arranca en `sql[i]` como lo lee Postgres: (texto, fin).
+
+    Dos reglas de Postgres que el test de firmas no mira y que acá importan:
+    `''` adentro de un literal es UNA comilla escapada, y dos literales seguidos se
+    pegan sólo si entre ellos hay un salto de línea. Sin salto (`'a' 'b'`) es un
+    error de sintaxis, y pegados (`'a''b'`) son un solo literal con una comilla en
+    el medio.
+    """
+    partes = []
+    while True:
+        assert sql[i] == "'", f"se esperaba un literal y hay: {sql[i:i + 40]!r}"
+        i += 1
+        while True:
+            j = sql.index("'", i)
+            partes.append(sql[i:j])
+            if sql[j + 1:j + 2] == "'":
+                partes.append("'")
+                i = j + 2
+                continue
+            i = j + 1
+            break
+        sigue = re.match(r"[ \t]*\n\s*'", sql[i:])
+        if not sigue:
+            return "".join(partes), i
+        i += sigue.end() - 1
+
+
+def _comentarios(sql: str) -> dict[str, str]:
+    """{objeto: texto} de cada COMMENT ON, con el texto que queda en la base."""
+    sin_notas = re.sub(r"(?m)^\s*--[^\n]*", "", sql)
+    textos = {}
+    for m in re.finditer(r"comment on (?:column|table) ([\w.]+) is\s*", sin_notas, re.I):
+        texto, fin = _literal_sql(sin_notas, m.end())
+        resto = sin_notas[fin:].lstrip()
+        assert resto == "" or resto.startswith(";"), (
+            f"el COMMENT de {m.group(1)} no termina en un literal: sigue {resto[:60]!r}"
+        )
+        textos[m.group(1)] = texto
+    return textos
+
+
+# Ya corrieron en Supabase con el defecto de abajo y se dejaron como están a
+# propósito: corregirlas acá reescribe su COMMENT en producción en el próximo
+# deploy (sólo el texto, ninguna fila), y eso se decide aparte. `strict=True` hace
+# que el día que alguien las arregle el test avise que hay que sacarlas de esta lista.
+COMMENT_CON_COMILLAS_CONOCIDO = {
+    "2026-09-11_no_lleva_materia_prima",
+    "2026-09-11_inicio_base_del_plan",
+    "2026-09-15_proceso_no_lleva_maquina",
+}
+
+# El módulo escribió a propósito una versión resumida del .sql: prosa distinta, no
+# este defecto. En esas sólo se cuentan las comillas.
+COMMENT_RESUMIDO_A_PROPOSITO = {"2026-09-11_modificado_en_ot"}
+
+
+def _casos_de_comment():
+    for nombre, sentencias in migraciones.MIGRACIONES:
+        marcas = []
+        if nombre in COMMENT_CON_COMILLAS_CONOCIDO:
+            marcas.append(pytest.mark.xfail(
+                strict=True,
+                reason="ya corrió en producción así; corregirla reescribe el COMMENT",
+            ))
+        yield pytest.param(nombre, sentencias, id=nombre, marks=marcas)
+
+
+@pytest.mark.parametrize("nombre,sentencias", list(_casos_de_comment()))
+def test_cada_comment_es_un_solo_literal(nombre, sentencias):
+    """Que la documentación que queda en la base diga lo que dice el .sql.
+
+    En Python un COMMENT largo va partido en varias strings. Si cada trozo abre y
+    cierra su comilla, Python los pega en `...ninguna ''(altas...` y Postgres lee
+    el `''` como una comilla escapada: no falla, el log dice "aplicada" y el
+    comentario queda con apóstrofos sueltos. Pasó en cinco migraciones hasta el
+    22/09 y el test de firmas no lo veía porque no mira la prosa.
+    """
+    del_archivo = _comentarios((MIGRATIONS_DIR / f"{nombre}.sql").read_text())
+    for s in sentencias:
+        if not s.lstrip().lower().startswith("comment on"):
+            continue
+        for objeto, texto in _comentarios(s).items():
+            esperado = del_archivo.get(objeto)
+            assert esperado is not None, f"{nombre}: el .sql no comenta {objeto}"
+            sueltas = texto.count("'") - esperado.count("'")
+            assert sueltas == 0, (
+                f"{nombre}: el COMMENT de {objeto} queda en la base con {sueltas} "
+                f"comilla(s) de más: «{texto}». Partido en varias strings de Python, "
+                f"la comilla simple va sólo al principio de la primera y al final de "
+                f"la última."
+            )
+            if nombre in COMMENT_RESUMIDO_A_PROPOSITO:
+                continue
+            assert " ".join(texto.split()) == " ".join(esperado.split()), (
+                f"{nombre}: el COMMENT de {objeto} que se aplica solo dice otra cosa "
+                f"que el .sql.\n  módulo: «{texto}»\n  .sql:   «{esperado}»"
+            )
+
+
 def test_todo_el_ddl_es_idempotente():
     """Corre en cada arranque y con varias instancias a la vez."""
     for nombre, sentencias in migraciones.MIGRACIONES:

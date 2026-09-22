@@ -92,6 +92,44 @@ function EnlaceMateriaPrima({ onAbrir }: { onAbrir: (idPieza: number | null) => 
   return null
 }
 
+/** Qué OT pidió abrir un enlace: por id interno o por el número que ve la gente. */
+type OtPedida = { id: number } | { vieja: number }
+
+/**
+ * Lee `?edit_ot=ID` (o `?edit_ot_vieja=N`) y le pasa a la página qué OT abrir. Lo usan
+ * el «Editar OT ↗» de la vista previa del plan y el aviso de OT retrasada de la
+ * campanita (RF-04).
+ *
+ * Mismo camino que `EnlaceMateriaPrima`, y por lo mismo. Antes esto se leía de
+ * `window.location` en un efecto que dependía sólo de la lista de órdenes, y fallaba
+ * de dos maneras cuando ya se estaba en Operaciones: tocar el aviso no abría nada (el
+ * router cambia la dirección sin volver a montar la página, y la lista no cambiaba), y
+ * el `?edit_ot` quedaba en la dirección, así que la próxima edición en línea de
+ * cualquier OT —que toca la lista— abría de golpe el modal de la retrasada.
+ *
+ * Por eso el parámetro se borra acá apenas se lee, y lo pendiente queda en el estado
+ * de la página, no en la dirección: una vez abierto, no hay nada que lo reabra.
+ */
+function EnlaceEditarOT({ onPedir }: { onPedir: (pedido: OtPedida) => void }) {
+  const params = useSearchParams()
+  const editOt = params.get("edit_ot")
+  const editOtVieja = params.get("edit_ot_vieja")
+  useEffect(() => {
+    if (!editOt && !editOtVieja) return
+    const id = Number(editOt)
+    const vieja = Number(editOtVieja)
+    if (editOt && Number.isInteger(id) && id > 0) onPedir({ id })
+    else if (editOtVieja && Number.isInteger(vieja) && vieja > 0) onPedir({ vieja })
+    const url = new URL(window.location.href)
+    url.searchParams.delete("edit_ot")
+    url.searchParams.delete("edit_ot_vieja")
+    window.history.replaceState({}, "", url.toString())
+    // Ver la nota de `EnlaceMateriaPrima`: lo que dispara es el parámetro, no el callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editOt, editOtVieja])
+  return null
+}
+
 export default function OperacionesPage() {
   // Operaciones abre SIEMPRE en "Órdenes de Trabajo": es la pantalla desde la que se
   // arranca el día (ver qué entró y qué falta planificar), no la planificación ya hecha.
@@ -106,6 +144,9 @@ export default function OperacionesPage() {
   /** OT pre-seleccionada para editar (viene del query param `?edit_ot=ID` desde
    *  el link "Editar OT ↗" de la vista previa, o de otra parte del sistema). */
   const [orderToEdit, setOrderToEdit] = useState<WorkOrder | null>(null)
+  /** La OT que pidió abrir un enlace (`EnlaceEditarOT`), mientras llegan las órdenes.
+   *  Se consume una vez: al abrirla vuelve a null. */
+  const [otPedida, setOtPedida] = useState<OtPedida | null>(null)
   const { isDetailsPanelOpen, setIsDetailsPanelOpen } = usePanelContext()
 
   // Refresh Trigger for Children
@@ -439,33 +480,32 @@ export default function OperacionesPage() {
   }, []);
 
   /**
-   * Lee el query param `?edit_ot=ID` (o `?edit_ot_vieja=ID`) y, cuando las OTs
-   * ya están cargadas, abre el modal de edición. Esto permite que desde el modal
-   * de vista previa el usuario haga click en "Editar OT ↗" y aterrice acá
-   * directamente sobre la OT correcta, en una pestaña separada.
+   * Abre el modal de edición de la OT que pidió un enlace (`?edit_ot`, ver
+   * `EnlaceEditarOT`), apenas están las órdenes. Si se llega de otra pantalla, la
+   * lista todavía no llegó y el pedido espera; si ya se estaba acá, abre en el acto.
+   *
+   * El pedido se consume antes de abrir: así, que después cambie la lista (cualquier
+   * edición en línea la toca) no vuelve a abrir nada.
    */
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!otPedida) return;
     if (ordenesTrabajo.length === 0) return;
-    const params = new URLSearchParams(window.location.search);
-    const editOtId = params.get("edit_ot");
-    const editOtVieja = params.get("edit_ot_vieja");
-    if (!editOtId && !editOtVieja) return;
-
-    const target = editOtId
-      ? ordenesTrabajo.find(o => o.id === parseInt(editOtId))
-      : ordenesTrabajo.find(o => o.id_otvieja === parseInt(editOtVieja!));
-
-    if (target) {
-      setOrderToEdit(target);
-      setIsCreateModalOpen(true);
-      // Limpiamos el query param sin recargar para que no se vuelva a abrir al refresh.
-      const url = new URL(window.location.href);
-      url.searchParams.delete("edit_ot");
-      url.searchParams.delete("edit_ot_vieja");
-      window.history.replaceState({}, "", url.toString());
+    const target = "id" in otPedida
+      ? ordenesTrabajo.find(o => o.id === otPedida.id)
+      : ordenesTrabajo.find(o => o.id_otvieja === otPedida.vieja);
+    setOtPedida(null);
+    if (!target) {
+      // Antes no pasaba nada y no se sabía por qué: tocar el aviso parecía roto.
+      toast.error(
+        "id" in otPedida
+          ? "Esa orden ya no está en la lista: puede que la hayan borrado."
+          : `La OT #${otPedida.vieja} ya no está en la lista: puede que la hayan borrado.`
+      );
+      return;
     }
-  }, [ordenesTrabajo]);
+    setOrderToEdit(target);
+    setIsCreateModalOpen(true);
+  }, [otPedida, ordenesTrabajo]);
 
 
   const uniqueLotes = React.useMemo(() => {
@@ -2692,6 +2732,7 @@ export default function OperacionesPage() {
             setPiezaEnlazada(idPieza)
           }}
         />
+        <EnlaceEditarOT onPedir={setOtPedida} />
       </Suspense>
       {/* La raíz no pone ni alto ni fondo: los pone la pantalla de adentro, que
           arranca justo del alto de la ventana. El `min-h-screen` que había acá

@@ -103,6 +103,14 @@ export default function NoConformidadesPage() {
     const [estados, setEstados] = useState<Listas>({});
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    /**
+     * El servidor todavía no tiene el reporte. Va aparte de `error` porque no se
+     * arregla reintentando: el front sale por Vercel con cada push y el backend se
+     * deploya a mano, así que hay un rato en el que esta pantalla ya está publicada y
+     * el servidor contesta 404. Decir «probá en unos segundos» en ese rato, con un
+     * «todavía no se registró ninguna» abajo, hacía creer que se habían perdido.
+     */
+    const [sinServidor, setSinServidor] = useState(false);
     const [bajando, setBajando] = useState(false);
 
     // Filtros
@@ -137,9 +145,20 @@ export default function NoConformidadesPage() {
             const res = await fetch(`${API_URL}/incidencias/reporte?${queryFiltros}`, {
                 headers: getAuthHeaders(),
             });
+            // 404/405 es el servidor anterior, que no conoce la ruta: el nuevo no
+            // contesta 404 en el reporte (sin coincidencias devuelve la lista vacía).
+            // Mismo criterio que la materia prima y el consumo de la OT.
+            if (res.status === 404 || res.status === 405) {
+                setSinServidor(true);
+                setFilas([]);
+                setResumen(null);
+                setHayMas(false);
+                return;
+            }
             if (!res.ok) throw new Error(String(res.status));
             const json = await res.json();
             const data = json.data ?? {};
+            setSinServidor(false);
             setFilas(data.no_conformidades ?? []);
             setResumen(data.resumen ?? null);
             setHayMas(!!data.hay_mas);
@@ -148,6 +167,15 @@ export default function NoConformidadesPage() {
             setEstados(data.estados ?? {});
         } catch (e) {
             console.error(e);
+            // Se vacía lo de antes: si no, debajo del cartel quedaban a la vista las
+            // filas del filtro ANTERIOR como si fueran las del que se acaba de pedir.
+            setFilas([]);
+            setResumen(null);
+            setHayMas(false);
+            // Cada respuesta dice lo suyo: si antes fue un 404 y ahora es otra falla, el
+            // cartel de «falta actualizar» ya no es lo que pasa, y los dos juntos no se
+            // entienden.
+            setSinServidor(false);
             setError("No se pudo traer la lista. Probá de nuevo en unos segundos.");
         } finally {
             setCargando(false);
@@ -269,70 +297,85 @@ export default function NoConformidadesPage() {
                 </div>
             )}
 
-            {/* Filtros */}
-            <div className="rounded-lg border bg-card p-3 space-y-3 mb-4">
-                <div className="flex items-center gap-2 flex-wrap">
-                    <div className="relative w-40">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            value={ot}
-                            onChange={(e) => setOt(e.target.value.replace(/\D/g, ""))}
-                            placeholder="N° de OT"
-                            inputMode="numeric"
-                            className="pl-8 h-9"
-                        />
-                    </div>
-                    {/* Cada rótulo envuelve su fecha: así, cuando la fila no entra (en el
-                        teléfono no entra), «Desde» baja de renglón JUNTO con su campo. Sueltos,
-                        el rótulo quedaba al final de un renglón y la fecha al principio del
-                        otro, y no se sabía cuál era cuál. */}
-                    <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                        Desde
-                        <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
-                               className="h-9 w-40" />
-                    </label>
-                    <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                        Hasta
-                        <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
-                               className="h-9 w-40" />
-                    </label>
-                    {hayFiltros && (
-                        <Button variant="ghost" size="sm" className="h-9" onClick={limpiar}>
-                            Limpiar filtros
-                        </Button>
-                    )}
+            {sinServidor && (
+                <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-medium">
+                        Esta lista todavía no está disponible: falta actualizar el servidor.
+                    </p>
+                    <p className="mt-1">
+                        No se perdió nada: las no conformidades ya cargadas siguen guardadas y
+                        aparecen acá apenas se actualice.
+                    </p>
                 </div>
+            )}
 
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    <Filter className="h-3.5 w-3.5 text-muted-foreground mr-0.5" />
-                    {Object.entries(estados).map(([clave, rotulo]) => (
-                        <Chip key={clave} activo={estado === clave}
-                              onClick={() => setEstado(estado === clave ? null : clave)}>
-                            {rotulo}
+            {/* Filtros. Sin el reporte en el servidor no hay nada que filtrar: de los chips
+                quedaba sólo «Sin clasificar», porque los demás vienen con la respuesta. */}
+            {!sinServidor && (
+                <div className="rounded-lg border bg-card p-3 space-y-3 mb-4">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <div className="relative w-40">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                value={ot}
+                                onChange={(e) => setOt(e.target.value.replace(/\D/g, ""))}
+                                placeholder="N° de OT"
+                                inputMode="numeric"
+                                className="pl-8 h-9"
+                            />
+                        </div>
+                        {/* Cada rótulo envuelve su fecha: así, cuando la fila no entra (en el
+                            teléfono no entra), «Desde» baja de renglón JUNTO con su campo. Sueltos,
+                            el rótulo quedaba al final de un renglón y la fecha al principio del
+                            otro, y no se sabía cuál era cuál. */}
+                        <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                            Desde
+                            <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)}
+                                   className="h-9 w-40" />
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                            Hasta
+                            <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
+                                   className="h-9 w-40" />
+                        </label>
+                        {hayFiltros && (
+                            <Button variant="ghost" size="sm" className="h-9" onClick={limpiar}>
+                                Limpiar filtros
+                            </Button>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        <Filter className="h-3.5 w-3.5 text-muted-foreground mr-0.5" />
+                        {Object.entries(estados).map(([clave, rotulo]) => (
+                            <Chip key={clave} activo={estado === clave}
+                                  onClick={() => setEstado(estado === clave ? null : clave)}>
+                                {rotulo}
+                            </Chip>
+                        ))}
+                        <span className="mx-1 h-4 w-px bg-border" />
+                        {Object.entries(gravedades).map(([clave, rotulo]) => (
+                            <Chip key={clave} activo={gravedad === clave}
+                                  onClick={() => setGravedad(gravedad === clave ? null : clave)}>
+                                {rotulo}
+                            </Chip>
+                        ))}
+                        {/* No es una gravedad más: es «nadie la evaluó todavía», y es el filtro
+                            con el que se encuentra lo que hay que ir a completar. */}
+                        <Chip activo={gravedad === SIN_CLASIFICAR}
+                              onClick={() => setGravedad(gravedad === SIN_CLASIFICAR ? null : SIN_CLASIFICAR)}>
+                            Sin clasificar
                         </Chip>
-                    ))}
-                    <span className="mx-1 h-4 w-px bg-border" />
-                    {Object.entries(gravedades).map(([clave, rotulo]) => (
-                        <Chip key={clave} activo={gravedad === clave}
-                              onClick={() => setGravedad(gravedad === clave ? null : clave)}>
-                            {rotulo}
-                        </Chip>
-                    ))}
-                    {/* No es una gravedad más: es «nadie la evaluó todavía», y es el filtro
-                        con el que se encuentra lo que hay que ir a completar. */}
-                    <Chip activo={gravedad === SIN_CLASIFICAR}
-                          onClick={() => setGravedad(gravedad === SIN_CLASIFICAR ? null : SIN_CLASIFICAR)}>
-                        Sin clasificar
-                    </Chip>
-                    <span className="mx-1 h-4 w-px bg-border" />
-                    {Object.entries(tipos).map(([clave, rotulo]) => (
-                        <Chip key={clave} activo={tipo === clave}
-                              onClick={() => setTipo(tipo === clave ? null : clave)}>
-                            {rotulo}
-                        </Chip>
-                    ))}
+                        <span className="mx-1 h-4 w-px bg-border" />
+                        {Object.entries(tipos).map(([clave, rotulo]) => (
+                            <Chip key={clave} activo={tipo === clave}
+                                  onClick={() => setTipo(tipo === clave ? null : clave)}>
+                                {rotulo}
+                            </Chip>
+                        ))}
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Resumen */}
             {resumen && (
@@ -352,11 +395,14 @@ export default function NoConformidadesPage() {
                 </div>
             )}
 
+            {/* Si falló el pedido, lo que hay arriba es el cartel y nada más. Decir acá
+                «todavía no se registró ninguna» es afirmar algo que no se sabe: la lista
+                está vacía porque no llegó, no porque no haya. */}
             {cargando ? (
                 <div className="flex items-center justify-center py-16">
                     <Spinner className="h-8 w-8" />
                 </div>
-            ) : filas.length === 0 ? (
+            ) : error || sinServidor ? null : filas.length === 0 ? (
                 <p className="rounded-lg border bg-card px-4 py-12 text-center text-sm text-muted-foreground">
                     {hayFiltros
                         ? "No hay ninguna que cumpla con eso."
