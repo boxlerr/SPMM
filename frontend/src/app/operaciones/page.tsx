@@ -1,7 +1,8 @@
 "use client"
 
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
@@ -60,10 +61,44 @@ const getAuthHeaders = (): HeadersInit => {
 /** Valor especial del desplegable de planificaciones: no es un lote, es una acción. */
 const LIMPIAR_VIEJAS = "__limpiar_viejas__";
 
+/**
+ * Lee `?tab=materia_prima&pieza=ID` —el enlace del aviso de stock bajo en la
+ * campanita (RF-14)— y abre la solapa parada en esa pieza.
+ *
+ * Es un componente aparte, envuelto en <Suspense>, y no un `window.location` leído al
+ * montar, por dos motivos: `useSearchParams` fuera de un Suspense rompe el build
+ * estático de Next 15, y leyéndolo una sola vez al montar el aviso no andaría si ya se
+ * está en Operaciones (el router cambia la dirección sin volver a montar la página).
+ *
+ * Después de leerlo limpia los dos parámetros sin recargar, como `?edit_ot`, para que
+ * un refresh no vuelva a saltar a la pieza.
+ */
+function EnlaceMateriaPrima({ onAbrir }: { onAbrir: (idPieza: number | null) => void }) {
+  const params = useSearchParams()
+  const tab = params.get("tab")
+  const pieza = params.get("pieza")
+  useEffect(() => {
+    if (tab !== "materia_prima") return
+    const id = Number(pieza)
+    onAbrir(Number.isInteger(id) && id > 0 ? id : null)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("tab")
+    url.searchParams.delete("pieza")
+    window.history.replaceState({}, "", url.toString())
+    // `onAbrir` cambia en cada render de la página: si estuviera acá, esto correría en
+    // cada render. Lo que dispara el salto es el parámetro, y sólo eso.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, pieza])
+  return null
+}
+
 export default function OperacionesPage() {
   // Operaciones abre SIEMPRE en "Órdenes de Trabajo": es la pantalla desde la que se
   // arranca el día (ver qué entró y qué falta planificar), no la planificación ya hecha.
   const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "operarios" | "materia_prima" | "carga">("work_orders")
+  /** La pieza a la que lleva el aviso de stock bajo (RF-14). Se consume una vez: la
+   *  solapa la busca, la resalta y avisa que ya la usó. */
+  const [piezaEnlazada, setPiezaEnlazada] = useState<number | null>(null)
   /** Qué solapa de Órdenes de Trabajo está abierta. Vive acá —y no adentro de la
    *  lista— porque al confirmar un plan hay que caer en «Planificadas». */
   const [otSubTab, setOtSubTab] = useState("no_planificadas")
@@ -2645,6 +2680,14 @@ export default function OperacionesPage() {
 
   return (
     <div className={"flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'xl:mr-[400px]' : '')}>
+      <Suspense fallback={null}>
+        <EnlaceMateriaPrima
+          onAbrir={(idPieza) => {
+            setActiveTab("materia_prima")
+            setPiezaEnlazada(idPieza)
+          }}
+        />
+      </Suspense>
       {/* La raíz no pone ni alto ni fondo: los pone la pantalla de adentro, que
           arranca justo del alto de la ventana. El `min-h-screen` que había acá
           sumaba los 24px de arriba y abajo del layout y hacía scrollear el
@@ -2848,7 +2891,10 @@ export default function OperacionesPage() {
             )}
 
             {activeTab === "materia_prima" && (
-              <MateriaPrimaTab />
+              <MateriaPrimaTab
+                piezaInicial={piezaEnlazada}
+                onPiezaInicialUsada={() => setPiezaEnlazada(null)}
+              />
             )}
 
             {activeTab === "gantt" && (

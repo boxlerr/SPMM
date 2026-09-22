@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2, AlertTriangle, PackageMinus } from "lucide-react";
 import { useNotifications, type Notification } from "../contexts/NotificationContext";
 import { usePanelContext } from "../contexts/PanelContext";
 import { useRouter } from "next/navigation";
 import { formatNotificationMessage } from "@/lib/utils";
+import { enlaceAPieza } from "@/lib/stockMinimo";
 
 export default function Topbar() {
   const { notifications, unreadCount, markAsRead } = useNotifications();
@@ -62,6 +63,10 @@ export default function Topbar() {
       // salía con la campanita gris, igual que un alta de persona.
       case "OT_RETRASADA":
         return <AlertTriangle className="h-4 w-4 text-red-600" />;
+      // Un insumo que quedó abajo de su stock mínimo (RF-14). Ámbar y no rojo: no es
+      // algo que ya salió mal, es algo que hay que pedir antes de que salga mal.
+      case "STOCK_BAJO":
+        return <PackageMinus className="h-4 w-4 text-amber-600" />;
       default:
         return <Bell className="h-4 w-4 text-gray-600" />;
     }
@@ -80,6 +85,8 @@ export default function Topbar() {
         return <span className="text-xs text-red-600 font-medium">Eliminado</span>;
       case "OT_RETRASADA":
         return <span className="text-xs text-red-600 font-medium">Retrasada</span>;
+      case "STOCK_BAJO":
+        return <span className="text-xs text-amber-600 font-medium">Stock bajo</span>;
       default:
         return null;
     }
@@ -104,6 +111,12 @@ export default function Topbar() {
     // la lista de avisos y la orden había que ir a buscarla a mano.
     if (notification.id_orden_trabajo) {
       router.push(`/operaciones?edit_ot=${notification.id_orden_trabajo}`);
+      return;
+    }
+    // El aviso de stock bajo lleva a la pieza: ahí se ve cuánto queda y se corrige el
+    // mínimo si estaba mal puesto.
+    if (notification.id_pieza) {
+      router.push(enlaceAPieza(notification.id_pieza));
       return;
     }
     router.push("/configuracion?tab=notificaciones");

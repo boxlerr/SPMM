@@ -323,6 +323,8 @@ def test_toda_ruta_de_escritura_de_la_app_queda_auditada():
         "POST /internal/sync",
         # El cron del aviso de órdenes retrasadas: mismo motivo, tampoco lo llama nadie.
         "POST /internal/alertas-retraso",
+        # El cron de todos los avisos juntos (retraso + stock bajo, RF-14): ídem.
+        "POST /internal/alertas",
     }
     assert set(sin_auditar) <= esperadas, (
         f"estas escrituras quedaron fuera del registro sin motivo: "

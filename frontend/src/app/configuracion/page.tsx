@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield } from 'lucide-react';
+import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield, AlertTriangle, PackageMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UsuariosTable from '@/components/usuarios/UsuariosTable';
 import CambiarPassword from '@/components/usuarios/CambiarPassword';
@@ -110,6 +110,12 @@ export default function ConfiguracionPage() {
             case 'operario_deleted':
             case 'usuario_deleted':
               return <UserMinus className="h-5 w-5 text-red-600" />;
+            // Los dos avisos que genera el sistema solo (RF-04 y RF-14), con el mismo
+            // ícono que en la campanita: sin esto acá salían con la campana gris.
+            case 'OT_RETRASADA':
+              return <AlertTriangle className="h-5 w-5 text-red-600" />;
+            case 'STOCK_BAJO':
+              return <PackageMinus className="h-5 w-5 text-amber-600" />;
             default:
               return <Bell className="h-5 w-5 text-gray-600" />;
           }
@@ -126,6 +132,10 @@ export default function ConfiguracionPage() {
             case 'operario_deleted':
             case 'usuario_deleted':
               return <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">Eliminado</span>;
+            case 'OT_RETRASADA':
+              return <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">Retrasada</span>;
+            case 'STOCK_BAJO':
+              return <span className="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Stock bajo</span>;
             default:
               return null;
           }

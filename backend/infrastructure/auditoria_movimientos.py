@@ -115,6 +115,9 @@ SUBENTIDAD = {
     # «/consumos-material/5/anular»: el consumo no se borra, se anula. Sin esto el
     # renglón diría «editó consumo de material #5» y no se sabría que fue la anulación.
     "anular": "anulación",
+    # «/piezas/5/stock-minimo» (RF-14): cambiarle el mínimo a una materia prima no es
+    # editarla —sus datos son del sistema viejo—, es decidir desde cuándo avisar.
+    "stock-minimo": "stock mínimo",
 }
 
 # Nombres de campo cuyo VALOR no puede terminar en el registro. Cubre los DTO de hoy

@@ -39,7 +39,15 @@ class PiezaRepository:
             logger.error(f"Repository - Error real en delete: {e}")
             raise InfrastructureException("Error al eliminar la Pieza.") from e
 
-    async def find_all(self, page: int = 1, size: int = 50, search: str = "", only_with_ot: bool = False):
+    async def find_all(self, page: int = 1, size: int = 50, search: str = "", only_with_ot: bool = False,
+                       con_minimo: bool = False, bajo_minimo: bool = False):
+        """Piezas paginadas.
+
+        `con_minimo` deja sólo las que tienen un stock mínimo cargado (lo que se está
+        vigilando) y `bajo_minimo` sólo las que hoy están abajo de él (RF-14). La regla
+        de «abajo» es la de `Pieza.bajo_minimo`, la misma que usa el detector de avisos:
+        la solapa y la campanita no pueden opinar distinto.
+        """
         try:
             from sqlalchemy import func
             from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
@@ -67,9 +75,17 @@ class PiezaRepository:
                     ot_subquery, Pieza.id == ot_subquery.c.id_pieza
                 )
             
+            # Filtros que valen igual para la lista y para el total: si se aplicaran
+            # sólo a uno, el «Mostrando 12 de 4.000» mentiría.
+            filtros = []
             if search:
-                search_filter = (Pieza.descripcion.ilike(f"%{search}%")) | (Pieza.cod_pieza.ilike(f"%{search}%"))
-                query = query.where(search_filter)
+                filtros.append((Pieza.descripcion.ilike(f"%{search}%")) | (Pieza.cod_pieza.ilike(f"%{search}%")))
+            if con_minimo:
+                filtros.append(Pieza.stock_minimo.isnot(None))
+            if bajo_minimo:
+                filtros.append(Pieza.bajo_minimo)
+            if filtros:
+                query = query.where(*filtros)
             
             # Count total
             if only_with_ot:
@@ -79,8 +95,8 @@ class PiezaRepository:
             else:
                 count_query = select(func.count(Pieza.id))
                 
-            if search:
-                count_query = count_query.where((Pieza.descripcion.ilike(f"%{search}%")) | (Pieza.cod_pieza.ilike(f"%{search}%")))
+            if filtros:
+                count_query = count_query.where(*filtros)
             
             total_result = await self.db.execute(count_query)
             total = total_result.scalar()

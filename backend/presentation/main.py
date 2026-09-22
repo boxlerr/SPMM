@@ -1,6 +1,7 @@
 from fastapi import FastAPI,HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 # Routers de presentación
 from backend.presentation.ProcesoAPI import router as proceso_router
@@ -28,6 +29,7 @@ from backend.presentation.RangoAPI import router as rango_router
 from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
 from backend.application.AlertaRetrasoService import AlertaRetrasoService, TOPE_POR_CORRIDA
+from backend.application.AlertaStockService import AlertaStockService
 from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
@@ -343,6 +345,76 @@ async def internal_alertas_retraso(
         "duracion_seg": round((datetime.now() - inicio).total_seconds(), 1),
         "timestamp": inicio.isoformat(),
     }
+
+
+@app.post("/internal/alertas")
+async def internal_alertas(
+    request: Request,
+    tope: int = TOPE_POR_CORRIDA,
+    db=Depends(get_db_interno),
+):
+    """Corre TODOS los avisos automáticos en una pasada: órdenes retrasadas (RF-04) y
+    stock bajo (RF-14).
+
+    POR QUÉ UNO SOLO Y NO UNO POR AVISO
+
+    Cada aviso nuevo con su propia ruta es un trabajo más para dar de alta en Cloud
+    Scheduler, a mano, y el día que alguien se olvide de uno ese aviso queda mudo sin
+    que nadie lo note. Con uno solo, el cron se configura una vez y el próximo aviso
+    que se agregue acá corre solo.
+
+    Se puede llamar seguido (por ejemplo, cada hora): los dos avisos son idempotentes
+    —ninguno repite lo que ya avisó— así que correr de más no ensucia la campanita.
+    El de retraso sólo encuentra algo nuevo una vez por día; el de stock, cada vez que
+    el sync del viejo trae un stock que perforó un mínimo.
+
+    `/internal/alertas-retraso` queda como estaba, por si ya hay un cron apuntándole.
+
+    Cada aviso corre aislado: si uno falla, el otro corre igual y lo que alcanzó a
+    escribir queda escrito. La respuesta es 500 si falló alguno —para que el cron lo
+    marque y lo reintente, cosa que ninguno de los dos duplica— y dice cuál.
+
+    `tope` vale para CADA aviso por separado.
+
+    Protegido con SYNC_TOKEN, igual que `/internal/sync`. Si la variable no está
+    seteada, el endpoint queda deshabilitado.
+    """
+    esperado = os.getenv("SYNC_TOKEN")
+    if not esperado:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if request.headers.get("x-sync-token") != esperado:
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+    inicio = datetime.now()
+    avisos = (
+        ("retraso", lambda: AlertaRetrasoService(db).detectarYAvisarRetrasos(tope=tope)),
+        ("stock", lambda: AlertaStockService(db).detectarYAvisarStockBajo(tope=tope)),
+    )
+    resultados, fallas = {}, {}
+    for nombre, correr in avisos:
+        try:
+            resultados[nombre] = (await correr()).data
+        except Exception as e:
+            logger.error(f"Alertas internas: falló el aviso de {nombre}: {e}")
+            fallas[nombre] = getattr(e, "message", None) or str(e)
+            # En Postgres una consulta que falla deja la transacción abortada y la
+            # sesión no sirve hasta el rollback: sin esto, el segundo aviso caería
+            # por culpa del primero.
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+
+    cuerpo = {
+        "status": "error" if fallas else "ok",
+        **resultados,
+        "fallas": fallas,
+        "duracion_seg": round((datetime.now() - inicio).total_seconds(), 1),
+        "timestamp": inicio.isoformat(),
+    }
+    if fallas:
+        return JSONResponse(status_code=500, content=cuerpo)
+    return cuerpo
 
 
 @app.on_event("startup")

@@ -315,6 +315,34 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON consumo_material (id_pieza, fecha DESC)",
         ],
     ),
+    (
+        # RF-14. Hace falta ANTES de la primera lectura, no de la primera escritura:
+        # SQLAlchemy pide `stock_minimo` y `stock_bajo_avisado_en` en cada SELECT de
+        # piezas —la solapa Materia Prima, la materia prima de la OT, el consumo— e
+        # `id_pieza` en cada lectura de la campanita. Tres columnas nullable: ninguna
+        # fila existente cambia, todas quedan «sin mínimo, no se vigila».
+        "2026-09-22_stock_minimo",
+        [
+            "ALTER TABLE pieza "
+            "ADD COLUMN IF NOT EXISTS stock_minimo DOUBLE PRECISION, "
+            "ADD COLUMN IF NOT EXISTS stock_bajo_avisado_en TIMESTAMP",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN pieza.stock_minimo IS "
+            "'Stock mínimo que el pañol quiere vigilar (RF-14). Dato de SPMM: el sistema viejo "
+            "no lo tiene y el sync no lo toca. NULL = no se vigila, que es como arrancan todas; "
+            "nunca se completa con un valor inventado. Se avisa cuando stockactual < "
+            "stock_minimo.'",
+            "COMMENT ON COLUMN pieza.stock_bajo_avisado_en IS "
+            "'Cuándo se avisó que la pieza quedó abajo del mínimo, en hora local del taller y "
+            "sin zona. NULL = no hay aviso vigente. Lo escribe y lo limpia el detector de stock "
+            "bajo: mientras siga abajo no se repite el aviso; cuando se recupera vuelve a NULL.'",
+            "ALTER TABLE notificacion ADD COLUMN IF NOT EXISTS id_pieza INTEGER",
+            "COMMENT ON COLUMN notificacion.id_pieza IS "
+            "'De qué pieza (materia prima) habla esta notificación. NULL = de ninguna. Sin FK a "
+            "propósito: borrar una pieza no tiene que fallar por un aviso viejo. Es lo que hace "
+            "que tocar el aviso de stock bajo lleve a esa pieza.'",
+        ],
+    ),
 ]
 
 

@@ -35,6 +35,17 @@ class Notificacion(Base):
     # puede fallar por un aviso viejo que la nombra.
     # Ver migrations/2026-09-22_alerta_retraso_ot.sql.
     id_orden_trabajo = Column(Integer, nullable=True)
+
+    # De qué pieza (materia prima) habla este aviso. NULL = de ninguna.
+    #
+    # La usa el aviso de stock bajo (RF-14) para que tocarlo en la campanita lleve a esa
+    # pieza, donde se ve el stock y se corrige el mínimo. OJO: acá NO vive el
+    # anti-duplicado de ese aviso —un insumo se perfora muchas veces y cada vez merece
+    # su aviso—; eso lo lleva la pieza (`pieza.stock_bajo_avisado_en`).
+    #
+    # Sin FK, mismo criterio que `id_orden_trabajo`: borrar una pieza no puede fallar
+    # por un aviso viejo que la nombra. Ver migrations/2026-09-22_stock_minimo.sql.
+    id_pieza = Column(Integer, nullable=True)
     
     def to_dict(self) -> dict:
         """Convierte la notificación a diccionario"""
@@ -47,5 +58,6 @@ class Notificacion(Base):
             "fecha_creacion": self.fecha_creacion.isoformat() if self.fecha_creacion else None,
             "id_usuario_creador": self.id_usuario_creador,
             "id_orden_trabajo": self.id_orden_trabajo,
+            "id_pieza": self.id_pieza,
         }
 

@@ -17,6 +17,13 @@ export interface Notification {
    * ninguna orden (altas de personas, cambios de usuario) vienen sin esto.
    */
   id_orden_trabajo?: number;
+  /**
+   * De qué pieza (materia prima) habla el aviso, cuando habla de alguna: la trae el
+   * aviso de stock bajo (RF-14) y es lo que hace que tocarlo lleve a esa pieza en la
+   * solapa Materia Prima. Con el backend viejo no viene y el aviso se comporta como
+   * cualquier otro.
+   */
+  id_pieza?: number;
 }
 
 import { API_URL } from "@/config";
@@ -77,6 +84,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
               read: n.leida,
               motivo: n.motivo,
               id_orden_trabajo: n.id_orden_trabajo ?? undefined,
+              id_pieza: n.id_pieza ?? undefined,
             }));
             setNotifications(loadedNotifications);
           }
@@ -114,6 +122,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             read: n.leida,
             motivo: n.motivo,
             id_orden_trabajo: n.id_orden_trabajo ?? undefined,
+            id_pieza: n.id_pieza ?? undefined,
           }));
           setNotifications(loadedNotifications);
         }
@@ -213,6 +222,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             read: result.data.leida,
             motivo: result.data.motivo,
             id_orden_trabajo: result.data.id_orden_trabajo ?? undefined,
+            id_pieza: result.data.id_pieza ?? undefined,
           };
           setNotifications((prev) => [newNotification, ...prev]);
         }
