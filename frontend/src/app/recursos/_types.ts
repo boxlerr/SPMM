@@ -55,6 +55,12 @@ export interface Maquina {
   limitacion?: string;
   capacidad?: string;
   especialidad?: string;
+  // RF-08. Opcionales porque un backend todavía sin deployar no los manda: `undefined`
+  // = el backend no los conoce; `null` = los conoce y no están cargados. La lista de
+  // valores vive en _maquinaOpciones.ts.
+  tipo?: string | null;
+  estado_operativo?: string;
+  frecuencia_mantenimiento_dias?: number | null;
 }
 
 

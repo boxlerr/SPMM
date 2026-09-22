@@ -10,6 +10,111 @@ from backend.commons.loggers.logger import logger
 from backend.infrastructure import auditoria_procesos as auditoria_proc
 
 
+# ─────────────────────────── RF-08: las listas cerradas ───────────────────────────
+#
+# La clave es lo que se guarda en la base; el valor, cómo se lee en pantalla. El front
+# ofrece exactamente las mismas claves (frontend/src/app/recursos/_maquinaOpciones.ts) y
+# un test compara las dos listas: si alguien agrega un tipo de un lado y no del otro,
+# se pone rojo antes de que la pantalla ofrezca algo que el backend rechaza.
+
+# Qué clase de máquina es. Son las familias con las que el planificador clasifica
+# máquinas y procesos (familia_requerida_from_proceso en PlanificacionService.py), más
+# OTRO: así el día que se quiera cruzar el tipo cargado contra la familia que pide un
+# proceso, los dos lados hablan el mismo idioma. Otro test cuida que toda familia del
+# planificador esté acá.
+TIPOS_MAQUINA: dict[str, str] = {
+    "TORNO": "Torno",
+    "FRESADORA": "Fresadora",
+    "AGUJEREADORA": "Agujereadora",
+    "LIMADORA": "Limadora",
+    "RECTIFICADORA": "Rectificadora",
+    "GUILLOTINA": "Guillotina",
+    "PRENSA": "Prensa",
+    "PLEGADORA": "Plegadora",
+    "SIERRA_CIRCULAR": "Sierra circular",
+    "OXICORTE": "Oxicorte",
+    "SOLDADORA_TIG": "Soldadora TIG",
+    "SOLDADORA_MIG": "Soldadora MIG/MAG",
+    "OTRO": "Otro",
+}
+
+# Si la máquina está para trabajar. Por ahora es INFORMATIVO: el planificador no lo mira
+# (ver el comentario de la columna en domain/Maquinaria.py).
+ESTADOS_OPERATIVOS: dict[str, str] = {
+    "operativa": "Operativa",
+    "en_mantenimiento": "En mantenimiento",
+    "fuera_de_servicio": "Fuera de servicio",
+}
+ESTADO_POR_DEFECTO = "operativa"
+
+# Tope de la frecuencia de mantenimiento: diez años. Más que eso es un error de tipeo
+# (un 3650 que quiso ser 365), no una frecuencia.
+FRECUENCIA_MAXIMA_DIAS = 3650
+
+
+def _clave(valor: str) -> str:
+    """'En mantenimiento ' → 'en_mantenimiento'. Lo que la gente tipea, a la clave."""
+    return "_".join(str(valor).strip().split())
+
+
+def validar_tipo(valor: str | None) -> str | None:
+    """Vacío pasa (es «sin cargar»); un tipo que no está en la lista, no."""
+    if valor is None or str(valor).strip() == "":
+        return None
+    limpio = _clave(valor).upper()
+    if limpio not in TIPOS_MAQUINA:
+        raise BusinessException(
+            f"«{valor}» no es un tipo de máquina válido. Los posibles son: "
+            + ", ".join(TIPOS_MAQUINA.values()) + "."
+        )
+    return limpio
+
+
+def validar_estado(valor: str | None) -> str | None:
+    """None = no vino (el que llama decide qué hacer); un valor fuera de la lista, 422."""
+    if valor is None:
+        return None
+    limpio = _clave(valor).lower()
+    if limpio not in ESTADOS_OPERATIVOS:
+        raise BusinessException(
+            f"«{valor}» no es un estado válido. Los posibles son: "
+            + ", ".join(ESTADOS_OPERATIVOS.values()) + "."
+        )
+    return limpio
+
+
+def validar_frecuencia(valor: int | None) -> int | None:
+    """Días entre mantenimientos. None = no se lleva; 0 o negativo no es una frecuencia."""
+    if valor is None:
+        return None
+    if valor < 1 or valor > FRECUENCIA_MAXIMA_DIAS:
+        raise BusinessException(
+            f"La frecuencia de mantenimiento tiene que ser de 1 a {FRECUENCIA_MAXIMA_DIAS} "
+            "días. Si a esta máquina no se le lleva, dejala vacía."
+        )
+    return valor
+
+
+def maquinaria_a_dict(m: Maquinaria) -> dict:
+    """Lo que el front recibe de una máquina.
+
+    UN solo lugar: antes el alta, el listado y el detalle armaban cada uno su dict a
+    mano, y un campo nuevo que se olvidaba en uno quedaba invisible en esa pantalla.
+    """
+    return {
+        "id": m.id,
+        "nombre": m.nombre,
+        "cod_maquina": m.cod_maquina,
+        "limitacion": m.limitacion,
+        "capacidad": m.capacidad,
+        "especialidad": m.especialidad,
+        "tipo": m.tipo,
+        # `or` por si una fila viene sin el valor (no debería: la columna es NOT NULL).
+        "estado_operativo": m.estado_operativo or ESTADO_POR_DEFECTO,
+        "frecuencia_mantenimiento_dias": m.frecuencia_mantenimiento_dias,
+    }
+
+
 class MaquinariaService:
     """
     Capa de aplicación de Maquinaria (versión asincrónica).
@@ -31,13 +136,20 @@ class MaquinariaService:
                 limitacion=maquinaria_dto.limitacion,
                 capacidad=maquinaria_dto.capacidad,
                 especialidad=maquinaria_dto.especialidad,
+                tipo=validar_tipo(maquinaria_dto.tipo),
+                # Un front viejo no manda el estado: la máquina nueva nace operativa,
+                # igual que las que ya estaban cargadas.
+                estado_operativo=validar_estado(maquinaria_dto.estado_operativo) or ESTADO_POR_DEFECTO,
+                frecuencia_mantenimiento_dias=validar_frecuencia(
+                    maquinaria_dto.frecuencia_mantenimiento_dias
+                ),
             )
 
             maquinaria_creada = await self.repository.save(maquinaria)
 
             return ResponseDTO(
                 status=True,
-                data=jsonable_encoder(maquinaria_creada),
+                data=jsonable_encoder(maquinaria_a_dict(maquinaria_creada)),
                 errorDescription=""
             )
 
@@ -135,17 +247,7 @@ class MaquinariaService:
             logger.info("Service - Listar Maquinarias.")
             maquinarias = await self.repository.find_all()
 
-            data = [
-                {
-                    "id": m.id,
-                    "nombre": m.nombre,
-                    "cod_maquina": m.cod_maquina,
-                    "limitacion": m.limitacion,
-                    "capacidad": m.capacidad,
-                    "especialidad": m.especialidad,
-                }
-                for m in maquinarias
-            ]
+            data = [maquinaria_a_dict(m) for m in maquinarias]
 
             return ResponseDTO(status=True, data=data, errorDescription="")
         except Exception as e:
@@ -163,14 +265,7 @@ class MaquinariaService:
 
             return ResponseDTO(
                 status=True,
-                data={
-                    "id": m.id,
-                    "nombre": m.nombre,
-                    "cod_maquina": m.cod_maquina,
-                    "limitacion": m.limitacion,
-                    "capacidad": m.capacidad,
-                    "especialidad": m.especialidad,
-                },
+                data=maquinaria_a_dict(m),
                 errorDescription=""
             )
         except Exception as e:
@@ -180,17 +275,44 @@ class MaquinariaService:
     # Modificar Maquinaria
     async def modificarMaquinaria(self, id: int, maquinaria_dto: MaquinariaRequestDTO):
         try:
+            # `exclude_unset`: sólo se toca lo que VINO en el cuerpo. Es lo que deja que un
+            # front viejo —que no conoce tipo, estado ni frecuencia— edite el nombre sin
+            # borrarle a la máquina lo que otro cargó desde el front nuevo.
             nueva_data = maquinaria_dto.dict(exclude_unset=True)
+
+            if "tipo" in nueva_data:
+                nueva_data["tipo"] = validar_tipo(nueva_data["tipo"])
+            if "estado_operativo" in nueva_data:
+                estado = validar_estado(nueva_data["estado_operativo"])
+                if estado is None:
+                    # null no es un estado: la columna es NOT NULL y guardarlo tiraría un
+                    # 500. Se lee como «no lo cambio», no como «vacialo».
+                    nueva_data.pop("estado_operativo")
+                else:
+                    nueva_data["estado_operativo"] = estado
+            if "frecuencia_mantenimiento_dias" in nueva_data:
+                # Acá None SÍ es un valor: «a esta máquina ya no se le lleva frecuencia».
+                nueva_data["frecuencia_mantenimiento_dias"] = validar_frecuencia(
+                    nueva_data["frecuencia_mantenimiento_dias"]
+                )
+
             actualizado = await self.repository.update(id, nueva_data)
 
             if not actualizado:
                 return ResponseDTO(status=False, data={}, errorDescription="Maquinaria no encontrada")
 
+            # La máquina entera y no sólo el id: el front la usa para dejar la fila como
+            # quedó guardada (con el tipo y el estado ya normalizados) sin volver a pedir
+            # la lista. Sigue trayendo `id`, que es lo único que leía el front viejo.
             return ResponseDTO(
                 status=True,
-                data={"id": actualizado.id},
+                data=maquinaria_a_dict(actualizado),
                 errorDescription=""
             )
+        except BusinessException:
+            # Un estado o un tipo fuera de la lista es un 422 con el motivo, no un 500
+            # que diga «error al actualizar».
+            raise
         except Exception as e:
             logger.error(f"Service - Error al actualizar Maquinaria: {e}")
             raise InfrastructureException("Error al actualizar la Maquinaria.") from e

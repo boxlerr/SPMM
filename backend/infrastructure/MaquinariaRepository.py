@@ -6,6 +6,12 @@ from backend.commons.exceptions.InfrastructureException import InfrastructureExc
 from backend.commons.loggers.logger import logger
 
 
+# Qué columnas puede tocar un update: todas las de la tabla menos la clave.
+_COLUMNAS_EDITABLES = frozenset(
+    c.name for c in Maquinaria.__table__.columns if not c.primary_key
+)
+
+
 class MaquinariaRepository:
     """
     Repositorio asincrónico de `Maquinaria`.
@@ -53,8 +59,12 @@ class MaquinariaRepository:
                 logger.info(f"Repository - Maquinaria {id} no encontrada para actualizar.")
                 return None
 
-            # Solo campos válidos del modelo
-            campos_validos = {"nombre", "cod_maquina", "limitacion", "capacidad", "especialidad"}
+            # Solo columnas del modelo, y sacadas DEL MODELO, no escritas a mano. Hasta el
+            # 22/09 esto era un set literal de cinco nombres y el update ignoraba en
+            # silencio cualquier otro: una columna nueva que no se sumaba acá daba PUT 200
+            # sin guardar nada, sin error y sin log. Que el DTO decida qué entra; acá sólo
+            # se impide pisar el id.
+            campos_validos = _COLUMNAS_EDITABLES
             for key, value in nueva_data.items():
                 if key in campos_validos:
                     setattr(maquinaria, key, value)

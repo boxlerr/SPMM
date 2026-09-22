@@ -234,6 +234,33 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON incidencia_proceso (estado, fecha_registro DESC)",
         ],
     ),
+    (
+        # RF-08. Sin esto, el primer GET /maquinarias después del deploy rompe la lista
+        # entera de máquinas —y con ella el planificador, que las carga todas—, no sólo
+        # lo nuevo: SQLAlchemy pide las tres columnas en cada SELECT.
+        "2026-09-22_maquina_tipo_estado_mantenimiento",
+        [
+            "ALTER TABLE maquinaria "
+            "ADD COLUMN IF NOT EXISTS tipo VARCHAR(40), "
+            "ADD COLUMN IF NOT EXISTS estado_operativo VARCHAR(20) NOT NULL DEFAULT 'operativa', "
+            "ADD COLUMN IF NOT EXISTS frecuencia_mantenimiento_dias INTEGER",
+            # Cada COMMENT es UN solo literal SQL partido en varias strings de Python (las
+            # comillas simples van sólo al principio y al final). Partirlo en varios
+            # literales SQL pegados sin salto de línea no los concatena: Postgres lee el
+            # `''` del medio como una comilla escapada y la deja adentro del comentario.
+            "COMMENT ON COLUMN maquinaria.tipo IS "
+            "'Qué clase de máquina es, de una lista cerrada alineada con las familias del "
+            "planificador (TORNO, FRESADORA, PRENSA...; ver MaquinariaService.TIPOS_MAQUINA). "
+            "NULL = no se cargó; nunca se completa deduciéndolo del nombre.'",
+            "COMMENT ON COLUMN maquinaria.estado_operativo IS "
+            "'operativa, en_mantenimiento o fuera_de_servicio. Las máquinas cargadas antes del "
+            "22/09/2026 quedaron en operativa por suposición (el taller las estaba usando). Por "
+            "ahora es informativo: el planificador todavía no lo mira.'",
+            "COMMENT ON COLUMN maquinaria.frecuencia_mantenimiento_dias IS "
+            "'Cada cuántos días le toca mantenimiento. NULL = no se le lleva frecuencia, que no "
+            "es lo mismo que 0.'",
+        ],
+    ),
 ]
 
 

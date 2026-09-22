@@ -16,6 +16,9 @@ import CatalogoSimple from "./_components/CatalogoSimple";
 import RangoComposicion from "./_components/RangoComposicion";
 import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
+import { EstadoMaquinaSelector } from "./_components/EstadoMaquina";
+import { backendConoceEstado, infoEstado, type EstadoOperativo } from "./_maquinaOpciones";
+import { parseApiError } from "@/lib/utils";
 import CambiarEstado from "./_components/CambiarEstado";
 import { Operario, Maquina, Proceso } from "./_types";
 import { useNotifications } from "@/contexts/NotificationContext";
@@ -56,6 +59,9 @@ export default function RecursosPage() {
   const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos" | "rangos" | "sectores" | "planos">("operarios");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
+  // ¿El backend ya sabe de tipo, estado y frecuencia (RF-08)? Mientras el deploy a mano
+  // no llegue, la lista no trae esos campos y la pantalla se ve como antes.
+  const conoceEstado = backendConoceEstado(maquinas);
   const [procesos, setProcesos] = useState<Proceso[]>([]);
 
   const [busquedaProceso, setBusquedaProceso] = useState("");
@@ -200,6 +206,71 @@ export default function RecursosPage() {
     setMaquinas(data);
   };
 
+  /**
+   * La lista de nuevo, pero sin el spinner de `fetchMaquinas`, que la tapa entera.
+   * Después de guardar la fila ya muestra lo guardado: esto sólo trae lo que haya
+   * cambiado otro (y la máquina recién creada, que todavía no tiene fila).
+   */
+  const refrescarMaquinasSinSpinner = async () => {
+    try {
+      const res = await fetch(`${cleanUrl}/maquinarias`, { headers: getAuthHeaders() });
+      if (!res.ok) return;
+      const cuerpo = await res.json();
+      if (cuerpo?.status && Array.isArray(cuerpo.data)) setMaquinas(cuerpo.data);
+    } catch {
+      // Se queda lo que está en pantalla, que ya es lo guardado.
+    }
+  };
+
+  /** Pone en la lista (y en el detalle, si está abierto) la máquina como quedó guardada. */
+  const aplicarMaquinaGuardada = (guardada?: Maquina) => {
+    if (!guardada) return;
+    setMaquinas((prev) => prev.map((m) => (m.id === guardada.id ? { ...m, ...guardada } : m)));
+    setMaquinaSeleccionada((sel) => (sel && sel.id === guardada.id ? { ...sel, ...guardada } : sel));
+  };
+
+  // Último pedido de cambio de estado por máquina: si se cambia dos veces seguidas y el
+  // primero falla tarde, no tiene que deshacer el segundo.
+  const ultimoCambioEstado = useRef<Record<number, number>>({});
+
+  /**
+   * Cambiar el estado operativo desde la fila (RF-08). Se ve al toque y, si el backend
+   * no lo guarda, vuelve a como estaba y avisa. Nada de recargar la lista.
+   */
+  const cambiarEstadoMaquina = async (maquina: Maquina, nuevo: EstadoOperativo) => {
+    const anterior = maquina.estado_operativo;
+    const pedido = (ultimoCambioEstado.current[maquina.id] ?? 0) + 1;
+    ultimoCambioEstado.current[maquina.id] = pedido;
+    const poner = (valor?: string) => {
+      setMaquinas((prev) => prev.map((m) => (m.id === maquina.id ? { ...m, estado_operativo: valor } : m)));
+      setMaquinaSeleccionada((sel) => (sel && sel.id === maquina.id ? { ...sel, estado_operativo: valor } : sel));
+    };
+    const deshacer = (motivo: string) => {
+      if (ultimoCambioEstado.current[maquina.id] === pedido) poner(anterior);
+      showToast(motivo, "error");
+    };
+
+    poner(nuevo);
+    try {
+      const res = await fetch(`${cleanUrl}/maquinarias/${maquina.id}`, {
+        method: "PUT",
+        headers: { ...(getAuthHeaders() as Record<string, string>), "Content-Type": "application/json" },
+        // `nombre` va porque el DTO lo exige; el backend sólo toca los campos que vienen.
+        body: JSON.stringify({ nombre: maquina.nombre, estado_operativo: nuevo }),
+      });
+      const texto = await res.text().catch(() => "");
+      let cuerpo: { status?: boolean } | null = null;
+      try { cuerpo = JSON.parse(texto); } catch { cuerpo = null; }
+      if (!res.ok || cuerpo?.status === false) {
+        deshacer(parseApiError(texto) || `No se pudo cambiar el estado de ${maquina.nombre}; quedó como estaba.`);
+        return;
+      }
+      showToast(`${maquina.nombre}: ${infoEstado(nuevo).etiqueta.toLowerCase()}.`, "success");
+    } catch {
+      deshacer(`No se pudo conectar con el servidor: ${maquina.nombre} quedó como estaba.`);
+    }
+  };
+
   const fetchProcesos = async () => {
     const data = await api.fetchData(`${cleanUrl}/procesos`);
     setProcesos(data);
@@ -240,16 +311,20 @@ export default function RecursosPage() {
   };
 
   const handleVerMaquina = async (maquina: Maquina) => {
+    // Se abre al toque con lo que ya está en la lista, y después se refresca por si otro
+    // la cambió. Antes esperaba al pedido para abrir, y si la máquina no existía más
+    // abría el detalle vacío: `data` viene como {} y `{} || maquina` elige el {}.
+    setMaquinaSeleccionada(maquina);
     try {
       const response = await fetch(`${cleanUrl}/maquinarias/${maquina.id}`, { headers: getAuthHeaders() });
-      if (response.ok) {
-        const data = await response.json();
-        setMaquinaSeleccionada(data.data || maquina);
-      } else {
-        setMaquinaSeleccionada(maquina);
+      if (!response.ok) return;
+      const data = await response.json();
+      const fresca = data?.data;
+      if (fresca && fresca.id === maquina.id) {
+        setMaquinaSeleccionada((sel) => (sel && sel.id === maquina.id ? { ...sel, ...fresca } : sel));
       }
     } catch {
-      setMaquinaSeleccionada(maquina);
+      // Queda lo de la lista.
     }
   };
 
@@ -541,6 +616,14 @@ export default function RecursosPage() {
                     <tr>
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Nombre</th>
                       <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">Código</th>
+                      {conoceEstado && (
+                        <th
+                          className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground"
+                          title="Operativa, en mantenimiento o fuera de servicio. Tocá el estado de una fila para cambiarlo."
+                        >
+                          Estado
+                        </th>
+                      )}
                       <th
                         className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground"
                         title="Quién puede usar el recurso maquinaria. Sin rango, el planificador no se lo asigna a nadie."
@@ -560,6 +643,15 @@ export default function RecursosPage() {
                       >
                         <td className="px-4 py-2 text-sm font-medium">{maquina.nombre}</td>
                         <td className="px-4 py-2 text-sm">{maquina.cod_maquina || "-"}</td>
+                        {conoceEstado && (
+                          <td className="px-4 py-2 text-sm">
+                            <EstadoMaquinaSelector
+                              valor={maquina.estado_operativo}
+                              nombre={maquina.nombre}
+                              onCambiar={(nuevo) => void cambiarEstadoMaquina(maquina, nuevo)}
+                            />
+                          </td>
+                        )}
                         {/* Rangos que habilitan la máquina. Sin ninguno, el planificador
                             no puede asignarla: queda fuera del dominio de todo proceso
                             que exija rangos y el trabajo sale "sin máquina". */}
@@ -601,6 +693,18 @@ export default function RecursosPage() {
                         </td>
                         <td className="px-4 py-2">
                           <div className="flex justify-end gap-2">
+                            {/* El detalle existía y no había cómo abrirlo: es el único lugar
+                                donde se ven capacidad, tipo y frecuencia de mantenimiento. */}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => void handleVerMaquina(maquina)}
+                              className="h-8 w-8"
+                              title="Ver detalle"
+                              aria-label={`Ver detalle de ${maquina.nombre}`}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
                               <Pencil className="h-4 w-4" />
                             </Button>
@@ -620,7 +724,7 @@ export default function RecursosPage() {
                       </tr>
                       {maquinaAbierta === maquina.id && coberturaListo && (
                         <tr>
-                          <td colSpan={5} className="p-0">
+                          <td colSpan={conoceEstado ? 6 : 5} className="p-0">
                             <EditorRangosDe
                               tipo="maquinaria"
                               id={maquina.id}
@@ -644,7 +748,18 @@ export default function RecursosPage() {
                 {maquinas.map((maquina) => (
                   <div key={maquina.id} className="p-4 hover:bg-muted/50 transition-colors">
                     <div className="mb-3">
-                      <h3 className="font-semibold text-base mb-2">{maquina.nombre}</h3>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h3 className="font-semibold text-base min-w-0 break-words">{maquina.nombre}</h3>
+                        {conoceEstado && (
+                          <div className="shrink-0">
+                            <EstadoMaquinaSelector
+                              valor={maquina.estado_operativo}
+                              nombre={maquina.nombre}
+                              onCambiar={(nuevo) => void cambiarEstadoMaquina(maquina, nuevo)}
+                            />
+                          </div>
+                        )}
+                      </div>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-muted-foreground">Código:</span>
@@ -678,7 +793,15 @@ export default function RecursosPage() {
                     </div>
 
                     <div className="flex gap-2">
-
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleVerMaquina(maquina)}
+                        aria-label={`Ver detalle de ${maquina.nombre}`}
+                        title="Ver detalle"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -1116,11 +1239,15 @@ export default function RecursosPage() {
         editing={!!mostrarDialogo.editar}
         data={itemAEditar as Maquina}
         onClose={() => setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false })}
-        onSuccess={async () => {
-          await fetchMaquinas();
+        onSuccess={(guardada) => {
+          // Lo guardado se pone en la fila al toque y la lista se refresca por detrás, sin
+          // el spinner que la tapaba entera cada vez que se editaba una máquina.
+          aplicarMaquinaGuardada(guardada);
           setMostrarDialogo({ ...mostrarDialogo, crear: false, editar: false });
+          void refrescarMaquinasSinSpinner();
         }}
         cleanUrl={cleanUrl}
+        conoceEstado={conoceEstado}
       />
 
       <ProcesoForm
@@ -1147,7 +1274,14 @@ export default function RecursosPage() {
         }}
       />
 
-      <DetalleMaquina maquina={maquinaSeleccionada} onClose={() => setMaquinaSeleccionada(null)} />
+      <DetalleMaquina
+        maquina={maquinaSeleccionada}
+        onClose={() => setMaquinaSeleccionada(null)}
+        onEditar={(m) => {
+          setMaquinaSeleccionada(null);
+          void handleEditar("maquina", m);
+        }}
+      />
 
       <CambiarEstado
         operario={operarioCambiarEstado as Operario}

@@ -64,6 +64,9 @@ async def modificar_maquinaria(id: int, maquinaria_dto: MaquinariaRequestDTO, db
         logger.info(f"API - Inicio PUT /maquinarias/{id}")
         service = MaquinariaService(db)
         return await service.modificarMaquinaria(id, maquinaria_dto)
+    except BusinessException as e:
+        # Un tipo o un estado fuera de la lista (RF-08): 422 con el motivo, igual que el alta.
+        raise HTTPException(status_code=422, detail=str(e))
     except InfrastructureException as e:
         raise HTTPException(status_code=500, detail=str(e))
 
