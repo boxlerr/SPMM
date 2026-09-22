@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ChevronDown, ChevronRight, Filter, PlusCircle, Pencil, Trash2,
-    AlertCircle, Clock, User, Search, X,
+    AlertCircle, Clock, User, Search, X, Lock, LockOpen,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,16 +51,23 @@ export interface Movimiento {
     detalle: string | null;
 }
 
+// «bloqueó» / «desbloqueó» son del RF-26: una cuenta que quedó bloqueada por 5
+// contraseñas malas seguidas (sin autor: lo decidió el sistema) y el admin que la
+// destrabó. Cualquier acción que no esté acá se muestra con el lápiz gris.
 const ICONO: Record<string, typeof PlusCircle> = {
     "creó": PlusCircle,
     "editó": Pencil,
     "eliminó": Trash2,
+    "bloqueó": Lock,
+    "desbloqueó": LockOpen,
 };
 
 const COLOR: Record<string, string> = {
     "creó": "text-emerald-600",
     "editó": "text-sky-600",
     "eliminó": "text-rose-600",
+    "bloqueó": "text-amber-600",
+    "desbloqueó": "text-emerald-600",
 };
 
 // Reloj de 24 horas a propósito: con `hour12` el es-AR escribe «12:10 p. m.», que en

@@ -221,10 +221,21 @@ def partes_del_camino(ruta: str) -> tuple[str, str | None]:
     return (entidad, id_entidad)
 
 
+# Tramos que no son una cosa sino un verbo propio. «POST /auth/usuarios/3/desbloquear»
+# por método sería «creó usuario #3», que no es lo que pasó: nadie creó nada, alguien
+# destrabó una cuenta (RF-26). Con esto la frase dice «desbloqueó usuario #3».
+VERBO = {
+    "desbloquear": "desbloqueó",
+}
+
+
 def describir(metodo: str, ruta: str, estado: int, usuario: str | None,
               etiqueta: str | None = None) -> tuple[str, str, str | None, str]:
     """(accion, entidad, id_entidad, frase). La frase es lo único que se lee."""
     accion = ACCION.get(metodo, metodo.lower())
+    verbo = next((VERBO[t] for t in ruta.split("/") if t in VERBO), None)
+    if verbo:
+        accion = verbo
     entidad, id_entidad = partes_del_camino(ruta)
     quien = usuario or "alguien"
     cual = f" #{id_entidad}" if id_entidad else ""
@@ -343,3 +354,44 @@ async def registrar(db, **kwargs) -> None:
             "Auditoría: no se pudo registrar %s %s: %s",
             kwargs.get("metodo"), kwargs.get("ruta"), e,
         )
+
+
+async def registrar_evento(db, *, accion: str, entidad: str, id_entidad: str | None,
+                           descripcion: str, metodo: str, ruta: str,
+                           detalle: dict | None = None) -> None:
+    """Una fila que no sale de un pedido sino de algo que decidió el sistema.
+
+    Existe por el bloqueo de cuenta (RF-26): lo dispara un login, y el login no se
+    audita (ver SIN_AUDITAR: su cuerpo es una contraseña). Sin esto, que una cuenta
+    quedó bloqueada no lo diría ningún renglón — y es justo lo que se pregunta cuando
+    alguien llama diciendo «no puedo entrar».
+
+    Sin autor a propósito (`usuario` e `id_usuario` en NULL): no lo hizo una persona,
+    y la regla de esta tabla es no inventar autores. Sin `estado`: no es la respuesta
+    de un pedido, es un hecho, y un 4xx lo pintaría de «no se pudo» cuando sí pasó.
+
+    Mismas garantías que `registrar`: no levanta NUNCA.
+    """
+    try:
+        db.add(AuditoriaMovimiento(
+            creado_en=ahora_ar(),
+            id_usuario=None,
+            usuario=None,
+            accion=accion[:20],
+            entidad=entidad[:80],
+            id_entidad=id_entidad,
+            descripcion=descripcion,
+            metodo=metodo[:10],
+            ruta=ruta[:300],
+            estado=None,
+            duracion_ms=None,
+            detalle=(json.dumps(_limpiar(detalle), ensure_ascii=False, default=str)[:TOPE_DETALLE]
+                     if detalle else None),
+        ))
+        await db.commit()
+    except Exception as e:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.warning("Auditoría: no se pudo registrar «%s»: %s", descripcion, e)

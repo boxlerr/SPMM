@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Lock, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,6 +15,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
+  // RF-26: si el error es un bloqueo o el último aviso antes de uno, el cartel cambia.
+  // Con el backend viejo quedan en false/null y se ve el cartel rojo de siempre.
+  const [bloqueado, setBloqueado] = useState(false);
+  const [intentosRestantes, setIntentosRestantes] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const { login } = useAuth();
@@ -32,7 +36,9 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    
+    setBloqueado(false);
+    setIntentosRestantes(null);
+
     if (!username || !password) {
       setError('Por favor ingresa usuario/email y contraseña');
       return;
@@ -55,6 +61,8 @@ export default function LoginPage() {
         router.push('/dashboard');
       } else {
         setError(result.error || 'Error al iniciar sesión');
+        setBloqueado(!!result.bloqueado);
+        setIntentosRestantes(result.intentosRestantes ?? null);
       }
     } catch (err) {
       setError('Error de conexión con el servidor');
@@ -188,11 +196,34 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            {/* El texto lo arma el servidor (con la hora del bloqueo en hora del taller);
+                acá sólo se elige cómo se ve. Cuenta bloqueada: candado y título, porque
+                no es un error de tipeo y volver a probar no sirve. Último aviso antes
+                del bloqueo: ámbar. Todo lo demás, el cartel rojo de siempre. */}
+            {error && bloqueado ? (
+              <div
+                role="alert"
+                className="bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-lg text-sm flex gap-3"
+              >
+                <Lock className="h-5 w-5 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0 space-y-1">
+                  <p className="font-semibold">Cuenta bloqueada</p>
+                  <p>{error}</p>
+                </div>
+              </div>
+            ) : error && intentosRestantes !== null && intentosRestantes <= 2 ? (
+              <div
+                role="alert"
+                className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-lg text-sm flex gap-3"
+              >
+                <TriangleAlert className="h-5 w-5 shrink-0 mt-0.5" aria-hidden="true" />
+                <p className="min-w-0">{error}</p>
+              </div>
+            ) : error ? (
+              <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
                 {error}
               </div>
-            )}
+            ) : null}
 
             <Button
               onClick={handleLogin}

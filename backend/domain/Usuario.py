@@ -29,6 +29,13 @@ class Usuario(Base):
     # de alta a alguien (la contraseña inicial se la pasa otra persona, así que hasta
     # que la cambie está escrita en un chat) y se apaga sola en cuanto la cambia.
     debe_cambiar_password = Column(Boolean, nullable=False, default=False)
+    # RF-26: bloqueo tras 5 contraseñas incorrectas SEGUIDAS. `intentos_fallidos` lleva
+    # la cuenta (vuelve a 0 con un ingreso bueno o con el desbloqueo del admin) y
+    # `bloqueado_hasta` dice hasta cuándo no entra, ni con la clave correcta. NULL o ya
+    # pasado = no está bloqueado. Hora local del taller, sin zona. La regla completa
+    # está en AuthService.login; la migración, en 2026-09-22_bloqueo_por_intentos_fallidos.
+    intentos_fallidos = Column(Integer, nullable=False, default=0, server_default="0")
+    bloqueado_hasta = Column(DateTime, nullable=True)
     reset_token = Column(String(255), nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
     fecha_creacion = Column(DateTime, nullable=False, default=datetime.utcnow)

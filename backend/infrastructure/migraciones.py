@@ -356,6 +356,29 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "que tocar el aviso de stock bajo lleve a esa pieza.'",
         ],
     ),
+    (
+        # RF-26. La más delicada de todas para un deploy a mano: SQLAlchemy pide estas
+        # dos columnas en CADA SELECT de usuario, y el login es un SELECT de usuario. Si
+        # no llegaran a estar, no entra nadie. Por eso van con DEFAULT/NULL y nada más:
+        # los usuarios que ya existen quedan en 0 intentos y sin bloqueo, o sea que
+        # nadie queda afuera por la migración. No toca filas.
+        "2026-09-22_bloqueo_por_intentos_fallidos",
+        [
+            "ALTER TABLE usuario "
+            "ADD COLUMN IF NOT EXISTS intentos_fallidos INTEGER NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS bloqueado_hasta TIMESTAMP",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN usuario.intentos_fallidos IS "
+            "'Contraseñas incorrectas SEGUIDAS en el login (RF-26). Vuelve a 0 con un ingreso "
+            "bueno o cuando un administrador desbloquea la cuenta. Al llegar a 5 se llena "
+            "bloqueado_hasta.'",
+            "COMMENT ON COLUMN usuario.bloqueado_hasta IS "
+            "'Hasta cuándo la cuenta no puede entrar, ni con la contraseña correcta (RF-26). "
+            "NULL = no está bloqueada; si ya pasó, tampoco. Bloqueo temporal de 15 minutos que "
+            "se levanta solo; un administrador lo puede levantar antes. Hora local del taller, "
+            "sin zona.'",
+        ],
+    ),
 ]
 
 

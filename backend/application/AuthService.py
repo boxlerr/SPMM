@@ -12,14 +12,159 @@ from backend.core.config import settings
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.LoginRechazadoException import LoginRechazadoException
 from backend.commons.loggers.logger import logger
+from backend.infrastructure import auditoria_movimientos as auditoria
+from backend.infrastructure.auditoria_movimientos import ahora_ar
+
+# ───────────── RF-26: bloqueo tras intentos fallidos ─────────────
+#
+# El SRS pide «bloquear el acceso tras 5 intentos fallidos consecutivos». Lo que no
+# dice es por cuánto tiempo, y eso se decidió acá con la opción conservadora, PENDIENTE
+# DE CONFIRMAR con el taller:
+#
+#   · TEMPORAL, 15 minutos, y se levanta solo. Un bloqueo permanente que sólo saque un
+#     administrador es más estricto, pero puede dejar a Lucas afuera en el taller justo
+#     cuando no hay nadie para destrabarlo — y si el bloqueado es el único admin, no lo
+#     destraba nadie sin tocar la base.
+#   · Un administrador lo puede levantar antes: «Desbloquear» en Configuración ›
+#     Usuarios (POST /auth/usuarios/{id}/desbloquear).
+#   · «Consecutivos» = sin un ingreso bueno en el medio. Entrar bien vuelve la cuenta a
+#     cero; el tiempo solo, no (tres errores hoy y dos mañana son cinco).
+#   · Mientras está bloqueada no se mira la contraseña —ni la correcta entra— y los
+#     intentos no suman ni estiran el plazo.
+#   · Cuando el plazo vence, la cuenta arranca de cero: 5 intentos nuevos, no 1.
+#
+# Un usuario que NO existe recibe el mismo «Usuario o contraseña incorrectos» de
+# siempre, sin cuenta de intentos: no se lleva registro de nombres que no existen.
+#
+# OJO, también PENDIENTE: a un usuario que SÍ existe se le dice cuántos intentos le
+# quedan, así que por contraste el mensaje deja saber si un nombre existe. Se hizo así
+# porque se pidió mostrar los intentos. Si se quiere cerrar eso, lo simple es no decir
+# la cuenta (sólo avisar que al 5º error se bloquea) y dejar el mensaje del bloqueo.
+MAX_INTENTOS_FALLIDOS = 5
+MINUTOS_DE_BLOQUEO = 15
+
+
+def _al_minuto_siguiente(momento: datetime) -> datetime:
+    """Redondea para arriba al minuto entero.
+
+    El mensaje dice «hasta las 21:02». Si el bloqueo terminara en 21:02:49, quien
+    vuelve a probar a las 21:02 —que es lo que le dijimos— lo encuentra bloqueado y
+    con el mismo cartel. Redondeado, dura entre 15 y 16 minutos y la hora que se lee
+    es exacta.
+    """
+    entero = momento.replace(second=0, microsecond=0)
+    return entero if entero == momento else entero + timedelta(minutes=1)
+
+
+def _cuando(hasta: datetime, ahora: datetime) -> str:
+    """«las 14:35», o «el 23/09 a las 00:05» si el bloqueo cruza la medianoche."""
+    if hasta.date() == ahora.date():
+        return f"las {hasta:%H:%M}"
+    return f"el {hasta:%d/%m} a las {hasta:%H:%M}"
+
+
+def _te_quedan(restantes: int) -> str:
+    if restantes == 1:
+        return (f"Te queda 1 intento: si volvés a equivocarte, la cuenta se bloquea "
+                f"{MINUTOS_DE_BLOQUEO} minutos.")
+    return (f"Te quedan {restantes} intentos antes de que la cuenta se bloquee "
+            f"{MINUTOS_DE_BLOQUEO} minutos.")
+
 
 class AuthService:
     """Servicio de autenticación"""
-    
+
     def __init__(self, usuario_repository: UsuarioRepository):
         self.usuario_repository = usuario_repository
-    
+
+    async def _contar_intento_fallido(self, usuario, ahora: datetime):
+        """Suma la contraseña mala y rechaza el login. Nunca vuelve: siempre levanta.
+
+        Si con ésta llega a MAX_INTENTOS_FALLIDOS, la cuenta queda bloqueada y se anota
+        en la auditoría. La anota sólo el intento que cruzó la raya (el 5º): si llegan
+        dos juntos, el otro ve 6 y no repite la fila.
+        """
+        # Todo lo que hace falta del usuario se lee ANTES de escribir: si la fila de
+        # auditoría falla, el rollback expira el objeto y releerlo en async revienta.
+        id_usuario = usuario.id_usuario
+        quien = usuario.username
+        nombre = " ".join(p for p in (usuario.nombre, usuario.apellido) if p).strip()
+
+        hasta_si_bloquea = _al_minuto_siguiente(ahora + timedelta(minutes=MINUTOS_DE_BLOQUEO))
+        intentos, hasta = await self.usuario_repository.registrar_intento_fallido(
+            id_usuario, MAX_INTENTOS_FALLIDOS, hasta_si_bloquea, ahora
+        )
+
+        if intentos < MAX_INTENTOS_FALLIDOS:
+            restantes = MAX_INTENTOS_FALLIDOS - intentos
+            raise LoginRechazadoException(
+                f"Usuario o contraseña incorrectos. {_te_quedan(restantes)}",
+                estado_http=401,
+                intentos_restantes=restantes,
+                maximo_intentos=MAX_INTENTOS_FALLIDOS,
+                minutos_bloqueo=MINUTOS_DE_BLOQUEO,
+            )
+
+        hasta = hasta or hasta_si_bloquea
+        logger.warning(f"LOGIN: Usuario '{quien}' bloqueado hasta {hasta} ({intentos} intentos).")
+        if intentos == MAX_INTENTOS_FALLIDOS:
+            await auditoria.registrar_evento(
+                self.usuario_repository.db,
+                accion="bloqueó",
+                entidad="usuario",
+                id_entidad=str(id_usuario),
+                descripcion=(
+                    f"Se bloqueó el usuario {quien}"
+                    + (f" ({nombre})" if nombre else "")
+                    + f" hasta {_cuando(hasta, ahora)} por {MAX_INTENTOS_FALLIDOS} "
+                    f"intentos fallidos seguidos"
+                ),
+                metodo="POST",
+                ruta="/auth/login",
+                detalle={
+                    "username": quien,
+                    "intentos_fallidos": intentos,
+                    "bloqueado_hasta": hasta.isoformat(),
+                    "minutos_bloqueo": MINUTOS_DE_BLOQUEO,
+                },
+            )
+        raise LoginRechazadoException(
+            f"Usuario o contraseña incorrectos. Por {MAX_INTENTOS_FALLIDOS} intentos "
+            f"fallidos seguidos, la cuenta quedó bloqueada hasta {_cuando(hasta, ahora)}. "
+            f"Si no podés esperar, pedile a un administrador que la desbloquee.",
+            estado_http=423,
+            bloqueado_hasta=hasta.isoformat(),
+            intentos_restantes=0,
+            maximo_intentos=MAX_INTENTOS_FALLIDOS,
+            minutos_bloqueo=MINUTOS_DE_BLOQUEO,
+        )
+
+    async def desbloquear(self, id_usuario: int) -> dict:
+        """El «Desbloquear» del admin (RF-26): cuenta en cero y sin bloqueo.
+
+        Se puede llamar sobre una cuenta que no está bloqueada —no hace nada malo y
+        deja la cuenta en cero—: el botón puede haber quedado viejo en una pantalla
+        abierta hace rato. Quién lo hizo lo anota el middleware de auditoría
+        («desbloqueó usuario #3»), como cualquier otra escritura.
+        """
+        usuario = await self.usuario_repository.obtener_por_id(id_usuario)
+        if not usuario:
+            raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
+        ahora = ahora_ar()
+        estaba_bloqueado = usuario.bloqueado_hasta is not None and usuario.bloqueado_hasta > ahora
+        username = usuario.username
+        await self.usuario_repository.limpiar_intentos(id_usuario)
+        return {
+            "id_usuario": id_usuario,
+            "username": username,
+            "estaba_bloqueado": estaba_bloqueado,
+            "bloqueado": False,
+            "bloqueado_hasta": None,
+            "intentos_fallidos": 0,
+        }
+
     async def login(self, username: str, password: str) -> dict:
         """
         Autentica un usuario y genera un token JWT
@@ -54,7 +199,29 @@ class AuthService:
             if not usuario.activo:
                 logger.error(f"LOGIN FAILED: Usuario '{username}' inactivo.")
                 raise BusinessException("Usuario inactivo. Contacta al administrador")
-            
+
+            # RF-26. Mientras la cuenta esté bloqueada no se mira la contraseña: ni la
+            # correcta entra. Un bloqueo que ya venció no cuenta, y la cuenta arranca
+            # de cero (5 intentos nuevos, no 1).
+            ahora = ahora_ar()
+            intentos_previos = usuario.intentos_fallidos or 0
+            bloqueado_hasta = usuario.bloqueado_hasta
+            if bloqueado_hasta is not None and bloqueado_hasta > ahora:
+                logger.error(f"LOGIN FAILED: Usuario '{username}' bloqueado hasta {bloqueado_hasta}.")
+                raise LoginRechazadoException(
+                    f"La cuenta está bloqueada hasta {_cuando(bloqueado_hasta, ahora)} por "
+                    f"{MAX_INTENTOS_FALLIDOS} intentos fallidos seguidos. Probá de nuevo a esa "
+                    f"hora o pedile a un administrador que la desbloquee.",
+                    estado_http=423,
+                    bloqueado_hasta=bloqueado_hasta.isoformat(),
+                    intentos_restantes=0,
+                    maximo_intentos=MAX_INTENTOS_FALLIDOS,
+                    minutos_bloqueo=MINUTOS_DE_BLOQUEO,
+                )
+            if bloqueado_hasta is not None:
+                await self.usuario_repository.limpiar_intentos(usuario.id_usuario)
+                intentos_previos = 0
+
             start_hash = time.time()
             is_valid_password = verify_password(password, usuario.password_hash)
             hash_time = time.time() - start_hash
@@ -62,8 +229,13 @@ class AuthService:
 
             if not is_valid_password:
                 logger.error(f"LOGIN FAILED: Password incorrecto para usuario '{username}'.")
-                raise BusinessException("Usuario o contraseña incorrectos")
-            
+                await self._contar_intento_fallido(usuario, ahora)
+
+            # Entró: la cuenta de errores vuelve a cero. Sólo se escribe si había algo
+            # que limpiar, para no sumarle un UPDATE a cada ingreso normal.
+            if intentos_previos:
+                await self.usuario_repository.limpiar_intentos(usuario.id_usuario)
+
             # Actualizar último login
             await self.usuario_repository.actualizar_ultimo_login(usuario.id_usuario)
             

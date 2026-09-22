@@ -3,6 +3,7 @@ API de Autenticación
 Endpoints para login, logout, recuperación de contraseña
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from backend.infrastructure.db import SessionLocal
 from backend.infrastructure.UsuarioRepository import UsuarioRepository
@@ -18,7 +19,10 @@ from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.commons.exceptions.LoginRechazadoException import LoginRechazadoException
 from backend.commons.loggers.logger import logger
+from backend.dto.ErrorItemDTO import ErrorItemDTO
+from backend.infrastructure.auditoria_movimientos import ahora_ar
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 security = HTTPBearer()
@@ -63,6 +67,21 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Servicio no disponible. Intenta nuevamente en unos segundos."
+        )
+    except LoginRechazadoException as e:
+        # RF-26: contraseña mala con la cuenta de intentos, o cuenta bloqueada (423).
+        # Misma forma que cualquier error —status false y el mensaje en errors[0]—, así
+        # un front que no sabe nada del bloqueo muestra el mensaje y alcanza. Lo único
+        # que suma es `data`, para que la pantalla de login pinte el bloqueo distinto.
+        logger.error(f"Login rechazado ({e.estado_http}): {e.message}")
+        return JSONResponse(
+            status_code=e.estado_http,
+            content=ResponseDTO(
+                status=False,
+                data=e.datos(),
+                errors=[ErrorItemDTO(message=e.message, campo="global")],
+            ).model_dump(),
+            headers={"WWW-Authenticate": "Bearer"},
         )
     except BusinessException as e:
         logger.error(f"Error de negocio en login: {str(e)}")
@@ -235,6 +254,27 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 # ==================== ENDPOINTS CRUD DE USUARIOS ====================
 
+def _estado_de_bloqueo(u, ahora=None) -> dict:
+    """RF-26: lo que la tabla de usuarios necesita para mostrar el bloqueo.
+
+    `bloqueado` lo decide el servidor, con SU reloj: si lo calculara el navegador
+    comparando `bloqueado_hasta` con su hora, una PC con la hora corrida mostraría
+    bloqueado a alguien que ya puede entrar (o al revés). Un bloqueo vencido se
+    informa como no bloqueado aunque la fila todavía no se haya limpiado: se limpia
+    sola en el próximo intento de entrar.
+    """
+    ahora = ahora or ahora_ar()
+    hasta = u.bloqueado_hasta
+    bloqueado = hasta is not None and hasta > ahora
+    # Un bloqueo que ya venció arranca de cero en el próximo intento (AuthService).
+    vencido = hasta is not None and not bloqueado
+    return {
+        "bloqueado": bloqueado,
+        "bloqueado_hasta": hasta.isoformat() if bloqueado else None,
+        "intentos_fallidos": 0 if vencido else (u.intentos_fallidos or 0),
+    }
+
+
 @router.get("/usuarios", response_model=ResponseDTO)
 async def listar_usuarios(
     db=Depends(get_db),
@@ -253,6 +293,7 @@ async def listar_usuarios(
         usuarios = await usuario_repository.obtener_todos()
         
         # Convertir a diccionarios
+        ahora = ahora_ar()
         usuarios_data = [
             {
                 "id_usuario": u.id_usuario,
@@ -263,7 +304,8 @@ async def listar_usuarios(
                 "rol": u.rol,
                 "activo": u.activo,
                 "fecha_creacion": u.fecha_creacion.isoformat() if u.fecha_creacion else None,
-                "ultimo_login": u.ultimo_login.isoformat() if u.ultimo_login else None
+                "ultimo_login": u.ultimo_login.isoformat() if u.ultimo_login else None,
+                **_estado_de_bloqueo(u, ahora),
             }
             for u in usuarios
         ]
@@ -310,7 +352,8 @@ async def obtener_usuario(
             "activo": usuario.activo,
             "fecha_creacion": usuario.fecha_creacion.isoformat() if usuario.fecha_creacion else None,
             "fecha_actualizacion": usuario.fecha_actualizacion.isoformat() if usuario.fecha_actualizacion else None,
-            "ultimo_login": usuario.ultimo_login.isoformat() if usuario.ultimo_login else None
+            "ultimo_login": usuario.ultimo_login.isoformat() if usuario.ultimo_login else None,
+            **_estado_de_bloqueo(usuario),
         }
         
         return ResponseDTO(
@@ -595,4 +638,41 @@ async def eliminar_usuario(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+
+@router.post("/usuarios/{id_usuario}/desbloquear", response_model=ResponseDTO)
+async def desbloquear_usuario(
+    id_usuario: int,
+    db=Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Levanta el bloqueo por intentos fallidos (RF-26) y deja la cuenta en cero.
+
+    El bloqueo es de 15 minutos y se levanta solo; esto es para no tener a alguien
+    esperando en el taller. Solo administradores. Quién lo hizo queda en la auditoría
+    (lo anota el middleware: «desbloqueó usuario #3»).
+    """
+    try:
+        resultado = await AuthService(UsuarioRepository(db)).desbloquear(id_usuario)
+        logger.info(
+            f"Usuario {resultado['username']} desbloqueado por {current_user.get('username')}"
+        )
+        return ResponseDTO(
+            status=True,
+            message=(
+                f"Usuario '{resultado['username']}' desbloqueado: ya puede entrar."
+                if resultado["estaba_bloqueado"]
+                else f"Usuario '{resultado['username']}' no estaba bloqueado; su cuenta de intentos quedó en cero."
+            ),
+            data=resultado,
+        )
+    except NotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error al desbloquear usuario {id_usuario}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo desbloquear el usuario"
         )

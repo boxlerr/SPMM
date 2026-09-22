@@ -4,7 +4,7 @@ Maneja todas las operaciones de base de datos para usuarios usando SQLAlchemy
 """
 from typing import Optional, List
 from datetime import datetime
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, and_, case, func, or_
 from backend.domain.Usuario import Usuario
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
@@ -138,6 +138,66 @@ class UsuarioRepository:
             logger.error(f"Error al actualizar último login del usuario {id_usuario}: {str(e)}")
             raise InfrastructureException("Error al actualizar último login") from e
     
+    # ───────────── RF-26: bloqueo por intentos fallidos ─────────────
+    #
+    # Las dos escrituras van por UPDATE directo y no tocando el objeto del ORM: la
+    # cuenta tiene que ser atómica. Dos intentos malos que llegan juntos (dos pestañas,
+    # un script) leerían los dos «3» y escribirían los dos «4»; con el `+ 1` adentro
+    # del UPDATE cada uno suma el suyo. `synchronize_session=False` porque el que llama
+    # usa lo que devuelve el RETURNING, no el objeto que tiene en la sesión.
+
+    async def registrar_intento_fallido(
+        self, id_usuario: int, maximo: int, bloquear_hasta: datetime, ahora: datetime
+    ) -> tuple[int, Optional[datetime]]:
+        """Suma una contraseña mala y, si con ésta llega a `maximo`, bloquea hasta
+        `bloquear_hasta`. Un solo UPDATE. Devuelve (intentos, bloqueado_hasta).
+
+        Si ya hay un bloqueo vigente, lo deja como está: dos intentos que llegan juntos
+        con la cuenta en 4 ven 5 y 6, y el segundo no puede correr el plazo que ya le
+        dijo al primero."""
+        try:
+            siguiente = func.coalesce(Usuario.intentos_fallidos, 0) + 1
+            sin_bloqueo_vigente = or_(
+                Usuario.bloqueado_hasta.is_(None), Usuario.bloqueado_hasta <= ahora
+            )
+            resultado = await self.db.execute(
+                update(Usuario)
+                .where(Usuario.id_usuario == id_usuario)
+                .values(
+                    intentos_fallidos=siguiente,
+                    bloqueado_hasta=case(
+                        (and_(siguiente >= maximo, sin_bloqueo_vigente), bloquear_hasta),
+                        else_=Usuario.bloqueado_hasta,
+                    ),
+                )
+                .returning(Usuario.intentos_fallidos, Usuario.bloqueado_hasta)
+                .execution_options(synchronize_session=False)
+            )
+            intentos, hasta = resultado.one()
+            await self.db.commit()
+            return int(intentos or 0), hasta
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error al registrar intento fallido del usuario {id_usuario}: {str(e)}")
+            raise InfrastructureException("Error al registrar el intento de ingreso") from e
+
+    async def limpiar_intentos(self, id_usuario: int) -> bool:
+        """Cuenta en cero y sin bloqueo. La usan el ingreso bueno, el bloqueo que ya
+        venció (arranca de cero) y el «Desbloquear» del admin."""
+        try:
+            await self.db.execute(
+                update(Usuario)
+                .where(Usuario.id_usuario == id_usuario)
+                .values(intentos_fallidos=0, bloqueado_hasta=None)
+                .execution_options(synchronize_session=False)
+            )
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error al limpiar los intentos del usuario {id_usuario}: {str(e)}")
+            raise InfrastructureException("Error al desbloquear el usuario") from e
+
     async def guardar_reset_token(self, email: str, token: str, expiry: datetime) -> bool:
         """Guarda el token de recuperación de contraseña"""
         try:

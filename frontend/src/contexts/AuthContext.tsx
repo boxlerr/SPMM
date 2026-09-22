@@ -17,10 +17,26 @@ interface User {
   debe_cambiar_password?: boolean;
 }
 
+/**
+ * Lo que devuelve un intento de login.
+ *
+ * `bloqueado` e `intentosRestantes` son del RF-26 (bloqueo tras 5 contraseñas malas
+ * seguidas). Con un backend que todavía no lo tiene vienen en false/null y la pantalla
+ * queda exactamente como antes: el mensaje del servidor en el cartel rojo.
+ */
+export interface ResultadoLogin {
+  success: boolean;
+  error?: string;
+  /** La cuenta está bloqueada (el servidor contestó 423). */
+  bloqueado?: boolean;
+  /** Cuántas contraseñas malas más aguanta antes del bloqueo; null si no se sabe. */
+  intentosRestantes?: number | null;
+}
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (username: string, password: string) => Promise<ResultadoLogin>;
   logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
@@ -213,7 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // En el taller la gente puede pasar horas sin tocar la PC y la sesión no
   // debería caerse por eso.
 
-  const login = async (username: string, password: string) => {
+  const login = async (username: string, password: string): Promise<ResultadoLogin> => {
     try {
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
@@ -247,9 +263,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const fallback = response.status >= 500
           ? 'Servicio no disponible. Intenta nuevamente en unos segundos.'
           : 'Credenciales inválidas';
+        // RF-26: el backend nuevo manda en `data` si la cuenta quedó bloqueada y
+        // cuántos intentos le quedan. El mensaje ya viene armado (con la hora del
+        // bloqueo en hora del taller), así que acá sólo se lee para pintarlo distinto;
+        // si no viene nada —backend viejo, usuario que no existe— es el cartel de siempre.
+        const extra = data?.data && typeof data.data === 'object' ? data.data : null;
         return {
           success: false,
           error: backendMessage || fallback,
+          bloqueado: extra?.bloqueado === true,
+          intentosRestantes: typeof extra?.intentos_restantes === 'number' ? extra.intentos_restantes : null,
         };
       }
     } catch (error) {

@@ -16,7 +16,9 @@ import {
   XCircle,
   AlertCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  Lock,
+  LockOpen
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -51,6 +53,26 @@ interface Usuario {
   activo: boolean;
   fecha_creacion: string;
   ultimo_login: string | null;
+  // RF-26 (bloqueo tras 5 contraseñas malas seguidas). Opcionales: el backend viejo no
+  // los manda, y entonces la tabla queda como siempre, sin cartel ni botón.
+  /** Lo decide el servidor con su reloj, no el navegador. */
+  bloqueado?: boolean;
+  /** Hora local del taller, sin zona: «2026-09-22T21:04:00». */
+  bloqueado_hasta?: string | null;
+  intentos_fallidos?: number;
+}
+
+/**
+ * «21:04», o «23/09 00:05» si no es hoy. Se lee del texto tal cual y no con `new Date`:
+ * el servidor ya la manda en hora del taller, y convertirla con la zona de la PC la
+ * correría en una computadora con la zona mal puesta.
+ */
+function horaDeDesbloqueo(iso: string): string {
+  const hora = iso.slice(11, 16);
+  const hoy = new Date();
+  const dia = `${String(hoy.getDate()).padStart(2, '0')}/${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+  const suDia = `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  return suDia === dia ? hora : `${suDia} ${hora}`;
 }
 
 interface FormData {
@@ -166,6 +188,54 @@ export default function UsuariosTable() {
   const handleDeleteUser = (usuario: Usuario) => {
     setSelectedUsuario(usuario);
     setIsDeleteModalOpen(true);
+  };
+
+  /**
+   * RF-26: levanta el bloqueo por intentos fallidos.
+   *
+   * Se ve al toque —la fila deja de decir «Bloqueado» antes de que conteste el
+   * servidor— y si falla vuelve a como estaba, sin recargar la lista. No pide
+   * confirmación: no se pierde nada, sólo deja entrar antes a alguien que igual
+   * entraría solo a los 15 minutos.
+   */
+  const handleDesbloquear = async (usuario: Usuario) => {
+    const antes = {
+      bloqueado: usuario.bloqueado,
+      bloqueado_hasta: usuario.bloqueado_hasta,
+      intentos_fallidos: usuario.intentos_fallidos,
+    };
+    const aplicar = (cambios: Partial<Usuario>) =>
+      setUsuarios((prev) =>
+        prev.map((u) => (u.id_usuario === usuario.id_usuario ? { ...u, ...cambios } : u))
+      );
+
+    aplicar({ bloqueado: false, bloqueado_hasta: null, intentos_fallidos: 0 });
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`${API_URL}/auth/usuarios/${usuario.id_usuario}/desbloquear`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.status) {
+        aplicar(antes);
+        const mensaje = data?.errors?.[0]?.message;
+        // Un 404 «Not Found» pelado es la ruta que no existe: el servidor todavía no
+        // tiene esta función. Un 404 con mensaje propio es el usuario que no está.
+        showToast(
+          response.status === 404 && (!mensaje || mensaje === 'Not Found')
+            ? 'No se pudo desbloquear: falta actualizar el servidor.'
+            : mensaje || `No se pudo desbloquear a '${usuario.username}'`,
+          'error'
+        );
+        return;
+      }
+      showToast(`'${usuario.username}' desbloqueado: ya puede entrar`, 'success');
+    } catch (error) {
+      console.error('Error al desbloquear usuario:', error);
+      aplicar(antes);
+      showToast('Error de conexión al desbloquear', 'error');
+    }
   };
 
   const validateForm = (isEdit: boolean = false): boolean => {
@@ -448,6 +518,35 @@ export default function UsuariosTable() {
                           Inactivo
                         </span>
                       )}
+                      {/* RF-26: bloqueado por 5 contraseñas malas seguidas. Se levanta
+                          solo a esa hora; el botón es para no tenerlo esperando. */}
+                      {usuario.bloqueado && usuario.bloqueado_hasta ? (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <span
+                            className="inline-flex items-center px-2 py-1 text-xs font-medium bg-amber-100 text-amber-900 rounded-full"
+                            title="5 contraseñas incorrectas seguidas. Se desbloquea solo a esa hora."
+                          >
+                            <Lock className="h-3 w-3 mr-1" />
+                            Bloqueado hasta {horaDeDesbloqueo(usuario.bloqueado_hasta)}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => handleDesbloquear(usuario)}
+                          >
+                            <LockOpen className="h-3 w-3 mr-1" />
+                            Desbloquear
+                          </Button>
+                        </div>
+                      ) : usuario.intentos_fallidos ? (
+                        <div
+                          className="mt-1 text-xs text-muted-foreground"
+                          title="Contraseñas incorrectas seguidas desde su último ingreso. Al llegar a 5 se bloquea 15 minutos."
+                        >
+                          {usuario.intentos_fallidos} {usuario.intentos_fallidos === 1 ? 'intento fallido' : 'intentos fallidos'}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {formatDate(usuario.ultimo_login)}
@@ -464,6 +563,12 @@ export default function UsuariosTable() {
                             <Edit className="h-4 w-4 mr-2" />
                             Editar
                           </DropdownMenuItem>
+                          {usuario.bloqueado && (
+                            <DropdownMenuItem onClick={() => handleDesbloquear(usuario)}>
+                              <LockOpen className="h-4 w-4 mr-2" />
+                              Desbloquear
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem
                             onClick={() => handleDeleteUser(usuario)}
                             className="text-red-600"
