@@ -432,7 +432,12 @@ class OperarioService:
             await db.execute(_text(
                 "UPDATE orden_trabajo_proceso SET id_operario = NULL WHERE id_operario = :o"), {"o": id})
             await db.execute(_text("DELETE FROM operario_rango WHERE id_operario = :o"), {"o": id})
-            await db.execute(_text("DELETE FROM incidencia_proceso WHERE id_operario = :o"), {"o": id})
+            # La no conformidad NO se borra: se le suelta la persona, igual que a los
+            # pasos de la OT. Es un registro de calidad y pertenece a la ORDEN (RF-12);
+            # borrarla porque quien la protagonizó ya no trabaja acá hace desaparecer lo
+            # que le pasó a esa orden, que es justo lo que después alguien viene a mirar.
+            await db.execute(_text(
+                "UPDATE incidencia_proceso SET id_operario = NULL WHERE id_operario = :o"), {"o": id})
             # Sin esto el borrado falla aunque las filas hijas YA no estén: SQLAlchemy
             # sigue teniendo los objetos viejos en memoria y, al borrar el padre,
             # intenta ponerles la FK en NULL — sobre una PK, que no se puede. El error

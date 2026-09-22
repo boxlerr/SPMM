@@ -321,6 +321,8 @@ def test_toda_ruta_de_escritura_de_la_app_queda_auditada():
         "PUT /notificaciones/leer-todas", "PUT /notificaciones/{id}/leida",
         # El cron del sync: no lo llama una persona y son 48 por día.
         "POST /internal/sync",
+        # El cron del aviso de órdenes retrasadas: mismo motivo, tampoco lo llama nadie.
+        "POST /internal/alertas-retraso",
     }
     assert set(sin_auditar) <= esperadas, (
         f"estas escrituras quedaron fuera del registro sin motivo: "

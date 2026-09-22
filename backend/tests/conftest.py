@@ -46,6 +46,9 @@ from backend.domain.Plano import Plano
 # El registro de quién tocó cada paso. Se escribe sola, enganchada al ORM, así que
 # cualquier test que guarde un proceso la necesita creada.
 from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
+# El aviso de orden retrasada se guarda acá, y el detector pregunta contra esta misma
+# tabla si de una OT ya avisó: sin ella no se puede probar que no duplique.
+from backend.domain.Notificacion import Notificacion
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -71,6 +74,7 @@ TEST_TABLES = [
     Planificacion.__table__,
     Plano.__table__,
     AuditoriaProcesoOT.__table__,
+    Notificacion.__table__,
 ]
 
 

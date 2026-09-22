@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2 } from "lucide-react";
-import { useNotifications } from "../contexts/NotificationContext";
+import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2, AlertTriangle } from "lucide-react";
+import { useNotifications, type Notification } from "../contexts/NotificationContext";
 import { usePanelContext } from "../contexts/PanelContext";
 import { useRouter } from "next/navigation";
 import { formatNotificationMessage } from "@/lib/utils";
@@ -58,6 +58,10 @@ export default function Topbar() {
       case "operario_deleted":
       case "usuario_deleted":
         return <UserMinus className="h-4 w-4 text-red-600" />;
+      // Orden que se pasó de su fecha prometida. Sin este caso caía en el default y
+      // salía con la campanita gris, igual que un alta de persona.
+      case "OT_RETRASADA":
+        return <AlertTriangle className="h-4 w-4 text-red-600" />;
       default:
         return <Bell className="h-4 w-4 text-gray-600" />;
     }
@@ -74,6 +78,8 @@ export default function Topbar() {
       case "operario_deleted":
       case "usuario_deleted":
         return <span className="text-xs text-red-600 font-medium">Eliminado</span>;
+      case "OT_RETRASADA":
+        return <span className="text-xs text-red-600 font-medium">Retrasada</span>;
       default:
         return null;
     }
@@ -91,9 +97,15 @@ export default function Topbar() {
     return date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
   };
 
-  const handleNotificationClick = (notificationId: string) => {
-    markAsRead(notificationId);
+  const handleNotificationClick = (notification: Notification) => {
+    markAsRead(notification.id);
     setIsOpen(false);
+    // Si el aviso dice de qué orden habla, se abre esa orden. Antes todos llevaban a
+    // la lista de avisos y la orden había que ir a buscarla a mano.
+    if (notification.id_orden_trabajo) {
+      router.push(`/operaciones?edit_ot=${notification.id_orden_trabajo}`);
+      return;
+    }
     router.push("/configuracion?tab=notificaciones");
   };
 
@@ -146,7 +158,7 @@ export default function Topbar() {
                   {recentNotifications.map((notification) => (
                     <button
                       key={notification.id}
-                      onClick={() => handleNotificationClick(notification.id)}
+                      onClick={() => handleNotificationClick(notification)}
                       className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors ${!notification.read ? "bg-blue-50/50" : ""
                         }`}
                     >

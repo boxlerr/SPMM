@@ -17,7 +17,8 @@ import {
   ClipboardList,
   Briefcase,
   Ruler,
-  Sparkles
+  Sparkles,
+  FileWarning
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
@@ -63,6 +64,15 @@ const sidebarItems: SidebarItem[] = [
     name: "Configuración",
     href: "/configuracion",
     icon: Settings
+  },
+  {
+    // No conformidades: lo que salió mal en una orden. Se cargan desde la orden —con el
+    // ícono naranja al lado de cada paso— pero hasta ahora no había dónde verlas todas
+    // juntas ni cómo bajarlas. Va al lado de Auditoría porque son las dos pantallas de
+    // «qué pasó»: una con lo que hizo la gente y otra con lo que le pasó al trabajo.
+    name: "No conformidades",
+    href: "/no-conformidades",
+    icon: FileWarning
   },
   {
     // Auditoría: cada intento de planificación (salga bien o mal) y cada borrado

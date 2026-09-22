@@ -247,7 +247,11 @@ class ProcesoService:
             # como "error de conexión" y no dice nada.
             await db.execute(_text("DELETE FROM orden_trabajo_proceso WHERE id_proceso = :p"), {"p": id})
             await db.execute(_text("DELETE FROM rango_proceso WHERE id_proceso = :p"), {"p": id})
-            await db.execute(_text("DELETE FROM incidencia_proceso WHERE id_proceso = :p"), {"p": id})
+            # La no conformidad NO se borra: se le suelta el proceso. Es un registro de
+            # calidad de la ORDEN (RF-12), y que alguien limpie el catálogo de procesos
+            # no puede hacer desaparecer lo que pasó en una orden.
+            await db.execute(_text(
+                "UPDATE incidencia_proceso SET id_proceso = NULL WHERE id_proceso = :p"), {"p": id})
             await db.execute(_text("DELETE FROM proceso WHERE id = :p"), {"p": id})
             await db.commit()
         except Exception as e:

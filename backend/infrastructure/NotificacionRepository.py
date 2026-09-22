@@ -69,6 +69,29 @@ class NotificacionRepository:
             logger.error(f"Repository - Error al guardar Notificacion: {e}")
             raise InfrastructureException("Error al guardar una Notificacion.") from e
 
+    async def guardar_varias(self, notificaciones: list[Notificacion]):
+        """Guarda un lote de notificaciones en UN solo viaje y UN solo commit.
+
+        El detector de órdenes retrasadas escribe de a muchas: llamar a `save()` por
+        cada una sería una ida y vuelta por orden contra Supabase, cuyo pooler admite
+        15 conexiones para TODO el proyecto. Y peor: si se cortara a mitad de camino
+        quedaría media corrida avisada, que es justo el estado del que después nadie
+        se entera.
+
+        Devuelve cuántas se guardaron.
+        """
+        if not notificaciones:
+            return 0
+        try:
+            self.db.add_all(notificaciones)
+            await self.db.commit()
+            logger.info(f"Repository - {len(notificaciones)} notificaciones guardadas en lote.")
+            return len(notificaciones)
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Repository - Error al guardar notificaciones en lote: {e}")
+            raise InfrastructureException("Error al guardar las Notificaciones.") from e
+
     async def update(self, id: int, nueva_data: dict):
         try:
             result = await self.db.execute(

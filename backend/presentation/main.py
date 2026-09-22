@@ -26,6 +26,7 @@ from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
 from backend.presentation.RangoAPI import router as rango_router
 from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
+from backend.application.AlertaRetrasoService import AlertaRetrasoService, TOPE_POR_CORRIDA
 from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
@@ -286,6 +287,54 @@ async def internal_sync(request: Request):
     await run_sync_once()
     return {
         "status": "ok",
+        "duracion_seg": round((datetime.now() - inicio).total_seconds(), 1),
+        "timestamp": inicio.isoformat(),
+    }
+
+
+async def get_db_interno():
+    """Sesión para los trabajos internos (los dispara un cron, no una pantalla).
+
+    Es una dependencia y no un `async with` adentro del endpoint para que los tests
+    puedan pisarla: `SessionLocal` acá es el de PRODUCCIÓN —se arma al importar db.py—
+    y un test que llame a este endpoint sin pisar nada le escribiría a Supabase.
+    """
+    async with SessionLocal() as session:
+        yield session
+
+
+@app.post("/internal/alertas-retraso")
+async def internal_alertas_retraso(
+    request: Request,
+    tope: int = TOPE_POR_CORRIDA,
+    db=Depends(get_db_interno),
+):
+    """Busca órdenes vencidas sin aviso y crea la alerta de cada una (RF-04).
+
+    Mismo patrón y misma protección que `/internal/sync`: el contenedor de Cloud Run
+    se apaga si no hay tráfico, así que no sirve un reloj adentro del proceso — esto lo
+    dispara un cron externo una vez por día.
+
+    `tope` acota cuántos avisos escribe UNA corrida. Hay ~194 órdenes abiertas y el
+    taller está sobrevendido: sin tope, la primera pasada puede dejar la campanita con
+    cien renglones el día uno y nadie la vuelve a mirar. Lo que queda afuera no se
+    pierde —la próxima corrida lo vuelve a encontrar— y la respuesta dice cuántos
+    quedaron, para hacer la primera pasada a mano y mirando.
+
+    Protegido con SYNC_TOKEN. Si la variable no está seteada, el endpoint queda
+    deshabilitado (para que nadie pueda dispararlo en un entorno mal configurado).
+    """
+    esperado = os.getenv("SYNC_TOKEN")
+    if not esperado:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if request.headers.get("x-sync-token") != esperado:
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+    inicio = datetime.now()
+    resultado = await AlertaRetrasoService(db).detectarYAvisarRetrasos(tope=tope)
+    return {
+        "status": "ok",
+        **resultado.data,
         "duracion_seg": round((datetime.now() - inicio).total_seconds(), 1),
         "timestamp": inicio.isoformat(),
     }

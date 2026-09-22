@@ -11,6 +11,12 @@ export interface Notification {
   timestamp: Date;
   read: boolean;
   motivo?: string; // Motivo o detalles adicionales (solo para cambio de estado)
+  /**
+   * De qué orden de trabajo habla el aviso, cuando habla de alguna. Es lo que hace que
+   * tocarlo abra esa orden en vez de la lista de avisos. Los avisos que no hablan de
+   * ninguna orden (altas de personas, cambios de usuario) vienen sin esto.
+   */
+  id_orden_trabajo?: number;
 }
 
 import { API_URL } from "@/config";
@@ -70,6 +76,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
               timestamp: new Date(n.fecha_creacion),
               read: n.leida,
               motivo: n.motivo,
+              id_orden_trabajo: n.id_orden_trabajo ?? undefined,
             }));
             setNotifications(loadedNotifications);
           }
@@ -106,6 +113,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             timestamp: new Date(n.fecha_creacion),
             read: n.leida,
             motivo: n.motivo,
+            id_orden_trabajo: n.id_orden_trabajo ?? undefined,
           }));
           setNotifications(loadedNotifications);
         }
@@ -204,6 +212,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             timestamp: new Date(result.data.fecha_creacion),
             read: result.data.leida,
             motivo: result.data.motivo,
+            id_orden_trabajo: result.data.id_orden_trabajo ?? undefined,
           };
           setNotifications((prev) => [newNotification, ...prev]);
         }

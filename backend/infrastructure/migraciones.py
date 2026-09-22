@@ -179,6 +179,61 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "'días. NULL = plan anterior al 11/09/2026; para esos se deduce de creado_en.'",
         ],
     ),
+    (
+        "2026-09-22_alerta_retraso_ot",
+        [
+            "ALTER TABLE notificacion ADD COLUMN IF NOT EXISTS id_orden_trabajo INTEGER",
+            "COMMENT ON COLUMN notificacion.id_orden_trabajo IS "
+            "'De qué orden de trabajo habla esta notificación. NULL = no habla de ninguna '"
+            "'(altas de personas, cambios de usuario). Sin FK a propósito: borrar una OT no '"
+            "'tiene que fallar por un aviso viejo. Es además lo que evita repetir el aviso de '"
+            "'retraso en cada corrida del detector.'",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_notificacion_retraso_ot "
+            "ON notificacion (id_orden_trabajo) WHERE tipo = 'OT_RETRASADA'",
+        ],
+    ),
+    (
+        "2026-09-22_no_conformidades",
+        [
+            "ALTER TABLE incidencia_proceso "
+            "ADD COLUMN IF NOT EXISTS gravedad VARCHAR(10), "
+            "ADD COLUMN IF NOT EXISTS estado VARCHAR(10) NOT NULL DEFAULT 'ABIERTA', "
+            "ADD COLUMN IF NOT EXISTS piezas_afectadas INTEGER, "
+            "ADD COLUMN IF NOT EXISTS accion_correctiva TEXT, "
+            "ADD COLUMN IF NOT EXISTS id_usuario INTEGER, "
+            "ADD COLUMN IF NOT EXISTS usuario VARCHAR(120), "
+            "ADD COLUMN IF NOT EXISTS fecha_cierre TIMESTAMP",
+            "COMMENT ON COLUMN incidencia_proceso.gravedad IS "
+            "'Qué tan grave fue: LEVE, MEDIA o GRAVE. NULL = sin clasificar, que es como '"
+            "'quedan las cargadas antes del 22/09/2026, cuando el campo no existía en '"
+            "'pantalla. Nunca se completa por default: sería inventar una evaluación que "
+            "nadie hizo.'",
+            "COMMENT ON COLUMN incidencia_proceso.estado IS "
+            "'ABIERTA o CERRADA. Arranca ABIERTA y sólo pasa a CERRADA cuando alguien la '"
+            "'cierra desde la pantalla, que es además cuando se llena fecha_cierre. Las '"
+            "'viejas quedan ABIERTA porque nunca existió la forma de cerrarlas: eso es un "
+            "hecho, no un default.'",
+            "COMMENT ON COLUMN incidencia_proceso.piezas_afectadas IS "
+            "'Cuántas piezas salieron afectadas. NULL = no se registró, que NO es lo mismo '"
+            "'que 0 (ninguna): la diferencia importa para contar rechazos.'",
+            "COMMENT ON COLUMN incidencia_proceso.accion_correctiva IS "
+            "'Qué se hizo para resolverla, en texto libre. NULL = todavía nada.'",
+            "COMMENT ON COLUMN incidencia_proceso.id_usuario IS "
+            "'Quién la reportó, tomado del token. NULL = no se registró (las anteriores al '"
+            "'22/09/2026 y las que entren por script); nunca un autor inventado.'",
+            "COMMENT ON COLUMN incidencia_proceso.usuario IS "
+            "'Nombre y apellido de quien la reportó, congelado al momento de reportarla: si '"
+            "'después se renombra el usuario, el registro de calidad tiene que seguir '"
+            "'diciendo lo que decía.'",
+            "COMMENT ON COLUMN incidencia_proceso.fecha_cierre IS "
+            "'Cuándo se cerró, en hora local del taller y sin zona (como todas las fechas '"
+            "'de esta base). NULL mientras siga abierta.'",
+            "CREATE INDEX IF NOT EXISTS ix_incidencia_ot "
+            "ON incidencia_proceso (id_orden_trabajo, fecha_registro DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_incidencia_estado "
+            "ON incidencia_proceso (estado, fecha_registro DESC)",
+        ],
+    ),
 ]
 
 
