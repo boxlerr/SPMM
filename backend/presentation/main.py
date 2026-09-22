@@ -23,6 +23,7 @@ from backend.presentation.AuditoriaAPI import router as auditoria_router
 from backend.presentation.ConfigAPI import router as config_router
 from backend.presentation.PiezaAPI import router as pieza_router
 from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
+from backend.presentation.ConsumoMaterialAPI import router as consumo_material_router
 from backend.presentation.RangoAPI import router as rango_router
 from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
@@ -235,6 +236,10 @@ app.include_router(config_router, tags=["configuracion"], dependencies=protected
 
 app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
 app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)
+# RF-15: lo que se consumió de cada material de la OT. Tabla propia de SPMM; el sync no
+# la mira. Cualquier usuario con sesión registra; anular es de quien lo cargó o de un
+# admin (lo decide el servicio, que es el que sabe quién lo cargó).
+app.include_router(consumo_material_router, tags=["consumos_material"], dependencies=protected_deps)
 app.include_router(rango_router, tags=["rangos"], dependencies=protected_deps)
 app.include_router(auditoria_router, tags=["auditoria"], dependencies=protected_deps)
 

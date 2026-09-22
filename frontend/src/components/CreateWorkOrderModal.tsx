@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,13 @@ import { ProcesosEditor, pasosSinMinutos, SIN_MAQUINA, ProcesoRow } from "@/comp
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeArticulo, usePlanosDeOrden } from "@/hooks/usePlanos";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
+import {
+    CeldaConsumido,
+    FilaDeConsumo,
+    ListaDeConsumos,
+    useConsumosDeOrden,
+    type LineaDeMaterial,
+} from "@/components/materiales/ConsumoDeMaterial";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -57,6 +64,8 @@ interface Articulo {
 
 interface MateriaPrimaItem {
     id: string; // Temp ID
+    /** El id de la línea en orden_trabajo_pieza. Es contra lo que se registra el consumo. */
+    id_linea?: number;
     codigo: string;
     descripcion: string;
     cantidad: string;
@@ -386,6 +395,13 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     /** Lo que el planificador asignó, por id de pasada. Lo manda GET /ordenes/{id}. */
     const [planificado, setPlanificado] = useState<Record<number, any>>({});
     const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrimaItem[]>([]);
+    /** Lo consumido de cada material (RF-15). Si el backend no tiene la ruta, `estado`
+     *  queda en "no" y la solapa se ve exactamente como antes. */
+    const consumo = useConsumosDeOrden(orderToEdit?.id, isOpen);
+    /** La línea con el alta de consumo abierta debajo. Una sola a la vez: en un
+     *  teléfono dos formularios abiertos empujan la lista fuera de la pantalla. */
+    const [consumoAbierto, setConsumoAbierto] = useState<number | null>(null);
+    useEffect(() => { setConsumoAbierto(null); }, [isOpen, orderToEdit?.id]);
     const [files, setFiles] = useState<File[]>([]);
     const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
     const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
@@ -589,6 +605,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         if (!data.status || !Array.isArray(data.data)) return;
                         const mapped: MateriaPrimaItem[] = data.data.map((p: any) => ({
                             id: p.id?.toString() || Math.random().toString(36).substr(2, 9),
+                            id_linea: typeof p.id === "number" ? p.id : undefined,
                             codigo: p.cod_pieza || "",
                             descripcion: p.descripcion || "",
                             cantidad: p.cantidad?.toString() || "0",
@@ -1917,18 +1934,33 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             en la hoja de pañol y se perdían al cerrar. Con el viejo como
                                             dueño, agregar material acá nunca iba a ser correcto, así que
                                             el formulario se fue y la pantalla dice dónde se carga.
-                                            Lo único que SÍ es nuestro es la casilla de abajo. */}
+                                            Lo único que SÍ es nuestro es la casilla de abajo… y, desde
+                                            el 22/09 (RF-15), lo CONSUMIDO: va a una tabla propia que el
+                                            sync no mira, y se carga desde la fila del material. La
+                                            lista de lo que se pide sigue siendo del viejo. */}
                                         <Alert className="border-blue-200 bg-blue-50/60">
                                             <Info className="h-4 w-4 text-blue-600" />
                                             <AlertDescription className="text-xs text-blue-900">
                                                 <strong>Las materias primas se cargan en el sistema viejo.</strong> Acá
                                                 se ven, y se actualizan solas cada pocos minutos. Si a esta orden le
                                                 falta un material, cargalo allá y en un rato aparece.
+                                                {/* En un solo span: AlertDescription es una grilla y
+                                                    cada nodo suelto (el <strong> incluido) caía en su
+                                                    propio renglón. */}
+                                                {consumo.estado === "si" && (
+                                                    <span>
+                                                        Lo que se <strong>consume</strong> sí se registra acá: tocá la
+                                                        columna Consumido del material. No descuenta stock.
+                                                    </span>
+                                                )}
                                             </AlertDescription>
                                         </Alert>
 
                                         {/* Table */}
-                                        <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
+                                        {/* `@container`: la fila que se abre para cargar el consumo
+                                            mide su ancho contra esta caja (100cqw), así queda a la
+                                            vista aunque la tabla se desplace de costado. */}
+                                        <div className="@container border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
                                             <table className="w-full text-sm text-left relative">
                                                 <thead className="text-xs text-gray-600 bg-gray-50/80 border-b border-gray-200 uppercase whitespace-nowrap">
                                                     <tr>
@@ -1937,11 +1969,16 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                         <th className="px-3 py-2">Proveedor</th>
                                                         <th className="px-3 py-2">Cant</th>
                                                         <th className="px-3 py-2">UN</th>
+                                                        {consumo.estado === "si" && (
+                                                            <th className="px-3 py-2" title="Lo registrado en SPMM, carga por carga. No descuenta stock.">
+                                                                Consumido
+                                                            </th>
+                                                        )}
                                                         <th className="px-3 py-2">Disponible</th>
                                                         <th className="px-3 py-2">En Prod.</th>
                                                         <th className="px-3 py-2 w-32">Obs</th>
                                                         <th className="px-3 py-2">Precio</th>
-                                                        <th className="px-3 py-2">C. Usado</th>
+                                                        <th className="px-3 py-2" title="Lo que dice el sistema viejo. No es lo consumido que se registra acá.">C. Usado</th>
                                                         <th className="px-3 py-2 text-center">Utiliz.</th>
                                                         <th className="px-3 py-2 text-center">Cortes</th>
                                                     </tr>
@@ -1949,7 +1986,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 <tbody className="divide-y divide-gray-100">
                                                     {materiasPrimas.length === 0 ? (
                                                         <tr>
-                                                            <td colSpan={12} className="px-4 py-8 text-center text-sm text-gray-500">
+                                                            <td colSpan={consumo.estado === "si" ? 13 : 12} className="px-4 py-8 text-center text-sm text-gray-500">
                                                                 Esta orden no tiene materias primas cargadas en el sistema viejo.
                                                                 <br />
                                                                 <span className="text-xs text-gray-400">
@@ -1958,13 +1995,43 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                             </td>
                                                         </tr>
                                                     ) : (
-                                                        materiasPrimas.map((mp, index) => (
-                                                            <tr key={mp.id} className="hover:bg-gray-50/50 transition-colors group">
+                                                        materiasPrimas.map((mp) => {
+                                                            // La línea contra la que se registra el consumo. Sin id (una
+                                                            // fila que no vino de la base) no hay contra qué cargarlo.
+                                                            const linea: LineaDeMaterial | null =
+                                                                consumo.estado === "si" && mp.id_linea != null
+                                                                    ? {
+                                                                        idLinea: mp.id_linea,
+                                                                        codigo: mp.codigo,
+                                                                        descripcion: mp.descripcion,
+                                                                        pedido: Number(mp.cantidad) || 0,
+                                                                        unidad: mp.unidad,
+                                                                    }
+                                                                    : null;
+                                                            const abierto = linea !== null && consumoAbierto === linea.idLinea;
+                                                            const totalConsumido = linea ? (consumo.totalPorLinea.get(linea.idLinea) ?? 0) : 0;
+                                                            return (
+                                                            <Fragment key={mp.id}>
+                                                            <tr className={cn("hover:bg-gray-50/50 transition-colors group", abierto && "bg-blue-50/40")}>
                                                                 <td className="px-3 py-2 font-medium">{mp.codigo}</td>
                                                                 <td className="px-3 py-2 truncate max-w-[150px]" title={mp.descripcion}>{mp.descripcion}</td>
                                                                 <td className="px-3 py-2 text-gray-600 truncate max-w-[120px]" title={mp.proveedor}>{mp.proveedor || "—"}</td>
                                                                 <td className="px-3 py-2">{mp.cantidad}</td>
                                                                 <td className="px-3 py-2">{mp.unidad}</td>
+                                                                {consumo.estado === "si" && (
+                                                                    <td className="px-2 py-1">
+                                                                        {linea ? (
+                                                                            <CeldaConsumido
+                                                                                linea={linea}
+                                                                                total={totalConsumido}
+                                                                                abierto={abierto}
+                                                                                onAlternar={() => setConsumoAbierto(abierto ? null : linea.idLinea)}
+                                                                            />
+                                                                        ) : (
+                                                                            <span className="text-gray-400">—</span>
+                                                                        )}
+                                                                    </td>
+                                                                )}
                                                                 <td className="px-3 py-2 text-gray-500">{mp.disponible}</td>
                                                                 <td className="px-3 py-2 text-gray-500">{mp.en_produccion}</td>
                                                                 <td className="px-3 py-2 truncate max-w-[100px] text-gray-500" title={mp.observaciones}>{mp.observaciones}</td>
@@ -1981,11 +2048,58 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                                     {mp.cortes || "—"}
                                                                 </td>
                                                             </tr>
-                                                        ))
+                                                            {abierto && linea && (
+                                                                <FilaDeConsumo
+                                                                    linea={linea}
+                                                                    colSpan={13}
+                                                                    consumos={consumo.consumos.filter(c => c.id_orden_trabajo_pieza === linea.idLinea)}
+                                                                    total={totalConsumido}
+                                                                    onRegistrar={(cantidad, obs) => consumo.registrar(linea, cantidad, obs)}
+                                                                    puedeAnular={consumo.puedeAnular}
+                                                                    onAnular={(id) => { void consumo.anular(id); }}
+                                                                />
+                                                            )}
+                                                            </Fragment>
+                                                            );
+                                                        })
                                                     )}
                                                 </tbody>
                                             </table>
                                         </div>
+
+                                        {/* Consumos que no cuelgan de ninguna fila de arriba: cargados
+                                            por API contra un material que no está en la lista, o contra
+                                            una línea que el sistema viejo sacó después. No se pierden de
+                                            vista: siguen siendo de esta orden. */}
+                                        {consumo.estado === "si" && (() => {
+                                            const lineas = new Set(materiasPrimas.map(mp => mp.id_linea).filter((x): x is number => x != null));
+                                            const sueltos = consumo.consumos.filter(c => c.id_orden_trabajo_pieza == null || !lineas.has(c.id_orden_trabajo_pieza));
+                                            if (sueltos.length === 0) return null;
+                                            return (
+                                                <div className="rounded-xl border border-gray-200 bg-white p-3">
+                                                    <p className="text-xs font-semibold text-gray-700">Consumos de materiales que no están en la lista</p>
+                                                    <p className="mb-1 text-[11px] text-gray-500">
+                                                        Se registraron contra esta orden, pero no contra ninguna de las filas de arriba.
+                                                    </p>
+                                                    <ListaDeConsumos
+                                                        consumos={sueltos}
+                                                        puedeAnular={consumo.puedeAnular}
+                                                        onAnular={(id) => { void consumo.anular(id); }}
+                                                        mostrarMaterial
+                                                    />
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* El backend tiene la ruta pero no pudo contestar (la tabla
+                                            todavía no se creó, la base no respondió). La columna no se
+                                            muestra para no dibujar un «—» que parezca «nada consumido». */}
+                                        {consumo.estado === "error" && materiasPrimas.length > 0 && (
+                                            <p className="text-[11px] text-amber-700">
+                                                No se pudo leer lo consumido de esta orden. La lista de materiales está
+                                                completa; volvé a abrir la orden en un rato para ver y cargar el consumo.
+                                            </p>
+                                        )}
 
                                         {/* Lo único de esta solapa que SÍ se guarda, y es de SPMM: el
                                             sync no lo mira ni lo pisa. Hace falta porque sin esto «no

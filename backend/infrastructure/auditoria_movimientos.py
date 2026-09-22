@@ -68,6 +68,7 @@ ACCION = {"POST": "creó", "PUT": "editó", "PATCH": "editó", "DELETE": "elimin
 ENTIDAD = {
     "ordenes": "orden de trabajo",
     "ordenes-trabajo-piezas": "materia prima de la OT",
+    "consumos-material": "consumo de material",
     "procesos": "proceso",
     "operarios": "persona",
     "maquinarias": "máquina",
@@ -111,6 +112,9 @@ SUBENTIDAD = {
     "leida": "leída",
     "pendientes": "pendientes",
     "confirmar": "confirmación",
+    # «/consumos-material/5/anular»: el consumo no se borra, se anula. Sin esto el
+    # renglón diría «editó consumo de material #5» y no se sabría que fue la anulación.
+    "anular": "anulación",
 }
 
 # Nombres de campo cuyo VALOR no puede terminar en el registro. Cubre los DTO de hoy

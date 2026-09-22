@@ -261,6 +261,60 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "es lo mismo que 0.'",
         ],
     ),
+    (
+        # RF-15. Tabla nueva y nada más: no se agrega ninguna columna a una tabla que ya
+        # se lee, así que si esto no llega a aplicarse lo único que falla es el consumo
+        # (la ficha de la OT esconde la columna y sigue andando). No toca filas.
+        "2026-09-22_consumo_material",
+        [
+            "CREATE TABLE IF NOT EXISTS consumo_material ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "id_orden_trabajo INTEGER NOT NULL REFERENCES orden_trabajo (id), "
+            "id_pieza INTEGER NOT NULL REFERENCES pieza (id), "
+            "id_orden_trabajo_pieza INTEGER, "
+            "cantidad NUMERIC(18, 3) NOT NULL, "
+            "unidad VARCHAR(40), "
+            "fecha TIMESTAMP NOT NULL, "
+            "id_usuario INTEGER, "
+            "usuario VARCHAR(120), "
+            "observaciones TEXT, "
+            "anulado SMALLINT NOT NULL DEFAULT 0, "
+            "anulado_en TIMESTAMP, "
+            "anulado_por VARCHAR(120), "
+            "motivo_anulacion TEXT, "
+            "CONSTRAINT ck_consumo_material_cantidad_positiva CHECK (cantidad > 0))",
+            # Un solo literal SQL por COMMENT (ver la nota de la migración de arriba).
+            "COMMENT ON TABLE consumo_material IS "
+            "'Consumo real de material por OT (RF-15). La escribe SPMM; el sync del sistema "
+            "viejo no la mira ni la pisa. Distinta de orden_trabajo_pieza.cantidad, que es lo "
+            "que la OT PIDE, y de orden_trabajo_pieza.cantusada, que es una copia de "
+            "mp.cantstk del viejo. No descuenta stock.'",
+            "COMMENT ON COLUMN consumo_material.id_orden_trabajo_pieza IS "
+            "'La línea de material de la OT que se consumió, por PK (el par OT-pieza no es "
+            "único). Sin FK a propósito: la línea es del sistema viejo y el consumo tiene que "
+            "sobrevivir si la borran. NULL = material que no estaba en la lista de la OT.'",
+            "COMMENT ON COLUMN consumo_material.cantidad IS "
+            "'Cuánto se consumió en ESTA carga, en la unidad de la columna unidad. Siempre "
+            "positiva: una carga equivocada se anula, no se compensa con un negativo.'",
+            "COMMENT ON COLUMN consumo_material.unidad IS "
+            "'La unidad de la línea de la OT (o de la pieza, si no hay línea), copiada al "
+            "cargar. Se copia para que el renglón siga diciendo lo mismo aunque el sync cambie "
+            "la unidad de la línea.'",
+            "COMMENT ON COLUMN consumo_material.fecha IS "
+            "'Cuándo se registró, en hora local del taller y sin zona, como todas las fechas de "
+            "esta base.'",
+            "COMMENT ON COLUMN consumo_material.usuario IS "
+            "'Nombre y apellido de quien lo registró, tomado del token y congelado. NULL = no "
+            "se registró (un script); nunca un autor inventado.'",
+            "COMMENT ON COLUMN consumo_material.anulado IS "
+            "'1 = anulado: deja de sumar pero sigue a la vista, con quién y cuándo en "
+            "anulado_por y anulado_en. Los consumos no se borran.'",
+            "CREATE INDEX IF NOT EXISTS ix_consumo_material_ot "
+            "ON consumo_material (id_orden_trabajo, fecha DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_consumo_material_pieza "
+            "ON consumo_material (id_pieza, fecha DESC)",
+        ],
+    ),
 ]
 
 

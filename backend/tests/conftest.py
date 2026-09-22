@@ -49,6 +49,11 @@ from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
 # El aviso de orden retrasada se guarda acá, y el detector pregunta contra esta misma
 # tabla si de una OT ya avisó: sin ella no se puede probar que no duplique.
 from backend.domain.Notificacion import Notificacion
+# El consumo de material (RF-15) cuelga de la OT, de la pieza y —sin FK— de la línea de
+# materia prima: para probar que el alta valida la línea hacen falta las tres.
+from backend.domain.Pieza import Pieza
+from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
+from backend.domain.ConsumoMaterial import ConsumoMaterial
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -75,6 +80,9 @@ TEST_TABLES = [
     Plano.__table__,
     AuditoriaProcesoOT.__table__,
     Notificacion.__table__,
+    Pieza.__table__,
+    OrdenTrabajoPieza.__table__,
+    ConsumoMaterial.__table__,
 ]
 
 

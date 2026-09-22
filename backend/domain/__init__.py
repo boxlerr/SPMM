@@ -7,6 +7,7 @@ from backend.domain.Cliente import Cliente
 from backend.domain.Pieza import Pieza
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
+from backend.domain.ConsumoMaterial import ConsumoMaterial
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 from backend.domain.Articulo import Articulo
 from backend.domain.Maquinaria import Maquinaria
