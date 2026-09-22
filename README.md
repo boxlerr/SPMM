@@ -35,6 +35,11 @@ pip install sqlalchemy hola
    - DB_PASSWORD
    - TRUSTED_CONNECTION
 
+## Backups de la base (RF-18 / RF-20)
+
+Los backups diarios de producción los hace Supabase, no la app. Qué cubren según el plan,
+cómo verificarlos en el panel y cómo se restaura: [docs/BACKUPS.md](docs/BACKUPS.md).
+
 ## Keep Alive (Render Cold Start)
 
 Para evitar el "cold start" del plan gratuito de Render, se configuró un **GitHub Action** que hace ping al endpoint `/health` cada 10 minutos.
