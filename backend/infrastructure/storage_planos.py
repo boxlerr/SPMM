@@ -30,6 +30,11 @@ import uuid
 
 BUCKET = "planos"
 
+# La carpeta del mismo bucket donde quedan las copias de seguridad automáticas (RF-19,
+# infrastructure/deposito_copias.py). Está acá para que el barrido de huérfanos de
+# scripts/planos la saltee sin importar nada más.
+CARPETA_COPIAS = "copias-de-seguridad/"
+
 # Supabase corta las subidas grandes; el objeto más pesado de la carpeta del taller es
 # de ~13 MB, así que con esto sobra y avisa temprano si alguien sube un video.
 LIMITE_BYTES = 50 * 1024 * 1024

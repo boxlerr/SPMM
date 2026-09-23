@@ -90,6 +90,8 @@ ENTIDAD = {
     # RF-24: la administración de permisos. La frase buena la deja el endpoint
     # (armar_fila, `resumen`); esto es para los intentos que no pasaron.
     "permisos": "permisos",
+    # RF-19: bajar, revisar y restaurar una copia. Ídem: la frase la deja el endpoint.
+    "backups": "copia de seguridad",
 }
 
 # El segundo tramo, cuando dice más que el primero. «/rangos/7/procesos» no es editar
@@ -125,6 +127,8 @@ SUBENTIDAD = {
     "roles": "de un rol",
     "usuarios": "de una persona",
     "secciones": "confidencialidad",
+    # /backups/automaticas/{nombre}/descargar: la que se guardó sola antes de restaurar.
+    "automaticas": "automática",
 }
 
 # Nombres de campo cuyo VALOR no puede terminar en el registro. Cubre los DTO de hoy
@@ -233,6 +237,11 @@ def partes_del_camino(ruta: str) -> tuple[str, str | None]:
 # destrabó una cuenta (RF-26). Con esto la frase dice «desbloqueó usuario #3».
 VERBO = {
     "desbloquear": "desbloqueó",
+    # RF-19. Bajar una copia es un GET que el endpoint anota a mano (por método sería
+    # «get»); revisar y restaurar son POST que no crean nada.
+    "descargar": "descargó",
+    "revisar": "revisó",
+    "restauracion": "restauró",
 }
 
 

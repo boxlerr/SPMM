@@ -20,6 +20,7 @@ from backend.presentation.IncidenciaProcesoAPI import router as incidencia_route
 from backend.presentation.ClienteAPI import router as cliente_router
 from backend.presentation.AuditoriaAPI import router as auditoria_router
 from backend.presentation.PermisosAPI import router as permisos_router
+from backend.presentation.CopiaSeguridadAPI import router as copia_seguridad_router
 
 
 from backend.presentation.ConfigAPI import router as config_router
@@ -275,6 +276,8 @@ app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencie
 app.include_router(consumo_material_router, tags=["consumos_material"], dependencies=_protegido("consumos_material"))
 app.include_router(rango_router, tags=["rangos"], dependencies=_protegido("rangos"))
 app.include_router(auditoria_router, tags=["auditoria"], dependencies=_protegido("auditoria"))
+# RF-19: bajar una copia completa y restaurarla. Sólo admin (la política «backups»).
+app.include_router(copia_seguridad_router, tags=["copias de seguridad"], dependencies=_protegido("backups"))
 
 # RF-24: la administración de permisos (matriz rol × área y rol × sección, permisos de
 # más por persona, secciones confidenciales, cambio de rol). No va por el mapa: cada

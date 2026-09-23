@@ -64,7 +64,8 @@ y como solapa de Recursos):
   Clientes           /clientes
   No conformidades   /incidencias/*
   Auditoría          /auditoria/movimientos, /auditoria/procesos, /auditoria/planificacion
-  Configuración      /auth/usuarios (sección confidencial), /auth/change-password
+  Configuración      /auth/usuarios (sección confidencial), /auth/change-password,
+                     /backups/* (la solapa Copias de seguridad: sólo admin, RF-19)
   todas              /notificaciones, /auth/me
 
 tests/test_permisos_rutas.py tiene esa tabla por pantalla y exige que alguien con SOLO
@@ -297,6 +298,15 @@ POLITICAS: dict[str, Politica] = {
     # ── De todos ──
     # La campanita: cada uno la suya. Con cuenta activa alcanza para todo.
     "notificaciones": Politica(leer=LIBRE, escribir=LIBRE),
+
+    # ── Copias de seguridad (RF-19): sólo el admin del área de sistema ──
+    # Bajar una copia es llevarse TODOS los datos (clientes, usuarios con sus hashes) y
+    # restaurar es pisarlos: las dos cosas, y también mirar la solapa, piden nivel admin
+    # en Configuración, que es sólo del rol admin (ver «EL ÁREA DE SISTEMA» arriba).
+    "backups": Politica(
+        leer=(area("configuracion", "admin"),),
+        escribir=(area("configuracion", "admin"),),
+    ),
 }
 
 

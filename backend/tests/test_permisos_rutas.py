@@ -248,6 +248,12 @@ MATRIZ = [
     ("GET", "/auditoria/procesos", OK, NO, NO),
     ("GET", "/auditoria/procesos?id_orden=5", OK, OK, OK),  # el historial de UNA OT
     ("GET", "/auditoria/procesos?id_orden=", OK, NO, NO),
+    # copias de seguridad (RF-19): sólo admin, también para mirar
+    ("GET", "/backups/estado", OK, NO, NO),
+    ("GET", "/backups/descargar", OK, NO, NO),
+    ("POST", "/backups/revisar", OK, NO, NO),
+    ("POST", "/backups/restauracion", OK, NO, NO),
+    ("GET", "/backups/automaticas/x/descargar", OK, NO, NO),
     # la campanita: de todos
     ("GET", "/notificaciones", OK, OK, OK),
     ("PUT", "/notificaciones/leer-todas", OK, OK, OK),
