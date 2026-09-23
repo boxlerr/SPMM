@@ -1847,7 +1847,28 @@ export default function OperacionesPage() {
       const guardado = await response.json().catch(() => null);
       const loteNuevo = guardado?.planificados?.id_planificacion_lote;
 
-      toast.success("Planificación guardada exitosamente");
+      // RF-03: lo que se pausó DESPUÉS de calcular este plan no se guarda (el backend lo
+      // saca al confirmar y lo dice con el mismo aviso que al calcular). Se avisa acá,
+      // porque es lo último que se mira: el plan que quedó no es exactamente el que se
+      // aprobó en pantalla.
+      const pausadasAlGuardar: any[] = (Array.isArray(guardado?.diagnosticos) ? guardado.diagnosticos : [])
+        .filter((d: any) => d?.tipo === "ot_pausada");
+      if (pausadasAlGuardar.length) {
+        const cuales = pausadasAlGuardar.map((d: any) => d.titulo).join(" · ");
+        if (!loteNuevo) {
+          toast.warning("No se guardó nada: todo el plan quedó pausado", {
+            description: `${cuales}. Se pausó después de calcular el plan.`,
+            duration: 15_000,
+          });
+        } else {
+          toast.warning("Planificación guardada, sin lo que se pausó", {
+            description: `${cuales}. Se pausó después de calcular el plan: cuando lo reanuden, planificalo de nuevo.`,
+            duration: 15_000,
+          });
+        }
+      } else {
+        toast.success("Planificación guardada exitosamente");
+      }
       // Dejó de ser un borrador: ahora es el plan. Si no se olvida acá, la próxima
       // vez Planificar Órdenes ofrece "retomar" algo que ya está confirmado.
       olvidar();
@@ -2075,6 +2096,22 @@ export default function OperacionesPage() {
    * que baja es el árbol ya armado: `WorkOrdersListWrapper` lo dibuja adentro de su
    * solapa, sin saber nada de planificación.
    */
+  // RF-22: qué dice el archivo exportado de cada solapa sobre lo que se estaba mirando.
+  // Sin el plan y la semana, un PDF de «Semanal» impreso no dice de qué semana es.
+  const filtrosDelPlanExport = (...extra: string[]) => [
+    `Planificación: ${selectedLoteId === "all" ? "todas" : etiquetaPlanElegido}`,
+    ...extra,
+  ];
+  const semanaExport = (() => {
+    const dia = fechaReferencia.getDay();
+    const lunes = new Date(fechaReferencia);
+    lunes.setDate(fechaReferencia.getDate() - dia + (dia === 0 ? -6 : 1));
+    const domingo = new Date(lunes);
+    domingo.setDate(lunes.getDate() + 6);
+    return `Semana del ${format(lunes, "dd/MM/yyyy")} al ${format(domingo, "dd/MM/yyyy")}`;
+  })();
+  const diaExport = `Día: ${format(fechaReferencia, "EEEE dd/MM/yyyy", { locale: es })}`;
+
   const pantallaDePlanificacion = (
             <Tabs
               value={planSubTab}
@@ -2371,6 +2408,7 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsPendientes}
+                    exportar={{ titulo: "Planificadas · Pendientes", archivo: "plan_pendientes", filtros: filtrosDelPlanExport() }}
                     mensajeVacio="Esta planificación no tiene trabajo pendiente: ya está todo terminado o entregado."
                     selectedIds={selectedPlanIds}
                     onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
@@ -2510,6 +2548,7 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsDeLaSemana}
+                    exportar={{ titulo: "Planificadas · Semanal", archivo: "plan_semanal", filtros: filtrosDelPlanExport(semanaExport) }}
                     mensajeVacio="Esta semana no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
                     selectedIds={selectedPlanIds}
                     onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
@@ -2644,6 +2683,7 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsDelDia}
+                    exportar={{ titulo: "Planificadas · Diaria", archivo: "plan_diaria", filtros: filtrosDelPlanExport(diaExport) }}
                     mensajeVacio="Este día no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
                     diaResaltado={fechaReferencia}
                     selectedIds={selectedPlanIds}
@@ -2679,6 +2719,7 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={completedPlannedOrdenes}
+                    exportar={{ titulo: "Planificadas · Entregadas al cliente", archivo: "plan_entregadas", filtros: filtrosDelPlanExport() }}
                     mensajeVacio="Todavía no se entregó ninguna OT de esta planificación."
                     selectedIds={selectedPlanIds}
                     onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
@@ -2713,6 +2754,7 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsTerminadasSinEntregar}
+                    exportar={{ titulo: "Planificadas · Terminadas en el taller", archivo: "plan_terminadas", filtros: filtrosDelPlanExport() }}
                     mensajeVacio="No hay nada terminado esperando despacho en esta planificación."
                     selectedIds={selectedPlanIds}
                     onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}

@@ -35,6 +35,8 @@ import { SubirPlanoModal } from "@/components/planos/SubirPlanoModal";
 import { invalidarOrdenesConPlano } from "@/hooks/useOrdenesConPlano";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 
 /** El servidor todavía no tiene la sección de planos (ver el 404 más abajo). */
 class SeccionNoDisponible extends Error {}
@@ -73,6 +75,17 @@ export interface PlanoBiblioteca {
 // solo su tamaño); lo caro es dibujar las miniaturas, y esas salen recién cuando
 // entran en pantalla, así que se puede pedir de a mucho sin que se note.
 const POR_PAGINA = 48;
+
+/** RF-22: qué es cada plano, de qué producto y cuándo se subió. */
+const COLUMNAS_EXPORT: ColumnaExport<PlanoBiblioteca>[] = [
+    { titulo: "Código", valor: (p) => p.cod_articulo?.trim() ?? "" },
+    { titulo: "Producto", valor: (p) => p.descripcion_articulo?.trim() || p.descripcion?.trim() || "" },
+    { titulo: "Archivo", valor: (p) => p.nombre },
+    { titulo: "Tipo", valor: (p) => p.tipo_archivo ?? "" },
+    { titulo: "Cargado en", valor: (p) => (p.id_orden_trabajo ? `OT ${p.id_orden_trabajo}` : p.id_articulo ? "Producto" : "") },
+    { titulo: "Subido", tipo: "fechaHora", valor: (p) => p.fecha_subida },
+    { titulo: "Tamaño (KB)", tipo: "numero", decimales: 0, valor: (p) => (p.bytes ? p.bytes / 1024 : null) },
+];
 
 export interface BibliotecaPlanosProps {
     className?: string;
@@ -345,6 +358,18 @@ export function BibliotecaPlanos({
 
     const acciones = (
         <>
+            {/* RF-22: los planos que ya trajo la grilla, con la búsqueda puesta. */}
+            <ExportarMenu
+                titulo="Planos"
+                archivo="planos"
+                filas={items}
+                columnas={COLUMNAS_EXPORT}
+                disabled={cargando}
+                filtros={() => filtroBusqueda(consulta)}
+                aviso={hayMas
+                    ? `Salen los ${items.length} que ya se ven, de ${total}. Para sumar más, tocá «Ver más planos» abajo.`
+                    : undefined}
+            />
             {puedeEditar ? (
                 <Button onClick={() => setSubidaAbierta(true)} size="sm">
                     <UploadCloud className="h-4 w-4 mr-2" />

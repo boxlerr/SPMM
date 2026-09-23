@@ -29,8 +29,10 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { API_URL } from "@/config";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
 
-interface Item {
+export interface Item {
   id: number;
   nombre: string;
 }
@@ -71,6 +73,12 @@ interface CatalogoSimpleProps {
    * una solapa distinta (Rangos, Sectores).
    */
   soloLectura?: boolean;
+  /**
+   * RF-22. Columnas que se suman al exportar, después de # y Nombre. Rangos las usa
+   * para llevar lo que dicen sus carteles (cuánta maquinaria habilita, cuánta gente lo
+   * tiene), que en pantalla se ven al lado del nombre.
+   */
+  columnasExport?: ColumnaExport<Item>[];
 }
 
 const getAuthHeaders = (): HeadersInit => {
@@ -90,6 +98,7 @@ export default function CatalogoSimple({
   renderExpanded,
   renderBadge,
   soloLectura = false,
+  columnasExport = [],
 }: CatalogoSimpleProps) {
   const cleanUrl = API_URL.replace(/\/$/, "");
   const { showToast } = useToast();
@@ -248,6 +257,17 @@ export default function CatalogoSimple({
           )}
         </div>
         <div className="flex items-center gap-2">
+          <ExportarMenu
+            titulo={titulo}
+            archivo={resource}
+            filas={items}
+            columnas={[
+              { titulo: "#", tipo: "entero", valor: (_: Item, i: number) => i + 1 },
+              { titulo: "Nombre", valor: (it: Item) => it.nombre },
+              ...columnasExport,
+            ]}
+            disabled={loading}
+          />
           {soloLectura ? (
             <MarcaSoloLectura que={titulo.toLowerCase()} />
           ) : (

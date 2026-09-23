@@ -20,6 +20,19 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
+
+/** RF-22: las columnas de la tabla, con los números como números. */
+const COLUMNAS_EXPORT: ColumnaExport<any>[] = [
+    { titulo: "Recurso humano", valor: (i) => i.operator_name_display },
+    { titulo: "Proceso", valor: (i) => String(i.process_name_display ?? "").toUpperCase() },
+    { titulo: "Orden proceso", tipo: "entero", valor: (i) => i.orden_proceso_display },
+    { titulo: "OT", tipo: "id", valor: (i) => i.pedido_externo || i.orden_id },
+    { titulo: "Tiempo (min)", tipo: "entero", valor: (i) => i.tiempo_proceso_display },
+    { titulo: "Acumulado (min)", tipo: "entero", valor: (i) => i.acumulado },
+    { titulo: "Días ocupados", tipo: "numero", decimales: 2, valor: (i) => i.dias_ocupados },
+];
 
 interface OperatorLoadTabProps {
     planificacion: any[];
@@ -199,6 +212,18 @@ export function OperatorLoadTab({ planificacion, operarios, ordenes }: OperatorL
                 <div className="flex items-center gap-2 text-xs text-gray-500 font-medium px-2 py-1 bg-white rounded-lg border border-gray-100 shadow-sm self-end mb-1">
                     <Clock className="h-3.5 w-3.5 text-blue-500" />
                     <span>Jornada: {selectedOperator !== "all" ? (processedData[0]?.jornada_mins / 60).toFixed(2) + "hs" : "Variable"}</span>
+                </div>
+                <div className="self-end mb-1">
+                    <ExportarMenu
+                        titulo="Carga del recurso humano"
+                        archivo="carga_recurso_humano"
+                        filas={processedData}
+                        columnas={COLUMNAS_EXPORT}
+                        filtros={[
+                            ...(selectedOperator !== "all" ? [`Recurso humano: ${selectedOperator}`] : []),
+                            ...(selectedProcess !== "all" ? [`Proceso: ${selectedProcess}`] : []),
+                        ]}
+                    />
                 </div>
             </div>
 

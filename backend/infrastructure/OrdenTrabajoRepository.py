@@ -636,6 +636,7 @@ class OrdenTrabajoRepository:
                 logger.info("Repository - Relación Orden-Proceso no encontrada.")
                 return False
 
+            estado_anterior = ot_proceso.id_estado
             ot_proceso.id_estado = id_estado
             
             # Logic for Real Minutes Tracking
@@ -651,12 +652,29 @@ class OrdenTrabajoRepository:
                     ot_proceso.inicio_real = _ahora_ar()
                 # If reverting from finalized to in-process, clear finish time
                 ot_proceso.fin_real = None
-            elif id_estado == 3:  # Finalizado
+            elif id_estado == 3 and estado_anterior != 3:  # Finalizado
+                # Sólo al TERMINARLO. Elegir otra vez «terminado» sobre uno que ya lo
+                # estaba no es terminarlo de nuevo: pisar el fin corría el paso hasta
+                # hoy y el tiempo trabajado (RF-06/07) se llevaba días en que nadie lo
+                # tocó.
                 ot_proceso.fin_real = _ahora_ar()
 
             # Mover un proceso de la OT es modificar la OT: es el cambio que más se
             # hace y el que más se pregunta después ("¿quién lo dio por terminado?").
             await self._sellar_modificacion(id_orden, usuario)
+
+            # RF-03. Si el paso estaba pausado y alguien lo puso en proceso o lo
+            # terminó, ya no está parado: se cierra su pausa (y la de la OT, si con
+            # esto quedó todo terminado). Sólo si el estado CAMBIÓ: elegir otra vez el
+            # mismo estado en la lista no es arrancar nada. En su propio savepoint:
+            # si falla, el cambio de estado se guarda igual (ver PausaRepository).
+            if estado_anterior != id_estado:
+                from backend.infrastructure.PausaRepository import PausaRepository
+                await PausaRepository(self.db).cerrar_al_cambiar_estado(
+                    id_orden=id_orden, id_otp=ot_proceso.id, id_estado=id_estado,
+                    cuando=_ahora_ar(), id_usuario=(usuario or {}).get("id_usuario"),
+                    usuario=(nombre_de(usuario) or "")[:120] or None,
+                )
 
             await self.db.commit()
             await self.db.refresh(ot_proceso)
@@ -830,7 +848,10 @@ class OrdenTrabajoRepository:
 
         Las marcas de tiempo siguen la misma regla que el cambio de a uno
         (`update_proceso_status`): pendiente borra las dos, en proceso deja la de
-        arranque si ya estaba, y terminado escribe la de fin.
+        arranque si ya estaba, y terminado escribe la de fin SÓLO en los pasos que no
+        estaban terminados. Marcar como terminada una OT con pasos que se terminaron
+        hace días no les corre el fin a hoy: eso inflaba el tiempo trabajado de cada
+        paso (RF-06) y la eficiencia de quien lo hizo (RF-07).
         """
         try:
             ids = [int(i) for i in (orden_ids or [])]
@@ -854,7 +875,9 @@ class OrdenTrabajoRepository:
                        inicio_real = CASE WHEN :estado = 1 THEN NULL
                                           WHEN :estado = 2 THEN COALESCE(inicio_real, :ahora)
                                           ELSE inicio_real END,
-                       fin_real    = CASE WHEN :estado = 3 THEN :ahora ELSE NULL END
+                       fin_real    = CASE WHEN :estado = 3 AND id_estado = 3 THEN fin_real
+                                          WHEN :estado = 3 THEN :ahora
+                                          ELSE NULL END
                  WHERE id_orden_trabajo = ANY(:ordenes)
             """), {"estado": id_estado, "ahora": ahora, "ordenes": ids})
             procesos = resultado.rowcount or 0
@@ -871,9 +894,21 @@ class OrdenTrabajoRepository:
                     return {"id_estado": id_estado,
                             "inicio_real": fila.get("inicio_real") or ahora,
                             "fin_real": None}
+                if fila.get("id_estado") == 3:
+                    # Ya estaba terminado: el UPDATE no le toca el fin (ver arriba).
+                    return {"id_estado": id_estado, "fin_real": fila.get("fin_real")}
                 return {"id_estado": id_estado, "fin_real": ahora}
 
             await auditoria_proc.anotar(self.db, previas, "edicion", nuevos=_como_queda)
+
+            # RF-03. Todos los pasos quedaron en el mismo estado: las pausas que eso
+            # deja sin sentido se cierran (ver PausaRepository.cerrar_al_marcar_varias).
+            from backend.infrastructure.PausaRepository import PausaRepository
+            await PausaRepository(self.db).cerrar_al_marcar_varias(
+                ordenes_ids=ids, id_estado=id_estado, cuando=ahora,
+                id_usuario=(usuario or {}).get("id_usuario"),
+                usuario=(nombre_de(usuario) or "")[:120] or None,
+            )
 
             # La OT queda entregada sólo si TODOS sus pasos quedaron terminados, que es
             # exactamente lo que acaba de pasar cuando el estado pedido es "finalizado".

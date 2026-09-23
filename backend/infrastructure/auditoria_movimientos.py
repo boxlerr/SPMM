@@ -121,6 +121,9 @@ SUBENTIDAD = {
     # «/piezas/5/stock-minimo» (RF-14): cambiarle el mínimo a una materia prima no es
     # editarla —sus datos son del sistema viejo—, es decidir desde cuándo avisar.
     "stock-minimo": "stock mínimo",
+    # «/operarios/5/ausencias» (RF-06): cargarle una ausencia a alguien no es editar a
+    # la persona. La frase buena, con los días y el motivo, la deja el endpoint.
+    "ausencias": "ausencias",
     # /permisos/roles/..., /permisos/usuarios/..., /permisos/secciones/...
     "roles": "de un rol",
     "usuarios": "de una persona",
@@ -233,6 +236,11 @@ def partes_del_camino(ruta: str) -> tuple[str, str | None]:
 # destrabó una cuenta (RF-26). Con esto la frase dice «desbloqueó usuario #3».
 VERBO = {
     "desbloquear": "desbloqueó",
+    # RF-03. «POST /ordenes/1081/pausar» no crea nada: para la OT (o un paso). La frase
+    # buena, con el número de OT y el motivo, la deja el endpoint (PausaAPI); esto es
+    # para los intentos que no pasaron, que igual tienen que decir qué se intentó.
+    "pausar": "pausó",
+    "reanudar": "reanudó",
 }
 
 

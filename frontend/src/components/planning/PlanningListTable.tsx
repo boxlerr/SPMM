@@ -62,6 +62,16 @@ import { API_URL } from "@/config";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { MarcaPausada } from "@/components/pausas/MarcaPausada";
+import { filtroBusqueda, type SeccionExport } from "@/lib/exportar";
+import {
+    columnasOrdenes,
+    columnasPasos,
+    columnasPasosDelPlan,
+    filtroOrden,
+    pasosDelPlan,
+} from "@/lib/exportes/ordenes";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -141,7 +151,23 @@ interface PlanningListTableProps {
      *  estaban desplegadas. Sin esto la lista nueva aparece con las bandas abiertas
      *  de la vuelta anterior y no se entiende qué estás mirando. */
     colapsarFilasKey?: string;
+    /**
+     * RF-22. Si viene, al lado del buscador aparece «Exportar» con lo que la tabla está
+     * mostrando —la búsqueda y el orden incluidos—: una hoja con las OT y otra con sus
+     * pasos, y si hay plan, con el horario, el recurso humano y la maquinaria de cada uno.
+     * `filtros` son los de afuera de la tabla (qué plan, qué semana, qué día).
+     */
+    exportar?: { titulo: string; archivo: string; filtros?: string[] };
 }
+
+/** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
+const ROTULOS_ORDEN: Record<SortColumn, string> = {
+    id: "OT", id_otvieja: "OT", fecha_entrada: "F. Entrada", cliente: "Cliente", codigo: "Código",
+    descripcion: "Producto", n_pedido: "N° Pedido", unidades: "Cant.", prioridad: "Prioridad",
+    material: "Material", proceso: "Proceso", plano: "Plano", estado: "Estado", entrega: "Entrega",
+    fecha_prometida: "F. Prometida", fecha_entrega: "F. Entrega", aprobado_por: "Aprobado por",
+    requerido_por: "Pedido por",
+};
 
 /** Columnas ordenables de la tabla. TODAS las columnas con dato ordenan; las que
  *  no muestran un valor "ordenable" obvio (Material, Proceso, Plano, Entrega) usan
@@ -232,7 +258,8 @@ function _PlanningListTable({
     diaResaltado,
     pinSelectedOnTop = false,
     compacto = false,
-    colapsarFilasKey
+    colapsarFilasKey,
+    exportar,
 }: PlanningListTableProps) {
 
     // RF-24. Esta tabla edita dos cosas distintas y cada una pide lo suyo, igual que el
@@ -1417,6 +1444,37 @@ function _PlanningListTable({
         );
     }
 
+    // RF-22: lo que se ve, en el orden en que se ve. Los pasos se arman recién al
+    // exportar: con 150 OT desplegar todos en cada dibujo sería trabajo tirado.
+    const menuExportar = exportar ? (
+        <ExportarMenu
+            titulo={exportar.titulo}
+            archivo={exportar.archivo}
+            cantidad={sortedData.length}
+            secciones={(): SeccionExport[] => [
+                {
+                    titulo: "Órdenes",
+                    filas: sortedData,
+                    columnas: columnasOrdenes({
+                        plano: (o) => estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles),
+                        estado: hideStatus ? undefined : getOrderStatus,
+                    }),
+                },
+                {
+                    titulo: planificacion.length ? "Pasos del plan" : "Pasos",
+                    filas: pasosDelPlan(sortedData, planificacion, feriados),
+                    columnas: planificacion.length ? columnasPasosDelPlan : columnasPasos,
+                },
+            ]}
+            filtros={() => [
+                ...(exportar.filtros ?? []),
+                ...filtroBusqueda(searchTerm),
+                ...filtroOrden(sortConfig.key ? ROTULOS_ORDEN[sortConfig.key] : null, sortConfig.direction),
+            ]}
+            className={compacto ? undefined : "h-10"}
+        />
+    ) : null;
+
     return (
         /* `mt-6` es el aire que la tabla necesita en las pestañas de Operaciones, donde
            arranca pegada a la barra de tabs. Dentro del planificador ese margen sobra
@@ -1448,7 +1506,8 @@ function _PlanningListTable({
                 entre las dos cosas se veía una banda blanca que Julián marcó dos veces
                 ("quedan esos espacios entre el buscador y las OT, pierde espacio"). */}
             {!compacto && (
-                <div className="relative">
+                <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                         placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
@@ -1457,10 +1516,15 @@ function _PlanningListTable({
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
+                {menuExportar}
+                </div>
             )}
 
             {/* Mobile Card View (< md) */}
             <div className="md:hidden space-y-4">
+                {compacto && menuExportar && (
+                    <div className="flex justify-end">{menuExportar}</div>
+                )}
                 {sortedData.length === 0 ? (
                     <div className="text-center py-8 text-gray-500 bg-white rounded-lg shadow">
                         {searchTerm ? "No se encontraron resultados." : (mensajeVacio || "No hay órdenes activas.")}
@@ -1490,6 +1554,7 @@ function _PlanningListTable({
                                         )}
                                         <span className="font-bold text-lg text-gray-800">#{item.id_otvieja || item.id}</span>
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
+                                        <MarcaPausada idOrden={item.id} />
                                     </div>
                                     <button className="text-gray-400">
                                         {isRowExpanded(item.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -1561,14 +1626,17 @@ function _PlanningListTable({
             {/* Desktop Table View (>= md). El `zoom` aplica SOLO acá (no al search ni a las tarjetas mobile). */}
             <Card className="hidden md:block overflow-hidden border-none shadow-xl bg-white w-full relative">
                 {compacto && (
-                    <div className="relative p-2 border-b border-gray-100 bg-white">
-                        <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <div className="flex items-center gap-2 p-2 border-b border-gray-100 bg-white">
+                    <div className="relative flex-1 min-w-0">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                         <Input
                             placeholder="Buscar por OT, pedido, cliente, código, producto o proceso..."
                             className="pl-9 h-8 text-xs border-gray-200 focus:border-red-500 focus:ring-red-500"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
+                    </div>
+                    {menuExportar}
                     </div>
                 )}
                 <div
@@ -1838,7 +1906,12 @@ function _PlanningListTable({
                                                 </button>
                                             </td>
                                             <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                                            <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
+                                            <td className="px-3 py-3 font-medium">
+                                                <span className="inline-flex flex-wrap items-center gap-1.5">
+                                                    {item.id_otvieja || item.id}
+                                                    <MarcaPausada idOrden={item.id} />
+                                                </span>
+                                            </td>
                                             <td
                                                 className="group/edit relative px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm"
                                                 title="Click para editar la fecha de entrada"

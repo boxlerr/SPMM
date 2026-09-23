@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { RefreshCw } from "lucide-react";
 import { API_URL } from "@/config"
+import { ExportarMenu } from "@/components/common/ExportarMenu";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -76,18 +77,30 @@ export default function PlanificacionPage() {
             Gestión de procesos del sistema
           </p>
         </div>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <ExportarMenu
+          titulo="Procesos"
+          archivo="procesos"
+          filas={procesos}
+          columnas={[
+            { titulo: "#", tipo: "id", valor: (p: Proceso) => p.id },
+            { titulo: "Nombre", valor: (p: Proceso) => p.nombre ?? "" },
+            { titulo: "Descripción", valor: (p: Proceso) => p.descripcion ?? "" },
+          ]}
+          disabled={loading}
+        />
         <Button
           onClick={fetchProcesos}
           disabled={loading}
           variant="outline"
           size="sm"
-          className="self-start sm:self-auto"
         >
           <RefreshCw
             className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
           />
           Actualizar
         </Button>
+        </div>
       </div>
 
       {error && (

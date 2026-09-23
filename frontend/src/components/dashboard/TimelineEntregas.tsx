@@ -3,6 +3,7 @@ import { TimelineItem, OrdenEstado } from "./types"
 import { useState } from "react"
 import StatusOrdersModal from "./StatusOrdersModal"
 import { API_URL } from "../../config"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
 
 interface TimelineEntregasProps {
     timeline: TimelineItem[]
@@ -42,7 +43,7 @@ export default function TimelineEntregas({ timeline, loading }: TimelineEntregas
     return (
         <>
             <section className="bg-white rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-gray-100 overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-50">
+                <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-teal-50 text-teal-600 rounded-lg border border-teal-100/50">
                             <Calendar className="h-5 w-5" />
@@ -52,6 +53,27 @@ export default function TimelineEntregas({ timeline, loading }: TimelineEntregas
                             <p className="text-gray-500 text-xs">Próximas 7 días</p>
                         </div>
                     </div>
+                    <ExportarMenu
+                        titulo="Entregas de los próximos 7 días"
+                        archivo="dashboard_timeline_entregas"
+                        filas={timeline ?? []}
+                        columnas={[
+                            { titulo: "Fecha", tipo: "fecha", valor: (t: TimelineItem) => t.fecha },
+                            {
+                                titulo: "Órdenes",
+                                tipo: "entero",
+                                // El tipo dice número, pero el servidor también manda la lista con
+                                // su cantidad aparte: se toma lo que venga.
+                                valor: (t: TimelineItem) => {
+                                    const x = t as unknown as { ordenes: unknown; cantidad_ordenes?: number };
+                                    return typeof x.ordenes === "number" ? x.ordenes
+                                        : x.cantidad_ordenes ?? (Array.isArray(x.ordenes) ? x.ordenes.length : null);
+                                },
+                            },
+                        ]}
+                        disabled={loading}
+                        soloIcono
+                    />
                 </div>
 
                 <div className="p-6">

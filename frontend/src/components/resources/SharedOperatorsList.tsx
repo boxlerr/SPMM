@@ -6,6 +6,23 @@ import { Eye, Trash2, Phone } from "lucide-react";
 import { Operario } from "@/app/recursos/_types";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
+
+const nombrePropio = (text?: string) =>
+    (text ?? "").split(/\s+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+
+/** RF-22: lo que muestra la tabla, más la jornada, que es lo que se pregunta al imprimirla. */
+const COLUMNAS_EXPORT: ColumnaExport<Operario>[] = [
+    { titulo: "Nombre", valor: (o) => `${nombrePropio(o.nombre)} ${nombrePropio(o.apellido)}`.trim() },
+    { titulo: "Rango", valor: (o) => o.categoria ?? "" },
+    { titulo: "Sector", valor: (o) => o.sector ?? "" },
+    { titulo: "Teléfono", valor: (o) => (o.celular || o.telefono || "").replace(/\D/g, "") },
+    { titulo: "Estado", valor: (o) => (o.disponible ? "Activo" : "Ausente") },
+    { titulo: "Entrada", valor: (o) => o.hora_inicio?.slice(0, 5) ?? "" },
+    { titulo: "Salida", valor: (o) => o.hora_fin?.slice(0, 5) ?? "" },
+    { titulo: "Interpreta planos", tipo: "booleano", valor: (o) => o.interpreta_planos },
+];
 
 interface SharedOperatorsListProps {
     operarios: Operario[];
@@ -61,6 +78,18 @@ export function SharedOperatorsList({
 
     return (
         <div className={cn("w-full", className)}>
+            {/* RF-22: la lista entera, en el orden en que se ve. */}
+            <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <span className="text-xs text-muted-foreground">
+                    {operarios.length} {operarios.length === 1 ? "persona" : "personas"}
+                </span>
+                <ExportarMenu
+                    titulo="Recurso humano"
+                    archivo="recurso_humano"
+                    filas={operarios}
+                    columnas={COLUMNAS_EXPORT}
+                />
+            </div>
             {/* Vista Desktop - Tabla */}
             <div className="hidden md:block overflow-x-auto rounded-md border">
                 <table className="w-full">

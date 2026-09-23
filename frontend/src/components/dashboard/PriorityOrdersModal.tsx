@@ -1,5 +1,17 @@
 import React from "react"
 import { OrdenPrioridad } from "./types"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
+import type { ColumnaExport } from "@/lib/exportar"
+
+/** RF-22: lo que dice cada tarjeta de la lista. */
+const COLUMNAS_EXPORT: ColumnaExport<OrdenPrioridad>[] = [
+    { titulo: "Orden", tipo: "id", valor: (o) => o.id },
+    { titulo: "Artículo", valor: (o) => o.articulo },
+    { titulo: "Fecha entrega", tipo: "fecha", valor: (o) => o.fecha_entrega },
+    { titulo: "Estado", valor: (o) => o.estado },
+    { titulo: "Sector", valor: (o) => o.sector },
+    { titulo: "Cantidad", tipo: "entero", valor: (o) => o.cantidad },
+]
 
 interface PriorityOrdersModalProps {
     isOpen: boolean
@@ -35,11 +47,20 @@ export default function PriorityOrdersModal({
                             {priorityOrders.length} {priorityOrders.length === 1 ? "orden encontrada" : "órdenes encontradas"}
                         </p>
                     </div>
+                    <div className="flex items-center gap-2">
+                    <ExportarMenu
+                        titulo={`Órdenes con prioridad ${selectedPriority ?? ""}`.trim()}
+                        archivo={`dashboard_prioridad_${selectedPriority ?? ""}`}
+                        filas={priorityOrders ?? []}
+                        columnas={COLUMNAS_EXPORT}
+                        disabled={loading}
+                    />
                     <button onClick={onClose} className="p-2 hover:bg-white rounded-lg transition-colors">
                         <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
+                    </div>
                 </div>
 
                 {/* Content */}

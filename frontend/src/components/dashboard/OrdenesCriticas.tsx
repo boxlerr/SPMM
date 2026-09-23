@@ -1,5 +1,16 @@
 import { AlertTriangle, Clock } from "lucide-react"
 import { OrdenCritica } from "./types"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
+import type { ColumnaExport } from "@/lib/exportar"
+
+const COLUMNAS_EXPORT: ColumnaExport<OrdenCritica>[] = [
+    { titulo: "Orden", tipo: "id", valor: (o) => o.id },
+    { titulo: "Artículo", valor: (o) => o.articulo },
+    { titulo: "Prioridad", valor: (o) => o.prioridad },
+    { titulo: "Estado", valor: (o) => o.estado },
+    { titulo: "Entrega", tipo: "fecha", valor: (o) => o.fecha_entrega },
+    { titulo: "Días restantes", tipo: "entero", valor: (o) => o.dias_restantes },
+]
 
 interface OrdenesCriticasProps {
     ordenes: OrdenCritica[]
@@ -32,6 +43,14 @@ export default function OrdenesCriticas({ ordenes, loading }: OrdenesCriticasPro
                         <p className="text-gray-500 text-xs">Próximas a vencer (7 días)</p>
                     </div>
                 </div>
+                <ExportarMenu
+                    titulo="Órdenes críticas (próximas a vencer, 7 días)"
+                    archivo="dashboard_ordenes_criticas"
+                    filas={ordenes ?? []}
+                    columnas={COLUMNAS_EXPORT}
+                    disabled={loading}
+                    soloIcono
+                />
             </div>
 
             <div className="p-6">

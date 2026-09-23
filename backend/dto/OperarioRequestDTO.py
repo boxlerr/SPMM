@@ -31,6 +31,10 @@ class OperarioRequestDTO(BaseModel):
     dias_trabajo: Optional[str] = "MON,TUE,WED,THU,FRI"
     min_desayuno: Optional[int] = 15
     min_almuerzo: Optional[int] = 30
+    # RF-06. No es un dato de la persona: si este guardado la pasa de Activo a Ausente,
+    # es el «por qué» que se anota en la ausencia que se abre (el «motivo del cambio» de
+    # la ventana Cambiar estado). En cualquier otro guardado se ignora.
+    ausencia_observacion: Optional[str] = Field(None, max_length=300)
 
     class Config:
         json_schema_extra = {

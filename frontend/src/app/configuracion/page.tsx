@@ -11,6 +11,42 @@ import CambiarPassword from '@/components/usuarios/CambiarPassword';
 import { formatNotificationMessage } from '@/lib/utils';
 import { API_URL } from '@/config';
 import { usePermisos } from '@/hooks/usePermisos';
+import { ExportarMenu } from '@/components/common/ExportarMenu';
+import type { ColumnaExport } from '@/lib/exportar';
+import type { Notification as Aviso } from '@/contexts/NotificationContext';
+
+/** RF-22: el rótulo de cada tipo de aviso, el mismo que el cartelito de la lista. */
+const TIPO_AVISO: Record<string, string> = {
+  operario_created: 'Creado', usuario_created: 'Creado',
+  operario_updated: 'Modificado', usuario_updated: 'Modificado',
+  operario_deleted: 'Eliminado', usuario_deleted: 'Eliminado',
+  OT_RETRASADA: 'Retrasada', STOCK_BAJO: 'Stock bajo',
+};
+
+/** Los «Detalles» en una línea de texto: el JSON de los cambios de estado, leído. */
+function detalleEnTexto(motivo?: string): string {
+  if (!motivo) return '';
+  try {
+    const t = motivo.trim();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      const d = JSON.parse(t);
+      if (d?.new_state && d?.previous_state) return `Estado anterior: ${d.previous_state} → Nuevo estado: ${d.new_state}`;
+      if (d?.unidades !== undefined) return `Unidades: ${d.unidades}${d.id ? ` · ID Orden: #${d.id}` : ''}`;
+      return JSON.stringify(d);
+    }
+  } catch {
+    // no era JSON: va tal cual
+  }
+  return motivo;
+}
+
+const COLUMNAS_AVISOS: ColumnaExport<Aviso>[] = [
+  { titulo: 'Fecha', tipo: 'fechaHora', valor: (n) => n.timestamp },
+  { titulo: 'Tipo', valor: (n) => TIPO_AVISO[n.type] ?? n.type },
+  { titulo: 'Aviso', valor: (n) => formatNotificationMessage(n.message) },
+  { titulo: 'Detalles', valor: (n) => detalleEnTexto(n.motivo) },
+  { titulo: 'Leída', tipo: 'booleano', valor: (n) => n.read },
+];
 
 
 export default function ConfiguracionPage() {
@@ -245,6 +281,12 @@ export default function ConfiguracionPage() {
               </div>
               {notifications.length > 0 && (
                 <div className="flex flex-wrap gap-2">
+                  <ExportarMenu
+                    titulo="Historial de notificaciones"
+                    archivo="notificaciones"
+                    filas={notifications}
+                    columnas={COLUMNAS_AVISOS}
+                  />
                   {unreadCount > 0 && (
                     <Button
                       variant="outline"

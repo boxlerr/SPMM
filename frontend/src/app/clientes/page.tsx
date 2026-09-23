@@ -14,6 +14,23 @@ import ClienteForm from "./_components/ClienteForm";
 import { API_URL } from "@/config";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+
+/** RF-22: todos los datos del cliente que muestra la tabla (según el ancho, algunos se esconden). */
+const COLUMNAS_EXPORT: ColumnaExport<Cliente>[] = [
+    { titulo: "Cliente", valor: (c) => c.nombre },
+    { titulo: "Nombre de fantasía", valor: (c) => c.fantasia ?? "" },
+    { titulo: "CUIT", valor: (c) => c.cuit ?? "" },
+    { titulo: "Abreviatura", valor: (c) => c.abreviatura ?? "" },
+    { titulo: "Dirección", valor: (c) => c.direccion ?? "" },
+    { titulo: "Localidad", valor: (c) => c.localidad ?? "" },
+    { titulo: "Mail", valor: (c) => c.mail ?? "" },
+    { titulo: "Celular", valor: (c) => c.celular ?? "" },
+    { titulo: "Teléfono", valor: (c) => c.telefono ?? "" },
+    { titulo: "Web", valor: (c) => c.web ?? "" },
+    { titulo: "Observaciones", valor: (c) => c.obs ?? "" },
+];
 
 export default function ClientesPage() {
     const { showToast } = useToast();
@@ -140,8 +157,8 @@ export default function ClientesPage() {
                     <p className="text-sm text-muted-foreground mt-1">Gestión de cartera de clientes</p>
                 </div>
 
-                <div className="p-4 md:p-6 border-b bg-muted/20">
-                    <div className="relative max-w-sm">
+                <div className="p-4 md:p-6 border-b bg-muted/20 flex items-center gap-2">
+                    <div className="relative max-w-sm flex-1 min-w-0">
                         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
                             placeholder="Buscar cliente..."
@@ -150,6 +167,16 @@ export default function ClientesPage() {
                             className="pl-8"
                         />
                     </div>
+                    {/* RF-22: la lista con la búsqueda puesta, todas las páginas. */}
+                    <ExportarMenu
+                        titulo="Clientes"
+                        archivo="clientes"
+                        filas={clientesFiltrados}
+                        columnas={COLUMNAS_EXPORT}
+                        filtros={() => filtroBusqueda(busqueda)}
+                        disabled={api.loading}
+                        className="h-9"
+                    />
                 </div>
 
                 {api.loading && clientes.length === 0 && (

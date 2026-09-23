@@ -1,5 +1,6 @@
 import { BarChart2 } from "lucide-react"
 import { DistribucionPrioridad } from "./types"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
 
 interface DistribucionPrioridadesProps {
     prioridades: DistribucionPrioridad[]
@@ -41,6 +42,18 @@ export default function DistribucionPrioridades({
                         <p className="text-gray-500 text-xs">Click para ver órdenes</p>
                     </div>
                 </div>
+                <ExportarMenu
+                    titulo="Órdenes por prioridad"
+                    archivo="dashboard_prioridades"
+                    filas={prioridades ?? []}
+                    columnas={[
+                        { titulo: "Prioridad", valor: (p: DistribucionPrioridad) => p.prioridad },
+                        { titulo: "Órdenes", tipo: "entero", valor: (p: DistribucionPrioridad) => p.cantidad },
+                        { titulo: "Porcentaje", tipo: "porcentaje", valor: (p: DistribucionPrioridad) => p.porcentaje },
+                    ]}
+                    disabled={loading}
+                    soloIcono
+                />
             </div>
             <div className="p-6">
                 {loading ? (

@@ -16,13 +16,14 @@
  *    hay que ir a completar.
  *  · No se borra nada: se cierra. Un registro de calidad que se puede borrar no sirve
  *    como registro. Cerrar deja la fecha y lo que se hizo.
- *  · La descarga va con fetch y blob, no con un `<a href>`: la dirección pide token y
- *    un link pelado se come un 401 (mismo camino que la descarga de planos).
+ *  · Se baja con el botón común «Exportar» (RF-22): PDF, Excel o CSV de lo que está
+ *    en pantalla, con las mismas columnas que tenía el CSV del servidor. Antes había un
+ *    botón propio que sólo sabía CSV y lo pedía al servidor.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    AlertTriangle, CheckCircle2, Download, FileWarning, Filter, RefreshCw,
+    AlertTriangle, CheckCircle2, FileWarning, Filter, RefreshCw,
     RotateCcw, Search, User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,8 @@ import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { fechaDeFiltro, type ColumnaExport } from "@/lib/exportar";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -117,7 +120,6 @@ export default function NoConformidadesPage() {
      * «todavía no se registró ninguna» abajo, hacía creer que se habían perdido.
      */
     const [sinServidor, setSinServidor] = useState(false);
-    const [bajando, setBajando] = useState(false);
 
     // Filtros
     const [ot, setOt] = useState("");
@@ -195,33 +197,40 @@ export default function NoConformidadesPage() {
         return () => clearTimeout(t);
     }, [cargar]);
 
-    /** Se baja con fetch porque la dirección pide token; un link pelado da 401. */
-    const descargar = async () => {
-        setBajando(true);
-        try {
-            const res = await fetch(`${API_URL}/incidencias/reporte.csv?${queryFiltros}`, {
-                headers: getAuthHeaders(),
-            });
-            if (!res.ok) throw new Error(String(res.status));
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
-            try {
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "no-conformidades.csv";
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-            } finally {
-                setTimeout(() => URL.revokeObjectURL(url), 10_000);
-            }
-        } catch (e) {
-            console.error(e);
-            toast.error("No se pudo bajar el archivo");
-        } finally {
-            setBajando(false);
-        }
-    };
+    /**
+     * Lo que se exporta (RF-22): las mismas dieciséis columnas, con los mismos nombres
+     * y en el mismo orden que el CSV que armaba el servidor, así quien ya lo usaba
+     * encuentra todo donde estaba. Salen las filas que está mostrando la lista.
+     */
+    const columnasExport: ColumnaExport<NoConformidad>[] = [
+        { titulo: "N° OT", tipo: "id", valor: (f) => f.nro_ot ?? f.id_orden_trabajo },
+        { titulo: "Cliente", valor: (f) => f.cliente ?? "" },
+        { titulo: "Producto", valor: (f) => f.producto ?? "" },
+        { titulo: "Fecha", tipo: "fechaHora", valor: (f) => f.fecha_registro },
+        { titulo: "Tipo", valor: (f) => tipos[f.tipo] ?? f.tipo ?? "" },
+        // Vacío sería «no aplica»; la verdad es que nadie la evaluó todavía.
+        { titulo: "Gravedad", valor: (f) => (f.gravedad ? (gravedades[f.gravedad] ?? f.gravedad) : "Sin clasificar") },
+        { titulo: "Estado", valor: (f) => estados[f.estado] ?? f.estado ?? "" },
+        { titulo: "Piezas afectadas", tipo: "entero", valor: (f) => f.piezas_afectadas },
+        { titulo: "Minutos perdidos", tipo: "entero", valor: (f) => f.minutos_perdidos },
+        { titulo: "Recurso humano extra", tipo: "entero", valor: (f) => f.operarios_extra },
+        { titulo: "Proceso", valor: (f) => f.proceso ?? "" },
+        { titulo: "Recurso humano", valor: (f) => f.operario ?? "" },
+        { titulo: "Qué pasó", valor: (f) => f.descripcion ?? "" },
+        { titulo: "Qué se hizo", valor: (f) => f.accion_correctiva ?? "" },
+        { titulo: "Lo reportó", valor: (f) => f.usuario ?? "" },
+        { titulo: "Fecha de cierre", tipo: "fechaHora", valor: (f) => f.fecha_cierre },
+    ];
+
+    const filtrosExport = () => [
+        ...(ot.trim() ? [`N° de OT: ${ot.trim()}`] : []),
+        ...(estado ? [`Estado: ${estados[estado] ?? estado}`] : []),
+        ...(gravedad ? [`Gravedad: ${gravedad === SIN_CLASIFICAR ? "Sin clasificar" : (gravedades[gravedad] ?? gravedad)}`] : []),
+        ...(tipo ? [`Tipo: ${tipos[tipo] ?? tipo}`] : []),
+        ...(desde ? [`Desde: ${fechaDeFiltro(desde)}`] : []),
+        ...(hasta ? [`Hasta: ${fechaDeFiltro(hasta)}`] : []),
+        ...(hayMas ? [`Sólo las ${filas.length} más nuevas: hay más que no entran en la pantalla`] : []),
+    ];
 
     /**
      * Guardar un cambio de una fila sin recargar la pantalla.
@@ -291,10 +300,17 @@ export default function NoConformidadesPage() {
                         <RefreshCw className={cn("h-4 w-4 mr-2", cargando && "animate-spin")} />
                         Actualizar
                     </Button>
-                    <Button size="sm" onClick={descargar} disabled={bajando || !filas.length}>
-                        <Download className="h-4 w-4 mr-2" />
-                        {bajando ? "Bajando…" : "Descargar"}
-                    </Button>
+                    <ExportarMenu
+                        titulo="No conformidades"
+                        archivo="no_conformidades"
+                        filas={filas}
+                        columnas={columnasExport}
+                        filtros={filtrosExport}
+                        disabled={cargando || sinServidor}
+                        aviso={hayMas
+                            ? `Salen las ${filas.length} más nuevas, las que entran en la pantalla. Achicá las fechas o filtrá por OT para bajar el resto.`
+                            : undefined}
+                    />
                 </div>
             </div>
 

@@ -10,6 +10,8 @@
 import React from "react";
 import { Gauge, Settings, User } from "lucide-react";
 import { API_URL } from "@/config";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -83,6 +85,22 @@ export default function RendimientoEstimadoReal() {
                         <p className="text-gray-500 text-xs">Tiempo real (marcado) comparado con el estimado</p>
                     </div>
                 </div>
+                <div className="flex items-center gap-2">
+                {/* RF-22: la solapa que se está mirando (por proceso o por recurso humano). */}
+                <ExportarMenu
+                    titulo={`Rendimiento estimado vs. real · ${tab === "procesos" ? "Por proceso" : "Por recurso humano"}`}
+                    archivo={tab === "procesos" ? "dashboard_rendimiento_procesos" : "dashboard_rendimiento_recurso_humano"}
+                    filas={rows}
+                    columnas={[
+                        { titulo: tab === "procesos" ? "Proceso" : "Recurso humano", valor: (r: Row) => (tab === "procesos" ? r.proceso : r.operario)?.trim() ?? "" },
+                        { titulo: "Cantidad", tipo: "entero", valor: (r: Row) => r.cantidad },
+                        { titulo: "Estimado (min)", tipo: "entero", valor: (r: Row) => Math.round(r.estimado_min) },
+                        { titulo: "Real (min)", tipo: "entero", valor: (r: Row) => Math.round(r.real_min) },
+                        { titulo: "Desvío", tipo: "porcentaje", decimales: 0, valor: (r: Row) => r.desvio_pct },
+                    ] as ColumnaExport<Row>[]}
+                    disabled={loading}
+                    soloIcono
+                />
                 <div className="flex bg-gray-100 rounded-lg p-0.5 text-xs font-medium">
                     <button
                         onClick={() => setTab("procesos")}
@@ -96,6 +114,7 @@ export default function RendimientoEstimadoReal() {
                     >
                         <User className="h-3.5 w-3.5" /> Por recurso humano
                     </button>
+                </div>
                 </div>
             </div>
 

@@ -220,6 +220,23 @@ MATRIZ = [
     ("GET", "/consumos-material", OK, OK, OK),
     ("POST", "/consumos-material", OK, OK, NO),
     ("PUT", "/consumos-material/1/anular", OK, OK, NO),
+    # RF-03: pausar y reanudar es tocar la OT (la solapa Órdenes); las pausas se leen
+    # con Operaciones.
+    ("GET", "/ordenes-pausadas", OK, OK, OK),
+    ("GET", "/ordenes/1/pausas", OK, OK, OK),
+    ("POST", "/ordenes/1/pausar", OK, OK, NO),
+    ("POST", "/ordenes/1/reanudar", OK, OK, NO),
+    # RF-06: la asistencia y los tiempos de la ficha de la persona. Se leen con Recursos
+    # (el supervisor) o con Operaciones (el operario); cargar una ausencia es tocar a la
+    # persona, la solapa Recurso humano.
+    ("GET", "/operarios/1/ausencias", OK, OK, OK),
+    ("POST", "/operarios/1/ausencias", OK, NO, NO),
+    ("PUT", "/operarios/1/ausencias/2", OK, NO, NO),
+    ("DELETE", "/operarios/1/ausencias/2", OK, NO, NO),
+    ("GET", "/operarios/1/tiempos", OK, OK, OK),
+    # RF-07: el reporte de rendimiento de la ficha pide la sección confidencial
+    # «Rendimiento por persona», igual que el cuadro del Dashboard.
+    ("GET", "/operarios/1/rendimiento", OK, NO, NO),
     # el plan y el planificador
     ("GET", "/planificacion", OK, OK, OK),
     ("POST", "/planificar", OK, OK, NO),
@@ -299,6 +316,9 @@ async def test_el_mensaje_dice_que_falta(espejo):
         "No tenés permiso para modificar «Recurso humano» (Recursos)."
     r = await _pedir(espejo, "GET", "/api/dashboard/rendimiento-operarios", SOFIA, "supervisor")
     assert "«Rendimiento por persona» (Dashboard)" in r.json()["errors"][0]["message"]
+    r = await _pedir(espejo, "GET", "/operarios/1/rendimiento", SOFIA, "supervisor")
+    assert r.json()["errors"][0]["message"] == \
+        "No tenés permiso para ver «Rendimiento por persona» (Dashboard)."
 
 
 async def test_la_seccion_restringida_del_rol_vale_tambien_para_escribir(espejo):
@@ -386,6 +406,8 @@ PANTALLAS = {
         "/ordenes/1/procesos/versiones", "/ordenes-trabajo-piezas", "/consumos-material",
         "/planos/orden/1", "/planos/articulo/1", "/planos/1", "/planos/1/archivo",
         "/ordenes/1/incidencias", "/auditoria/procesos?id_orden=1",
+        # RF-03: el cartel de «Pausada» de las listas y el historial de pausas de la ficha
+        "/ordenes-pausadas", "/ordenes/1/pausas",
         # el plan, el Gantt y el planificador
         "/planificacion", "/planificacion/borradores", "/planificacion/borradores/1",
         "/config/availability", "/planos/ordenes-con-plano", "/planos/ordenes-con-plano-disponible",
@@ -393,6 +415,10 @@ PANTALLAS = {
         "/procesos", "/procesos/quien-puede", "/operarios", "/operarios/1", "/maquinarias",
         "/rangos", "/rangos/procesos", "/rangos/maquinarias", "/rangos/cobertura",
         "/articulos", "/clientes", "/sectores", "/prioridades", "/piezas",
+        # RF-06: la ficha de la persona (se abre también desde Operaciones)
+        "/operarios/1/ausencias", "/operarios/1/tiempos",
+        # (su solapa Rendimiento, RF-07, es la sección confidencial «Rendimiento por
+        # persona»: la ficha no la pide si no se tiene)
     ],
     "planos": ["/planos/biblioteca", "/planos/1", "/planos/1/archivo", "/articulos"],
     "recursos": [
@@ -400,6 +426,8 @@ PANTALLAS = {
         "/rangos/1/detalle", "/rangos/procesos", "/rangos/maquinarias", "/rangos/cobertura",
         "/sectores", "/prioridades",
         "/planificacion",  # lo que tiene asignado cada persona
+        # RF-06: la asistencia y los tiempos de su ficha
+        "/operarios/1/ausencias", "/operarios/1/tiempos",
         # (la solapa Planos va por el área Planos, igual que la pantalla)
     ],
     "clientes": ["/clientes", "/clientes/1"],
@@ -512,7 +540,8 @@ async def test_sin_ninguna_area_solo_se_leen_catalogos_y_la_campanita(espejo):
                     update(Usuario).where(Usuario.id_usuario == MATIAS).values(rol="nuevo"))
     for ruta, esperado in (("/ordenes", NO), ("/planificacion", NO), ("/planos/1", NO),
                            ("/incidencias", NO), ("/api/dashboard/estadisticas", NO),
-                           ("/clientes", NO), ("/procesos", OK), ("/maquinarias", OK),
+                           ("/clientes", NO), ("/operarios/1/ausencias", NO),
+                           ("/procesos", OK), ("/maquinarias", OK),
                            ("/notificaciones", OK)):
         r = await _pedir(espejo, "GET", ruta, MATIAS, "nuevo")
         assert r.status_code == esperado, ruta
@@ -544,6 +573,10 @@ async def test_un_permiso_de_mas_vencido_no_abre_y_uno_vigente_si(espejo):
     await _ejecutar(espejo, update(UsuarioSeccion).values(vence_en=None))
     assert (await _pedir(espejo, "GET", ruta, MATIAS, "operario")).status_code == OK
     assert (await _pedir(espejo, "GET", ruta, SOFIA, "supervisor")).status_code == NO
+    # La misma sección abre el reporte de rendimiento de la ficha (RF-07).
+    ficha = "/operarios/1/rendimiento"
+    assert (await _pedir(espejo, "GET", ficha, MATIAS, "operario")).status_code == OK
+    assert (await _pedir(espejo, "GET", ficha, SOFIA, "supervisor")).status_code == NO
 
 
 async def test_el_planificador_se_abre_al_operario_con_un_permiso_de_mas(espejo):

@@ -56,6 +56,12 @@ from backend.domain.EstadoProceso import EstadoProceso
 from backend.domain.Maquinaria import Maquinaria
 from backend.domain.Operario import Operario
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+from backend.domain.PausaOrden import (
+    PausaOrden,
+    duracion_corta,
+    minutos_entre,
+    texto_del_motivo,
+)
 from backend.domain.Proceso import Proceso
 
 _TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -130,6 +136,12 @@ def origen_de(ruta: str, parametros: dict | None = None) -> str:
     if ruta.startswith("/maquinarias"):
         return "Al tocar una máquina"
     if ruta.startswith("/ordenes"):
+        # RF-03. Van antes que el resto: «/ordenes/1081/pausar» caería en «Guardado de
+        # la orden», que es justo lo que no pasó.
+        if ruta.rstrip("/").endswith("/pausar"):
+            return "Pausar"
+        if ruta.rstrip("/").endswith("/reanudar"):
+            return "Reanudar"
         if "/reorder" in ruta:
             return "Reordenar los pasos"
         if "/estado" in ruta or "/status" in ruta:
@@ -286,10 +298,92 @@ def _resolver_nombres(session, pedidos: set[tuple[str, int]]) -> dict:
     return nombres
 
 
+def _pausas_del_flush(session) -> tuple[list, list]:
+    """Las pausas (RF-03) que este flush abrió y las que cerró.
+
+    Una pausa no es un cambio de un paso, pero es lo primero que se pregunta al mirar
+    el historial de una OT que se atrasó: «¿quién la paró, cuándo y por qué?». Va en la
+    misma tabla, con acción `pausa` / `reanuda`, así se lee en orden junto con el resto
+    y no hay que cruzar dos pantallas. Y va por el mismo enganche al ORM: la pausa se
+    abre desde un botón, pero se cierra también sola al terminar el paso, y el que sólo
+    mirara el botón se perdería ésas.
+
+    Mismo filtro de «ya tiene id» que las altas de pasos (ver `_pasadas_del_flush`).
+    """
+    abiertas = [o for o in session.new if isinstance(o, PausaOrden) and o.id is not None]
+    cerradas = []
+    for o in session.dirty:
+        if not isinstance(o, PausaOrden):
+            continue
+        historial = sa_inspect(o).attrs["hasta"].history
+        antes = historial.deleted[0] if historial.deleted else None
+        despues = historial.added[0] if historial.added else None
+        if historial.has_changes() and antes is None and despues is not None:
+            cerradas.append(o)
+    return abiertas, cerradas
+
+
+def _frase_de_pausa(pausa, accion: str) -> str:
+    """«pausó la OT: Falta material», «reanudó el paso 3 — TORNO CNC (estuvo parado 2 h)».
+    El quién lo pone el que la muestra, como en las demás frases de esta tabla."""
+    if pausa.id_otp is None:
+        que, parada = "la OT", "parada"
+    else:
+        que = f"el paso {pausa.paso}" if pausa.paso else "un paso"
+        if pausa.nombre_proceso:
+            que += f" — {pausa.nombre_proceso}"
+        parada = "parado"
+    if accion == "pausa":
+        return f"pausó {que}: {texto_del_motivo(pausa)}"
+    cuanto = duracion_corta(minutos_entre(pausa.desde, pausa.hasta))
+    if pausa.cierre == "PASO_TERMINADO":
+        return f"terminó {que}, que estaba pausado: se cerró la pausa ({cuanto})"
+    if pausa.cierre == "PASO_EN_PROCESO":
+        return f"puso en proceso {que}, que estaba pausado: se cerró la pausa ({cuanto})"
+    if pausa.cierre == "OT_TERMINADA":
+        return f"terminó todos los pasos de la OT, que estaba pausada: se cerró la pausa ({cuanto})"
+    return f"reanudó {que} (estuvo {parada} {cuanto})"
+
+
+def _filas_de_pausas(abiertas, cerradas, comun: dict) -> list[dict]:
+    filas = []
+    for accion, pausas in (("pausa", abiertas), ("reanuda", cerradas)):
+        for p in pausas:
+            filas.append({
+                **comun,
+                "id_orden_trabajo": p.id_orden_trabajo,
+                "id_otp": p.id_otp,
+                "id_proceso": None,
+                "nombre_proceso": p.nombre_proceso,
+                "accion": accion,
+                "paso": p.paso,
+                "cambios": None,
+                "descripcion": _frase_de_pausa(p, accion),
+            })
+    return filas
+
+
+def _contexto_comun() -> dict:
+    ctx = _CONTEXTO.get() or {}
+    usuario = ctx.get("usuario") or {}
+    return {
+        "creado_en": ahora_ar(),
+        "id_usuario": usuario.get("id_usuario"),
+        "usuario": _nombre_usuario(usuario),
+        "origen": ctx.get("origen") or "Sistema",
+        "metodo": (ctx.get("metodo") or "")[:10] or None,
+        "ruta": (ctx.get("ruta") or "")[:300] or None,
+    }
+
+
 def _armar_filas(session) -> list[dict]:
+    pausas_abiertas, pausas_cerradas = _pausas_del_flush(session)
+    filas_pausas = (_filas_de_pausas(pausas_abiertas, pausas_cerradas, _contexto_comun())
+                    if (pausas_abiertas or pausas_cerradas) else [])
+
     altas, editadas, bajas = _pasadas_del_flush(session)
     if not (altas or editadas or bajas):
-        return []
+        return filas_pausas
 
     cambios_por_obj = {}
     for obj in editadas:
@@ -297,7 +391,7 @@ def _armar_filas(session) -> list[dict]:
         if cambios:
             cambios_por_obj[obj] = cambios
     if not (altas or bajas or cambios_por_obj):
-        return []
+        return filas_pausas
 
     # Todos los ids que van a aparecer, para pedir los nombres de una.
     pedidos = set()
@@ -315,19 +409,9 @@ def _armar_filas(session) -> list[dict]:
                         pedidos.add((campo, v))
     nombres = _resolver_nombres(session, pedidos)
 
-    ctx = _CONTEXTO.get() or {}
-    usuario = ctx.get("usuario") or {}
-    cuando = ahora_ar()
-    comun = {
-        "creado_en": cuando,
-        "id_usuario": usuario.get("id_usuario"),
-        "usuario": _nombre_usuario(usuario),
-        "origen": ctx.get("origen") or "Sistema",
-        "metodo": (ctx.get("metodo") or "")[:10] or None,
-        "ruta": (ctx.get("ruta") or "")[:300] or None,
-    }
+    comun = _contexto_comun()
 
-    filas = []
+    filas = list(filas_pausas)
 
     def _fila(obj, accion, cambios=None):
         nombre_proceso = nombres.get(("id_proceso", obj.id_proceso))

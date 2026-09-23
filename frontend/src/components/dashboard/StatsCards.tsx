@@ -1,5 +1,6 @@
 import { TrendingUp, CheckCircle2, Clock, AlertCircle, XCircle } from "lucide-react"
 import { EstadisticasOrdenes } from "./types"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
 
 interface StatsCardsProps {
     estadisticas: EstadisticasOrdenes | null
@@ -89,7 +90,7 @@ export default function StatsCards({ estadisticas, loading, error, onStatusClick
 
     return (
         <section className="bg-white rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-gray-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-50">
+            <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100/50">
                         <TrendingUp className="h-5 w-5" />
@@ -99,6 +100,18 @@ export default function StatsCards({ estadisticas, loading, error, onStatusClick
                         <p className="text-gray-500 text-xs">Resumen general del sistema</p>
                     </div>
                 </div>
+                {/* RF-22: las cuatro cifras de la tarjeta. */}
+                <ExportarMenu
+                    titulo="Estado de órdenes"
+                    archivo="dashboard_estado_ordenes"
+                    filas={stats}
+                    columnas={[
+                        { titulo: "Estado", valor: (s: (typeof stats)[number]) => s.label.charAt(0) + s.label.slice(1).toLowerCase() },
+                        { titulo: "Órdenes", tipo: "entero", valor: (s: (typeof stats)[number]) => s.value },
+                        { titulo: "Porcentaje", tipo: "porcentaje", valor: (s: (typeof stats)[number]) => s.percentage },
+                    ]}
+                    soloIcono
+                />
             </div>
 
             <div className="p-6">

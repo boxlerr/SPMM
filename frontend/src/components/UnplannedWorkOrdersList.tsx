@@ -42,6 +42,16 @@ import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano, rankPlano } from
 import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { usePermisos } from "@/hooks/usePermisos";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { MarcaPausada } from "@/components/pausas/MarcaPausada";
+import { columnasOrdenes, filtroOrden, resumenFiltrosOT } from "@/lib/exportes/ordenes";
+
+/** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
+const ROTULOS_ORDEN: Record<string, string> = {
+    id: "OT", id_otvieja: "OT", fecha_entrada: "F. Entrada", cliente: "Cliente", codigo: "Código",
+    descripcion: "Producto", unidades: "Cant.", prioridad: "Prioridad", material: "Material",
+    proceso: "Proceso", plano: "Plano", entrega: "Entrega", fecha_prometida: "F. Prometida",
+};
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -337,6 +347,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                         <p className="text-xs text-gray-500">{copy.bajada}</p>
                     </div>
                 </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
                 <div className="relative w-full md:w-96">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <Input
@@ -345,6 +356,22 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-10 h-10 bg-gray-50/50 border-gray-200 focus:bg-white transition-all rounded-lg"
                     />
+                </div>
+                {/* RF-22: exporta lo que queda en la tabla con la búsqueda, los filtros y
+                    el orden que tenga puestos. */}
+                <ExportarMenu
+                    titulo={copy.titulo}
+                    archivo={variante === "planificadas" ? "ordenes_planificadas" : "ordenes_no_planificadas"}
+                    filas={sortedOrders}
+                    columnas={columnasOrdenes({
+                        plano: (o) => estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles),
+                    })}
+                    filtros={() => [
+                        ...resumenFiltrosOT(filters, searchTerm),
+                        ...filtroOrden(sortConfig.key ? ROTULOS_ORDEN[sortConfig.key] : null, sortConfig.direction),
+                    ]}
+                    className="h-10"
+                />
                 </div>
             </div>
 
@@ -387,6 +414,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         <div className="flex items-center gap-2">
                                             <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
                                             <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
+                                            <MarcaPausada idOrden={order.id} />
                                         </div>
                                         <button className="text-gray-400">
                                             {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -576,7 +604,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                         </button>
                                                     </td>
                                                     <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                                                    <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
+                                                    <td className="px-3 py-3 font-medium">
+                                                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                                                            {order.id_otvieja || order.id}
+                                                            <MarcaPausada idOrden={order.id} />
+                                                        </span>
+                                                    </td>
                                                     <td className="px-3 py-3 font-medium">
                                                         {formatDate(order.fecha_entrada)}
                                                     </td>

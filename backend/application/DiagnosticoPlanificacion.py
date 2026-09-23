@@ -37,6 +37,7 @@ traba tiene otro orden de palabras" — Julián):
 """
 import re
 
+from backend.domain.PausaOrden import MOTIVO_EN_FRASE, fecha_corta, texto_del_motivo
 from backend.application.PlanificacionService import (
     MIN_LABORAL_DIA,
     familia_requerida_from_proceso,
@@ -95,6 +96,14 @@ HUMANO = "humano"
 RANGO = "rango"
 CAPACIDAD = "capacidad"
 SKILL = "skill"
+
+# RF-03 (22/09/2026): la OT o el paso PAUSADO. Es la única excepción a la taxonomía
+# cerrada de arriba, y no es un recurso que falte: es una decisión del taller (alguien
+# apretó «Pausar» con un motivo). Meterlo en máquina/capacidad porque el motivo sea
+# «máquina rota» le haría decir al panel que hay que tocar Recursos, y no hay nada que
+# tocar ahí. Queda pendiente confirmarlo con Lucas, como pide la regla de arriba.
+ORDEN = "orden"
+PAUSA = "pausa"
 
 # Siglas del taller que NO son palabras: si se las escribe como palabra el proceso
 # deja de reconocerse («soldadura con mig» no lo lee nadie como MIG).
@@ -296,14 +305,93 @@ def construir_diagnosticos(
     for d in diagnosticos:
         d["resumen"] = _resumen_corto(d)
 
-    # El desempate por `id` no es cosmético: sin él, dos líneas con los mismos minutos
-    # se intercambian entre recálculos —el orden de entrada sale de dicts armados
-    # sobre sets— y parece que el plan cambió cuando no cambió nada.
+    return ordenar_diagnosticos(diagnosticos)
+
+
+def ordenar_diagnosticos(diagnosticos):
+    """Alta primero, y dentro de cada una lo que más trabajo toca.
+
+    El desempate por `id` no es cosmético: sin él, dos líneas con los mismos minutos
+    se intercambian entre recálculos —el orden de entrada sale de dicts armados
+    sobre sets— y parece que el plan cambió cuando no cambió nada.
+
+    Está afuera de `construir_diagnosticos` porque los avisos de lo pausado (RF-03) se
+    arman aparte y se suman después: tienen que quedar ordenados con la misma regla.
+    """
     orden = {BLOQUEANTE: 0, ADVERTENCIA: 1}
-    diagnosticos.sort(
-        key=lambda d: (orden.get(d["severidad"], 9), -d["impacto"]["minutos"], d["id"])
+    return sorted(
+        diagnosticos,
+        key=lambda d: (orden.get(d["severidad"], 9), -d["impacto"]["minutos"], d["id"]),
     )
-    return diagnosticos
+
+
+def diagnosticos_de_pausas(saltadas):
+    """Un aviso por cada OT que el planificador dejó afuera por estar pausada (RF-03).
+
+    `saltadas` sale de PlanificacionService._sacar_lo_pausado. Pedido: que se lea
+    «OT pausada — motivo — desde tal fecha». Con la forma de siempre de los títulos
+    («Sujeto: qué le pasa», una cláusula en minúscula) queda:
+
+        OT 15279: pausada por falta de material desde el 22/09 10:30
+        Torno CNC de la OT 15279: pausado por máquina rota desde el 22/09 10:30
+
+    Es Media y no Alta: el plan no salió mal por un dato que falte en Recursos; la OT
+    quedó afuera porque alguien la paró, y eso lo sabe el taller. Uno por OT y no uno
+    agrupado: cada pausa tiene su motivo y su fecha, que es justo lo que se viene a leer.
+    """
+    avisos = []
+    for s in saltadas:
+        p = s["pausa"]
+        cuando = fecha_corta(p.desde)
+        quien = f"**{p.usuario_pausa}**" if p.usuario_pausa else "alguien"
+        motivo = MOTIVO_EN_FRASE.get(p.motivo, "")
+        # Con «Otro», el texto que escribieron es el motivo; con los demás, una nota.
+        nota = f" Anotó: «{p.observacion}»." if p.observacion else ""
+        if s["alcance"] == "ot":
+            titulo = f"OT {s['numero']}: pausada {motivo} desde el {cuando}"
+            detalle = (f"La pausó {quien} el {cuando}.{nota} No entra en el plan hasta que "
+                       "alguien la reanude.")
+            resumen = "No entra en el plan hasta que la reanuden."
+            sujeto = "la OT"
+        else:
+            nombre = _bonito(p.nombre_proceso or "") or f"Paso {p.paso}"
+            titulo = f"{nombre} de la OT {s['numero']}: pausado {motivo} desde el {cuando}"
+            despues = s.get("despues") or 0
+            siguen = (f" Tampoco {_concuerda(despues, 'entra el paso', 'entran los ' + str(despues) + ' pasos')} "
+                      f"que {_concuerda(despues, 'va', 'van')} después: van en secuencia."
+                      if despues else "")
+            detalle = (f"Lo pausó {quien} el {cuando}.{nota} No entra en el plan hasta que "
+                       f"alguien lo reanude.{siguen} Los pasos de antes se planifican igual.")
+            resumen = ("No entra en el plan, ni lo que va después, hasta que lo reanuden."
+                       if despues else "No entra en el plan hasta que lo reanuden.")
+            sujeto = "el paso"
+        ots = [s["orden_id"]]
+        avisos.append({
+            "id": f"ot-pausada-{s['orden_id']}",
+            "tipo": "ot_pausada",
+            "severidad": ADVERTENCIA,
+            "recurso": ORDEN,
+            "subtipo": PAUSA,
+            "tiene": texto_del_motivo(p),
+            "pide": "",
+            "titulo": titulo,
+            "detalle": detalle,
+            "resumen": resumen,
+            "impacto": {
+                "procesos": s["procesos"],
+                "ots": ots,
+                "minutos": s["minutos"],
+                "resumen": _resumen(s["procesos"], ots, s["minutos"]),
+            },
+            "soluciones": [{
+                "texto": f"Cuando se destrabe, reanudá {sujeto} y volvé a calcular el plan.",
+                # El botón está en la ficha de la OT, arriba de todo, en la franja de la
+                # pausa (frontend/src/components/pausas/PausasDeLaOT.tsx). Si se mueve,
+                # esto se cambia con él: el aviso no puede mandar a un botón que no está.
+                "donde": "Operaciones › abrí la OT › «Reanudar», arriba de todo",
+            }],
+        })
+    return avisos
 
 
 def _resumen_corto(d) -> str:

@@ -28,6 +28,22 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+
+/** RF-22: la frase y quién, cuándo y cómo salió. El detalle crudo no va: es para abrirlo acá. */
+const COLUMNAS_EXPORT: ColumnaExport<Movimiento>[] = [
+    { titulo: "Fecha", tipo: "fechaHora", valor: (m) => m.cuando },
+    { titulo: "Quién", valor: (m) => m.usuario ?? "sin registrar" },
+    { titulo: "Acción", valor: (m) => m.accion },
+    { titulo: "Qué", valor: (m) => m.entidad },
+    { titulo: "N°", valor: (m) => m.id_entidad ?? "" },
+    { titulo: "Descripción", valor: (m) => m.descripcion },
+    { titulo: "Resultado", valor: (m) => (m.salio_bien ? "Bien" : "No se pudo") },
+    { titulo: "Código", tipo: "id", valor: (m) => m.estado },
+    { titulo: "Duración (ms)", tipo: "entero", valor: (m) => m.duracion_ms },
+    { titulo: "Pedido", valor: (m) => `${m.metodo} ${m.ruta}` },
+];
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -279,11 +295,27 @@ export function RegistroDeMovimientos() {
                     <h2 className="text-sm font-semibold">
                         {hayFiltro ? `${visibles.length} de ${movs.length}` : `Últimos ${movs.length}`} movimientos
                     </h2>
+                    <div className="flex items-center gap-2">
                     {movs.length >= 300 && (
                         <span className="text-xs text-muted-foreground">
                             se muestran los 300 más recientes
                         </span>
                     )}
+                    <ExportarMenu
+                        titulo="Auditoría · Todo lo que se hizo"
+                        archivo="auditoria_movimientos"
+                        filas={visibles}
+                        columnas={COLUMNAS_EXPORT}
+                        filtros={() => [
+                            ...filtroBusqueda(texto),
+                            ...(queAccion ? [`Acción: ${queAccion}`] : []),
+                            ...(queEntidad ? [`Qué: ${queEntidad}`] : []),
+                            ...(quien ? [`Quién: ${quien}`] : []),
+                            ...(soloFallidos ? ["Sólo lo que no se pudo"] : []),
+                            ...(movs.length >= 300 ? ["Sobre los 300 movimientos más recientes"] : []),
+                        ]}
+                    />
+                    </div>
                 </div>
 
                 {visibles.length === 0 ? (

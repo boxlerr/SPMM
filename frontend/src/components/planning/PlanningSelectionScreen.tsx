@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, Users, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
+import { resumenFiltrosOT } from "@/lib/exportes/ordenes"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { BorradoresPlan } from "./BorradoresPlan"
 import type { BorradorPlan } from "@/lib/borradorPlan"
@@ -810,6 +811,16 @@ export function PlanningSelectionScreen({
                                     pinSelectedOnTop
                                     colapsarFilasKey={filtrosKey}
                                     compacto
+                                    exportar={{
+                                        titulo: "Órdenes para planificar",
+                                        archivo: "planificar_ordenes",
+                                        filtros: [
+                                            ...resumenFiltrosOT(filters),
+                                            ...(soloTildadas !== null ? ["Sólo las tildadas"] : []),
+                                            ...(dateSort === "OLDEST_FIRST" ? ["Por fecha de entrada: las más viejas primero"]
+                                                : dateSort === "NEWEST_FIRST" ? ["Por fecha de entrada: las más nuevas primero"] : []),
+                                        ],
+                                    }}
                                 />
                             </div>
                         </div>

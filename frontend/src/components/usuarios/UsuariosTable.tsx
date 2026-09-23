@@ -26,6 +26,8 @@ import { nombreDePersona } from '@/lib/permisosAdmin';
 import { claseDeRol } from './area-meta';
 import type { RolElegible, UsuarioFila } from './api';
 import SelectorDePantalla from './SelectorDePantalla';
+import { ExportarMenu } from '@/components/common/ExportarMenu';
+import { filtroBusqueda, filtroSi } from '@/lib/exportar';
 
 /**
  * El listado de usuarios de «Usuarios y permisos» (RF-24 y RF-26).
@@ -471,6 +473,30 @@ export default function UsuariosTable({
               className="pl-9 max-md:h-10"
             />
           </div>
+          {/* RF-22: los que quedan con la búsqueda y el rol puestos (y los «Sin acceso» si
+              están abiertos). Nunca contraseñas. */}
+          <ExportarMenu
+            titulo="Usuarios"
+            archivo="usuarios"
+            filas={[...filtrados, ...sinAccesoVisibles]}
+            columnas={[
+              { titulo: 'Usuario', valor: (u: UsuarioFila) => u.username },
+              { titulo: 'Email', valor: (u: UsuarioFila) => u.email },
+              { titulo: 'Nombre completo', valor: (u: UsuarioFila) => `${capitalizeName(u.nombre)} ${capitalizeName(u.apellido)}`.trim() },
+              { titulo: 'Rol', valor: (u: UsuarioFila) => nombreDeRol(u.rol, roles) },
+              { titulo: 'Estado', valor: (u: UsuarioFila) => (u.activo ? 'Con acceso' : 'Sin acceso') },
+              { titulo: 'Bloqueado hasta', tipo: 'fechaHora', valor: (u: UsuarioFila) => (u.bloqueado ? u.bloqueado_hasta ?? null : null) },
+              { titulo: 'Intentos fallidos', tipo: 'entero', valor: (u: UsuarioFila) => u.intentos_fallidos ?? null },
+              { titulo: 'Último acceso', tipo: 'fechaHora', valor: (u: UsuarioFila) => u.ultimo_login },
+              { titulo: 'Creado', tipo: 'fecha', valor: (u: UsuarioFila) => u.fecha_creacion ?? null },
+            ]}
+            filtros={() => [
+              ...filtroBusqueda(busqueda),
+              ...filtroSi('Rol', rolFiltro ? nombreDeRol(rolFiltro, rolesDelFiltro) : ''),
+            ]}
+            disabled={cargando}
+            className="h-9 max-md:h-10"
+          />
         </div>
       </div>
 
