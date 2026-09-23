@@ -208,6 +208,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           delete siguiente.permisos;
         }
         if (typeof datos.rol === 'string' && datos.rol) siguiente.rol = datos.rol;
+        // La contraseña provisoria, como la sabe la base. Sin la clave (backend viejo),
+        // queda lo que dijo el login.
+        if (typeof datos.debe_cambiar_password === 'boolean') {
+          siguiente.debe_cambiar_password = datos.debe_cambiar_password;
+        }
         // RF-28. Sin la clave es un backend de antes: entra por donde siempre.
         if ('pantalla_inicio' in datos) siguiente.pantalla_inicio = datos.pantalla_inicio;
         else delete siguiente.pantalla_inicio;
@@ -222,6 +227,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refrescarPermisos = useCallback(() => {
     void refrescarPermisosCon(60_000);
   }, [refrescarPermisosCon]);
+
+  /**
+   * El backend dijo que todavía tiene la contraseña provisoria (403 con campo
+   * «debe_cambiar_password»): se prende el flag y AuthGuard muestra PrimerIngreso en vez
+   * del sistema. Pasa si la sesión quedó de antes (un token de otra pestaña) o si la
+   * pantalla creía otra cosa.
+   */
+  const marcarDebeCambiarPassword = useCallback(() => {
+    setUser((previo) => {
+      if (!previo || previo.debe_cambiar_password) return previo;
+      const siguiente: User = { ...previo, debe_cambiar_password: true };
+      try { localStorage.setItem('user', JSON.stringify(siguiente)); } catch { /* sin storage: queda en memoria */ }
+      return siguiente;
+    });
+  }, []);
 
   // Al abrir la app con una sesión guardada, y cada vez que se vuelve a la pestaña.
   useEffect(() => {
@@ -309,6 +329,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           marcarSinPermiso();
           response.clone().json()
             .then((cuerpo) => {
+              // Todavía tiene la contraseña provisoria (el backend la corta desde el
+              // 23/09, como el requireUser de DJ). No es un permiso que falta: en vez del
+              // aviso, la pantalla de elegir contraseña (AuthGuard -> PrimerIngreso).
+              const campo = cuerpo?.errors?.[0]?.campo ?? cuerpo?.detail?.campo;
+              if (campo === 'debe_cambiar_password') {
+                marcarDebeCambiarPassword();
+                return;
+              }
               const detalle = cuerpo?.errors?.[0]?.message
                 ?? cuerpo?.detail?.message
                 ?? (typeof cuerpo?.detail === 'string' ? cuerpo.detail : null);
@@ -316,9 +344,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               // un pedido mal armado, no un permiso que falta.
               if (detalle === 'Not authenticated') return;
               avisarSinPermiso(detalle);
+              if (!url.includes('/auth/me')) void refrescarPermisosCon(5_000);
             })
-            .catch(() => avisarSinPermiso(null));
-          if (!url.includes('/auth/me')) void refrescarPermisosCon(5_000);
+            .catch(() => {
+              avisarSinPermiso(null);
+              if (!url.includes('/auth/me')) void refrescarPermisosCon(5_000);
+            });
         }
 
         if (isAuthFailure) {
@@ -341,7 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [performSilentLogout, refrescarPermisosCon]);
+  }, [performSilentLogout, refrescarPermisosCon, marcarDebeCambiarPassword]);
 
   // ---- 3) Keep-alive: ping a /health cada 10 minutos ------------------------
   // Render free tier duerme el servicio tras ~15 minutos sin tráfico. Eso causa

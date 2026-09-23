@@ -19,6 +19,7 @@ from backend.core.security import (
     get_current_user,
     get_sesiones_permisos,
     get_usuario_actual,
+    get_usuario_actual_aunque_deba_cambiar_la_clave,
     require_admin,
     require_seccion,
     resolver_permisos_actuales,
@@ -239,7 +240,7 @@ async def change_password(
 @router.get("/me", response_model=ResponseDTO)
 async def get_current_user_info(
     current_user: dict = Depends(get_current_user),
-    usuario: UsuarioActual = Depends(get_usuario_actual),
+    usuario: UsuarioActual = Depends(get_usuario_actual_aunque_deba_cambiar_la_clave),
     sesiones=Depends(get_sesiones_permisos),
 ):
     """
@@ -267,6 +268,9 @@ async def get_current_user_info(
             # RF-28: la pantalla fijada (la suya pisa la de su rol), o None. La pantalla la
             # usa sólo si la puede abrir (lib/permisos.ts, rutaInicio).
             "pantalla_inicio": await _pantalla_de_inicio(sesiones, usuario.id_usuario),
+            # Si todavía tiene la contraseña provisoria. /auth/me es lo único (además de
+            # cambiarla) que contesta en ese estado: el resto de la API da 403.
+            "debe_cambiar_password": usuario.debe_cambiar_password,
         },
     )
 

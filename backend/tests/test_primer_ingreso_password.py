@@ -157,3 +157,66 @@ async def test_las_rutas_parecidas_siguen_sin_existir(cliente, ruta):
     """
     r = await cliente.post(ruta, json={})
     assert r.status_code == 404
+
+
+# ─────────────── el corte en el servidor (revisión del 23/09) ───────────────
+#
+# El corte estaba sólo en la pantalla (PrimerIngreso). Con la provisoria —la que le
+# dictó otra persona— se podía usar la API entera sin cambiarla nunca: con
+# debe_cambiar_password prendido, GET /op (Operaciones) daba 200. Ahora es el
+# requireUser de Don Joaquín: todo contesta 403 salvo cambiarla, /auth/me y salir.
+
+
+async def test_con_la_provisoria_la_api_no_deja_hacer_nada_mas_que_cambiarla():
+    from sqlalchemy import update
+
+    from backend.core.security import get_sesiones_permisos
+    from backend.presentation import NotificacionAPI
+    from backend.tests.test_permisos_api import CLAVE, MATIAS, _base, _enchufar, _juguete, _token
+
+    engine, Sesion = await _base()
+    async with Sesion() as s:
+        await s.execute(update(Usuario).where(Usuario.id_usuario == MATIAS)
+                        .values(debe_cambiar_password=True))
+        await s.commit()
+
+    async def _db():
+        async with Sesion() as s:
+            yield s
+
+    _enchufar(app, Sesion)
+    app.dependency_overrides[NotificacionAPI.get_db] = _db
+    juguete = _juguete()
+    juguete.dependency_overrides[get_sesiones_permisos] = lambda: Sesion
+    token = _token(MATIAS, "operario")
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c, \
+                AsyncClient(transport=ASGITransport(app=juguete), base_url="http://test") as j:
+            # Operaciones la puede ver su rol: el 403 es por la contraseña, y lo dice.
+            r = await j.get("/op", headers=token)
+            assert r.status_code == 403, r.text
+            assert r.json()["errors"][0]["campo"] == "debe_cambiar_password"
+            assert "contraseña" in r.json()["errors"][0]["message"]
+            # Por la app real: cualquier router colgado del mapa (acá, la campanita).
+            r = await c.get("/notificaciones", headers=token)
+            assert r.status_code == 403
+            assert r.json()["errors"][0]["campo"] == "debe_cambiar_password"
+
+            # /auth/me sí: es lo que la pantalla necesita para pedirle una nueva.
+            r = await c.get("/auth/me", headers=token)
+            assert r.status_code == 200, r.text
+            assert r.json()["data"]["debe_cambiar_password"] is True
+
+            r = await c.post("/auth/change-password", headers=token, json={
+                "current_password": CLAVE, "new_password": PASS_PROPIA,
+                "confirm_password": PASS_PROPIA})
+            assert r.status_code == 200, r.text
+
+            # Con la suya, el mismo token ya sirve.
+            assert (await j.get("/op", headers=token)).status_code == 200
+            assert (await c.get("/notificaciones", headers=token)).status_code == 200
+            r = await c.get("/auth/me", headers=token)
+            assert r.json()["data"]["debe_cambiar_password"] is False
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

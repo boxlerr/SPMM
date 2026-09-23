@@ -190,13 +190,15 @@ class UsuarioActual:
     id_usuario: int
     username: Optional[str]
     rol: Optional[str]
+    # Entró con la contraseña que le pasó otra persona y todavía no eligió una suya.
+    debe_cambiar_password: bool = False
 
     @property
     def es_admin(self) -> bool:
         return self.rol == ROL_ADMIN
 
 
-async def get_usuario_actual(
+async def get_usuario_actual_aunque_deba_cambiar_la_clave(
     current_user: dict = Depends(get_current_user),
     sesiones=Depends(get_sesiones_permisos),
 ) -> UsuarioActual:
@@ -205,7 +207,9 @@ async def get_usuario_actual(
     - 401 si ya no existe o está inactivo (el token sigue vivo, la cuenta no).
     - 503 si la base no contesta.
 
-    Es todo lo que necesitan require_admin y, para un admin, los permisos.
+    NO corta a quien tiene la contraseña provisoria: es sólo para /auth/me, que la
+    pantalla necesita para saber que tiene que pedirle una nueva. Todo lo demás pasa
+    por get_usuario_actual, que sí la corta.
     """
     from backend.infrastructure.PermisosRepository import PermisosRepository
 
@@ -223,7 +227,38 @@ async def get_usuario_actual(
             detail="Tu usuario está inactivo o ya no existe. Pedile a un administrador que lo revise.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return UsuarioActual(id_usuario=fila.id_usuario, username=fila.username, rol=fila.rol)
+    return UsuarioActual(id_usuario=fila.id_usuario, username=fila.username, rol=fila.rol,
+                         debe_cambiar_password=bool(fila.debe_cambiar_password))
+
+
+# El 403 de la contraseña provisoria. `campo` propio: la pantalla lo reconoce y, en vez
+# del aviso de «no tenés permiso», muestra la de elegir contraseña (PrimerIngreso).
+CAMPO_DEBE_CAMBIAR_PASSWORD = "debe_cambiar_password"
+
+
+async def get_usuario_actual(
+    usuario: UsuarioActual = Depends(get_usuario_actual_aunque_deba_cambiar_la_clave),
+) -> UsuarioActual:
+    """Dependencia: quien hace el pedido, según la base (ver la de arriba), y que ya
+    haya elegido su contraseña. Es todo lo que necesitan require_admin y, para un admin,
+    los permisos; y la cuelgan TODOS los routers (require_politica).
+
+    - 403 (campo «debe_cambiar_password») si todavía tiene la provisoria: la que le
+      dictó otra persona al darlo de alta no sirve para trabajar, sólo para elegir la
+      suya. Es el requireUser de Don Joaquín. Hasta el 23/09 el corte estaba sólo en la
+      pantalla (PrimerIngreso), y con la provisoria se podía usar la API entera sin
+      cambiarla nunca. Lo que queda abierto: /auth/change-password y /auth/logout (piden
+      sólo el token) y /auth/me (la variante de arriba).
+    """
+    if usuario.debe_cambiar_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "Antes de seguir tenés que elegir una contraseña tuya.",
+                "campo": CAMPO_DEBE_CAMBIAR_PASSWORD,
+            },
+        )
+    return usuario
 
 
 async def get_usuario_verificado(

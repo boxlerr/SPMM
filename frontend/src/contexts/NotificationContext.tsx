@@ -44,7 +44,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  // Con la contraseña provisoria el backend no contesta nada más que cambiarla (403): la
+  // campanita espera a que elija la suya, en vez de llenar la pantalla de avisos de
+  // «no tenés permiso» detrás de PrimerIngreso.
+  const esperaClave = !!user?.debe_cambiar_password;
 
   // Función auxiliar para obtener headers con autenticación
   const getHeaders = () => {
@@ -60,7 +64,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   // Cargar notificaciones desde el backend al montar
   useEffect(() => {
     const loadNotifications = async () => {
-      if (!token) {
+      if (!token || esperaClave) {
         setIsLoaded(true);
         return;
       }
@@ -98,11 +102,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     };
 
     loadNotifications();
-  }, [token]);
+  }, [token, esperaClave]);
 
   // Función para recargar notificaciones manualmente
   const reloadNotifications = async () => {
-    if (!token) return;
+    if (!token || esperaClave) return;
 
     try {
       const response = await fetch(`${API_URL}/notificaciones`, {
@@ -149,7 +153,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   // NotificationHandlers), así que el GET /notificaciones es la fuente de verdad
   // completa. Lo único que se pierde es inmediatez: hasta POLL_MS de demora.
   useEffect(() => {
-    if (!isLoaded || typeof window === 'undefined' || !token) return;
+    if (!isLoaded || typeof window === 'undefined' || !token || esperaClave) return;
 
     const POLL_MS = 30_000;
 
@@ -172,13 +176,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [isLoaded, token]);
+  }, [isLoaded, token, esperaClave]);
 
   // Exponer la función para recargar manualmente
   useEffect(() => {
     // Agregar función al contexto global para que otros componentes puedan usarla
     (window as any).reloadNotifications = reloadNotifications;
-  }, [token]);
+  }, [token, esperaClave]);
 
   const addNotification = async (
     message: string,

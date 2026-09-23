@@ -53,9 +53,11 @@ class PermisosRepository:
     # ─────────────────────────── la persona ───────────────────────────
 
     async def fila_usuario(self, id_usuario: Optional[int], username: Optional[str]):
-        """(id_usuario, username, rol, activo) o None. Sólo columnas que existen seguro:
-        esta consulta corre en cada pedido."""
-        consulta = select(Usuario.id_usuario, Usuario.username, Usuario.rol, Usuario.activo)
+        """(id_usuario, username, rol, activo, debe_cambiar_password) o None. Sólo
+        columnas que existen seguro (debe_cambiar_password está en producción desde el
+        2/9): esta consulta corre en cada pedido."""
+        consulta = select(Usuario.id_usuario, Usuario.username, Usuario.rol, Usuario.activo,
+                          Usuario.debe_cambiar_password)
         if id_usuario is not None:
             consulta = consulta.where(Usuario.id_usuario == id_usuario)
         elif username:
