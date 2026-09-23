@@ -37,11 +37,45 @@ async def registrar_incidencia(
     return await service.registrar(dto, usuario)
 
 
-# 🔹 Las listas para los desplegables (tipos, gravedades, estados)
+# 🔹 Las listas para los desplegables (tipos, gravedades, estados, qué se hace)
 @router.get("/incidencias/tipos")
 async def tipos_de_incidencia(db=Depends(get_db)):
     logger.info("API - Inicio GET /incidencias/tipos")
     return IncidenciaProcesoService(db).catalogos()
+
+
+# 🔹 Para cargar una desde la OT: la orden, sus pasos y quién hizo cada uno (23/09)
+@router.get("/incidencias/para-registrar")
+async def para_registrar_incidencia(
+    id_orden: int | None = None,
+    nro_ot: int | None = None,
+    db=Depends(get_db),
+):
+    """Por `id_orden` (desde la ficha de la OT) o por `nro_ot`, el número que se ve
+    (desde No conformidades, mientras se escribe). Una OT que no existe no da 404:
+    vuelve `orden: null`, así el front no la confunde con un servidor sin esta ruta."""
+    logger.info(f"API - Inicio GET /incidencias/para-registrar ({id_orden=} {nro_ot=})")
+    return await IncidenciaProcesoService(db).para_registrar(id_orden=id_orden, nro_ot=nro_ot)
+
+
+# 🔹 Agrupadas por quién hizo las piezas (23/09). Sección confidencial «Rendimiento por
+# persona»: ver core/permisos_rutas.py, política «incidencias».
+@router.get("/incidencias/por-persona")
+async def incidencias_por_persona(
+    nro_ot: int | None = None,
+    tipo: str | None = None,
+    gravedad: str | None = None,
+    estado: str | None = None,
+    desde: str | None = None,
+    hasta: str | None = None,
+    id_operario: int | None = None,
+    db=Depends(get_db),
+):
+    logger.info("API - Inicio GET /incidencias/por-persona")
+    return await IncidenciaProcesoService(db).por_persona(
+        nro_ot=nro_ot, tipo=tipo, gravedad=gravedad, estado=estado, desde=desde,
+        hasta=hasta, id_operario=id_operario,
+    )
 
 
 # 🔹 Métrica agregada para el dashboard
@@ -72,6 +106,7 @@ async def reporte_incidencias(
     estado: str | None = None,
     desde: str | None = None,
     hasta: str | None = None,
+    id_operario: int | None = None,
     limite: int = Query(TOPE_REPORTE, ge=1, le=5000),
     db=Depends(get_db),
 ):
@@ -79,7 +114,7 @@ async def reporte_incidencias(
     service = IncidenciaProcesoService(db)
     return await service.reporte(
         id_orden=id_orden, nro_ot=nro_ot, tipo=tipo, gravedad=gravedad, estado=estado,
-        desde=desde, hasta=hasta, limite=limite,
+        desde=desde, hasta=hasta, id_operario=id_operario, limite=limite,
     )
 
 
@@ -93,6 +128,7 @@ async def reporte_incidencias_csv(
     estado: str | None = None,
     desde: str | None = None,
     hasta: str | None = None,
+    id_operario: int | None = None,
     db=Depends(get_db),
 ):
     """El archivo va con `attachment`, pero el que dispara la descarga es el front con
@@ -101,7 +137,7 @@ async def reporte_incidencias_csv(
     service = IncidenciaProcesoService(db)
     contenido = await service.reporte_csv(
         id_orden=id_orden, nro_ot=nro_ot, tipo=tipo, gravedad=gravedad, estado=estado,
-        desde=desde, hasta=hasta,
+        desde=desde, hasta=hasta, id_operario=id_operario,
     )
     return Response(
         content=contenido,
@@ -133,6 +169,21 @@ async def incidencias_de_la_orden(id_orden: int, db=Depends(get_db)):
     logger.info(f"API - Inicio GET /ordenes/{id_orden}/incidencias")
     service = IncidenciaProcesoService(db)
     return await service.listar_por_orden(id_orden)
+
+
+# 🔹 Las no conformidades de las que una persona hizo las piezas: su ficha (23/09).
+# Vive en este router porque son no conformidades, pero pide la sección confidencial
+# «Rendimiento por persona», la misma del reporte de RF-07 que está al lado en la ficha
+# (core/permisos_rutas.py, política «incidencias»).
+@router.get("/operarios/{id_operario}/rechazos")
+async def rechazos_de_la_persona(
+    id_operario: int,
+    desde: str | None = None,
+    hasta: str | None = None,
+    db=Depends(get_db),
+):
+    logger.info(f"API - Inicio GET /operarios/{id_operario}/rechazos ({desde} → {hasta})")
+    return await IncidenciaProcesoService(db).rechazos_de_persona(id_operario, desde, hasta)
 
 
 # 🔹 Cerrar una no conformidad (va antes que la comodín de abajo)

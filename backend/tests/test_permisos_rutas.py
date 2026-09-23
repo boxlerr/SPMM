@@ -255,6 +255,12 @@ MATRIZ = [
     ("GET", "/ordenes/1/incidencias", OK, OK, OK),
     ("POST", "/incidencias", OK, OK, NO),
     ("PUT", "/incidencias/1/cerrar", OK, OK, NO),
+    # RF-12, los rechazos (23/09): el formulario de la ficha de la OT lee los pasos con
+    # la lectura del router (el operario ve Operaciones); cargar pide el área en
+    # escritura. Lo que agrupa POR PERSONA pide «Rendimiento por persona», como RF-07.
+    ("GET", "/incidencias/para-registrar?id_orden=1", OK, OK, OK),
+    ("GET", "/incidencias/por-persona", OK, NO, NO),
+    ("GET", "/operarios/1/rechazos", OK, NO, NO),
     # dashboard: cada tarjeta pide su área (RF-28); el operario no tiene Clientes
     ("GET", "/api/dashboard/estadisticas", OK, OK, OK),
     ("GET", "/api/dashboard/ordenes-por-estado/pendiente", OK, OK, OK),
@@ -425,6 +431,8 @@ PANTALLAS = {
         "/ordenes/1/procesos/versiones", "/ordenes-trabajo-piezas", "/consumos-material",
         "/planos/orden/1", "/planos/articulo/1", "/planos/1", "/planos/1/archivo",
         "/ordenes/1/incidencias", "/auditoria/procesos?id_orden=1",
+        # RF-12: el control de calidad de la ficha (cargar un rechazo)
+        "/incidencias/tipos", "/incidencias/para-registrar?id_orden=1",
         # RF-03: el cartel de «Pausada» de las listas y el historial de pausas de la ficha
         "/ordenes-pausadas", "/ordenes/1/pausas",
         # el plan, el Gantt y el planificador
@@ -453,6 +461,9 @@ PANTALLAS = {
     "no_conformidades": [
         "/incidencias", "/incidencias/tipos", "/incidencias/metricas",
         "/incidencias/reporte", "/incidencias/reporte.csv",
+        # RF-12: cargar un rechazo desde la pantalla (el agrupado por persona es la
+        # sección confidencial: la pantalla no lo pide sin ella)
+        "/incidencias/para-registrar?nro_ot=7010", "/incidencias/reporte?id_operario=1",
     ],
     # (Ingresos y Actividad por persona son la sección confidencial «Ingresos y actividad
     # por persona»: con sólo el área la pantalla no muestra esas solapas ni las pide. Se
@@ -647,6 +658,10 @@ async def test_un_permiso_de_mas_vencido_no_abre_y_uno_vigente_si(espejo):
     ficha = "/operarios/1/rendimiento"
     assert (await _pedir(espejo, "GET", ficha, MATIAS, "operario")).status_code == OK
     assert (await _pedir(espejo, "GET", ficha, SOFIA, "supervisor")).status_code == NO
+    # Y los rechazos por persona (RF-12): en la ficha y el agrupado de No conformidades.
+    for rechazos in ("/operarios/1/rechazos", "/incidencias/por-persona"):
+        assert (await _pedir(espejo, "GET", rechazos, MATIAS, "operario")).status_code == OK, rechazos
+        assert (await _pedir(espejo, "GET", rechazos, SOFIA, "supervisor")).status_code == NO, rechazos
 
 
 async def test_el_planificador_se_abre_al_operario_con_un_permiso_de_mas(espejo):

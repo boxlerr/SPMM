@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import BigInteger, Column, Integer, String, Text, DateTime, ForeignKey
 
 from backend.infrastructure.db import Base
 
@@ -72,3 +72,25 @@ class IncidenciaProceso(Base):
     fecha_registro = Column(DateTime, nullable=False, default=_ahora_ar)
     # Cuándo se cerró. NULL mientras siga abierta; las dos cosas se escriben juntas.
     fecha_cierre = Column(DateTime, nullable=True)
+
+    # ── Los rechazos (23/09, lo que pidió Lucas en la reunión) ──
+    # «Si algo se rechazó, que quede el registro de que tuviste 10 piezas que se
+    # rechazaron. ¿Quién la hizo? Tal empleado.» Para eso hacen falta tres datos más.
+    # Migración: 2026-09-23_rechazos_por_paso.sql.
+    #
+    # En qué PASO de la OT pasó: la pasada (orden_trabajo_proceso.id), no el proceso,
+    # porque el mismo proceso puede ir varias veces en la misma orden (la 7497 tiene
+    # TORNO CNC trece veces) y «el torno» no dice cuál de las trece. `id_proceso` se
+    # sigue llenando con el proceso de ese paso: si mañana sacan el paso de la OT, queda
+    # al menos qué trabajo era. Sin FK a propósito, como notificacion.id_orden_trabajo:
+    # sacar un paso de la OT no puede fallar por una no conformidad vieja.
+    id_otp = Column(BigInteger, nullable=True)
+    # De cuántas piezas controladas salieron las rechazadas (`piezas_afectadas`).
+    # NULL = no se dijo; no se completa con las unidades de la OT porque no siempre se
+    # controla todo.
+    piezas_controladas = Column(Integer, nullable=True)
+    # Qué se hace con lo rechazado: RETRABAJO | DESCARTE | CONCESION |
+    # DEVOLUCION_PROVEEDOR (DISPOSICIONES en el servicio). NULL = todavía no se decidió.
+    # No es lo mismo que `accion_correctiva`: ésta dice qué pasa con ESAS piezas; la
+    # acción correctiva, qué se hizo para que no vuelva a pasar (y es lo que la cierra).
+    disposicion = Column(String(30), nullable=True)

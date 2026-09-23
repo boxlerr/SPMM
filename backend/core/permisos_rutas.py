@@ -65,9 +65,14 @@ y como solapa de Recursos):
   Recursos y         la ficha de la persona: /operarios/{id}/ausencias y
   Operaciones        /operarios/{id}/tiempos (RF-06). La ficha se monta en las dos.
                      Su solapa Rendimiento (/operarios/{id}/rendimiento, RF-07) pide
-                     además la sección confidencial «Rendimiento por persona».
+                     además la sección confidencial «Rendimiento por persona», y los
+                     rechazos que se muestran ahí (/operarios/{id}/rechazos, RF-12), lo
+                     mismo.
   Clientes           /clientes
-  No conformidades   /incidencias/*
+  No conformidades   /incidencias/* (el agrupado por persona, /incidencias/por-persona,
+                     con la sección confidencial «Rendimiento por persona»). La ficha
+                     de la OT lee además /incidencias/tipos y /incidencias/para-registrar
+                     para cargar un rechazo.
   Auditoría          /auditoria/movimientos (también la vista Ingresos, ?tipo=ingresos,
                      y /auditoria/actividad, Actividad por persona, RF-25: esas dos con
                      la sección confidencial «Ingresos y actividad por persona»),
@@ -393,10 +398,31 @@ POLITICAS: dict[str, Politica] = {
     # o editarla pide el área. Las métricas son la tarjeta «Interpretación de planos» del
     # Dashboard y piden lo de la tarjeta (RF-28, TARJETAS_DASHBOARD): No conformidades.
     # Hasta el 22/09 el área Dashboard leía TODO este router por esas métricas.
+    #
+    # Los rechazos (23/09): cargarlos desde la ficha de la OT es registrar una no
+    # conformidad y pide lo mismo (No conformidades en escritura). Lo que la ficha LEE
+    # para el formulario (/incidencias/para-registrar: los pasos y quién hizo cada uno)
+    # va con la lectura del router, como sus no conformidades.
+    #
+    # Lo que junta las no conformidades POR PERSONA —el agrupado de la pantalla y la
+    # parte de la ficha de cada persona— pide la sección confidencial «Rendimiento por
+    # persona», la misma del reporte de RF-07: pone un número de piezas rechazadas al
+    # lado de un nombre y sirve para evaluar a alguien («le tengo que llamar la
+    # atención», Lucas, 23/09). DECISIÓN ABIERTA, tomada del lado conservador: la lista
+    # de siempre sigue diciendo quién hizo cada una (ya lo decía) y se puede filtrar por
+    # persona con el área; lo que no se abre por tener el área es el ranking. Si Lucas
+    # quiere que el supervisor lo vea, le da la sección desde Usuarios y permisos.
     "incidencias": Politica(
         leer=(area("no_conformidades"), area("operaciones")),
         escribir=(area("no_conformidades", "write"),),
-        excepciones=_excepciones_de_tarjetas("incidencias"),
+        excepciones=_excepciones_de_tarjetas("incidencias") + (
+            Excepcion("GET", "/incidencias/por-persona", (seccion("dashboard_rendimiento"),),
+                      "Piezas rechazadas por persona: compara a la gente con nombre y "
+                      "apellido. Sección confidencial «Rendimiento por persona»."),
+            Excepcion("GET", "/operarios/{id_operario}/rechazos", (seccion("dashboard_rendimiento"),),
+                      "Los rechazos de una persona, en su ficha al lado del reporte de "
+                      "RF-07: la misma sección confidencial que ese reporte."),
+        ),
     ),
 
     # ── Dashboard: sólo lectura ──
