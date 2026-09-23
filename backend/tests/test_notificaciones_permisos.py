@@ -131,6 +131,34 @@ async def test_marcar_como_leidas_no_toca_lo_que_no_se_ve(cliente):
     assert r.json()["data"]["marcadas"] == 1
 
 
+async def test_los_avisos_automaticos_de_ot_y_stock_los_siguen_viendo_todos(cliente):
+    """RF-04 y RF-14, después del endurecimiento del 23/09 (y del merge con RF-03/06/07
+    y RF-19): el aviso de OT retrasada y el de stock bajo los arma el sistema, no son de
+    «Usuarios y permisos», así que no se esconden. Los ve el supervisor (Operaciones y
+    Materiales), el operario y el admin; cuentan en el contador y se marcan leídos."""
+    from backend.application.AlertaRetrasoService import TIPO_ALERTA as OT_RETRASADA
+    from backend.application.AlertaStockService import TIPO_ALERTA as STOCK_BAJO
+
+    retraso = "La OT 1081 está atrasada: vencía el 20/09"
+    stock = "Stock bajo: Barra SAE 1045 Ø50 (quedan 2, mínimo 5)"
+    async with cliente.sesiones() as s:
+        s.add_all([
+            Notificacion(mensaje=retraso, tipo=OT_RETRASADA, leida=False),
+            Notificacion(mensaje=stock, tipo=STOCK_BAJO, leida=False),
+        ])
+        await s.commit()
+
+    for quien in (ADMIN, SUPERVISOR, OPERARIO):
+        vistos = set(await _mensajes(cliente, quien))
+        assert {retraso, stock} <= vistos
+    r = await cliente.get("/notificaciones/contador/no-leidas", headers=SUPERVISOR)
+    assert r.json()["data"]["count"] == 3  # los dos automáticos + el de personas
+
+    r = await cliente.put(f"/notificaciones/{await _id_de(cliente, OT_RETRASADA)}/leida",
+                          headers=SUPERVISOR)
+    assert r.status_code == 200 and r.json()["status"] is True
+
+
 # ─────────────────────────── crear ───────────────────────────
 
 

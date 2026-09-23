@@ -2,6 +2,16 @@
 Fixtures de test. Usan SQLite en memoria (StaticPool para compartir la misma
 conexión entre create_all y la sesión) para no tocar la base real SMPP.
 """
+# ── LA GUARDIA, ANTES QUE NADA ──
+# Antes de importar cualquier cosa de la app: fuerza la URL de la base a una local donde
+# no escucha nadie y hace que toda conexión a un host que no sea esta máquina (por
+# SQLAlchemy, asyncpg, psycopg2 o un socket pelado) levante AccesoRemotoBloqueado. Los
+# fixtures de abajo (auditoría, permisos, copias) siguen: dan un error más claro en el
+# caso puntual, pero ya no son lo único entre un test y producción. Ver el módulo.
+from backend.tests import guardia_de_la_base
+
+guardia_de_la_base.instalar()
+
 from datetime import time
 
 import pytest
@@ -12,6 +22,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.infrastructure.db import Base
+
+# Y que db.py, recién importado, se haya armado contra la URL local de la guardia.
+guardia_de_la_base.verificar_la_app()
 
 # Importar los modelos involucrados para registrarlos en Base.metadata y
 # configurar los mappers (relaciones por string).
