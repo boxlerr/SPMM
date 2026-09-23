@@ -29,6 +29,8 @@ import { SharedOperatorsList } from "@/components/resources/SharedOperatorsList"
 import { useCoberturaRangos, problemaDelProceso } from "@/hooks/useCoberturaRangos";
 import EditorRangosDe from "./_components/EditorRangosDe";
 import EditorMaquinasDe from "./_components/EditorMaquinasDe";
+import DesdeAviso from "./_components/DesdeAviso";
+import SinResultados, { type FiltroPuesto } from "./_components/SinResultados";
 import { BibliotecaPlanos } from "@/components/planos/BibliotecaPlanos";
 import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
@@ -48,6 +50,35 @@ const SECCION_DE_SOLAPA: Record<Exclude<SolapaRecursos, "planos">, SeccionCodigo
   sectores: "recursos_sectores",
 };
 const ORDEN_SOLAPAS: SolapaRecursos[] = ["operarios", "maquinas", "procesos", "rangos", "sectores", "planos"];
+const NOMBRE_SOLAPA: Record<SolapaRecursos, string> = {
+  operarios: "Recurso humano",
+  maquinas: "Recurso maquinaria",
+  procesos: "Procesos",
+  rangos: "Rangos",
+  sectores: "Sectores",
+  planos: "Planos",
+};
+
+/**
+ * Para comparar nombres: sin mayúsculas, sin tildes y con un solo espacio.
+ *
+ * El catálogo viene del legacy en mayúscula y sin tildes («PREPARACION DE PINTURA»,
+ * «ENSAMBLAJE, PUNTEADO  Y ESCUADRADO» con dos espacios), y los avisos del plan lo
+ * escriben como frase («Preparación de pintura»). Buscando una forma no se encontraba
+ * la otra. Vale también para quien tipea: «preparacion» y «preparación» son lo mismo.
+ */
+const normalizar = (t: string) =>
+  (t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Cómo se marca la fila que pidió el aviso: el mismo celeste que el cartel de arriba. */
+const RESALTE_FOCO = "bg-sky-50 shadow-[inset_3px_0_0_0_var(--color-sky-500)]";
+
+/** Lo que trae el link de un aviso del plan (ver `enlaceDe` en DiagnosticosPlan). */
+interface LlegadaDesdeAviso {
+  tab: SolapaRecursos;
+  titulo: string | null;
+  hacer: string | null;
+}
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import { etiquetaTipo } from "./_maquinaOpciones";
@@ -102,6 +133,13 @@ export default function RecursosPage() {
   // no llegue, la lista no trae esos campos y la pantalla se ve como antes.
   const conoceEstado = backendConoceEstado(maquinas);
   const [procesos, setProcesos] = useState<Proceso[]>([]);
+  /**
+   * Si la lista de procesos ya llegó alguna vez. `api.loading` no alcanza: lo comparten
+   * todas las solapas, y entrando directo a Procesos el pedido de Recurso humano (la
+   * solapa de siempre, que arranca primero) termina antes y lo apaga con los procesos
+   * todavía en camino. En ese hueco se veía «no hay procesos» por un instante.
+   */
+  const [procesosCargados, setProcesosCargados] = useState(false);
 
   const [busquedaProceso, setBusquedaProceso] = useState("");
 
@@ -153,6 +191,13 @@ export default function RecursosPage() {
       // no mira `procesos` para nada. Sin esta salida, entrar a la solapa disparaba el
       // pedido de los 414 procesos para no mostrarlos en ningún lado.
       fetchProcesos();
+      // La fila desplegada de un proceso tiene el editor de "en qué máquinas se hace",
+      // y su lista para elegir es `maquinas`, que sólo se pedía al entrar a la solapa
+      // Recurso maquinaria. Entrando directo a Procesos —que es lo que hace el aviso
+      // «Decile en qué máquinas se hace»— el desplegable decía «No queda recurso
+      // maquinaria para agregar»: se llegaba a la fila y no había nada que elegir.
+      // En silencio, sin el spinner que taparía la lista de procesos.
+      if (tabActiva === "procesos" && maquinas.length === 0) void refrescarMaquinasSinSpinner();
     }
   }, [tabActiva]);
 
@@ -164,10 +209,22 @@ export default function RecursosPage() {
    * elegir la pestaña, buscar el proceso entre 414 (paginados de a 20) y recién
    * ahí desplegar la fila. El link del aviso ahora deja todo eso hecho.
    *
-   * `q` precarga el buscador para que la fila caiga en la primera página; sin eso
-   * el proceso podía estar en la página 12 y el `foco` no se veía por ningún lado.
+   * `foco` es uno o varios ids separados por coma, y la solapa muestra ESOS y nada
+   * más, con un cartel que lo dice y un botón para ver el resto. Hasta el 23/09/2026
+   * el foco se buscaba precargando el buscador con el nombre (`q`), y el nombre que
+   * manda el aviso no es el del catálogo («Preparación de pintura» contra «PREPARACION
+   * DE PINTURA»): la lista quedaba vacía y la fila que había que tocar no aparecía.
+   * `q` sin `foco` se sigue aceptando, y el buscador ahora ignora tildes y espacios.
+   *
+   * `aviso` y `hacer` son el aviso y la solución: van al cartel de arriba.
    */
   const focoAplicado = useRef(false);
+  /** Los ids que mandó el aviso, y en qué solapa. Mientras esté, esa solapa muestra solo esos. */
+  const [foco, setFoco] = useState<{ tab: SolapaRecursos; ids: number[] } | null>(null);
+  /** De qué aviso se vino, para el cartel de arriba. */
+  const [desdeAviso, setDesdeAviso] = useState<LlegadaDesdeAviso | null>(null);
+  const focoEn = (t: SolapaRecursos) => (foco && foco.tab === t ? foco.ids : null);
+  const esFoco = (t: SolapaRecursos, id: number) => !!focoEn(t)?.includes(id);
   /** Operario del `?foco=`: se guarda acá y se abre recién cuando la lista cargó. */
   const [operarioAFocalizar, setOperarioAFocalizar] = useState<number | null>(null);
   /**
@@ -186,15 +243,25 @@ export default function RecursosPage() {
     if (!["operarios", "maquinas", "procesos", "rangos", "sectores", "planos"].includes(tab)) return;
     focoAplicado.current = true;
 
-    setTabActiva(tab as SolapaRecursos);
-    const q = params.get("q");
-    if (q && tab === "procesos") setBusquedaProceso(q);
+    const solapa = tab as SolapaRecursos;
+    setTabActiva(solapa);
 
-    const foco = Number(params.get("foco"));
-    if (Number.isFinite(foco) && foco > 0) {
-      if (tab === "procesos") setProcesoAbierto(foco);
-      if (tab === "maquinas") setMaquinaAbierta(foco);
-      if (tab === "operarios") setOperarioAFocalizar(foco);
+    const ids = (params.get("foco") || "")
+      .split(",")
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    // El nombre sólo si no vino el id: con el id no hace falta, y el nombre del aviso
+    // puede no coincidir con el del catálogo (ver arriba).
+    const q = params.get("q");
+    if (q && solapa === "procesos" && ids.length === 0) setBusquedaProceso(q);
+
+    if (ids.length > 0) {
+      setFoco({ tab: solapa, ids });
+      // Se despliega el primero: con uno solo es "la fila"; con varios (las tres
+      // fresadoras) al guardarlo se pasa al siguiente (ver `siguienteDelAviso`).
+      if (solapa === "procesos") setProcesoAbierto(ids[0]);
+      if (solapa === "maquinas") setMaquinaAbierta(ids[0]);
+      if (solapa === "operarios" && ids.length === 1) setOperarioAFocalizar(ids[0]);
 
       const crudos = (params.get("rangos") || "")
         .split(",")
@@ -203,12 +270,40 @@ export default function RecursosPage() {
       if (crudos.length > 0) setRangosSugeridos(crudos);
     }
 
+    const titulo = params.get("aviso");
+    const hacer = params.get("hacer");
+    if (titulo || hacer || ids.length > 0) setDesdeAviso({ tab: solapa, titulo, hacer });
+
     // El query param se limpia para que un F5 no vuelva a arrastrar el foco de un
     // aviso que quizás ya se resolvió.
     const url = new URL(window.location.href);
-    ["tab", "foco", "q", "rangos"].forEach((k) => url.searchParams.delete(k));
+    ["tab", "foco", "q", "rangos", "aviso", "hacer"].forEach((k) => url.searchParams.delete(k));
     window.history.replaceState({}, "", url.toString());
   }, []);
+
+  /** Sacar el filtro del aviso: se ve la lista entera, el cartel queda con lo que había que hacer. */
+  const verTodoSinFoco = () => {
+    setFoco(null);
+    setRangosSugeridos(null);
+  };
+  /** Cerrar el cartel también saca el filtro: un filtro sin cartel sería un filtro escondido. */
+  const cerrarDesdeAviso = () => {
+    setDesdeAviso(null);
+    verTodoSinFoco();
+  };
+  /**
+   * El que sigue en la lista del aviso, para abrirlo al guardar el anterior.
+   *
+   * El aviso de la FRESADORA CNC pide lo mismo en tres máquinas. El botón del plan lo
+   * hace de una, pero quien viene a hacerlo acá tenía que abrir cada fila, y al
+   * guardar la primera se perdían los rangos propuestos para las otras dos.
+   */
+  const siguienteDelAviso = (t: SolapaRecursos, id: number): number | null => {
+    const ids = focoEn(t);
+    if (!ids) return null;
+    const i = ids.indexOf(id);
+    return i >= 0 && i + 1 < ids.length ? ids[i + 1] : null;
+  };
 
   useEffect(() => {
     if (operarioAFocalizar === null || operarios.length === 0) return;
@@ -228,8 +323,11 @@ export default function RecursosPage() {
     const id = procesoAbierto ? `proceso-${procesoAbierto}` : maquinaAbierta ? `maquina-${maquinaAbierta}` : null;
     if (!id) return;
     // Un tick: la fila se despliega en este mismo render y todavía no está en el DOM.
+    // La fila existe dos veces —la tabla de escritorio y la tarjeta del teléfono— y una
+    // de las dos está escondida: se lleva a la vista la que se ve.
     const t = window.setTimeout(() => {
-      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const filas = Array.from(document.querySelectorAll<HTMLElement>(`[data-fila="${id}"]`));
+      (filas.find((f) => f.offsetParent !== null) ?? filas[0])?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 150);
     return () => window.clearTimeout(t);
   }, [procesoAbierto, maquinaAbierta, procesos.length, maquinas.length, currentProcesosPage]);
@@ -313,6 +411,7 @@ export default function RecursosPage() {
   const fetchProcesos = async () => {
     const data = await api.fetchData(`${cleanUrl}/procesos`);
     setProcesos(data);
+    setProcesosCargados(true);
   };
 
   const handleVerOperario = async (operario: Operario) => {
@@ -464,8 +563,11 @@ export default function RecursosPage() {
       .join(" ");
   };
 
+  const busquedaNormalizada = normalizar(busquedaProceso);
+  const focoProcesos = focoEn("procesos");
   const procesosFiltrados = procesos
-    .filter(p => p.nombre.toLowerCase().includes(busquedaProceso.toLowerCase()))
+    .filter(p => !focoProcesos || focoProcesos.includes(p.id))
+    .filter(p => normalizar(p.nombre).includes(busquedaNormalizada))
     // "Problema" es no tener rango (se lo lleva cualquiera) o tener rangos que no
     // habilitan a nadie disponible (no lo hace nadie). Son los dos casos que el
     // planificador después reporta como bloqueo.
@@ -474,6 +576,55 @@ export default function RecursosPage() {
       const c = porProceso.get(p.id);
       return !!c && c.lineas_abiertas > 0 && !!problemaDelProceso(c);
     });
+
+  /**
+   * Los filtros puestos en Procesos, cada uno con cómo sacarlo. Es lo que se muestra
+   * cuando la lista queda vacía: sin esto, «No se encontraron procesos» no decía que
+   * había un filtro ni cuál (ver `SinResultados`).
+   */
+  const filtrosProcesos: FiltroPuesto[] = [
+    ...(focoProcesos ? [{ etiqueta: "Solo lo del aviso del plan", onSacar: verTodoSinFoco }] : []),
+    ...(busquedaNormalizada ? [{ etiqueta: `Búsqueda «${busquedaProceso.trim()}»`, onSacar: () => setBusquedaProceso("") }] : []),
+    ...(soloProblemas ? [{ etiqueta: "Solo los que frenan un plan", onSacar: () => setSoloProblemas(false) }] : []),
+  ];
+  // Si lo que pidió el aviso no está en el catálogo, se dice eso y no "no hay nada".
+  const focoProcesosPerdido = !!focoProcesos && procesosCargados && !procesos.some((p) => focoProcesos.includes(p.id));
+
+  // Recurso maquinaria y Recurso humano: lo mismo, pero el aviso es el único filtro.
+  const focoMaquinas = focoEn("maquinas");
+  const maquinasVisibles = focoMaquinas ? maquinas.filter((m) => focoMaquinas.includes(m.id)) : maquinas;
+  const focoOperarios = focoEn("operarios");
+  const operariosVisibles = focoOperarios ? operarios.filter((o) => focoOperarios.includes(o.id)) : operarios;
+
+  /** Qué está mostrando el cartel del aviso en la solapa abierta, con nombre. */
+  const nombresDelFoco: string[] =
+    tabActiva === "procesos" && focoProcesos
+      ? procesos.filter((p) => focoProcesos.includes(p.id)).map((p) => p.nombre)
+      : tabActiva === "maquinas" && focoMaquinas
+        ? maquinasVisibles.map((m) => m.nombre.trim())
+        : tabActiva === "operarios" && focoOperarios
+          ? operariosVisibles.map((o) => `${o.nombre} ${o.apellido}`.trim())
+          : [];
+  const totalDeLaSolapa =
+    tabActiva === "procesos" ? procesos.length : tabActiva === "maquinas" ? maquinas.length : operarios.length;
+  /**
+   * Dónde se hace, en esta solapa, lo que pide el aviso. "Dale el rango TERCERIZADO"
+   * trae a la lista de personas, y en la lista no hay ningún botón de rangos: se
+   * cambian adentro de la ficha. Y si el usuario no puede editar la solapa (RF-24),
+   * decirlo, en vez de dejarlo buscando un botón que para él no existe.
+   */
+  const SOLO_LECTURA = "Con tu usuario esta solapa es de solo lectura: el cambio lo tiene que hacer alguien con permiso para editarla.";
+  const comoSeHace: Partial<Record<SolapaRecursos, string>> = {
+    operarios: editaPersonas
+      ? "Los rangos de una persona se cambian tocando su fila y después «Editar»."
+      : SOLO_LECTURA,
+    maquinas: editaRangos
+      ? "Los rangos de una máquina se cambian desde «Rangos», en su fila."
+      : SOLO_LECTURA,
+    procesos: editaRangos || editaProcesos
+      ? "Quién lo hace y en qué máquina se cambian desplegando el proceso, desde «Quién puede hacerlo» en su fila."
+      : SOLO_LECTURA,
+  };
 
   const totalProcesosPages = Math.ceil(procesosFiltrados.length / ITEMS_PER_PAGE);
   const paginatedProcesos = procesosFiltrados.slice(
@@ -528,6 +679,65 @@ export default function RecursosPage() {
     { titulo: "Líneas en OT abiertas", tipo: "entero", valor: (p) => porProceso.get(p.id)?.lineas_abiertas ?? null },
     { titulo: "Descripción", valor: (p) => p.descripcion ?? "" },
   ];
+
+  /**
+   * Los editores de la fila desplegada. Salen de acá y no escritos en la tabla porque
+   * van en dos lugares: la tabla de escritorio y la tarjeta del teléfono, que hasta
+   * ahora no los tenía (se llegaba desde el aviso y no había con qué hacer lo que pedía).
+   *
+   * Los rangos que propone el aviso van SÓLO a las filas del aviso: antes iban a
+   * cualquier fila que se abriera, y abrir otra máquina la mostraba con un rango
+   * tildado que nadie le había pedido.
+   */
+  const editorRangosDeMaquina = (maquina: Maquina) => (
+    <EditorRangosDe
+      tipo="maquinaria"
+      id={maquina.id}
+      nombre={maquina.nombre}
+      actuales={rangosPorMaquina.get(maquina.id) ?? []}
+      catalogo={catalogoRangos}
+      sugeridos={esFoco("maquinas", maquina.id) ? rangosSugeridos ?? undefined : undefined}
+      onGuardado={() => {
+        const siguiente = siguienteDelAviso("maquinas", maquina.id);
+        setMaquinaAbierta(siguiente);
+        if (siguiente === null) setRangosSugeridos(null);
+        recargarCobertura();
+      }}
+    />
+  );
+  const editoresDeProceso = (proceso: Proceso) => {
+    const cob = porProceso.get(proceso.id);
+    const alGuardar = (limpiarSugeridos: boolean) => {
+      const siguiente = siguienteDelAviso("procesos", proceso.id);
+      setProcesoAbierto(siguiente);
+      if (limpiarSugeridos && siguiente === null) setRangosSugeridos(null);
+      recargarCobertura();
+    };
+    return (
+      <>
+        {editaRangos && <EditorRangosDe
+          tipo="proceso"
+          id={proceso.id}
+          nombre={proceso.nombre}
+          actuales={cob?.rangos ?? []}
+          catalogo={catalogoRangos}
+          sugeridos={esFoco("procesos", proceso.id) ? rangosSugeridos ?? undefined : undefined}
+          onGuardado={() => alGuardar(true)}
+        />}
+        {/* Quién puede hacerlo y en qué máquina son las dos mitades
+            de la misma pregunta: hacen falta las dos para que el
+            planificador pueda reservar. Van juntas, en la misma
+            fila desplegada. */}
+        {editaProcesos && <EditorMaquinasDe
+          id={proceso.id}
+          nombre={proceso.nombre}
+          actuales={cob?.maquinas ?? []}
+          catalogo={maquinas}
+          onGuardado={() => alGuardar(false)}
+        />}
+      </>
+    );
+  };
 
   return (
     // RF-27: en el teléfono casi sin margen propio, porque el layout ya pone el suyo
@@ -627,6 +837,22 @@ export default function RecursosPage() {
         </Button>}
       </div>
 
+      {/* De qué aviso del plan se vino y qué había que hacer. Sólo en la solapa a la
+          que apuntaba el aviso —en otra solapa hablaría de algo que no está a la vista—,
+          salvo que esa solapa no se pueda ver: ahí es justamente lo que hay que decir. */}
+      {desdeAviso && (desdeAviso.tab === tabActiva || !veSolapa(desdeAviso.tab)) && (
+        <DesdeAviso
+          titulo={desdeAviso.titulo}
+          hacer={desdeAviso.hacer}
+          como={comoSeHace[desdeAviso.tab] ?? null}
+          mostrando={desdeAviso.tab === tabActiva ? nombresDelFoco : []}
+          total={totalDeLaSolapa}
+          onVerTodos={verTodoSinFoco}
+          onCerrar={cerrarDesdeAviso}
+          sinAccesoA={veSolapa(desdeAviso.tab) ? null : NOMBRE_SOLAPA[desdeAviso.tab]}
+        />
+      )}
+
       {/* TABLA DE OPERARIOS */}
       {tabActiva === "operarios" && (
         <div className="rounded-lg border bg-card">
@@ -638,8 +864,15 @@ export default function RecursosPage() {
             <p className="text-sm text-muted-foreground mt-1">Gestión del recurso humano</p>
           </div>
 
+          {focoOperarios && !api.loading && operarios.length > 0 && operariosVisibles.length === 0 ? (
+            <SinResultados
+              que="personas"
+              filtros={[{ etiqueta: "Solo lo del aviso del plan", onSacar: verTodoSinFoco }]}
+              motivo="Las personas que nombraba el aviso ya no están en la lista: puede que las hayan dado de baja después de calcular el plan."
+            />
+          ) : (
           <SharedOperatorsList
-            operarios={operarios}
+            operarios={operariosVisibles}
             isLoading={api.loading}
             onView={handleVerOperario}
             onDelete={editaPersonas ? (op) => {
@@ -647,6 +880,7 @@ export default function RecursosPage() {
               setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
             } : undefined}
           />
+          )}
         </div>
       )}
 
@@ -661,9 +895,10 @@ export default function RecursosPage() {
                 <ExportarMenu
                   titulo="Recurso maquinaria"
                   archivo="recurso_maquinaria"
-                  filas={maquinas}
+                  filas={maquinasVisibles}
                   columnas={columnasMaquinas}
                   disabled={api.loading}
+                  filtros={() => (focoMaquinas ? ["Solo las del aviso del plan"] : [])}
                 />
               </div>
             </div>
@@ -704,7 +939,15 @@ export default function RecursosPage() {
             </div>
           )}
 
-          {!api.loading && maquinas.length > 0 && (
+          {!api.loading && maquinas.length > 0 && maquinasVisibles.length === 0 && (
+            <SinResultados
+              que="máquinas"
+              filtros={[{ etiqueta: "Solo las del aviso del plan", onSacar: verTodoSinFoco }]}
+              motivo="Las máquinas que nombraba el aviso ya no están en la lista: puede que las hayan borrado después de calcular el plan."
+            />
+          )}
+
+          {!api.loading && maquinasVisibles.length > 0 && (
             <>
               {/* Vista Desktop - Tabla */}
               <div className="hidden md:block overflow-x-auto">
@@ -732,11 +975,12 @@ export default function RecursosPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {maquinas.map((maquina) => (
+                    {maquinasVisibles.map((maquina) => (
                       <React.Fragment key={maquina.id}>
                       <tr
                         id={`maquina-${maquina.id}`}
-                        className={`hover:bg-muted/50 transition-colors ${coberturaListo && (rangosPorMaquina.get(maquina.id)?.length ?? 0) === 0 ? "bg-amber-50/40" : ""}`}
+                        data-fila={`maquina-${maquina.id}`}
+                        className={`hover:bg-muted/50 transition-colors ${esFoco("maquinas", maquina.id) ? RESALTE_FOCO : coberturaListo && (rangosPorMaquina.get(maquina.id)?.length ?? 0) === 0 ? "bg-amber-50/40" : ""}`}
                       >
                         <td className="px-4 py-2 text-sm font-medium">{maquina.nombre}</td>
                         <td className="px-4 py-2 text-sm">{maquina.cod_maquina || "-"}</td>
@@ -842,15 +1086,7 @@ export default function RecursosPage() {
                       {maquinaAbierta === maquina.id && coberturaListo && editaRangos && (
                         <tr>
                           <td colSpan={conoceEstado ? 6 : 5} className="p-0">
-                            <EditorRangosDe
-                              tipo="maquinaria"
-                              id={maquina.id}
-                              nombre={maquina.nombre}
-                              actuales={rangosPorMaquina.get(maquina.id) ?? []}
-                              catalogo={catalogoRangos}
-                              sugeridos={rangosSugeridos ?? undefined}
-                              onGuardado={() => { setMaquinaAbierta(null); setRangosSugeridos(null); recargarCobertura(); }}
-                            />
+                            {editorRangosDeMaquina(maquina)}
                           </td>
                         </tr>
                       )}
@@ -862,8 +1098,12 @@ export default function RecursosPage() {
 
               {/* Vista Mobile - Tarjetas */}
               <div className="md:hidden divide-y">
-                {maquinas.map((maquina) => (
-                  <div key={maquina.id} className="p-4 hover:bg-muted/50 transition-colors">
+                {maquinasVisibles.map((maquina) => (
+                  <div
+                    key={maquina.id}
+                    data-fila={`maquina-${maquina.id}`}
+                    className={`p-4 hover:bg-muted/50 transition-colors ${esFoco("maquinas", maquina.id) ? RESALTE_FOCO : ""}`}
+                  >
                     <div className="mb-3">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <h3 className="font-semibold text-base min-w-0 break-words">{maquina.nombre}</h3>
@@ -904,7 +1144,22 @@ export default function RecursosPage() {
                             Sin rango
                           </Badge>
                         )}
+                        {/* En el teléfono no había forma de cambiar los rangos: el editor
+                            vivía sólo en la tabla de escritorio, y el aviso del plan que
+                            trae acá ("agregale OFICIAL CNC") no se podía cumplir. */}
+                        {coberturaListo && editaRangos && (
+                          <button
+                            type="button"
+                            onClick={() => setMaquinaAbierta(maquinaAbierta === maquina.id ? null : maquina.id)}
+                            className="ml-2 text-xs font-medium text-blue-700 underline underline-offset-2"
+                          >
+                            {maquinaAbierta === maquina.id ? "Cerrar" : "Cambiar"}
+                          </button>
+                        )}
                       </div>
+                      {maquinaAbierta === maquina.id && coberturaListo && editaRangos && (
+                        <div className="mt-2 -mx-4 border-y">{editorRangosDeMaquina(maquina)}</div>
+                      )}
                       <div className="mt-2 text-sm">
                         <span className="text-muted-foreground">Limitación:</span>
                         <span className="ml-2 font-medium">
@@ -1021,20 +1276,27 @@ export default function RecursosPage() {
             </div>
           </div>
 
-          {api.loading && (
+          {(api.loading || !procesosCargados) && (
             <div className="flex items-center justify-center py-12">
               <Spinner className="h-8 w-8" />
               <span className="ml-3 text-muted-foreground">Cargando procesos...</span>
             </div>
           )}
 
-          {!api.loading && procesosFiltrados.length === 0 && (
-            <div className="py-12 text-center text-muted-foreground">
-              <p className="text-lg">No se encontraron procesos</p>
-            </div>
+          {/* Vacía por un filtro: se dice cuál, por qué y cómo sacarlo. Era un «No se
+              encontraron procesos» a secas, y llegando desde un aviso con el buscador
+              cargado con un nombre que no coincidía se leía como una pantalla rota. */}
+          {!api.loading && procesosCargados && procesosFiltrados.length === 0 && (
+            <SinResultados
+              que="procesos"
+              filtros={filtrosProcesos}
+              motivo={focoProcesosPerdido
+                ? "El proceso que nombraba el aviso ya no está en el catálogo: puede que lo hayan borrado o reemplazado después de calcular el plan."
+                : null}
+            />
           )}
 
-          {!api.loading && procesosFiltrados.length > 0 && (
+          {!api.loading && procesosCargados && procesosFiltrados.length > 0 && (
             <>
               {/* Vista Desktop - Tabla */}
               <div className="hidden md:block overflow-x-auto">
@@ -1063,7 +1325,11 @@ export default function RecursosPage() {
                       const sinNadie = problema === "nadie";
                       return (
                       <React.Fragment key={proceso.id}>
-                      <tr id={`proceso-${proceso.id}`} className={`hover:bg-muted/50 transition-colors ${enUso && sinNadie ? "bg-rose-50/50" : enUso && sinRango ? "bg-amber-50/40" : ""}`}>
+                      <tr
+                        id={`proceso-${proceso.id}`}
+                        data-fila={`proceso-${proceso.id}`}
+                        className={`hover:bg-muted/50 transition-colors ${esFoco("procesos", proceso.id) ? RESALTE_FOCO : enUso && sinNadie ? "bg-rose-50/50" : enUso && sinRango ? "bg-amber-50/40" : ""}`}
+                      >
                         <td className="px-4 py-2 text-sm font-medium">{proceso.nombre}</td>
                         {/* La pregunta que importa de un proceso no es qué rangos tiene
                             cargados sino si hay alguien que pueda hacerlo. Se puede tener
@@ -1159,26 +1425,7 @@ export default function RecursosPage() {
                       {procesoAbierto === proceso.id && coberturaListo && (editaRangos || editaProcesos) && (
                         <tr>
                           <td colSpan={4} className="p-0">
-                            {editaRangos && <EditorRangosDe
-                              tipo="proceso"
-                              id={proceso.id}
-                              nombre={proceso.nombre}
-                              actuales={cob?.rangos ?? []}
-                              catalogo={catalogoRangos}
-                              sugeridos={rangosSugeridos ?? undefined}
-                              onGuardado={() => { setProcesoAbierto(null); setRangosSugeridos(null); recargarCobertura(); }}
-                            />}
-                            {/* Quién puede hacerlo y en qué máquina son las dos mitades
-                                de la misma pregunta: hacen falta las dos para que el
-                                planificador pueda reservar. Van juntas, en la misma
-                                fila desplegada. */}
-                            {editaProcesos && <EditorMaquinasDe
-                              id={proceso.id}
-                              nombre={proceso.nombre}
-                              actuales={cob?.maquinas ?? []}
-                              catalogo={maquinas}
-                              onGuardado={() => { setProcesoAbierto(null); recargarCobertura(); }}
-                            />}
+                            {editoresDeProceso(proceso)}
                           </td>
                         </tr>
                       )}
@@ -1192,7 +1439,11 @@ export default function RecursosPage() {
               {/* Vista Mobile - Tarjetas */}
               <div className="md:hidden divide-y">
                 {paginatedProcesos.map((proceso) => (
-                  <div key={proceso.id} className="p-4 hover:bg-muted/50 transition-colors">
+                  <div
+                    key={proceso.id}
+                    data-fila={`proceso-${proceso.id}`}
+                    className={`p-4 hover:bg-muted/50 transition-colors ${esFoco("procesos", proceso.id) ? RESALTE_FOCO : ""}`}
+                  >
                     <div className="mb-3">
                       <h3 className="font-semibold text-base mb-2">{proceso.nombre}</h3>
                       {proceso.descripcion && (
@@ -1201,6 +1452,26 @@ export default function RecursosPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* Quién lo hace y en qué máquina, también en el teléfono. Hasta ahora
+                        los editores vivían sólo en la tabla de escritorio: el aviso del plan
+                        traía hasta acá y no había con qué hacer lo que pedía. */}
+                    {coberturaListo && (editaRangos || editaProcesos) && (
+                      <div className="mb-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => setProcesoAbierto(procesoAbierto === proceso.id ? null : proceso.id)}
+                        >
+                          <Layers className="h-4 w-4 mr-1" />
+                          {procesoAbierto === proceso.id ? "Cerrar" : "Quién puede hacerlo y en qué máquina"}
+                        </Button>
+                        {procesoAbierto === proceso.id && (
+                          <div className="mt-2 -mx-4 border-y">{editoresDeProceso(proceso)}</div>
+                        )}
+                      </div>
+                    )}
 
                     {editaProcesos && (
                     <div className="flex gap-2">

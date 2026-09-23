@@ -121,8 +121,8 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
 
     return (
         <div className="p-4 bg-muted/20 border-t">
-            <div className="flex items-start justify-between gap-4 mb-3">
-                <div>
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 mb-3">
+                <div className="min-w-0 flex-1 basis-60">
                     <p className="text-sm font-semibold">En qué recurso maquinaria se hace este proceso</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                         El planificador reserva uno de estos. Si no cargás ninguno, lo sigue

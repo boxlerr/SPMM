@@ -224,24 +224,37 @@ export interface Diagnostico {
  * había que salir, encontrar la pantalla, elegir la pestaña, buscar el proceso
  * entre 414 y recién ahí desplegar la fila. Ahora el link deja todo eso hecho.
  *
- * Con UN objetivo se apunta a la fila concreta (`foco`) y se precarga el buscador
- * para que caiga en la primera página. Con varios solo se abre la pestaña: llevar
- * a una de las tres soldadoras haría creer que el aviso habla de esa sola.
+ * El `foco` va POR ID y nada más. Hasta el 23/09/2026 viajaba también el nombre
+ * (`q`) para precargar el buscador de Recursos, y ese nombre es el del aviso, que el
+ * backend escribe «bonito» (`_bonito`: «Preparación de pintura», con tilde) mientras
+ * el catálogo lo tiene como vino del legacy («PREPARACION DE PINTURA»). El buscador
+ * no encontraba nada y Lucas caía en una pantalla que decía «No se encontraron
+ * procesos» y nada más. Ahora Recursos filtra por el id, que no se escribe de dos
+ * maneras.
+ *
+ * Con VARIOS objetivos (las tres fresadoras) van todos: Recursos muestra esos y
+ * nada más, con un botón para ver el resto. Antes se abría la pestaña entera y
+ * había que encontrar las tres entre treinta máquinas.
+ *
+ * `aviso` y `hacer` son el título del aviso y la solución: Recursos los muestra
+ * arriba, para que al llegar se lea qué se vino a hacer. Sin eso, una solución
+ * como «dale el rango TERCERIZADO» terminaba en una lista de personas sin ninguna
+ * pista de a quién ni para qué.
  */
-function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: DiagnosticoSolucion["objetivo"]): string | null {
-    const d = (donde || "").toLowerCase();
-    if (!d.startsWith("recursos")) return null;
-
-    // "operario" sigue estando porque el backend se despliega a mano y a destiempo
-    // del frontend: hasta que salga el deploy, los avisos llegan con el nombre
-    // viejo y el link tiene que andar igual.
-    const pestania = d.includes("maquinaria") ? "maquinas"
-        : d.includes("proceso") ? "procesos"
-            : (d.includes("humano") || d.includes("operario")) ? "operarios"
-                : null;
+function enlaceDe(
+    donde: string,
+    accion?: DiagnosticoAccion | null,
+    objetivo?: DiagnosticoSolucion["objetivo"],
+    contexto?: { titulo?: string; texto?: string },
+): string | null {
+    const pestania = pestaniaDe(donde);
     if (!pestania) return null;
 
     const params = new URLSearchParams({ tab: pestania });
+    // Sin los ** del resaltado: allá es texto plano.
+    const limpio = (t?: string) => (t || "").replace(/\*\*/g, "").trim();
+    if (limpio(contexto?.titulo)) params.set("aviso", limpio(contexto?.titulo));
+    if (limpio(contexto?.texto)) params.set("hacer", limpio(contexto?.texto));
 
     // Sin acción no había a dónde apuntar y el link caía en la lista entera. El
     // `objetivo` es lo mismo pero sin botón: dice a qué fila ir, no qué cambiar.
@@ -255,7 +268,6 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
             (clave === "operario" && pestania === "operarios");
         if (coincide) {
             params.set("foco", String(objetivo.id));
-            if (objetivo.nombre) params.set("q", objetivo.nombre);
             // Los rangos propuestos viajan en el link para que el editor de Recursos
             // se abra con ellos ya tildados: llegar y guardar, sin adivinar cuál era.
             if (objetivo.rangos?.length) params.set("rangos", objetivo.rangos.join(","));
@@ -271,7 +283,7 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
             ? [{ id: accion.id, nombre: accion.nombre }]
             : [];
 
-    if (accion && objetivos.length === 1) {
+    if (accion && objetivos.length > 0) {
         const clave = accion.tipo === "maquinaria" ? "maquina"
             : accion.tipo === "skill_nativa" ? "operario"
                 : "proceso";
@@ -282,17 +294,52 @@ function enlaceDe(donde: string, accion?: DiagnosticoAccion | null, objetivo?: D
             (clave === "proceso" && pestania === "procesos") ||
             (clave === "operario" && pestania === "operarios");
         if (coincide) {
-            params.set("foco", String(objetivos[0].id));
-            if (objetivos[0].nombre) params.set("q", objetivos[0].nombre);
+            params.set("foco", objetivos.map((o) => o.id).join(","));
             // `rangos` de la acción es el conjunto FINAL (lo que ya tenía más lo
             // nuevo), justo lo que el editor necesita para quedar listo para guardar.
-            const rangos = objetivos[0].rangos ?? accion.rangos;
-            if (rangos?.length) params.set("rangos", rangos.join(","));
+            //
+            // Con varios objetivos cada uno tiene su conjunto final, y al link va lo
+            // que tienen EN COMÚN: el editor de Recursos suma los propuestos a lo que
+            // la máquina ya tiene, así que la intersección nunca le propone a una
+            // máquina un rango que el aviso no le pedía (la unión sí: le pasaría a
+            // una el rango que otra ya tenía). La skill nativa no lleva rangos.
+            if (clave !== "operario") {
+                const conjuntos = objetivos.map((o) => o.rangos ?? accion.rangos ?? []);
+                const comunes = conjuntos.reduce<number[]>(
+                    (acc, c, i) => (i === 0 ? [...c] : acc.filter((r) => c.includes(r))),
+                    [],
+                );
+                if (comunes.length) params.set("rangos", comunes.join(","));
+            }
         }
     }
 
     return `/recursos?${params.toString()}`;
 }
+
+/**
+ * A qué solapa de Recursos apunta un "dónde", o null si la solución no se hace en
+ * Recursos ("Al elegir las OTs", "Operaciones › abrí la OT…", o vacío).
+ *
+ * "operario" sigue estando porque el backend se despliega a mano y a destiempo del
+ * frontend: hasta que salga el deploy, los avisos llegan con el nombre viejo y el
+ * link tiene que andar igual.
+ */
+function pestaniaDe(donde: string): "maquinas" | "procesos" | "operarios" | null {
+    const d = (donde || "").toLowerCase();
+    if (!d.startsWith("recursos")) return null;
+    return d.includes("maquinaria") ? "maquinas"
+        : d.includes("proceso") ? "procesos"
+            : (d.includes("humano") || d.includes("operario")) ? "operarios"
+                : null;
+}
+
+/** RF-24: qué sección de Recursos hay que poder ver para que el link sirva. */
+const SECCION_DE_PESTANIA = {
+    maquinas: "recursos_maquinaria",
+    procesos: "recursos_procesos",
+    operarios: "recursos_humano",
+} as const;
 
 /**
  * La acción que se puede probar "solo en este plan", venga o no con botón propio.
@@ -612,6 +659,19 @@ export function DiagnosticosPlan({
         accion.tipo === "skill_nativa"
             ? puedeSeccion("recursos_humano", "write")
             : puedeSeccion("recursos_rangos", "write");
+    /**
+     * El link a Recursos de una solución, o null si no hay a dónde ir.
+     *
+     * Null también cuando quien mira no puede ver esa solapa (RF-24): Recursos abre
+     * entonces la primera que sí puede ver, y un "Ir a arreglarlo" que termina en
+     * otra lista, sin lo que el aviso pedía, es la misma pantalla vacía con otro
+     * decorado. La solución se sigue leyendo; lo que no aparece es el botón.
+     */
+    const enlace = (d: Diagnostico, s: DiagnosticoSolucion) => {
+        const pestania = pestaniaDe(s.donde);
+        if (!pestania || !puedeSeccion(SECCION_DE_PESTANIA[pestania])) return null;
+        return enlaceDe(s.donde, s.accion, s.objetivo, { titulo: d.titulo, texto: s.texto });
+    };
     /**
      * Cuál de los botones índigo disparó el recálculo que está corriendo.
      *
@@ -1119,9 +1179,7 @@ export function DiagnosticosPlan({
                         const abierta = abiertos.has(clave);
                         const iAplicada = d.soluciones.findIndex((_, i) => aplicadas.has(`${d.id}-${i}`));
                         const solAplicada = iAplicada >= 0 ? d.soluciones[iAplicada] : null;
-                        const linkResuelto = solAplicada
-                            ? enlaceDe(solAplicada.donde, solAplicada.accion, solAplicada.objetivo)
-                            : null;
+                        const linkResuelto = solAplicada ? enlace(d, solAplicada) : null;
                         return (
                             <li
                                 key={clave}
@@ -1284,7 +1342,7 @@ export function DiagnosticosPlan({
                             ? Number(confirmando.slice(confirmando.lastIndexOf("-") + 1))
                             : -1;
                         const armada = iArmada >= 0 ? d.soluciones[iArmada] : null;
-                        const link = sol ? enlaceDe(sol.donde, sol.accion, sol.objetivo) : null;
+                        const link = sol ? enlace(d, sol) : null;
                         const otras = d.soluciones.length - 1;
 
                         // El backend ya manda el impacto masticado ("3 procesos · 2 OT · 4h").
@@ -1738,7 +1796,7 @@ export function DiagnosticosPlan({
                                                     if (idx === iSol) return null;
                                                     const clave = `${d.id}-${idx}`;
                                                     const hechaEsta = aplicadas.has(clave);
-                                                    const linkEste = enlaceDe(s.donde, s.accion, s.objetivo);
+                                                    const linkEste = enlace(d, s);
                                                     // Los dos caminos, también acá: desplegada la tarjeta
                                                     // salen TODAS las soluciones, y si el botón de probar
                                                     // solo estuviera en la plegada, las alternativas ("O

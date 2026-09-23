@@ -128,8 +128,8 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, s
 
     return (
         <div className="p-4 bg-muted/20 border-t">
-            <div className="flex items-start justify-between gap-4 mb-3">
-                <div>
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 mb-3">
+                <div className="min-w-0 flex-1 basis-60">
                     <p className="text-sm font-semibold">
                         Rangos que {tipo === "maquinaria" ? "pueden usar este recurso maquinaria" : "habilitan este proceso"}
                     </p>
