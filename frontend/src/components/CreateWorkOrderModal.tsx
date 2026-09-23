@@ -25,6 +25,9 @@ import { ProcesosEditor, pasosSinMinutos, SIN_MAQUINA, ProcesoRow } from "@/comp
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeArticulo, usePlanosDeOrden } from "@/hooks/usePlanos";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { aNumero } from "@/lib/exportar";
+import { archivoDeOT, seccionesDeOT, type DatosDeOT } from "@/lib/exportes/ot";
 import {
     CeldaConsumido,
     FilaDeConsumo,
@@ -1194,6 +1197,61 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         }
     };
 
+    /**
+     * Lo que sale al exportar la OT (RF-22): lo que está en el formulario AHORA, igual
+     * que «Imprimir» —sirve para una OT guardada y para un borrador—. De cada paso va la
+     * preselección y, si no tiene, lo que asignó el planificador.
+     */
+    const datosParaExportar = (): DatosDeOT => {
+        const art = articulos.find(a => a.id.toString() === generalData.articulo_id);
+        const procName = (id: string) => procesosOptions.find(p => p.id.toString() === id)?.nombre || "";
+        const maqName = (id: string) =>
+            id === SIN_MAQUINA ? "No lleva máquina (a mano)" : maquinarias.find(m => m.id.toString() === id)?.nombre || "";
+        const opName = (id: string) => {
+            const o = operarios.find(op => op.id.toString() === id);
+            return o ? capitalizeName(`${o.nombre} ${o.apellido ?? ""}`) : "";
+        };
+        const pasada = (idOtp?: number): any => (orderToEdit?.procesos ?? []).find((p: any) => p.id === idOtp);
+        return {
+            numero: String(orderToEdit?.id_otvieja || orderToEdit?.id || "Nueva"),
+            cliente: clientes.find(c => c.id.toString() === generalData.cliente_id)?.nombre || generalData.cliente || "",
+            codigo: art?.cod_articulo ?? "",
+            articulo: art?.descripcion ?? "",
+            prioridad: prioridades.find(p => p.id.toString() === generalData.prioridad_id)?.nombre ?? "",
+            sector: sectores.find(x => x.id.toString() === generalData.sector_id)?.nombre ?? "",
+            cantidad: detailsData.cantidad,
+            nPedido: generalData.n_pedido,
+            fechaEntrada: generalData.fecha_entrada,
+            fechaPrometida: generalData.fecha_prometida,
+            fechaEntrega: generalData.fecha_entrega,
+            pedidoPor: generalData.requerido_por,
+            aprobadoPor: generalData.aprobado_por,
+            notaDeTaller: detailsData.observaciones,
+            descripcion: generalData.descripcion,
+            procesos: processes.filter(p => p.incluido && p.proceso_id).map((p, i) => {
+                const plan = p.id_otp ? planificado[p.id_otp] : undefined;
+                return {
+                    paso: i + 1,
+                    proceso: procName(p.proceso_id),
+                    maquina: (p.maquina_id ? maqName(p.maquina_id) : "") || plan?.maquinaria || "",
+                    recursoHumano: (p.operario_id ? opName(p.operario_id) : "") || plan?.operario
+                        || capitalizeName(pasada(p.id_otp)?.operario_nombre) || "",
+                    minutos: aNumero(p.tiempo),
+                    enSimultaneo: aNumero(p.cant_operarios),
+                    estado: pasada(p.id_otp)?.estado_proceso?.descripcion ?? "",
+                };
+            }),
+            materias: materiasPrimas.map(mp => ({
+                codigo: mp.codigo,
+                descripcion: mp.descripcion,
+                proveedor: mp.proveedor || "",
+                cantidad: mp.cantidad,
+                unidad: mp.unidad,
+                disponible: mp.disponible,
+            })),
+        };
+    };
+
     // "Imprimir OT": arma una vista imprimible (ventana nueva) con los datos de la
     // orden + procesos + materias primas, y dispara el diálogo de impresión del navegador.
     // Usa el estado actual del formulario, así sirve tanto para una OT existente como para un borrador.
@@ -2326,6 +2384,24 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         <Printer className="w-4 h-4" />
                                         <span className="hidden sm:inline">Imprimir</span>
                                     </Button>
+                                    {/* RF-22: la misma OT como archivo. El PDF es la hoja de
+                                        «Imprimir»; Excel y CSV traen la orden, los procesos y las
+                                        materias primas por separado. */}
+                                    {(() => {
+                                        const numero = String(orderToEdit?.id_otvieja || orderToEdit?.id || "Nueva");
+                                        return (
+                                            <ExportarMenu
+                                                titulo={`Orden de trabajo N° ${numero}`}
+                                                archivo={archivoDeOT({ numero })}
+                                                secciones={() => seccionesDeOT(datosParaExportar())}
+                                                filtros={null}
+                                                rotulo="Exportar esta orden, como está en pantalla"
+                                                pdf={async () => (await import("@/lib/exportes/otPdf")).pdfDeOT(datosParaExportar())}
+                                                align="start"
+                                                className="h-10 px-3 sm:px-4"
+                                            />
+                                        );
+                                    })()}
                                 </div>
                                 <div className="flex gap-2 sm:gap-3 ml-auto">
                                     {activeTab !== "general" && (
