@@ -226,6 +226,14 @@ MATRIZ = [
     ("GET", "/ordenes/1/pausas", OK, OK, OK),
     ("POST", "/ordenes/1/pausar", OK, OK, NO),
     ("POST", "/ordenes/1/reanudar", OK, OK, NO),
+    # RF-06: la asistencia y los tiempos de la ficha de la persona. Se leen con Recursos
+    # (el supervisor) o con Operaciones (el operario); cargar una ausencia es tocar a la
+    # persona, la solapa Recurso humano.
+    ("GET", "/operarios/1/ausencias", OK, OK, OK),
+    ("POST", "/operarios/1/ausencias", OK, NO, NO),
+    ("PUT", "/operarios/1/ausencias/2", OK, NO, NO),
+    ("DELETE", "/operarios/1/ausencias/2", OK, NO, NO),
+    ("GET", "/operarios/1/tiempos", OK, OK, OK),
     # el plan y el planificador
     ("GET", "/planificacion", OK, OK, OK),
     ("POST", "/planificar", OK, OK, NO),
@@ -396,6 +404,8 @@ PANTALLAS = {
         "/procesos", "/procesos/quien-puede", "/operarios", "/operarios/1", "/maquinarias",
         "/rangos", "/rangos/procesos", "/rangos/maquinarias", "/rangos/cobertura",
         "/articulos", "/clientes", "/sectores", "/prioridades", "/piezas",
+        # RF-06: la ficha de la persona (se abre también desde Operaciones)
+        "/operarios/1/ausencias", "/operarios/1/tiempos",
     ],
     "planos": ["/planos/biblioteca", "/planos/1", "/planos/1/archivo", "/articulos"],
     "recursos": [
@@ -403,6 +413,8 @@ PANTALLAS = {
         "/rangos/1/detalle", "/rangos/procesos", "/rangos/maquinarias", "/rangos/cobertura",
         "/sectores", "/prioridades",
         "/planificacion",  # lo que tiene asignado cada persona
+        # RF-06: la asistencia y los tiempos de su ficha
+        "/operarios/1/ausencias", "/operarios/1/tiempos",
         # (la solapa Planos va por el área Planos, igual que la pantalla)
     ],
     "clientes": ["/clientes", "/clientes/1"],
@@ -451,7 +463,8 @@ async def test_sin_ninguna_area_solo_se_leen_catalogos_y_la_campanita(espejo):
                     update(Usuario).where(Usuario.id_usuario == MATIAS).values(rol="nuevo"))
     for ruta, esperado in (("/ordenes", NO), ("/planificacion", NO), ("/planos/1", NO),
                            ("/incidencias", NO), ("/api/dashboard/estadisticas", NO),
-                           ("/clientes", NO), ("/procesos", OK), ("/maquinarias", OK),
+                           ("/clientes", NO), ("/operarios/1/ausencias", NO),
+                           ("/procesos", OK), ("/maquinarias", OK),
                            ("/notificaciones", OK)):
         r = await _pedir(espejo, "GET", ruta, MATIAS, "nuevo")
         assert r.status_code == esperado, ruta

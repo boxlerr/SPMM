@@ -27,6 +27,7 @@ from backend.presentation.PiezaAPI import router as pieza_router
 from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
 from backend.presentation.ConsumoMaterialAPI import router as consumo_material_router
 from backend.presentation.PausaAPI import router as pausa_router
+from backend.presentation.AsistenciaAPI import router as asistencia_router
 from backend.presentation.RangoAPI import router as rango_router
 from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
@@ -277,6 +278,9 @@ app.include_router(consumo_material_router, tags=["consumos_material"], dependen
 # RF-03: pausar y reanudar una OT o un paso, con motivo y quién. Tabla propia de SPMM
 # (orden_trabajo_pausa); no le cambia el estado a ningún paso.
 app.include_router(pausa_router, tags=["pausas"], dependencies=_protegido("pausas"))
+# RF-06: la asistencia (ausencias con fecha) y el tiempo efectivo de cada persona, en su
+# ficha. Tabla propia de SPMM (operario_ausencia); no le cambia nada al planificador.
+app.include_router(asistencia_router, tags=["asistencia"], dependencies=_protegido("asistencia"))
 app.include_router(rango_router, tags=["rangos"], dependencies=_protegido("rangos"))
 app.include_router(auditoria_router, tags=["auditoria"], dependencies=_protegido("auditoria"))
 

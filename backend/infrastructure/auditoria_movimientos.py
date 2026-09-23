@@ -121,6 +121,9 @@ SUBENTIDAD = {
     # «/piezas/5/stock-minimo» (RF-14): cambiarle el mínimo a una materia prima no es
     # editarla —sus datos son del sistema viejo—, es decidir desde cuándo avisar.
     "stock-minimo": "stock mínimo",
+    # «/operarios/5/ausencias» (RF-06): cargarle una ausencia a alguien no es editar a
+    # la persona. La frase buena, con los días y el motivo, la deja el endpoint.
+    "ausencias": "ausencias",
     # /permisos/roles/..., /permisos/usuarios/..., /permisos/secciones/...
     "roles": "de un rol",
     "usuarios": "de una persona",

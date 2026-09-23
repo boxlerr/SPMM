@@ -60,6 +60,11 @@ export default function CambiarEstado({ operario, open, onClose, onSuccess, clea
           telefono: operario.telefono || null,
           celular: operario.celular || null,
           dni: operario.dni || null,
+          // RF-06: pasar a Ausente abre una ausencia con la fecha de hoy, y el «motivo
+          // del cambio» queda como su observación. Un backend de antes lo ignora.
+          ...(estadoCambio && !nuevoEstadoBoolean && motivoCambio.trim()
+            ? { ausencia_observacion: motivoCambio.trim().slice(0, 300) }
+            : {}),
         }),
       });
 

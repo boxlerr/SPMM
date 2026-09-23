@@ -7,6 +7,7 @@ from backend.commons.exceptions.InfrastructureException import InfrastructureExc
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.infrastructure.db import SessionLocal
 from backend.commons.loggers.logger import logger
+from backend.core.security import get_current_user
 
 app = FastAPI()
 router = APIRouter()
@@ -71,12 +72,15 @@ async def obtener_operario(id: int, db=Depends(get_db)):
 
 
 # 🔹 PUT /operarios/{id}
+#    Con el usuario del token: si el guardado lo pasa de Activo a Ausente (o al revés),
+#    queda anotado quién y cuándo en su asistencia (RF-06).
 @router.put("/operarios/{id}")
-async def modificar_operario(id: int, operario_dto: OperarioRequestDTO, db=Depends(get_db)):
+async def modificar_operario(id: int, operario_dto: OperarioRequestDTO, db=Depends(get_db),
+                             usuario: dict = Depends(get_current_user)):
     try:
         logger.info(f"API - Inicio PUT /operarios/{id}")
         service = OperarioService(db)
-        return await service.modificarOperario(id, operario_dto)
+        return await service.modificarOperario(id, operario_dto, usuario=usuario)
     except BusinessException as e:
         # Aviso para el usuario (ej. la skill ya está cargada como nativa), no un error.
         raise HTTPException(status_code=422, detail=str(e))

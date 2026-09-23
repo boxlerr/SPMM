@@ -61,6 +61,8 @@ y como solapa de Recursos):
   Planos             /planos/*, /articulos
   Recursos           los catálogos y /planificacion (el plan de cada persona). La solapa
                      Planos de Recursos va por el área Planos, igual que la pantalla.
+  Recursos y         la ficha de la persona: /operarios/{id}/ausencias y
+  Operaciones        /operarios/{id}/tiempos (RF-06). La ficha se monta en las dos.
   Clientes           /clientes
   No conformidades   /incidencias/*
   Auditoría          /auditoria/movimientos, /auditoria/procesos, /auditoria/planificacion
@@ -232,6 +234,17 @@ POLITICAS: dict[str, Politica] = {
     # el estado a un paso—, así que pide la solapa Órdenes. Las pausas vigentes las leen
     # las listas de Operaciones (el cartel de «Pausada»), la ficha y el planificador.
     "pausas": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
+
+    # ── La ficha de la persona ──
+    # Su asistencia y el tiempo efectivo de sus pasos (RF-06). La ficha se abre desde
+    # Recursos y desde Operaciones, así que la leen las dos (regla 1). No va libre como
+    # el catálogo de personas: dice por qué faltó alguien —una enfermedad— y cuánto
+    # tardó en cada trabajo. Cargar, corregir o borrar una ausencia es tocar a la
+    # persona: pide la solapa Recurso humano, lo mismo que su Activo / Ausente.
+    "asistencia": Politica(
+        leer=(area("recursos"), area("operaciones")),
+        escribir=(seccion("recursos_humano", "write"),),
+    ),
     # El plan. Lo leen Operaciones (el Gantt) y Recursos (lo que tiene asignado cada
     # persona). Moverlo —planificar, borradores, confirmar, quitar órdenes, correr una
     # fecha— es del planificador.

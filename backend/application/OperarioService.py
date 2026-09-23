@@ -397,8 +397,12 @@ class OperarioService:
             "SELECT COUNT(*) FROM operario_proceso_skill WHERE id_operario = :o"), {"o": id})).scalar() or 0
         pasos = (await db.execute(_text(
             "SELECT COUNT(*) FROM orden_trabajo_proceso WHERE id_operario = :o"), {"o": id})).scalar() or 0
+        # RF-06: su historial de ausencias se va con ella (ON DELETE CASCADE). Se cuenta
+        # en un savepoint: sin la tabla da 0 y el aviso sale como antes.
+        from backend.infrastructure.AusenciaRepository import AusenciaRepository
+        ausencias = await AusenciaRepository(db).cuantas_sin_romper(id)
 
-        if (rangos or skills or pasos) and not forzar:
+        if (rangos or skills or pasos or ausencias) and not forzar:
             partes = []
             if pasos:
                 partes.append(f"{pasos} {'paso lo tiene' if pasos == 1 else 'pasos lo tienen'} "
@@ -407,6 +411,9 @@ class OperarioService:
                 partes.append(f"{rangos} {'categoría' if rangos == 1 else 'categorías'}")
             if skills:
                 partes.append(f"{skills} habilidades cargadas")
+            if ausencias:
+                partes.append(f"{ausencias} {'ausencia registrada' if ausencias == 1 else 'ausencias registradas'} "
+                              f"(se borran con la persona)")
             raise ConfirmacionRequeridaException(
                 f"{nombre} tiene " + ", ".join(partes) +
                 ". Si se fue del taller conviene marcarlo como NO disponible en vez de "
@@ -534,11 +541,15 @@ class OperarioService:
             raise InfrastructureException("Error al obtener Operario.") from e
 
     # 🔹 Modificar Operario
-    async def modificarOperario(self, id: int, operario_dto: OperarioRequestDTO):
+    async def modificarOperario(self, id: int, operario_dto: OperarioRequestDTO,
+                                usuario: dict | None = None):
         # Guardado ATÓMICO: datos del operario + skills + rangos se aplican en una
         # sola transacción con un único commit al final. Si algo falla a mitad de
         # camino (p. ej. la DB se desconecta), se hace rollback y NO queda un
         # guardado parcial: o se guarda todo o no se guarda nada.
+        #
+        # `usuario` (el del token) es para la asistencia (RF-06): si este guardado lo
+        # pasa de Activo a Ausente o al revés, queda anotado quién y cuándo.
         from sqlalchemy import select, delete
         from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
         from backend.domain.OperarioRango import OperarioRango
@@ -552,6 +563,9 @@ class OperarioService:
             skills_data = _normalizar_skills(skills_data)
         # 'rangos' no es columna de Operario: se sincroniza la tabla operario_rango aparte.
         rangos_data = nueva_data.pop("rangos", None)
+        # Tampoco es columna: es el «por qué» de un paso a Ausente (RF-06), y va a la
+        # ausencia que ese paso abre.
+        observacion_ausencia = nueva_data.pop("ausencia_observacion", None)
 
         if "hora_inicio" in nueva_data and isinstance(nueva_data["hora_inicio"], str):
             nueva_data["hora_inicio"] = time.fromisoformat(nueva_data["hora_inicio"])
@@ -594,8 +608,24 @@ class OperarioService:
             operario = result.scalar_one_or_none()
             if not operario:
                 return _NO_ENCONTRADO
+            estaba_disponible = operario.disponible
             for key, value in nueva_data.items():
                 setattr(operario, key, value)
+
+            # RF-06. Si este guardado lo pasó de Activo a Ausente (o al revés), queda
+            # anotado con la fecha: abre o cierra su ausencia. En su propio savepoint y
+            # sin levantar nunca: si la tabla de ausencias no está, la persona se guarda
+            # igual (ver AusenciaRepository).
+            if "disponible" in nueva_data:
+                from backend.application.IncidenciaProcesoService import nombre_de
+                from backend.application.PausaService import ahora_ar
+                from backend.infrastructure.AusenciaRepository import AusenciaRepository
+                id_usuario, nombre = nombre_de(usuario)
+                await AusenciaRepository(db).anotar_cambio_de_estado(
+                    id_operario=id, estaba_disponible=estaba_disponible,
+                    queda_disponible=operario.disponible, cuando=ahora_ar(),
+                    id_usuario=id_usuario, usuario=nombre, observacion=observacion_ausencia,
+                )
 
             # Las filas se reemplazan por completo: el form manda el estado final de
             # todas las habilidades (manuales + prioridad + apagadas), así que lo que no

@@ -622,6 +622,59 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "WHERE hasta IS NULL AND id_otp IS NOT NULL",
         ],
     ),
+    (
+        # RF-06. Una tabla nueva y nada más: ninguna columna de `operario`, que se lee en
+        # cada pantalla, así que si esto no llegara a aplicarse las personas se siguen
+        # leyendo igual. Lo único que no anda es la solapa Asistencia de la ficha; el
+        # Activo / Ausente se sigue guardando (la anotación va en un savepoint).
+        "2026-09-23_ausencias_de_operarios",
+        [
+            "CREATE TABLE IF NOT EXISTS operario_ausencia ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "id_operario INTEGER NOT NULL REFERENCES operario (id) ON DELETE CASCADE, "
+            "desde DATE NOT NULL, "
+            "vuelve DATE, "
+            "motivo VARCHAR(20), "
+            "observacion VARCHAR(300), "
+            "origen VARCHAR(10) NOT NULL DEFAULT 'CARGA', "
+            "cargada_en TIMESTAMP NOT NULL, "
+            "id_usuario_carga INTEGER, "
+            "usuario_carga VARCHAR(120), "
+            "cerrada_en TIMESTAMP, "
+            "id_usuario_cierre INTEGER, "
+            "usuario_cierre VARCHAR(120), "
+            "CONSTRAINT ck_ausencia_motivo CHECK (motivo IS NULL OR motivo IN ('VACACIONES', "
+            "'ENFERMEDAD', 'LICENCIA', 'PERSONAL', 'OTRO')), "
+            "CONSTRAINT ck_ausencia_origen CHECK (origen IN ('ESTADO', 'CARGA')), "
+            "CONSTRAINT ck_ausencia_vuelve_despues CHECK (vuelve IS NULL OR vuelve >= desde), "
+            "CONSTRAINT ck_ausencia_carga_con_fin CHECK (origen = 'ESTADO' OR vuelve IS NOT NULL))",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE operario_ausencia IS "
+            "'Ausencias de cada persona (RF-06): las que abre y cierra el Activo / Ausente de la "
+            "ficha y las que se cargan a mano (un día o un período). La escribe SPMM; el sync no "
+            "la mira y el planificador tampoco: sigue usando operario.disponible.'",
+            "COMMENT ON COLUMN operario_ausencia.desde IS "
+            "'Primer día que faltó. Día del taller, sin hora ni zona.'",
+            "COMMENT ON COLUMN operario_ausencia.vuelve IS "
+            "'Primer día que ya NO falta (medio abierto: faltó de desde a vuelve menos un día). "
+            "NULL = sigue ausente, sólo en origen ESTADO. Igual a desde = volvió el mismo día: "
+            "queda el registro y suma cero días.'",
+            "COMMENT ON COLUMN operario_ausencia.motivo IS "
+            "'VACACIONES, ENFERMEDAD, LICENCIA, PERSONAL u OTRO, o NULL si no se dijo. Lista "
+            "cerrada para poder contar por motivo; el detalle va en observacion.'",
+            "COMMENT ON COLUMN operario_ausencia.origen IS "
+            "'ESTADO: la abrió pasar a la persona a Ausente y la cierra volverla a Activo. "
+            "CARGA: la cargó alguien a mano, con su fin.'",
+            "COMMENT ON COLUMN operario_ausencia.usuario_carga IS "
+            "'Nombre y apellido de quien la cargó (o la pasó a Ausente), tomado del token y "
+            "congelado. NULL = no se registró; nunca un autor inventado. Igual usuario_cierre.'",
+            "CREATE INDEX IF NOT EXISTS ix_ausencia_operario "
+            "ON operario_ausencia (id_operario, desde)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_ausencia_abierta "
+            "ON operario_ausencia (id_operario) "
+            "WHERE vuelve IS NULL",
+        ],
+    ),
 ]
 
 

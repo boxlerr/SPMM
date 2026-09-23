@@ -57,6 +57,9 @@ from backend.domain.ConsumoMaterial import ConsumoMaterial
 # Las pausas (RF-03) cuelgan de la OT con ON DELETE CASCADE: borrar una OT que alguna vez
 # se pausó tiene que andar, y eso sólo se ve con la tabla creada.
 from backend.domain.PausaOrden import PausaOrden
+# Las ausencias (RF-06) cuelgan de la persona con ON DELETE CASCADE: borrar a alguien que
+# alguna vez faltó tiene que andar, y eso sólo se ve con la tabla creada.
+from backend.domain.AusenciaOperario import AusenciaOperario
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -87,6 +90,7 @@ TEST_TABLES = [
     OrdenTrabajoPieza.__table__,
     ConsumoMaterial.__table__,
     PausaOrden.__table__,
+    AusenciaOperario.__table__,
 ]
 
 

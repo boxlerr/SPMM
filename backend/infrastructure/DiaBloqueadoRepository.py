@@ -96,3 +96,28 @@ class DiaBloqueadoRepository:
             await self.db.rollback()
             logger.error(f"Repository - Error al desbloquear {fecha_str}: {e}")
             raise InfrastructureException("Error al quitar el día no laborable.") from e
+
+
+async def feriados_sin_romper(db) -> list[date]:
+    """Los días bloqueados, para una cuenta que corre adentro de OTRO pedido.
+
+    `listar()` crea la tabla y hace COMMIT, que está bien para la pantalla del
+    calendario pero no para quien sólo necesita leerlos en medio de lo suyo (los días
+    laborables de una ausencia, el tiempo efectivo de un paso — RF-06). Esto sólo lee,
+    en un savepoint: si la tabla no está, devuelve nada y el pedido sigue.
+    """
+    try:
+        async with db.begin_nested():
+            filas = (await db.execute(text("SELECT fecha FROM dia_bloqueado"))).all()
+        salida = []
+        for (f,) in filas:
+            if isinstance(f, datetime):
+                salida.append(f.date())
+            elif isinstance(f, date):
+                salida.append(f)
+            elif f:
+                salida.append(date.fromisoformat(str(f)[:10]))
+        return salida
+    except Exception as e:
+        logger.warning(f"Repository - No se pudieron leer los días bloqueados: {e}")
+        return []
