@@ -60,6 +60,13 @@ function formatDate(dateStr?: string) {
     }
 }
 
+/**
+ * Suspendida en el sistema viejo. Hay OT en el Historial que no terminaron: el viejo las
+ * saca de pendientes por estar suspendidas y acá quedan fuera del plan igual, pero decir
+ * «Finalizada» sobre ellas era mentir (15751, 15779, 15809…).
+ */
+const estaSuspendida = (o: WorkOrder) => Number(o.suspendida) === 1;
+
 interface CompletedWorkOrdersListProps {
     orders: WorkOrder[];
     onEdit: (order: WorkOrder) => void;
@@ -263,9 +270,18 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
                     <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
                 </td>
                 <td className="px-3 py-3 text-center">
-                    <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">
-                        Finalizada
-                    </Badge>
+                    {estaSuspendida(order) ? (
+                            <Badge
+                                className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-200 shadow-none"
+                                title="Suspendida en el sistema viejo: no cuenta como pendiente y no entra en el plan."
+                            >
+                                Suspendida
+                            </Badge>
+                        ) : (
+                            <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">
+                                Finalizada
+                            </Badge>
+                        )}
                 </td>
                 <td className="px-3 py-3 text-center">
                     <span className="text-xs font-bold text-green-700">
@@ -352,7 +368,9 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
                 <div className="flex justify-between items-start mb-2">
                     <div className="flex items-center gap-2">
                         <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
-                        <Badge className="bg-green-100 text-green-700 border-green-200 text-[9px]">FINALIZADA</Badge>
+                        {estaSuspendida(order)
+                                ? <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[9px]">SUSPENDIDA</Badge>
+                                : <Badge className="bg-green-100 text-green-700 border-green-200 text-[9px]">FINALIZADA</Badge>}
                     </div>
                     <button className="text-gray-400">
                         {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -470,7 +488,7 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
                     filas={sortedOrders}
                     columnas={columnasOrdenes({
                         plano: (o) => estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles),
-                        estado: "Finalizada",
+                        estado: (o) => (estaSuspendida(o) ? "Suspendida" : "Finalizada"),
                         conEntrega: true,
                     })}
                     filtros={() => [
