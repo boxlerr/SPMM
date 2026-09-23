@@ -22,6 +22,7 @@ import { mostrarSolapa, type ClavePeriodo } from "@/lib/asistencia";
 import AsistenciaOperario, { useAsistencia } from "./AsistenciaOperario";
 import TiemposOperario, { useTiempos } from "./TiemposOperario";
 import RendimientoOperario, { useRendimiento } from "./RendimientoOperario";
+import RechazosDeLaPersona from "./RechazosDeLaPersona";
 import type { PeriodoRendimiento } from "@/lib/rendimiento";
 
 const ESTADO_PASO: Record<number, string> = { 1: "Pendiente", 2: "En Proceso", 3: "Finalizado" };
@@ -815,6 +816,13 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                     rendimiento={rendimiento}
                     periodo={periodoRendimiento}
                     onPeriodo={setPeriodoRendimiento}
+                    nombre={`${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}`.trim()}
+                  />
+                  {/* RF-12: sus rechazos, con el mismo período. Misma sección confidencial
+                      que el reporte (la solapa ya no aparece sin ella). */}
+                  <RechazosDeLaPersona
+                    idOperario={operario.id}
+                    periodo={periodoRendimiento}
                     nombre={`${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}`.trim()}
                   />
                 </TabsContent>

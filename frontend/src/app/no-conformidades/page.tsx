@@ -19,12 +19,25 @@
  *  · Se baja con el botón común «Exportar» (RF-22): PDF, Excel o CSV de lo que está
  *    en pantalla, con las mismas columnas que tenía el CSV del servidor. Antes había un
  *    botón propio que sólo sabía CSV y lo pedía al servidor.
+ *
+ * Los rechazos (23/09, reunión con Lucas: «si algo se rechazó, que quede el registro de
+ * que tuviste 10 piezas que se rechazaron. ¿Quién la hizo? Tal empleado»):
+ *
+ *  · «Registrar rechazo» carga una de cualquier tipo acá mismo (el mismo formulario que
+ *    la ficha de la OT): la OT por su número, el paso, cuántas de cuántas, quién hizo
+ *    las piezas y qué se hace con lo rechazado. Aparece al toque en la lista.
+ *  · Se filtra por quién hizo las piezas, y «Por persona» las agrupa: «piezas
+ *    rechazadas por persona este mes», exportable. Esa vista pide la sección
+ *    confidencial «Rendimiento por persona» (la misma del reporte de RF-07): sin ella no
+ *    aparece. La lista de siempre, que ya decía quién hizo cada una, sigue igual.
+ *  · Con un servidor de antes del 23/09 nada de eso aparece: la pantalla queda como
+ *    estaba (guardar un tipo nuevo fallaría y el filtro por persona no filtraría).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    AlertTriangle, CheckCircle2, FileWarning, Filter, RefreshCw,
-    RotateCcw, Search, User,
+    AlertTriangle, CalendarDays, CheckCircle2, FileWarning, Filter, List, Plus, RefreshCw,
+    RotateCcw, Search, User, Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +50,26 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { fechaDeFiltro, type ColumnaExport } from "@/lib/exportar";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import { type BorradorRechazo, RegistrarRechazo, type VistaDelRechazo } from "@/components/calidad/RegistrarRechazo";
+import {
+    type Catalogos,
+    type CuerpoRechazo,
+    type NoConformidad,
+    type PersonaAgrupada,
+    type Persona,
+    type ResumenNC as Resumen,
+    filaProvisoria,
+    mesEnCurso,
+    nombreVisible,
+    pasoTexto,
+    pedirCatalogos,
+    pedirPersonas,
+    piezasTexto,
+    porcentajeTexto,
+    registrarRechazo,
+    sabeCargarRechazos,
+} from "@/lib/calidad";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -44,39 +77,12 @@ const getAuthHeaders = (): HeadersInit => {
     return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-interface NoConformidad {
-    id: number;
-    id_orden_trabajo: number;
-    nro_ot: number | null;
-    cliente: string | null;
-    producto: string | null;
-    proceso: string | null;
-    operario: string | null;
-    tipo: string;
-    /** null = nadie la evaluó todavía. */
-    gravedad: string | null;
-    estado: string;
-    piezas_afectadas: number | null;
-    minutos_perdidos: number;
-    operarios_extra: number;
-    descripcion: string | null;
-    accion_correctiva: string | null;
-    usuario: string | null;
-    fecha_registro: string;
-    fecha_cierre: string | null;
-}
-
-interface Resumen {
-    total: number;
-    abiertas: number;
-    cerradas: number;
-    minutos_perdidos: number;
-    piezas_afectadas: number;
-}
-
 type Listas = Record<string, string>;
 
 const SIN_CLASIFICAR = "SIN_CLASIFICAR";
+
+// Ids de las cargadas que todavía no contestó el servidor: negativos, de un contador.
+let proximoTemporal = -1;
 
 const COLOR_GRAVEDAD: Record<string, string> = {
     LEVE: "bg-sky-50 text-sky-700 border-sky-200",
@@ -102,14 +108,23 @@ const fmtHoras = (min: number) => {
 export default function NoConformidadesPage() {
     // RF-24: clasificarlas, anotar qué se hizo y cerrarlas pide el área en escritura.
     // Con lectura sola se ven igual, pero el panel muestra lo cargado sin botones.
-    const { puede } = usePermisos();
+    const { puede, puedeSeccion } = usePermisos();
     const puedeEditar = puede("no_conformidades", "write");
+    // El agrupado por persona es la sección confidencial «Rendimiento por persona» (la
+    // misma del reporte de RF-07 y la que pide el servidor): sin ella no se muestra.
+    const veRendimiento = puedeSeccion("dashboard_rendimiento", "read");
     const [filas, setFilas] = useState<NoConformidad[]>([]);
     const [resumen, setResumen] = useState<Resumen | null>(null);
     const [hayMas, setHayMas] = useState(false);
     const [tipos, setTipos] = useState<Listas>({});
     const [gravedades, setGravedades] = useState<Listas>({});
     const [estados, setEstados] = useState<Listas>({});
+    const [disposiciones, setDisposiciones] = useState<Listas>({});
+    /** Las listas del formulario de carga. Sin `disposiciones` el servidor es de antes
+     *  del 23/09 y no se ofrece cargar, ni filtrar ni agrupar por persona. */
+    const [catalogos, setCatalogos] = useState<Catalogos | null>(null);
+    const sabeCargar = sabeCargarRechazos(catalogos);
+    const [personas, setPersonas] = useState<Persona[]>([]);
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState<string | null>(null);
     /**
@@ -128,9 +143,24 @@ export default function NoConformidadesPage() {
     const [estado, setEstado] = useState<string | null>(null);
     const [desde, setDesde] = useState("");
     const [hasta, setHasta] = useState("");
+    /** Quién hizo las piezas (id de la persona), o "". */
+    const [persona, setPersona] = useState("");
 
     // Qué fila está abierta para completarla o cerrarla.
     const [abierta, setAbierta] = useState<number | null>(null);
+
+    // La lista de siempre, o agrupada por quién hizo las piezas.
+    const [vista, setVista] = useState<"lista" | "persona">("lista");
+    const verPorPersona = vista === "persona" && veRendimiento && sabeCargar;
+
+    // El formulario de carga, y lo tipeado si el servidor dijo que no.
+    const [formulario, setFormulario] = useState(false);
+    const [borrador, setBorrador] = useState<BorradorRechazo | null>(null);
+
+    useEffect(() => {
+        void pedirCatalogos().then(setCatalogos);
+        void pedirPersonas().then(setPersonas);
+    }, []);
 
     const queryFiltros = useMemo(() => {
         const p = new URLSearchParams();
@@ -143,8 +173,11 @@ export default function NoConformidadesPage() {
         if (estado) p.set("estado", estado);
         if (desde) p.set("desde", desde);
         if (hasta) p.set("hasta", hasta);
+        // Con un servidor de antes se ignoraría sin decir nada y la lista parecería
+        // filtrada sin estarlo: sólo se manda si el servidor sabe de rechazos.
+        if (persona && sabeCargar) p.set("id_operario", persona);
         return p.toString();
-    }, [ot, tipo, gravedad, estado, desde, hasta]);
+    }, [ot, tipo, gravedad, estado, desde, hasta, persona, sabeCargar]);
 
     const cargar = useCallback(async () => {
         setCargando(true);
@@ -173,6 +206,7 @@ export default function NoConformidadesPage() {
             setTipos(data.tipos ?? {});
             setGravedades(data.gravedades ?? {});
             setEstados(data.estados ?? {});
+            setDisposiciones(data.disposiciones ?? {});
         } catch (e) {
             console.error(e);
             // Se vacía lo de antes: si no, debajo del cartel quedaban a la vista las
@@ -220,6 +254,10 @@ export default function NoConformidadesPage() {
         { titulo: "Qué se hizo", valor: (f) => f.accion_correctiva ?? "" },
         { titulo: "Lo reportó", valor: (f) => f.usuario ?? "" },
         { titulo: "Fecha de cierre", tipo: "fechaHora", valor: (f) => f.fecha_cierre },
+        // Del 23/09, al final: las dieciséis de antes siguen en su lugar.
+        { titulo: "Paso", tipo: "entero", valor: (f) => f.paso ?? null },
+        { titulo: "Piezas controladas", tipo: "entero", valor: (f) => f.piezas_controladas ?? null },
+        { titulo: "Qué se hace con lo rechazado", valor: (f) => (f.disposicion ? (disposiciones[f.disposicion] ?? f.disposicion) : "") },
     ];
 
     const filtrosExport = () => [
@@ -229,6 +267,7 @@ export default function NoConformidadesPage() {
         ...(tipo ? [`Tipo: ${tipos[tipo] ?? tipo}`] : []),
         ...(desde ? [`Desde: ${fechaDeFiltro(desde)}`] : []),
         ...(hasta ? [`Hasta: ${fechaDeFiltro(hasta)}`] : []),
+        ...(persona && sabeCargar ? [`Hizo las piezas: ${personas.find((x) => String(x.id) === persona)?.nombre ?? persona}`] : []),
         ...(hayMas ? [`Sólo las ${filas.length} más nuevas: hay más que no entran en la pantalla`] : []),
     ];
 
@@ -272,9 +311,48 @@ export default function NoConformidadesPage() {
 
     const limpiar = () => {
         setOt(""); setTipo(null); setGravedad(null); setEstado(null);
-        setDesde(""); setHasta("");
+        setDesde(""); setHasta(""); setPersona("");
     };
-    const hayFiltros = !!(ot || tipo || gravedad || estado || desde || hasta);
+    const hayFiltros = !!(ot || tipo || gravedad || estado || desde || hasta || persona);
+    const mes = mesEnCurso();
+    const esEsteMes = desde === mes.desde && hasta === mes.hasta;
+    const porPersona = usePorPersona(queryFiltros, verPorPersona);
+
+    /**
+     * Registrar un rechazo sin recargar: la fila aparece arriba al toque (con «guardando…»)
+     * y se reemplaza por la que devuelve el servidor. Si dice que no, se saca, se dice por
+     * qué y el formulario vuelve a abrirse con lo tipeado.
+     */
+    const registrar = async (cuerpo: CuerpoRechazo, vista: VistaDelRechazo, lo: BorradorRechazo) => {
+        const temporal = filaProvisoria(cuerpo, vista, proximoTemporal--);
+        const piezas = cuerpo.piezas_afectadas ?? 0;
+        const mover = (signo: 1 | -1) => setResumen((r) => (r ? {
+            ...r,
+            total: r.total + signo,
+            abiertas: r.abiertas + signo,
+            piezas_afectadas: r.piezas_afectadas + signo * piezas,
+        } : r));
+        setFilas((l) => [temporal, ...l]);
+        mover(1);
+        try {
+            const guardada = await registrarRechazo(cuerpo);
+            setFilas((l) => l.map((f) => (f.id === temporal.id ? guardada : f)));
+            toast.success(`Registrada en la OT ${guardada.nro_ot ?? vista.nro_ot ?? ""}`.trim());
+            if (verPorPersona) void porPersona.recargar();
+            // El porcentaje de rechazo del encabezado no se puede recontar acá (sale de
+            // todas las filas, no de las que se ven): se pide sólo el resumen, en silencio.
+            void fetch(`${API_URL}/incidencias/reporte?${queryFiltros}&limite=1`, { headers: getAuthHeaders() })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((j) => { if (j?.data?.resumen) setResumen(j.data.resumen); })
+                .catch(() => { /* queda el que se recontó a mano */ });
+        } catch (e) {
+            setFilas((l) => l.filter((f) => f.id !== temporal.id));
+            mover(-1);
+            toast.error("No se registró", { description: e instanceof Error ? e.message : undefined });
+            setBorrador(lo);
+            setFormulario(true);
+        }
+    };
 
     return (
         // Márgenes chicos en el teléfono (RF-27): el layout ya pone los suyos, y sumados
@@ -295,22 +373,43 @@ export default function NoConformidadesPage() {
                         se llevó puestas y si ya se resolvió. Cada una queda pegada a su orden.
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={cargar} disabled={cargando}>
-                        <RefreshCw className={cn("h-4 w-4 mr-2", cargando && "animate-spin")} />
-                        Actualizar
+                <div className="flex items-center gap-2 flex-wrap">
+                    {/* RF-12: cargar una de cualquier tipo, acá mismo. Sólo con permiso de
+                        escritura y con un servidor que ya sabe de rechazos. */}
+                    {puedeEditar && sabeCargar && catalogos && (
+                        <Button size="sm" onClick={() => { setBorrador(null); setFormulario(true); }}
+                                className="bg-amber-600 text-white hover:bg-amber-700">
+                            <Plus className="h-4 w-4 sm:mr-1.5" />
+                            <span className="hidden sm:inline">Registrar rechazo / no conformidad</span>
+                            <span className="sm:hidden">Registrar</span>
+                        </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => { void cargar(); if (verPorPersona) void porPersona.recargar(); }} disabled={cargando}>
+                        <RefreshCw className={cn("h-4 w-4 sm:mr-2", cargando && "animate-spin")} />
+                        <span className="hidden sm:inline">Actualizar</span>
                     </Button>
-                    <ExportarMenu
-                        titulo="No conformidades"
-                        archivo="no_conformidades"
-                        filas={filas}
-                        columnas={columnasExport}
-                        filtros={filtrosExport}
-                        disabled={cargando || sinServidor}
-                        aviso={hayMas
-                            ? `Salen las ${filas.length} más nuevas, las que entran en la pantalla. Achicá las fechas o filtrá por OT para bajar el resto.`
-                            : undefined}
-                    />
+                    {verPorPersona ? (
+                        <ExportarMenu
+                            titulo="Piezas rechazadas por persona"
+                            archivo="rechazos_por_persona"
+                            filas={porPersona.personas}
+                            columnas={COLUMNAS_POR_PERSONA}
+                            filtros={filtrosExport}
+                            disabled={porPersona.cargando || !porPersona.personas.length}
+                        />
+                    ) : (
+                        <ExportarMenu
+                            titulo="No conformidades"
+                            archivo="no_conformidades"
+                            filas={filas}
+                            columnas={columnasExport}
+                            filtros={filtrosExport}
+                            disabled={cargando || sinServidor}
+                            aviso={hayMas
+                                ? `Salen las ${filas.length} más nuevas, las que entran en la pantalla. Achicá las fechas o filtrá por OT para bajar el resto.`
+                                : undefined}
+                        />
+                    )}
                 </div>
             </div>
 
@@ -361,6 +460,20 @@ export default function NoConformidadesPage() {
                             <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)}
                                    className="h-9 w-40" />
                         </label>
+                        <Chip activo={esEsteMes}
+                              onClick={() => { if (esEsteMes) { setDesde(""); setHasta(""); } else { setDesde(mes.desde); setHasta(mes.hasta); } }}>
+                            <CalendarDays className="inline h-3 w-3 mr-1 -mt-px" />Este mes
+                        </Chip>
+                        {sabeCargar && (
+                            <SearchableSelect
+                                options={personas.map((x) => ({ value: String(x.id), label: x.nombre }))}
+                                value={persona}
+                                onValueChange={setPersona}
+                                placeholder="Quién hizo las piezas"
+                                className="w-full sm:w-56"
+                                triggerClassName="h-9"
+                            />
+                        )}
                         {hayFiltros && (
                             <Button variant="ghost" size="sm" className="h-9" onClick={limpiar}>
                                 Limpiar filtros
@@ -390,13 +503,43 @@ export default function NoConformidadesPage() {
                             Sin clasificar
                         </Chip>
                         <span className="mx-1 h-4 w-px bg-border" />
-                        {Object.entries(tipos).map(([clave, rotulo]) => (
-                            <Chip key={clave} activo={tipo === clave}
-                                  onClick={() => setTipo(tipo === clave ? null : clave)}>
-                                {rotulo}
-                            </Chip>
-                        ))}
+                        {/* Un desplegable y no chips: con los tipos de un taller metalúrgico
+                            (23/09) son doce, y doce chips ocupaban media pantalla del teléfono. */}
+                        <select
+                            value={tipo ?? ""}
+                            onChange={(e) => setTipo(e.target.value || null)}
+                            aria-label="Tipo"
+                            className={cn(
+                                "h-7 rounded-full border px-2 text-xs",
+                                tipo ? "bg-primary text-primary-foreground border-primary" : "bg-transparent text-muted-foreground",
+                            )}
+                        >
+                            <option value="">Todos los tipos</option>
+                            {Object.entries(tipos).map(([clave, rotulo]) => (
+                                <option key={clave} value={clave}>{rotulo}</option>
+                            ))}
+                        </select>
                     </div>
+                </div>
+            )}
+
+            {/* La lista, o «piezas rechazadas por persona». */}
+            {veRendimiento && sabeCargar && !sinServidor && (
+                <div className="mb-4 inline-flex rounded-lg border bg-card p-0.5">
+                    {([["lista", "Lista", List], ["persona", "Por persona", Users]] as const).map(([clave, rotulo, Icono]) => (
+                        <button
+                            key={clave}
+                            type="button"
+                            onClick={() => setVista(clave)}
+                            aria-pressed={vista === clave}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                                vista === clave ? "bg-[#010e26] text-white" : "text-muted-foreground hover:bg-muted",
+                            )}
+                        >
+                            <Icono className="h-3.5 w-3.5" /> {rotulo}
+                        </button>
+                    ))}
                 </div>
             )}
 
@@ -407,7 +550,8 @@ export default function NoConformidadesPage() {
                     <Tarjeta titulo="Abiertas" valor={String(resumen.abiertas)} tono="text-amber-600" />
                     <Tarjeta titulo="Cerradas" valor={String(resumen.cerradas)} tono="text-emerald-600" />
                     <Tarjeta titulo="Tiempo perdido" valor={fmtHoras(resumen.minutos_perdidos)} tono="text-rose-600" />
-                    <Tarjeta titulo="Piezas afectadas" valor={String(resumen.piezas_afectadas)} />
+                    <Tarjeta titulo="Piezas rechazadas" valor={String(resumen.piezas_afectadas)}
+                             detalle={resumen.porcentaje_rechazo != null ? `${porcentajeTexto(resumen.porcentaje_rechazo)} de las controladas` : undefined} />
                 </div>
             )}
 
@@ -421,7 +565,12 @@ export default function NoConformidadesPage() {
             {/* Si falló el pedido, lo que hay arriba es el cartel y nada más. Decir acá
                 «todavía no se registró ninguna» es afirmar algo que no se sabe: la lista
                 está vacía porque no llegó, no porque no haya. */}
-            {cargando ? (
+            {verPorPersona ? (
+                <TablaPorPersona
+                    datos={porPersona}
+                    onVerPersona={(id) => { setPersona(String(id)); setVista("lista"); }}
+                />
+            ) : cargando ? (
                 <div className="flex items-center justify-center py-16">
                     <Spinner className="h-8 w-8" />
                 </div>
@@ -429,7 +578,9 @@ export default function NoConformidadesPage() {
                 <p className="rounded-lg border bg-card px-4 py-12 text-center text-sm text-muted-foreground">
                     {hayFiltros
                         ? "No hay ninguna que cumpla con eso."
-                        : "Todavía no se registró ninguna no conformidad. Se cargan desde la orden, con el ícono naranja que está al lado de cada paso."}
+                        : sabeCargar
+                            ? "Todavía no se registró ninguna no conformidad. Se cargan con «Registrar rechazo», acá o desde la ficha de la OT."
+                            : "Todavía no se registró ninguna no conformidad. Se cargan desde la orden, con el ícono naranja que está al lado de cada paso."}
                 </p>
             ) : (
                 <ul className="rounded-lg border bg-card divide-y overflow-hidden">
@@ -440,10 +591,11 @@ export default function NoConformidadesPage() {
                             <li key={f.id}>
                                 <button
                                     type="button"
-                                    onClick={() => setAbierta(activa ? null : f.id)}
+                                    onClick={() => !f.pendiente && setAbierta(activa ? null : f.id)}
                                     className={cn(
                                         "w-full px-4 py-3 text-left transition-colors",
-                                        activa ? "bg-muted/40" : "hover:bg-muted/30"
+                                        activa ? "bg-muted/40" : "hover:bg-muted/30",
+                                        f.pendiente && "opacity-60 cursor-default",
                                     )}
                                 >
                                     <div className="flex items-center gap-2 flex-wrap">
@@ -470,17 +622,22 @@ export default function NoConformidadesPage() {
                                             {f.gravedad ? (gravedades[f.gravedad] ?? f.gravedad) : "Sin clasificar"}
                                         </Etiqueta>
                                         <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">
-                                            {fmtFecha(f.fecha_registro)}
+                                            {f.pendiente ? "guardando…" : fmtFecha(f.fecha_registro)}
                                         </span>
                                     </div>
                                     <div className="mt-1 flex items-center gap-3 flex-wrap text-xs text-muted-foreground">
                                         {f.descripcion && (
                                             <span className="text-foreground/80 truncate max-w-[520px]">{f.descripcion}</span>
                                         )}
-                                        {f.proceso && <span>Paso: {f.proceso}</span>}
-                                        {f.operario && <span>{f.operario}</span>}
+                                        {(f.proceso || f.paso != null) && <span>{pasoTexto(f)}</span>}
+                                        {f.operario && <span className="inline-flex items-center gap-1"><User className="h-3 w-3" />Las hizo {nombreVisible(f.operario)}</span>}
                                         {f.minutos_perdidos > 0 && <span>{fmtHoras(f.minutos_perdidos)} perdidas</span>}
-                                        {f.piezas_afectadas != null && <span>{f.piezas_afectadas} pieza(s)</span>}
+                                        {f.piezas_afectadas != null && (
+                                            <span className="font-medium text-rose-700 tabular-nums">
+                                                {piezasTexto(f.piezas_afectadas, f.piezas_controladas)} {f.piezas_afectadas === 1 && f.piezas_controladas == null ? "pieza" : "piezas"}
+                                            </span>
+                                        )}
+                                        {f.disposicion && <span>{disposiciones[f.disposicion] ?? f.disposicion}</span>}
                                     </div>
                                 </button>
 
@@ -488,6 +645,7 @@ export default function NoConformidadesPage() {
                                     <Panel
                                         fila={f}
                                         gravedades={gravedades}
+                                        disposiciones={disposiciones}
                                         onGuardar={guardar}
                                         soloLectura={!puedeEditar}
                                     />
@@ -496,6 +654,16 @@ export default function NoConformidadesPage() {
                         );
                     })}
                 </ul>
+            )}
+
+            {catalogos && sabeCargar && puedeEditar && (
+                <RegistrarRechazo
+                    open={formulario}
+                    onClose={() => setFormulario(false)}
+                    catalogos={catalogos}
+                    borrador={borrador}
+                    onRegistrar={(cuerpo, vista, lo) => void registrar(cuerpo, vista, lo)}
+                />
             )}
         </div>
     );
@@ -531,11 +699,134 @@ function Etiqueta({ className, title, children }: {
     );
 }
 
-function Tarjeta({ titulo, valor, tono }: { titulo: string; valor: string; tono?: string }) {
+function Tarjeta({ titulo, valor, tono, detalle }: { titulo: string; valor: string; tono?: string; detalle?: string }) {
     return (
         <div className="rounded-lg border bg-card px-3 py-2">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{titulo}</p>
             <p className={cn("text-2xl font-bold tabular-nums", tono)}>{valor}</p>
+            {detalle && <p className="text-[11px] text-muted-foreground">{detalle}</p>}
+        </div>
+    );
+}
+
+// ─────────────────────────── por persona (23/09) ───────────────────────────
+
+/** Las columnas del archivo «piezas rechazadas por persona». */
+const COLUMNAS_POR_PERSONA: ColumnaExport<PersonaAgrupada>[] = [
+    { titulo: "Quién hizo las piezas", valor: (p) => (p.operario ? nombreVisible(p.operario) : "Sin decir quién") },
+    { titulo: "Piezas rechazadas", tipo: "entero", valor: (p) => p.piezas_rechazadas },
+    { titulo: "Piezas controladas", tipo: "entero", valor: (p) => p.piezas_controladas },
+    { titulo: "% rechazado (de las que dicen de cuántas)", tipo: "porcentaje", decimales: 1, valor: (p) => p.porcentaje_rechazo },
+    { titulo: "No conformidades", tipo: "entero", valor: (p) => p.no_conformidades },
+    { titulo: "Abiertas", tipo: "entero", valor: (p) => p.abiertas },
+    { titulo: "Órdenes", tipo: "entero", valor: (p) => p.ordenes },
+    { titulo: "La última", tipo: "fechaHora", valor: (p) => p.ultima },
+];
+
+/**
+ * El agrupado por persona, con los mismos filtros que la lista. Cambiar un filtro no
+ * tapa lo que se está viendo: queda a la vista con «actualizando…» hasta que llega lo
+ * nuevo.
+ */
+function usePorPersona(query: string, activo: boolean) {
+    const [personas, setPersonas] = useState<PersonaAgrupada[]>([]);
+    const [cargando, setCargando] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const pedido = useRef(0);
+
+    const recargar = useCallback(async () => {
+        if (!activo) return;
+        const este = ++pedido.current;
+        setCargando(true);
+        try {
+            const res = await fetch(`${API_URL}/incidencias/por-persona?${query}`, { headers: getAuthHeaders() });
+            if (este !== pedido.current) return;
+            if (!res.ok) {
+                const body = await res.json().catch(() => null);
+                throw new Error(body?.errors?.[0]?.message || "No se pudo armar el agrupado.");
+            }
+            const body = await res.json().catch(() => null);
+            if (este !== pedido.current) return;
+            setPersonas(Array.isArray(body?.data?.personas) ? body.data.personas : []);
+            setError(null);
+        } catch (e) {
+            if (este === pedido.current) setError(e instanceof Error ? e.message : "No se pudo armar el agrupado.");
+        } finally {
+            if (este === pedido.current) setCargando(false);
+        }
+    }, [query, activo]);
+
+    useEffect(() => {
+        const t = setTimeout(() => void recargar(), 250);
+        return () => clearTimeout(t);
+    }, [recargar]);
+
+    return { personas, cargando, error, recargar };
+}
+
+function TablaPorPersona({ datos, onVerPersona }: {
+    datos: ReturnType<typeof usePorPersona>;
+    onVerPersona: (idOperario: number) => void;
+}) {
+    const { personas, cargando, error } = datos;
+    if (error && !personas.length) {
+        return (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{error}</div>
+        );
+    }
+    if (cargando && !personas.length) {
+        return (
+            <div className="flex items-center justify-center py-16">
+                <Spinner className="h-8 w-8" />
+            </div>
+        );
+    }
+    if (!personas.length) {
+        return (
+            <p className="rounded-lg border bg-card px-4 py-12 text-center text-sm text-muted-foreground">
+                No hay ninguna que cumpla con eso.
+            </p>
+        );
+    }
+    const maximo = Math.max(1, ...personas.map((p) => p.piezas_rechazadas));
+    return (
+        <div className="rounded-lg border bg-card overflow-hidden">
+            <div className="flex items-center justify-between gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
+                <span>Piezas rechazadas por quién las hizo, con los filtros de arriba</span>
+                {cargando && <span>actualizando…</span>}
+            </div>
+            <ul className="divide-y">
+                {personas.map((p) => (
+                    <li key={p.id_operario ?? "nadie"}>
+                        <button
+                            type="button"
+                            disabled={p.id_operario == null}
+                            onClick={() => p.id_operario != null && onVerPersona(p.id_operario)}
+                            title={p.id_operario != null ? "Ver sus no conformidades" : undefined}
+                            className="w-full px-4 py-2.5 text-left hover:bg-muted/30 disabled:cursor-default disabled:hover:bg-transparent"
+                        >
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span className={cn("min-w-0 flex-1 truncate text-sm font-medium", p.id_operario == null && "italic text-muted-foreground")}>
+                                    {p.operario ? nombreVisible(p.operario) : "Sin decir quién las hizo"}
+                                </span>
+                                <span className="text-sm font-bold tabular-nums text-rose-700">
+                                    {p.piezas_rechazadas} {p.piezas_rechazadas === 1 ? "pieza" : "piezas"}
+                                </span>
+                                <span className="w-full sm:w-auto text-xs text-muted-foreground tabular-nums">
+                                    {p.porcentaje_rechazo != null ? `${porcentajeTexto(p.porcentaje_rechazo)} de las controladas · ` : ""}
+                                    {p.no_conformidades} {p.no_conformidades === 1 ? "no conformidad" : "no conformidades"}
+                                    {p.abiertas ? ` (${p.abiertas} ${p.abiertas === 1 ? "abierta" : "abiertas"})` : ""}
+                                    {` · ${p.ordenes} ${p.ordenes === 1 ? "OT" : "OT distintas"}`}
+                                </span>
+                            </div>
+                            {/* La barra compara contra el que más tuvo: se lee de un vistazo. */}
+                            <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full bg-[#445EF2]" style={{ width: `${(100 * p.piezas_rechazadas) / maximo}%` }} />
+                            </div>
+                        </button>
+                    </li>
+                ))}
+            </ul>
         </div>
     );
 }
@@ -544,9 +835,11 @@ function Tarjeta({ titulo, valor, tono }: { titulo: string; valor: string; tono?
  * Lo que se puede hacer con una no conformidad: clasificarla, anotar qué se hizo y
  * cerrarla. Nada de borrar — un registro de calidad se cierra, no desaparece.
  */
-function Panel({ fila, gravedades, onGuardar, soloLectura = false }: {
+function Panel({ fila, gravedades, disposiciones, onGuardar, soloLectura = false }: {
     fila: NoConformidad;
     gravedades: Listas;
+    /** Qué se hace con lo rechazado. Vacío con un servidor de antes del 23/09. */
+    disposiciones: Listas;
     onGuardar: (id: number, ruta: string, cuerpo: Record<string, unknown>) => Promise<boolean>;
     /** RF-24: sin permiso de escritura, lo cargado se lee y no hay botones. */
     soloLectura?: boolean;
@@ -569,6 +862,12 @@ function Panel({ fila, gravedades, onGuardar, soloLectura = false }: {
                         </span>
                     )}
                 </div>
+                {fila.disposicion && (
+                    <p className="text-xs">
+                        <span className="text-muted-foreground">Con lo rechazado: </span>
+                        {disposiciones[fila.disposicion] ?? fila.disposicion}
+                    </p>
+                )}
                 <div>
                     <p className="text-xs text-muted-foreground">Qué se hizo</p>
                     <p className="mt-0.5 whitespace-pre-wrap text-foreground/80">
@@ -615,8 +914,23 @@ function Panel({ fila, gravedades, onGuardar, soloLectura = false }: {
                 )}
             </div>
 
+            {Object.keys(disposiciones).length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-muted-foreground">Con lo rechazado:</span>
+                    {Object.entries(disposiciones).map(([clave, rotulo]) => (
+                        <Chip
+                            key={clave}
+                            activo={fila.disposicion === clave}
+                            onClick={() => conGuardado("", { disposicion: fila.disposicion === clave ? null : clave }, "Guardado")}
+                        >
+                            {rotulo}
+                        </Chip>
+                    ))}
+                </div>
+            )}
+
             <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground">Qué se hizo</label>
+                <label className="text-xs text-muted-foreground">Qué se hizo (acción correctiva)</label>
                 <Textarea
                     rows={2}
                     value={accion}

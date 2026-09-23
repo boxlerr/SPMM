@@ -29,6 +29,7 @@ import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { PausasDeLaOT } from "@/components/pausas/PausasDeLaOT";
+import { ControlDeCalidadOT } from "@/components/calidad/ControlDeCalidadOT";
 import { aNumero } from "@/lib/exportar";
 import { archivoDeOT, seccionesDeOT, type DatosDeOT } from "@/lib/exportes/ot";
 import {
@@ -1541,6 +1542,18 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                             numeroOT={orderToEdit.id_otvieja || orderToEdit.id}
                             pasos={orderToEdit.procesos || []}
                             entregada={isOrderDelivered(orderToEdit)}
+                        />
+                    ) : null}
+
+                    {/* RF-12: el control de calidad de la OT (sus no conformidades, cargar
+                        un rechazo y cerrarlo). Fuera del formulario por lo mismo que las
+                        pausas: sus botones no guardan la OT. Con un backend de antes no
+                        dibuja nada. RF-11 engancha acá su casilla «Controlado» llamando a
+                        ofrecerRegistrarRechazos(id) de lib/calidad.ts. */}
+                    {orderToEdit?.id ? (
+                        <ControlDeCalidadOT
+                            idOrden={orderToEdit.id}
+                            numeroOT={orderToEdit.id_otvieja || orderToEdit.id}
                         />
                     ) : null}
 
