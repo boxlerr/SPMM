@@ -21,12 +21,17 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { Calendar, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, Users, X } from "lucide-react"
+import { Calendar, CalendarDays, Filter, Clock, AlertCircle, AlertTriangle, CheckCircle2, Check, ChevronsUpDown, ListChecks, LogOut, Search, X } from "lucide-react"
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "@/components/common/WorkOrderFilters"
 import { resumenFiltrosOT } from "@/lib/exportes/ordenes"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { BorradoresPlan } from "./BorradoresPlan"
 import type { BorradorPlan } from "@/lib/borradorPlan"
+import {
+    pedirEstimacion, textoDeDias, detalleDeDias, textoDelPiso, detalleDelPiso,
+    type EstimacionDelPlan, type MotivoSinEstimacion,
+} from "@/lib/estimarPlan"
+import { numeroEs } from "@/lib/diasHabiles"
 
 export interface PlanningRange {
     fecha_desde?: string  // "YYYY-MM-DD"
@@ -45,7 +50,6 @@ interface PlanningSelectionScreenProps {
     initialSelectedIds?: number[]
     /** Abre un plan calculado y sin confirmar, sin volver a calcularlo. */
     onAbrirBorrador?: (borrador: BorradorPlan) => void
-    availableOperarios?: any[]
 }
 
 export function PlanningSelectionScreen({
@@ -57,7 +61,6 @@ export function PlanningSelectionScreen({
     onDataRefresh,
     initialSelectedIds = [],
     onAbrirBorrador,
-    availableOperarios = []
 }: PlanningSelectionScreenProps) {
     const [selectedIds, setSelectedIds] = useState<number[]>(initialSelectedIds)
 
@@ -224,34 +227,29 @@ export function PlanningSelectionScreen({
     /**
      * Cuánto trabajo entra en el plan y cuánto va a tardar.
      *
-     * Hasta el 17/9 esto repartía los minutos de lo tildado entre TODOS los operarios
-     * disponibles y mostraba esa división como si fueran las horas de la tanda. Con una
-     * sola OT tildada —7 procesos, 2446 minutos, uno de torno de 600— el cartel decía
-     * «0.1 días (1.1 hs)»: había dividido por los 37 operarios. Los procesos de una OT
-     * van uno atrás del otro (`_agregar_restricciones_secuencia`, en el solver), así que
-     * no hay forma de que 37 personas se repartan un torneado.
-     *
-     * Ahora son dos cuentas separadas, que es lo que realmente son:
+     * Son dos cuentas separadas, que es lo que realmente son (17/9, Julián: en una
+     * tanda de 20 o 30 OT lo primero que se quiere saber es CUÁNTO trabajo se mete):
      *   • CARGA: los minutos de trabajo que entran al plan, por `cant_operarios` (un
-     *     proceso de a dos ocupa a dos personas ese rato). Es una suma y no depende
-     *     de cuánta gente haya.
-     *   • DURACIÓN: lo que va a tardar, y es el mayor de dos topes —
-     *       - la OT más larga, que no se acorta con más gente porque es una fila; y
-     *       - la carga repartida entre los operarios disponibles, que es el tope de
-     *         cuánto entra por día en el taller.
-     *     Con una OT tildada manda el primero; con la tanda entera, el segundo.
+     *     proceso de a dos ocupa a dos personas ese rato). Es una suma, sale de acá
+     *     mismo y no depende de nadie.
+     *   • DÍAS: lo que eso tarda. Esa cuenta la hace el backend (ver `lib/estimarPlan`).
      *
-     * Las dos van al cartel por separado y con su propio nombre (17/9, Julián): en una
-     * tanda de 20 o 30 OTs lo que se quiere saber primero es CUÁNTO trabajo se está
-     * metiendo, y un solo número mezclado no lo decía.
+     * LOS DÍAS YA NO SE CUENTAN ACÁ (Julián, 23/9: «se quedaba trabada en 4,9 cuando
+     * en realidad son más»). Hasta hoy el cartel era el mayor entre la OT más larga y la
+     * carga repartida entre TODOS los operarios, como si cualquiera pudiera hacer
+     * cualquier paso. Con 39 OT tildadas la segunda daba menos que la primera, así que
+     * mandaba la OT más larga (2360 min / 485 = 4,9) y el número no se movía sumaras lo
+     * que sumaras. El plan de esas 39 OT fue del 24/9 al 6/10: 9 días hábiles. Lo que
+     * marca el ritmo es quién puede hacer cada paso —una persona que es la única que
+     * sabe hacer algo frena todo—, y eso lo sabe el backend, no esta pantalla.
      *
-     * Sigue siendo una cuenta de servilleta: no mira máquinas, ni skills, ni quién puede
-     * hacer qué, y da por libres a todos los operarios (lo que ya tienen encima no se
-     * descuenta). Para la cuenta fina está el planificador.
+     * Acá queda sólo la cadena de la OT más larga, que es el piso que se muestra si el
+     * backend no contesta: ese número es cierto aunque no sea toda la verdad, y el
+     * cartel lo dice así («mín. 5 días»).
      */
     type Estimacion =
         | { tipo: "aviso"; texto: string; detalle: string }
-        | { tipo: "ok"; carga: string; duracion: string; detalleCarga: string; detalleDuracion: string }
+        | { tipo: "ok"; carga: string; detalleCarga: string; cargaMin: number; cadenaMin: number; otMasLarga: string | null }
 
     const calcularEstimacion = (): Estimacion | null => {
         if (selectedIds.length === 0) return null
@@ -259,6 +257,7 @@ export function PlanningSelectionScreen({
         const selectedOrders = unplannedOrders.filter(o => selectedIds.includes(o.id))
         let cargaMin = 0          // minutos de trabajo (× la gente que ocupa cada proceso)
         let otMasLargaMin = 0     // la OT que más tarda de punta a punta
+        let otMasLarga: string | null = null
         let procesosConTiempo = 0
         let totalProcesos = 0
         let otsSinProcesos = 0
@@ -278,7 +277,10 @@ export function PlanningSelectionScreen({
                 cargaMin += min * Math.max(1, Number(p.cant_operarios) || 1)
             })
             // La OT tarda la suma de sus procesos: van en fila, no en paralelo.
-            otMasLargaMin = Math.max(otMasLargaMin, caminoOT)
+            if (caminoOT > otMasLargaMin) {
+                otMasLargaMin = caminoOT
+                otMasLarga = `OT ${o.id_otvieja ?? o.id}`
+            }
         })
 
         // Distinguimos 3 escenarios para que el usuario sepa exactamente qué
@@ -301,46 +303,9 @@ export function PlanningSelectionScreen({
             }
         }
 
-        // Solo contamos operarios marcados como disponibles. Si el array no llega
-        // o queda vacio, caemos a 1 para no dividir por cero.
-        const operariosDisponibles = availableOperarios.filter(op => op?.disponible !== false)
-        const resourceCount = Math.max(1, operariosDisponibles.length)
-
-        // Jornada laboral promedio real de los operarios disponibles
-        // (hora_fin - hora_inicio - desayuno - almuerzo). Default 495 min (8.25h)
-        // si no hay datos cargados todavia.
-        const parseHHMM = (s?: string) => {
-            if (!s || typeof s !== 'string') return null
-            const [h, m] = s.split(':').map(Number)
-            if (isNaN(h) || isNaN(m)) return null
-            return h * 60 + m
-        }
-        const jornadasMin = operariosDisponibles
-            .map(op => {
-                const ini = parseHHMM(op?.hora_inicio)
-                const fin = parseHHMM(op?.hora_fin)
-                if (ini === null || fin === null || fin <= ini) return null
-                const desayuno = Number(op?.min_desayuno) || 0
-                const almuerzo = Number(op?.min_almuerzo) || 0
-                return Math.max(0, (fin - ini) - desayuno - almuerzo)
-            })
-            .filter((v): v is number => v !== null && v > 0)
-        const MIN_LABORAL_DIA = jornadasMin.length > 0
-            ? jornadasMin.reduce((a, b) => a + b, 0) / jornadasMin.length
-            : 495
-
-        const porCapacidadMin = cargaMin / resourceCount
-        const mandaLaOT = otMasLargaMin >= porCapacidadMin
-        const duracionMin = Math.max(otMasLargaMin, porCapacidadMin)
-
         // Un decimal mientras el número es chico; de 100 para arriba el decimal no
         // dice nada y encima estira el cartel.
-        const redondear = (n: number) => (n >= 100 ? Math.round(n).toString() : n.toFixed(1))
-        const dias = redondear(duracionMin / MIN_LABORAL_DIA)
-        const horas = redondear(cargaMin / 60)
-
-        const otMasLargaHs = redondear(otMasLargaMin / 60)
-        const jornadaHs = (MIN_LABORAL_DIA / 60).toFixed(1)
+        const horas = cargaMin / 60 >= 100 ? Math.round(cargaMin / 60).toString() : numeroEs(cargaMin / 60)
 
         const detalleCarga = [
             `Suma de los minutos estimados de ${procesosConTiempo} ${procesosConTiempo === 1 ? 'proceso' : 'procesos'} de ${selectedOrders.length} ${selectedOrders.length === 1 ? 'OT tildada' : 'OTs tildadas'}.`,
@@ -353,24 +318,90 @@ export function PlanningSelectionScreen({
                 : '',
         ].filter(Boolean).join(' ')
 
-        const detalleDuracion = [
-            mandaLaOT
-                ? `No baja de ${dias} días aunque sobre gente: los procesos de una misma OT van uno atrás del otro y la más larga son ${otMasLargaHs} hs seguidas. Repartir la carga entre ${resourceCount} ${resourceCount === 1 ? 'operario' : 'operarios'} daría ${redondear(porCapacidadMin / MIN_LABORAL_DIA)} días, pero nadie puede partir un proceso en ${resourceCount}.`
-                : `${horas} hs de trabajo repartidas entre ${resourceCount} ${resourceCount === 1 ? 'operario disponible' : 'operarios disponibles'}, a ${jornadaHs} hs de jornada. Tampoco puede bajar de ${redondear(otMasLargaMin / MIN_LABORAL_DIA)} días, que es lo que tarda sola la OT más larga (${otMasLargaHs} hs seguidas).`,
-            `Da por libres a los ${resourceCount}: lo que ya tienen encima no se descuenta.`,
-            'Y es una cuenta gruesa — no mira máquinas ni quién sabe hacer qué. Para la fina, planificá.',
-        ].join(' ')
-
         return {
             tipo: "ok",
             carga: `${horas} hs`,
-            duracion: `≈ ${dias} ${dias === '1.0' ? 'día' : 'días'} con ${resourceCount} ${resourceCount === 1 ? 'operario' : 'operarios'}`,
             detalleCarga,
-            detalleDuracion,
+            cargaMin,
+            cadenaMin: otMasLargaMin,
+            otMasLarga,
         }
     }
 
     const estimacion = calcularEstimacion()
+
+    /**
+     * Los días que tarda lo tildado, pedidos al backend.
+     *
+     * Se pide al dejar de tildar (600 ms sin cambios) y cada pedido nuevo cancela el
+     * anterior: tildar diez OT seguidas son diez cambios y una sola cuenta. Mientras
+     * calcula queda el número anterior atenuado, sin tapar nada — la lista se sigue
+     * usando como si nada.
+     *
+     * `null` = todavía no hay nada que mostrar. "piso" = el backend no contestó (la
+     * producción se actualiza a mano y puede no tener esta cuenta todavía): se muestra
+     * sólo el piso de la OT más larga, que se calcula acá con lo tildado AHORA.
+     */
+    type DiasDelPlan =
+        | { tipo: "ok"; datos: EstimacionDelPlan }
+        | { tipo: "piso"; motivo: MotivoSinEstimacion }
+    const [diasDelPlan, setDiasDelPlan] = useState<DiasDelPlan | null>(null)
+    const [calculandoDias, setCalculandoDias] = useState(false)
+
+    const idsParaEstimar = [...selectedIds].sort((a, b) => a - b).join(",")
+    const fechaDesdeParaEstimar = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : null
+    // Si cambian los minutos de un proceso (se editan desde la lista) la cuenta también
+    // cambia, aunque lo tildado sea lo mismo.
+    const huellaDeCarga = estimacion?.tipo === "ok" ? `${estimacion.cargaMin}|${estimacion.cadenaMin}` : ""
+
+    useEffect(() => {
+        // Oculta (se está mirando la vista previa) no pide nada, pero tampoco borra:
+        // al volver sigue el número que había.
+        if (!isOpen) return
+        if (!idsParaEstimar || !huellaDeCarga) {
+            setDiasDelPlan(null)
+            setCalculandoDias(false)
+            return
+        }
+        setCalculandoDias(true)
+        const control = new AbortController()
+        let porTiempo = false
+        let tope: ReturnType<typeof setTimeout> | undefined
+        const espera = setTimeout(async () => {
+            // Si en 20 segundos no contestó, no va a contestar a tiempo para servir.
+            tope = setTimeout(() => { porTiempo = true; control.abort() }, 20_000)
+            const respuesta = await pedirEstimacion(
+                idsParaEstimar.split(",").map(Number), fechaDesdeParaEstimar, control.signal)
+            clearTimeout(tope)
+            // Cancelado porque cambió la selección: ya hay otro pedido en camino.
+            if (control.signal.aborted && !porTiempo) return
+            setDiasDelPlan(respuesta.ok
+                ? { tipo: "ok", datos: respuesta.datos }
+                : { tipo: "piso", motivo: porTiempo ? "tiempo" : respuesta.motivo })
+            setCalculandoDias(false)
+        }, 600)
+        return () => {
+            clearTimeout(espera)
+            clearTimeout(tope)
+            control.abort()
+        }
+    }, [isOpen, idsParaEstimar, fechaDesdeParaEstimar, huellaDeCarga])
+
+    /** Lo que dice el cartel de los días, ya armado. `null` = no se muestra. */
+    const cartelDeDias = ((): { texto: string; detalle: string; esPiso: boolean } | null => {
+        if (estimacion?.tipo !== "ok") return null
+        if (diasDelPlan?.tipo === "ok") {
+            return { texto: textoDeDias(diasDelPlan.datos), detalle: detalleDeDias(diasDelPlan.datos), esPiso: false }
+        }
+        if (diasDelPlan?.tipo === "piso" && estimacion.cadenaMin > 0) {
+            return {
+                texto: textoDelPiso(estimacion.cadenaMin),
+                detalle: detalleDelPiso(estimacion.cadenaMin, estimacion.otMasLarga, diasDelPlan.motivo),
+                esPiso: true,
+            }
+        }
+        return null
+    })()
 
     return (
         <PantallaPlanificador
@@ -416,8 +447,8 @@ export function PlanningSelectionScreen({
                         )}
                         {/* Dos carteles y no uno: son dos cosas distintas y mezclarlas fue
                             justo el problema. El de la izquierda es el trabajo que estás
-                            metiendo —una suma, no depende de nadie—; el de la derecha, lo
-                            que eso tarda con la gente que hay. */}
+                            metiendo —una suma, no depende de nadie—; el de la derecha, los
+                            días hábiles que eso tarda con quien puede hacer cada paso. */}
                         {estimacion?.tipo === "ok" && (
                             <>
                                 {/* Del tamaño de los chips vecinos y no del de antes: con dos
@@ -435,14 +466,34 @@ export function PlanningSelectionScreen({
                                         cartel de los días se entiende igual. */}
                                     {estimacion.carga}<span className="hidden 2xl:inline"> de trabajo</span>
                                 </Badge>
-                                <Badge
-                                    variant="secondary"
-                                    className="bg-indigo-50 text-indigo-700 border-indigo-200 gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help"
-                                    title={estimacion.detalleDuracion}
-                                >
-                                    <Users className="w-3 h-3 shrink-0" />
-                                    {estimacion.duracion}
-                                </Badge>
+                                {/* Los días. Mientras recalcula queda el número anterior
+                                    atenuado con «calculando…»: nada se tapa y la lista se
+                                    sigue usando. Si el backend no contesta, el piso de la
+                                    OT más larga en ámbar, que se lee distinto a propósito:
+                                    es un mínimo, no la cuenta. */}
+                                {(cartelDeDias || calculandoDias) && (
+                                    <Badge
+                                        variant="secondary"
+                                        aria-live="polite"
+                                        aria-busy={calculandoDias}
+                                        className={cn(
+                                            "gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help transition-opacity",
+                                            cartelDeDias?.esPiso
+                                                ? "bg-amber-50 text-amber-800 border-amber-200"
+                                                : "bg-indigo-50 text-indigo-700 border-indigo-200",
+                                            calculandoDias && "opacity-60"
+                                        )}
+                                        title={cartelDeDias
+                                            ? (calculandoDias ? `Recalculando con lo que tildaste recién. ${cartelDeDias.detalle}` : cartelDeDias.detalle)
+                                            : "Calculando cuántos días hábiles lleva lo tildado."}
+                                    >
+                                        <CalendarDays className="w-3 h-3 shrink-0" />
+                                        {cartelDeDias ? cartelDeDias.texto : "calculando días…"}
+                                        {cartelDeDias && calculandoDias && (
+                                            <span className="font-normal">· calculando…</span>
+                                        )}
+                                    </Badge>
+                                )}
                             </>
                         )}
                         {sinMaterial.length > 0 && (

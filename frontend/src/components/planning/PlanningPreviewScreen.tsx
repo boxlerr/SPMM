@@ -22,6 +22,10 @@ import type { WorkOrder } from "@/lib/types";
 import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 import { inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
+import {
+    capacidadEnElPeriodo, contarDiasHabiles, describirDias, diasQueTrabajaElTaller, jornadaDelOperario,
+    numeroEs, type CapacidadEnElPeriodo,
+} from "@/lib/diasHabiles";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";
 import { huellaRecursos } from "@/lib/huellaRecursos";
 import type { TandaManual } from "@/lib/borradorPlan";
@@ -1375,7 +1379,11 @@ export function PlanningPreviewScreen({
     const formatDate = (dateStr?: string | null) => {
         if (!dateStr) return "-";
         try {
-            const date = new Date(dateStr);
+            // Un "YYYY-MM-DD" pelado (el tope del rango) se lee LOCAL: `new Date` lo
+            // toma como medianoche UTC, que acá es el día anterior a las 21, y el
+            // «tope 6/10» salía «tope 05/10».
+            const soloDia = /^\d{4}-\d{2}-\d{2}$/.test(dateStr);
+            const date = soloDia ? fechaLocal(dateStr) : new Date(dateStr);
             return date.toLocaleDateString("es-AR", {
                 day: "2-digit",
                 month: "2-digit",
@@ -1652,6 +1660,13 @@ export function PlanningPreviewScreen({
     );
 
     /**
+     * Los días de la semana en que trabaja alguien del taller, según el `dias_trabajo`
+     * de cada operario. Es lo que hace que un día sea hábil: hoy nadie trabaja los
+     * sábados, así que un sábado en el medio del plan no es un día de trabajo.
+     */
+    const diasDelTaller = React.useMemo(() => diasQueTrabajaElTaller(availableOperators), [availableOperators]);
+
+    /**
      * Cuándo arranca y cuándo termina REALMENTE este plan, y cuántos días hábiles
      * ocupa. Se saca de las fechas que calculó el planificador, no del rango que
      * eligió el usuario: si no eligió ninguno igual hay un período — el que hizo
@@ -1664,16 +1679,13 @@ export function PlanningPreviewScreen({
         if (inicios.length === 0 || fines.length === 0) return null;
         const desde = inicios.reduce((a, b) => (a < b ? a : b));
         const hasta = fines.reduce((a, b) => (a > b ? a : b));
-        // Días hábiles entre ambas puntas (sin domingos; el sábado puede o no
-        // trabajarse según los horarios de cada uno, así que se cuenta).
-        const d0 = fechaLocal(desde);
-        const d1 = fechaLocal(hasta);
-        let habiles = 0;
-        for (const d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
-            if (d.getDay() !== 0) habiles++;  // el sábado puede trabajarse: cuenta
-        }
+        // Días hábiles entre ambas puntas, las dos incluidas: los días en que trabaja
+        // alguien, sin feriados. Hasta el 23/9 sólo se sacaban los domingos «porque el
+        // sábado puede trabajarse»: el plan de Lucas del jue 24/9 al mar 6/10 decía 11
+        // días hábiles y eran 9, porque nadie tiene el sábado cargado.
+        const habiles = contarDiasHabiles(desde, hasta, feriados, diasDelTaller);
         return { desde, hasta, habiles };
-    }, [results]);
+    }, [results, feriados, diasDelTaller]);
 
     /**
      * "18/8 07:00 → 27/8 10:30" para una OT. Toma la primera fecha de arranque y
@@ -2158,13 +2170,74 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [availableOperators, operatorLoads, results, editedResults]);
 
-    /** Cuántos operarios quedan pasados de las 44h si se confirma este plan.
-     *  Es lo que hace que plegar el panel resuma en vez de esconder: el riel lo
-     *  sigue mostrando en rojo. */
+    /**
+     * Contra qué se compara la carga de cada persona: el período del plan.
+     *
+     * Hasta el 23/9 era contra 44 h fijas «de la semana», y el plan no dura una
+     * semana: el de Lucas iba del 24/9 al 6/10 y Guillermo aparecía con 72,5 h / 44 h,
+     * pasadísimo, cuando en esos 9 días hábiles él trabaja 9 × 8,25 = 74,25 h. La
+     * carga que se suma es la de TODO el plan, así que la capacidad tiene que ser la
+     * de todo el plan: los días que trabaja esa persona entre el primer día y el
+     * último, sin feriados, por su jornada.
+     *
+     * Si el plan no trae fechas (no debería), se usa el rango elegido al planificar;
+     * y si tampoco hay, una semana de lunes a viernes — y el panel lo dice.
+     */
+    const periodoDeCarga = React.useMemo(() => {
+        if (spanPlan) return { desde: spanPlan.desde, hasta: spanPlan.hasta, habiles: spanPlan.habiles };
+        const { fecha_desde: desde, fecha_hasta: hasta } = planningRange;
+        if (desde && hasta) return { desde, hasta, habiles: contarDiasHabiles(desde, hasta, feriados, diasDelTaller) };
+        return null;
+    }, [spanPlan, planningRange, feriados, diasDelTaller]);
+
+    const capacidadPorOperario = React.useMemo(() => {
+        const salida: Record<number, CapacidadEnElPeriodo> = {};
+        for (const op of availableOperators) {
+            if (periodoDeCarga) {
+                salida[op.id] = capacidadEnElPeriodo(op, periodoDeCarga.desde, periodoDeCarga.hasta, feriados);
+            } else {
+                // Sin período: una semana de cinco días con su jornada.
+                const jornada = jornadaDelOperario(op);
+                salida[op.id] = { dias: 5, jornada, minutos: 5 * jornada };
+            }
+        }
+        return salida;
+    }, [availableOperators, periodoDeCarga, feriados]);
+
+    /** Qué parte de lo que puede trabajar en el período ya tiene ocupada. */
+    const ocupacionDe = (opId: number) => {
+        const cargaMin = minutosPorOperario[opId] || 0;
+        const capacidad = capacidadPorOperario[opId];
+        const capacidadMin = capacidad?.minutos ?? 0;
+        // Sin días de trabajo en el período (no trabaja ninguno de esos días): con
+        // cualquier minuto encima ya está pasado.
+        const pasado = capacidadMin > 0 ? cargaMin > capacidadMin : cargaMin > 0;
+        const porcentaje = capacidadMin > 0 ? (cargaMin / capacidadMin) * 100 : (cargaMin > 0 ? 100 : 0);
+        return { cargaMin, capacidad, capacidadMin, pasado, porcentaje };
+    };
+
+    /** Cuántos operarios quedan pasados de lo que pueden trabajar en el período si se
+     *  confirma este plan. Es lo que hace que plegar el panel resuma en vez de
+     *  esconder: el riel lo sigue mostrando en rojo. */
     const sobrecargados = React.useMemo(
-        () => availableOperators.filter(op => (minutosPorOperario[op.id] || 0) / 60 > 44).length,
-        [availableOperators, minutosPorOperario]
+        () => availableOperators.filter(op => ocupacionDe(op.id).pasado).length,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [availableOperators, minutosPorOperario, capacidadPorOperario]
     );
+
+    /** La bajada del panel: qué se compara contra qué, con las fechas de verdad. */
+    const bajadaDeCarga = (() => {
+        if (!periodoDeCarga) {
+            return "Sin fechas en el plan: se compara contra una semana de 5 días con la jornada de cada uno.";
+        }
+        const corta = (iso: string) => {
+            const [a, m, d] = iso.slice(0, 10).split("-").map(Number);
+            return a && m && d ? `${d}/${m}` : iso;
+        };
+        const n = periodoDeCarga.habiles;
+        const hayPrevia = availableOperators.some(op => (operatorLoads[op.id] || 0) > 0);
+        return `Del ${corta(periodoDeCarga.desde)} al ${corta(periodoDeCarga.hasta)}: lo que tiene cada uno${hayPrevia ? " (este plan y lo que ya tenía esos días)" : ""} contra lo que trabaja en ${n === 1 ? "ese día hábil" : `esos ${n} días hábiles`}, con su jornada.`;
+    })();
 
     /**
      * A quién le saltó la carga con lo último que se agregó a mano, y cuánto.
@@ -2837,12 +2910,18 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                 : "—"}
                             etiqueta={spanPlan
                                 ? (planningRange.fecha_hasta && planningRange.fecha_hasta.slice(0, 10) !== spanPlan.hasta.slice(0, 10)
-                                    ? `${spanPlan.habiles} días hábiles · tope ${formatDate(planningRange.fecha_hasta)}`
-                                    : `${spanPlan.habiles} días hábiles`)
+                                    ? `${spanPlan.habiles} ${spanPlan.habiles === 1 ? "día hábil" : "días hábiles"} · tope ${formatDate(planningRange.fecha_hasta)}`
+                                    : `${spanPlan.habiles} ${spanPlan.habiles === 1 ? "día hábil" : "días hábiles"}`)
                                 : "Período del plan"}
-                            title={planningRange.fecha_hasta
-                                ? `Período que ocupa el plan. Tope elegido al planificar: ${formatDate(planningRange.fecha_hasta)}`
-                                : "Período que ocupa el plan"}
+                            title={[
+                                "Período que ocupa el plan.",
+                                spanPlan
+                                    ? `Días hábiles: los que trabaja alguien del taller (${describirDias(diasDelTaller)}), sin feriados, contando el primero y el último aunque sean de media jornada.`
+                                    : "",
+                                planningRange.fecha_hasta
+                                    ? `Tope elegido al planificar: ${formatDate(planningRange.fecha_hasta)}.`
+                                    : "",
+                            ].filter(Boolean).join(" ")}
                         />
                         <CifraPlan
                             icono={<Cog className="w-4 h-4" />}
@@ -4245,7 +4324,8 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                     )}>
                         {!cargaAbierta ? (
                             /* El riel plegado no es una franja muerta: sigue diciendo
-                               cuántos operarios quedan pasados de las 44h. Plegar resume,
+                               cuántos operarios quedan pasados de lo que pueden trabajar en
+                               el período del plan. Plegar resume,
                                no esconde. */
                             /* Al costado (`lg`) es un riel vertical con el texto parado;
                                apilado abajo de la tabla, una barra acostada que se despliega
@@ -4276,11 +4356,11 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     Carga de recurso humano
                                     {sobrecargados > 0 && (
                                         <span className="rounded-full bg-rose-100 text-rose-700 text-[11px] font-bold px-2 py-0.5 tabular-nums">
-                                            {sobrecargados} pasados
+                                            {sobrecargados} {sobrecargados === 1 ? "pasado" : "pasados"}
                                         </span>
                                     )}
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">Estimación basada en la semana de planificación.</p>
+                                <p className="text-xs text-gray-500 mt-1">{bajadaDeCarga}</p>
                             </div>
                             <button
                                 type="button"
@@ -4315,19 +4395,27 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     })
                                     .map(op => {
                                         // La misma cuenta que usan el contador de pasados y el
-                                        // orden del panel: `minutosPorOperario`.
-                                        const totalLoadMin = minutosPorOperario[op.id] || 0;
+                                        // orden del panel: `minutosPorOperario` contra lo que
+                                        // esa persona trabaja en el período del plan.
+                                        const ocupacion = ocupacionDe(op.id);
+                                        const totalLoadMin = ocupacion.cargaMin;
                                         const totalLoadHours = (totalLoadMin / 60);
                                         // Lo que suma ESTE plan sobre lo que ya tenía cargado.
                                         const sessionLoadMin = totalLoadMin - (operatorLoads[op.id] || 0);
                                         // El salto de las últimas horas agregadas, si le tocó a esta persona.
                                         const salto = saltoCarga?.opId === op.id ? saltoCarga : null;
 
-                                        // Assuming 44h weekly capacity
-                                        const maxCapacityHours = 44;
-                                        const percentage = Math.min((totalLoadHours / maxCapacityHours) * 100, 100);
-
-                                        const isOverloaded = totalLoadHours > maxCapacityHours;
+                                        // Antes: 44 h fijas «de la semana» contra la carga de un
+                                        // plan de dos semanas. Ahora: sus días en el período × su
+                                        // jornada (ver `periodoDeCarga`).
+                                        const capacidadHs = ocupacion.capacidadMin / 60;
+                                        // El número dice cuánto se pasó (118%); la barra se llena y listo.
+                                        const percentage = ocupacion.porcentaje;
+                                        const anchoBarra = Math.min(percentage, 100);
+                                        const isOverloaded = ocupacion.pasado;
+                                        const capacidadTitulo = ocupacion.capacidad
+                                            ? `${ocupacion.capacidad.dias} ${ocupacion.capacidad.dias === 1 ? "día que trabaja" : "días que trabaja"} en el período × ${numeroEs(ocupacion.capacidad.jornada / 60, 2)} h de jornada = ${numeroEs(capacidadHs, 2)} h`
+                                            : "";
 
                                         // Rangos del operario: pueden venir como [{id, nombre}] o como [id]. Manejamos ambos.
                                         const rawRangos: any[] = op.rangos || [];
@@ -4374,13 +4462,13 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                             isOverloaded ? "bg-red-500" :
                                                                 percentage > 80 ? "bg-amber-500" : "bg-green-500"
                                                         )}
-                                                        style={{ width: `${percentage}%` }}
+                                                        style={{ width: `${anchoBarra}%` }}
                                                     />
                                                 </div>
                                                 <div className="flex justify-between items-center text-xs text-gray-500 mb-1.5">
-                                                    <span className="tabular-nums">{totalLoadHours.toFixed(1)}h / {maxCapacityHours}h</span>
+                                                    <span className="tabular-nums cursor-help" title={capacidadTitulo}>{numeroEs(totalLoadHours)}h / {numeroEs(capacidadHs)}h</span>
                                                     {sessionLoadMin > 0 && (
-                                                        <span className="text-blue-600 font-medium">+{Math.round(sessionLoadMin / 60 * 10) / 10}h nuevas</span>
+                                                        <span className="text-blue-600 font-medium">+{numeroEs(sessionLoadMin / 60)}h nuevas</span>
                                                     )}
                                                 </div>
                                                 {/* El "antes → después" de lo último que se agregó. Dura unos

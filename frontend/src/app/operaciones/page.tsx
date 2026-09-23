@@ -1398,20 +1398,21 @@ export default function OperacionesPage() {
         guardadoEn: new Date().toISOString(),
       });
 
-      // Calculate current operator loads for the WEEK of the FIRST PLANNED ITEM
-      const loads: Record<number, { current: number, new: number }> = {};
-
-      // Helper to get week key or range
-      const getWeekKey = (date: Date) => {
-        const d = new Date(date);
-        d.setHours(0, 0, 0, 0);
-        d.setDate(d.getDate() - d.getDay() + 1); // Monday
-        return d.getTime();
-      };
-
-      const newPlanWeekKeys = new Set(enrichedResults.map((r: any) => {
-        return getWeekKey(inicioDeLaFila(r) || baseDelPlan(r));
-      }));
+      // Lo que cada uno YA tenía planificado en los días de este plan nuevo.
+      //
+      // Del primer día del plan al último, y no por semanas: la vista previa compara
+      // la carga de cada persona contra lo que trabaja en ESE período (sus días
+      // hábiles × su jornada). Antes se contaban las semanas enteras que tocaba el
+      // plan y se comparaba contra 44 h fijas; con un plan del jueves 24/9 al martes
+      // 6/10 eso metía en la cuenta lo del lunes 21 y el miércoles 23, que el plan
+      // ni pisa.
+      const diaDe = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const puntasDelPlan = enrichedResults.flatMap((r: any) => {
+        const ini = inicioDeLaFila(r) || baseDelPlan(r);
+        return [diaDe(ini), diaDe(finDeLaFila(r) || ini)];
+      });
+      const primerDia = puntasDelPlan.length > 0 ? Math.min(...puntasDelPlan) : null;
+      const ultimoDia = puntasDelPlan.length > 0 ? Math.max(...puntasDelPlan) : null;
 
       // Better approach using `tasks` (GanttTasks) which have absolute dates
       const calculatedLoads: Record<number, number> = {};
@@ -1420,11 +1421,8 @@ export default function OperacionesPage() {
         const opId = parseInt(task.resourceId);
         if (isNaN(opId)) return;
 
-        const taskDate = new Date(task.startDate);
-        const taskWeek = getWeekKey(taskDate);
-
-        // Only count if it falls in one of the relevant weeks for new plan
-        if (newPlanWeekKeys.has(taskWeek)) {
+        const dia = diaDe(new Date(task.startDate));
+        if (primerDia !== null && ultimoDia !== null && dia >= primerDia && dia <= ultimoDia) {
           calculatedLoads[opId] = (calculatedLoads[opId] || 0) + (task.duration * 60); // Duration in minutes
         }
       });
@@ -2827,7 +2825,6 @@ export default function OperacionesPage() {
             onDataRefresh={fetchData}
             initialSelectedIds={isReplanning ? plannedOrdenes.map(o => o.id) : []}
             onAbrirBorrador={handleAbrirBorrador}
-            availableOperarios={rawOperarios}
           />
           <PlanningPreviewScreen
             isOpen={isPreviewOpen}
