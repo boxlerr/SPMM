@@ -385,7 +385,10 @@ def diagnosticos_de_pausas(saltadas):
             },
             "soluciones": [{
                 "texto": f"Cuando se destrabe, reanudá {sujeto} y volvé a calcular el plan.",
-                "donde": "Operaciones › la OT › Reanudar",
+                # El botón está en la ficha de la OT, arriba de todo, en la franja de la
+                # pausa (frontend/src/components/pausas/PausasDeLaOT.tsx). Si se mueve,
+                # esto se cambia con él: el aviso no puede mandar a un botón que no está.
+                "donde": "Operaciones › abrí la OT › «Reanudar», arriba de todo",
             }],
         })
     return avisos

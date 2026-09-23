@@ -18,8 +18,14 @@ LO QUE NO HACE, A PROPÓSITO
   · No cambia el estado de ningún paso ni sus ids: el tablero, el planificador y el
     sync dependen de ellos.
   · No saca la OT del plan ya confirmado. Deja de entrar en los planes NUEVOS (el
-    planificador la saltea y lo avisa), pero borrar sus filas del plan vigente sería
-    decidir por el planificador: queda a la vista con su cartel de «Pausada».
+    planificador la saltea y lo avisa; y si se pausó después de calcular una vista
+    previa o un borrador, al confirmarlo tampoco se guarda), pero borrar sus filas del
+    plan vigente sería decidir por el planificador: queda a la vista con su cartel de
+    «Pausada» en las listas de Operaciones (el Gantt no lo muestra).
+
+LA PANTALLA: la ficha de la OT, arriba de todo (frontend/src/components/pausas/
+PausasDeLaOT.tsx): «Pausar…» y «Reanudar» para la OT y para cada paso, y el historial.
+Las listas de Operaciones cruzan /ordenes-pausadas para el cartel.
   · No toca `orden_trabajo.suspendida`, la tilde del sistema viejo. Conviven: aquélla
     no tiene motivo ni autor, y reemplazarla es una decisión del taller.
 """

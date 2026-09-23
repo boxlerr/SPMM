@@ -63,6 +63,7 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, type SeccionExport } from "@/lib/exportar";
 import {
     columnasOrdenes,
@@ -1553,6 +1554,7 @@ function _PlanningListTable({
                                         )}
                                         <span className="font-bold text-lg text-gray-800">#{item.id_otvieja || item.id}</span>
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
+                                        <MarcaPausada idOrden={item.id} />
                                     </div>
                                     <button className="text-gray-400">
                                         {isRowExpanded(item.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -1904,7 +1906,12 @@ function _PlanningListTable({
                                                 </button>
                                             </td>
                                             <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                                            <td className="px-3 py-3 font-medium">{item.id_otvieja || item.id}</td>
+                                            <td className="px-3 py-3 font-medium">
+                                                <span className="inline-flex flex-wrap items-center gap-1.5">
+                                                    {item.id_otvieja || item.id}
+                                                    <MarcaPausada idOrden={item.id} />
+                                                </span>
+                                            </td>
                                             <td
                                                 className="group/edit relative px-3 py-3 font-medium cursor-pointer hover:bg-black/5 rounded-sm"
                                                 title="Click para editar la fecha de entrada"

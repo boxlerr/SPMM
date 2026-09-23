@@ -43,6 +43,7 @@ import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { columnasOrdenes, filtroOrden, resumenFiltrosOT } from "@/lib/exportes/ordenes";
 
 /** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
@@ -413,6 +414,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         <div className="flex items-center gap-2">
                                             <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
                                             <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
+                                            <MarcaPausada idOrden={order.id} />
                                         </div>
                                         <button className="text-gray-400">
                                             {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -602,7 +604,12 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                         </button>
                                                     </td>
                                                     <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                                                    <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
+                                                    <td className="px-3 py-3 font-medium">
+                                                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                                                            {order.id_otvieja || order.id}
+                                                            <MarcaPausada idOrden={order.id} />
+                                                        </span>
+                                                    </td>
                                                     <td className="px-3 py-3 font-medium">
                                                         {formatDate(order.fecha_entrada)}
                                                     </td>

@@ -233,8 +233,10 @@ POLITICAS: dict[str, Politica] = {
     "ordenes_trabajo_piezas": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
     "consumos_material": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
     # Pausar y reanudar una OT o un paso (RF-03). Es tocar la OT —lo mismo que cambiarle
-    # el estado a un paso—, así que pide la solapa Órdenes. Las pausas vigentes las leen
-    # las listas de Operaciones (el cartel de «Pausada»), la ficha y el planificador.
+    # el estado a un paso—, así que pide la solapa Órdenes. Las pausas vigentes
+    # (/ordenes-pausadas) las leen las listas de Operaciones (el cartel de «Pausada») y
+    # la vista previa del planificador; el historial de una OT (/ordenes/{id}/pausas), su
+    # ficha. El planificador del backend las lee por su cuenta, sin pasar por la ruta.
     "pausas": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
 
     # ── La ficha de la persona ──

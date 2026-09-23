@@ -30,6 +30,7 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { cn } from "@/lib/utils";
 import { TipoTrabajoBadge, textoTipoTrabajo, type TipoTrabajo } from "@/components/common/TipoTrabajoBadge";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import {
     Search, RefreshCw, Plus, CalendarClock, FileText, AlertTriangle,
@@ -390,7 +391,10 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                                                 className="hover:bg-red-50/40 cursor-pointer transition-colors"
                                             >
                                                 <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
-                                                    {o.id_otvieja ?? o.id}
+                                                    <span className="inline-flex items-center gap-1.5">
+                                                        {o.id_otvieja ?? o.id}
+                                                        <MarcaPausada idOrden={o.id} />
+                                                    </span>
                                                 </td>
                                                 <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate" title={o.cliente || ""}>
                                                     {o.cliente || "—"}

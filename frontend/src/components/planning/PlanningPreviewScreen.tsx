@@ -31,6 +31,7 @@ import {
 } from "@/lib/ajustesPlan";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { AvisoPausadasEnElPlan } from "@/components/pausas/AvisoPausadasEnElPlan";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import {
     useProcesosEnPlan, contarCambios, resumirCambios, filasVisiblesDeOT, pasadasEnOrden,
@@ -3003,6 +3004,14 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                             </div>
 
                             <div className="p-0 pr-2" style={{ zoom: zoom / 100 }}>
+                                {/* RF-03: una OT del plan se pausó DESPUÉS de calcularlo (una vista
+                                    previa abierta, un borrador de ayer). Al confirmar no se guarda;
+                                    acá se dice antes, con la opción de recalcular. */}
+                                <AvisoPausadasEnElPlan
+                                    filas={results}
+                                    onRecalcular={onRecalculate ? () => handleRecalculate() : undefined}
+                                    recalculando={isCalculating}
+                                />
                                 {/* Aviso compacto: hay OTs forzadas con procesos que el solver no pudo asignar.
                                     Explicamos el motivo real (datos faltantes) en vez de mostrarlo como "parcial". */}
                                 {forcedPartialMap.size > 0 && (() => {

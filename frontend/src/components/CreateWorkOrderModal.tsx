@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/lib/toast";
-import { cn, capitalizeName } from "@/lib/utils";
+import { cn, capitalizeName, isOrderDelivered } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -28,6 +28,7 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { PausasDeLaOT } from "@/components/pausas/PausasDeLaOT";
 import { aNumero } from "@/lib/exportar";
 import { archivoDeOT, seccionesDeOT, type DatosDeOT } from "@/lib/exportes/ot";
 import {
@@ -1528,6 +1529,20 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                             )}
                         </DialogTitle>
                     </DialogHeader>
+
+                    {/* RF-03: pausar y reanudar la OT o un paso. Arriba de todo y fuera del
+                        formulario (sus botones no guardan la OT): una OT pausada es lo
+                        primero que hay que ver al abrirla, y el «Reanudar» tiene que estar
+                        donde lo manda el aviso del planificador. Con un backend de antes no
+                        dibuja nada. */}
+                    {orderToEdit?.id ? (
+                        <PausasDeLaOT
+                            idOrden={orderToEdit.id}
+                            numeroOT={orderToEdit.id_otvieja || orderToEdit.id}
+                            pasos={orderToEdit.procesos || []}
+                            entregada={isOrderDelivered(orderToEdit)}
+                        />
+                    ) : null}
 
                     <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
                         <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 relative">
