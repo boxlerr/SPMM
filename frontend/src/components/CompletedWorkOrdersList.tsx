@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { 
     Search, 
     Calendar, 
@@ -24,12 +24,41 @@ import { MaterialChip } from "@/components/common/MaterialChip";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { columnasOrdenes, filtroOrden, resumenFiltrosOT } from "@/lib/exportes/ordenes";
 import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano } from "@/hooks/useOrdenesConPlano";
+import { useDeATandas, useVistaDeTarjetas } from "@/hooks/useDeATandas";
+import { PieDeTandas } from "./common/PieDeTandas";
+import { FilasDeATandas } from "./common/FilasDeATandas";
 
 /** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
 const ROTULOS_ORDEN: Record<string, string> = {
     id: "OT", id_otvieja: "OT", fecha_entrada: "F. Entrada", cliente: "Cliente", codigo: "Código",
     descripcion: "Producto", unidades: "Cant.", fecha_entrega: "F. Entrega",
 };
+
+/** Mismo criterio que en No Planificadas: el número solo no lo lee nadie. */
+function getPriorityLabel(priorityId?: number, descripcion?: string) {
+    if (descripcion) return descripcion;
+    switch (priorityId) {
+        case 3: return "Crítica";
+        case 2: return "Urgente";
+        case 1: return "Normal";
+        default: return "Normal";
+    }
+}
+
+// Un solo formateador para toda la lista: `toLocaleDateString` arma uno nuevo en cada
+// llamada, y son tres fechas por fila.
+const FORMATO_FECHA = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+function formatDate(dateStr?: string) {
+    if (!dateStr || dateStr.startsWith('1950')) return "-";
+    try {
+        const date = new Date(dateStr);
+        if (date.getFullYear() === 1950) return "-";
+        return FORMATO_FECHA.format(date);
+    } catch (e) {
+        return dateStr;
+    }
+}
 
 interface CompletedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -38,7 +67,9 @@ interface CompletedWorkOrdersListProps {
     tableZoom?: number;
 }
 
-export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: CompletedWorkOrdersListProps) {
+// `memo`: mientras esta solapa está escondida (queda armada, ver WorkOrdersListWrapper)
+// no se vuelve a dibujar por cada clic del planificador, que vive en la misma página.
+export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: CompletedWorkOrdersListProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
@@ -51,11 +82,16 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
     // dinámicamente cuando el usuario llegó al final del scroll horizontal.
     const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
     const [showRightFade, setShowRightFade] = useState(true);
+    // Tarjetas (celular) o tabla: se arma sólo la que se ve.
+    const verTarjetas = useVistaDeTarjetas();
 
     React.useEffect(() => {
         const el = scrollContainerRef.current;
         if (!el) return;
         const updateFade = () => {
+            // Escondida (otra solapa) mide 0: no cambiar nada, si no la lista se vuelve
+            // a dibujar al esconderse y otra vez al volver.
+            if (el.clientWidth === 0) return;
             const remaining = el.scrollWidth - el.scrollLeft - el.clientWidth;
             setShowRightFade(remaining > 2);
         };
@@ -67,19 +103,19 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
             el.removeEventListener('scroll', updateFade);
             ro.disconnect();
         };
-    }, [orders.length, tableZoom]);
+    }, [orders.length, tableZoom, verTarjetas]);
     const [sortConfig, setSortConfig] = useState<{
         key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'fecha_entrega' | null;
         direction: 'asc' | 'desc' | null;
     }>({ key: null, direction: null });
 
-    const toggleRow = (orderId: number) => {
+    const toggleRow = useCallback((orderId: number) => {
         setExpandedOrderIds(prev =>
             prev.includes(orderId)
                 ? prev.filter(id => id !== orderId)
                 : [...prev, orderId]
         );
-    };
+    }, []);
 
     const handleSort = (key: typeof sortConfig.key) => {
         let direction: 'asc' | 'desc' | null = 'asc';
@@ -95,8 +131,12 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
         return <span className="ml-1 text-green-600 font-bold">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
     };
 
-    const filteredOrders = applyWorkOrderFilters(orders, filters).filter(order => {
-        const searchLower = searchTerm.toLowerCase();
+    // El filtro corre con la búsqueda "diferida": el casillero muestra cada letra al
+    // toque y la lista se pone al día cuando el navegador tiene un respiro. Antes cada
+    // tecla volvía a filtrar y a dibujar las 1102 filas antes de mostrar la letra.
+    const busqueda = useDeferredValue(searchTerm);
+    const filteredOrders = useMemo(() => applyWorkOrderFilters(orders, filters).filter(order => {
+        const searchLower = busqueda.toLowerCase();
         const otId = order.id.toString();
         const oldOtId = order.id_otvieja?.toString() || "";
         const clientRaw = order.cliente;
@@ -110,7 +150,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                clientName.includes(searchLower) ||
                article.includes(searchLower) ||
                codArticle.includes(searchLower);
-    });
+    }), [orders, filters, busqueda]);
 
     const sortedOrders = React.useMemo(() => {
         const sorted = [...filteredOrders];
@@ -156,31 +196,248 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
         });
     }, [filteredOrders, sortConfig]);
 
-    /** Mismo criterio que en No Planificadas: el número solo no lo lee nadie. */
-    const getPriorityLabel = (priorityId?: number, descripcion?: string) => {
-        if (descripcion) return descripcion;
-        switch (priorityId) {
-            case 3: return "Crítica";
-            case 2: return "Urgente";
-            case 1: return "Normal";
-            default: return "Normal";
-        }
-    };
+    // Se dibujan de a 60 a medida que se baja (ver `useDeATandas`): el Historial es la
+    // lista que más crece y abrirlo armaba las 1102 filas de una. El Exportar y el
+    // buscador siguen mirando `sortedOrders` entero.
+    const tandas = useDeATandas(sortedOrders, JSON.stringify([filters, busqueda, sortConfig]));
 
-    const formatDate = (dateStr?: string) => {
-        if (!dateStr || dateStr.startsWith('1950')) return "-";
-        try {
-            const date = new Date(dateStr);
-            if (date.getFullYear() === 1950) return "-";
-            return date.toLocaleDateString('es-AR', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            });
-        } catch (e) {
-            return dateStr;
-        }
-    };
+
+
+    // Cómo se arma cada fila. Estables (useCallback) a propósito: `FilasDeATandas`
+    // saltea las tandas ya dibujadas mientras esto no cambie, así que bajar o teclear en
+    // el buscador no vuelve a armar lo que ya estaba. Cambian sólo al desplegar una OT.
+    const filaDeTabla = useCallback((order: WorkOrder, index: number) => (
+        <React.Fragment key={order.id}>
+            <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
+                <td className="px-3 py-3">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
+                        className="p-1 hover:bg-black/10 rounded transition-colors"
+                    >
+                        {expandedOrderIds.includes(order.id) ? (
+                            <ChevronDown className="h-4 w-4 text-gray-600" />
+                        ) : (
+                            <ChevronRight className="h-4 w-4 text-gray-400" />
+                        )}
+                    </button>
+                </td>
+                <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
+                <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
+                <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
+                <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
+                <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
+                {/* Producto: mismas restricciones que en PlanningListTable / Unplanned
+                    para que la altura de fila sea consistente entre las 3 tablas
+                    (min-w-[300px] max-w-[450px] + line-clamp-2). */}
+                <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>
+                    <span className="line-clamp-2">
+                        {(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}
+                    </span>
+                </td>
+                <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
+                <td className="px-3 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
+                <td className="px-3 py-3 text-center">
+                    <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
+                        {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
+                    </Badge>
+                </td>
+                <td className="px-3 py-3 text-center">
+                    <MaterialChip estado={order.estado_material} noLleva={order.no_lleva_materia_prima} />
+                </td>
+                {/* Proceso: Sí (verde) si tenía procesos cargados. */}
+                <td className="px-3 py-3 text-center">
+                    {(order.procesos && order.procesos.length > 0) ? (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                    ) : (
+                        <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                    )}
+                </td>
+                {/* Plano: qué hay para MIRAR, y se abre desde acá mismo.
+                    Antes esta celda solo repetía la bandera `tiene_plano` que
+                    viene del legacy, y esa bandera está en 1 en casi todas las
+                    OTs: decía "Sí" sobre órdenes sin ningún archivo, y "No"
+                    sobre órdenes cuyo plano estaba cargado —en el artículo—.
+                    Es una columna de consulta: no toca el filtro de planos del
+                    planificador, que sigue leyendo solo el plano propio. */}
+                <td className="px-3 py-3 text-center">
+                    <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
+                </td>
+                <td className="px-3 py-3 text-center">
+                    <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">
+                        Finalizada
+                    </Badge>
+                </td>
+                <td className="px-3 py-3 text-center">
+                    <span className="text-xs font-bold text-green-700">
+                        {order.cantidad_entregada || 0} / {order.unidades || 0}
+                    </span>
+                </td>
+                <td className="px-3 py-3">{formatDate(order.fecha_prometida)}</td>
+                <td className="px-3 py-3 font-medium">{formatDate(order.fecha_entrega)}</td>
+                <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>{order.aprobado_por || "-"}</td>
+                <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>{order.requerido_por || "-"}</td>
+                <td className="px-3 py-3">
+                    <div className="flex items-center justify-center">
+                        <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-7 px-2.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 text-xs font-bold"
+                            onClick={(e) => { e.stopPropagation(); onEdit(order); }}
+                        >
+                            <Eye className="w-3 h-3" /> Ver
+                        </Button>
+                    </div>
+                </td>
+            </tr>
+            {expandedOrderIds.includes(order.id) && (
+                <tr className="bg-gray-50 border-b">
+                    <td colSpan={20} className="px-4 py-4">
+                        <div className="space-y-3">
+                            <div className="text-xs text-gray-600">
+                                <span className="font-bold text-gray-800">Observaciones: </span>
+                                {order.observaciones || order.detalle || "Sin observaciones adicionales"}
+                            </div>
+                            <OrderFiles orderId={order.id} />
+                            {/* Process Sub-Table */}
+                            {order.procesos && order.procesos.length > 0 ? (
+                                <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
+                                    <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-2 font-bold border-b border-gray-200">
+                                        <div>#</div>
+                                        <div>Proceso</div>
+                                        <div>Estado</div>
+                                        <div className="text-center">Min. Est.</div>
+                                        <div className="text-center text-blue-700">Min. Real</div>
+                                        <div>Recurso humano</div>
+                                    </div>
+                                    {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
+                                        <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                            <div className="text-gray-500 font-mono">{proc.orden}</div>
+                                            <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                            <div>
+                                                <Badge className={cn(
+                                                    "text-[10px] shadow-none font-medium",
+                                                    proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
+                                                    proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
+                                                    "bg-gray-100 text-gray-800 border-gray-200"
+                                                )}>
+                                                    {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
+                                                </Badge>
+                                            </div>
+                                            <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
+                                            <div className="text-center font-bold text-blue-700 text-xs">
+                                                {proc.inicio_real && proc.fin_real
+                                                    ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)} min`
+                                                    : proc.inicio_real ? "En curso..." : "-"
+                                                }
+                                            </div>
+                                            <div className="text-gray-700 text-xs font-medium truncate">
+                                                {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
+                            )}
+                        </div>
+                    </td>
+                </tr>
+            )}
+        </React.Fragment>
+    ), [expandedOrderIds, onEdit, toggleRow]);
+
+    const tarjetaDeOrden = useCallback((order: WorkOrder) => (
+        <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
+            <div className="p-4" onClick={() => toggleRow(order.id)}>
+                <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2">
+                        <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
+                        <Badge className="bg-green-100 text-green-700 border-green-200 text-[9px]">FINALIZADA</Badge>
+                    </div>
+                    <button className="text-gray-400">
+                        {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                    </button>
+                </div>
+                <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                        <span className="font-semibold text-gray-900 line-clamp-1">
+                            {typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}
+                        </span>
+                        {/* En el celular no hay columna Plano donde meterlo, así que va
+                            pegado al código del artículo: es el plano de ESE producto y
+                            se abre sin desplegar la tarjeta ni entrar a la ficha. */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
+                            <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto className="text-[10px] px-1.5" />
+                        </div>
+                    </div>
+                    <div className="text-gray-600 line-clamp-2 text-xs">{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : order.articulo?.descripcion}</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">Entregado</span>
+                            <span className="font-medium text-green-700">{order.cantidad_entregada || 0} / {order.unidades || 0}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">F. Entrega</span>
+                            <span className="font-medium">{formatDate(order.fecha_entrega)}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">N° Pedido</span>
+                            <span className="font-medium text-gray-700">{order.n_pedido || order.n_ped_l || "-"}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
+                            <span className="font-medium text-gray-700">{order.aprobado_por || "-"}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {expandedOrderIds.includes(order.id) && (
+                <div className="bg-gray-50 border-t p-3 space-y-2">
+                    <div className="text-xs text-gray-600">
+                        <span className="font-bold text-gray-800">Observaciones: </span>
+                        {order.observaciones || order.detalle || "Sin observaciones adicionales"}
+                    </div>
+                    <OrderFiles orderId={order.id} />
+                    {/* Process Sub-Table */}
+                    {order.procesos && order.procesos.length > 0 ? (
+                        <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
+                            <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-2 font-bold border-b border-gray-200">
+                                <div>#</div>
+                                <div>Proceso</div>
+                                <div>Estado</div>
+                                <div className="text-center">Min. Est.</div>
+                            </div>
+                            {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
+                                <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                    <div className="text-gray-500 font-mono">{proc.orden}</div>
+                                    <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
+                                    <div>
+                                        <Badge className={cn(
+                                            "text-[10px] shadow-none",
+                                            proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
+                                            proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
+                                            "bg-gray-100 text-gray-800 border-gray-200"
+                                        )}>
+                                            {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
+                                        </Badge>
+                                    </div>
+                                    <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
+                    )}
+                    <div className="flex justify-end pt-2">
+                        <Button variant="ghost" size="sm" className="h-8 text-blue-600 hover:bg-blue-50 gap-1.5" onClick={() => onEdit(order)}>
+                            <Eye className="w-3.5 h-3.5" /> Ver Detalles
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </Card>
+    ), [expandedOrderIds, onEdit, toggleRow]);
 
     return (
         <div className="space-y-3">
@@ -237,104 +494,14 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                 </div>
             ) : (
                 <>
-                    {/* Mobile Card View */}
-                    <div className="md:hidden space-y-3">
-                        {sortedOrders.map((order) => (
-                            <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
-                                <div className="p-4" onClick={() => toggleRow(order.id)}>
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
-                                            <Badge className="bg-green-100 text-green-700 border-green-200 text-[9px]">FINALIZADA</Badge>
-                                        </div>
-                                        <button className="text-gray-400">
-                                            {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                                        </button>
-                                    </div>
-                                    <div className="space-y-2 text-sm">
-                                        <div className="flex justify-between">
-                                            <span className="font-semibold text-gray-900 line-clamp-1">
-                                                {typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}
-                                            </span>
-                                            {/* En el celular no hay columna Plano donde meterlo, así que va
-                                                pegado al código del artículo: es el plano de ESE producto y
-                                                se abre sin desplegar la tarjeta ni entrar a la ficha. */}
-                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
-                                                <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto className="text-[10px] px-1.5" />
-                                            </div>
-                                        </div>
-                                        <div className="text-gray-600 line-clamp-2 text-xs">{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : order.articulo?.descripcion}</div>
-                                        <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">Entregado</span>
-                                                <span className="font-medium text-green-700">{order.cantidad_entregada || 0} / {order.unidades || 0}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">F. Entrega</span>
-                                                <span className="font-medium">{formatDate(order.fecha_entrega)}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">N° Pedido</span>
-                                                <span className="font-medium text-gray-700">{order.n_pedido || order.n_ped_l || "-"}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
-                                                <span className="font-medium text-gray-700">{order.aprobado_por || "-"}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {expandedOrderIds.includes(order.id) && (
-                                    <div className="bg-gray-50 border-t p-3 space-y-2">
-                                        <div className="text-xs text-gray-600">
-                                            <span className="font-bold text-gray-800">Observaciones: </span>
-                                            {order.observaciones || order.detalle || "Sin observaciones adicionales"}
-                                        </div>
-                                        <OrderFiles orderId={order.id} />
-                                        {/* Process Sub-Table */}
-                                        {order.procesos && order.procesos.length > 0 ? (
-                                            <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
-                                                <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-2 font-bold border-b border-gray-200">
-                                                    <div>#</div>
-                                                    <div>Proceso</div>
-                                                    <div>Estado</div>
-                                                    <div className="text-center">Min. Est.</div>
-                                                </div>
-                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
-                                                        <div className="text-gray-500 font-mono">{proc.orden}</div>
-                                                        <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
-                                                        <div>
-                                                            <Badge className={cn(
-                                                                "text-[10px] shadow-none",
-                                                                proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
-                                                                proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
-                                                                "bg-gray-100 text-gray-800 border-gray-200"
-                                                            )}>
-                                                                {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
-                                                            </Badge>
-                                                        </div>
-                                                        <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
-                                        )}
-                                        <div className="flex justify-end pt-2">
-                                            <Button variant="ghost" size="sm" className="h-8 text-blue-600 hover:bg-blue-50 gap-1.5" onClick={() => onEdit(order)}>
-                                                <Eye className="w-3.5 h-3.5" /> Ver Detalles
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-                            </Card>
-                        ))}
-                    </div>
+                    {/* Mobile Card View. Se arma sólo si es la que se ve: escondida con CSS
+                        el navegador la dibujaba igual, y era el doble de trabajo. */}
+                    {verTarjetas && <div className="md:hidden space-y-3">
+                        <FilasDeATandas filas={sortedOrders} mostradas={tandas.mostradas} tanda={tandas.tanda} render={tarjetaDeOrden} />
+                    </div>}
 
                     {/* Desktop Table View. El `zoom` aplica SOLO acá (no al header ni a los filtros). */}
-                    <Card className="hidden md:block overflow-hidden border border-gray-200 shadow-sm bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
+                    {!verTarjetas && <Card className="hidden md:block overflow-hidden border border-gray-200 shadow-sm bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
                         <div ref={scrollContainerRef} className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
                             <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
@@ -382,149 +549,11 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
                                             <td colSpan={20} className="px-4 py-8 text-center text-gray-500">
-                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : "No hay órdenes completadas."}
+                                                {busqueda ? "No se encontraron resultados para la búsqueda." : "No hay órdenes completadas."}
                                             </td>
                                         </tr>
                                     ) : (
-                                        sortedOrders.map((order, index) => (
-                                            <React.Fragment key={order.id}>
-                                                <tr className={cn("border-b transition-colors duration-150 cursor-pointer", getWorkOrderRowColor(order))}>
-                                                    <td className="px-3 py-3">
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
-                                                            className="p-1 hover:bg-black/10 rounded transition-colors"
-                                                        >
-                                                            {expandedOrderIds.includes(order.id) ? (
-                                                                <ChevronDown className="h-4 w-4 text-gray-600" />
-                                                            ) : (
-                                                                <ChevronRight className="h-4 w-4 text-gray-400" />
-                                                            )}
-                                                        </button>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                                                    <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
-                                                    <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
-                                                    <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
-                                                    <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
-                                                    {/* Producto: mismas restricciones que en PlanningListTable / Unplanned
-                                                        para que la altura de fila sea consistente entre las 3 tablas
-                                                        (min-w-[300px] max-w-[450px] + line-clamp-2). */}
-                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px]" title={(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}>
-                                                        <span className="line-clamp-2">
-                                                            {(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : (order.articulo?.descripcion || "-")}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600">{order.n_pedido || order.n_ped_l || "-"}</td>
-                                                    <td className="px-3 py-3 text-center font-medium">{order.unidades ?? "-"}</td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
-                                                            {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
-                                                        </Badge>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <MaterialChip estado={order.estado_material} noLleva={order.no_lleva_materia_prima} />
-                                                    </td>
-                                                    {/* Proceso: Sí (verde) si tenía procesos cargados. */}
-                                                    <td className="px-3 py-3 text-center">
-                                                        {(order.procesos && order.procesos.length > 0) ? (
-                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                        ) : (
-                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
-                                                        )}
-                                                    </td>
-                                                    {/* Plano: qué hay para MIRAR, y se abre desde acá mismo.
-                                                        Antes esta celda solo repetía la bandera `tiene_plano` que
-                                                        viene del legacy, y esa bandera está en 1 en casi todas las
-                                                        OTs: decía "Sí" sobre órdenes sin ningún archivo, y "No"
-                                                        sobre órdenes cuyo plano estaba cargado —en el artículo—.
-                                                        Es una columna de consulta: no toca el filtro de planos del
-                                                        planificador, que sigue leyendo solo el plano propio. */}
-                                                    <td className="px-3 py-3 text-center">
-                                                        <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <Badge className="bg-green-100 text-green-800 hover:bg-green-200 border-green-200 shadow-none">
-                                                            Finalizada
-                                                        </Badge>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <span className="text-xs font-bold text-green-700">
-                                                            {order.cantidad_entregada || 0} / {order.unidades || 0}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-3">{formatDate(order.fecha_prometida)}</td>
-                                                    <td className="px-3 py-3 font-medium">{formatDate(order.fecha_entrega)}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>{order.aprobado_por || "-"}</td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>{order.requerido_por || "-"}</td>
-                                                    <td className="px-3 py-3">
-                                                        <div className="flex items-center justify-center">
-                                                            <Button 
-                                                                variant="ghost" 
-                                                                size="sm" 
-                                                                className="h-7 px-2.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1 text-xs font-bold"
-                                                                onClick={(e) => { e.stopPropagation(); onEdit(order); }}
-                                                            >
-                                                                <Eye className="w-3 h-3" /> Ver
-                                                            </Button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                                {expandedOrderIds.includes(order.id) && (
-                                                    <tr className="bg-gray-50 border-b">
-                                                        <td colSpan={20} className="px-4 py-4">
-                                                            <div className="space-y-3">
-                                                                <div className="text-xs text-gray-600">
-                                                                    <span className="font-bold text-gray-800">Observaciones: </span>
-                                                                    {order.observaciones || order.detalle || "Sin observaciones adicionales"}
-                                                                </div>
-                                                                <OrderFiles orderId={order.id} />
-                                                                {/* Process Sub-Table */}
-                                                                {order.procesos && order.procesos.length > 0 ? (
-                                                                    <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
-                                                                        <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-4 py-2 font-bold border-b border-gray-200">
-                                                                            <div>#</div>
-                                                                            <div>Proceso</div>
-                                                                            <div>Estado</div>
-                                                                            <div className="text-center">Min. Est.</div>
-                                                                            <div className="text-center text-blue-700">Min. Real</div>
-                                                                            <div>Recurso humano</div>
-                                                                        </div>
-                                                                        {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                                            <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px_70px_2fr] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
-                                                                                <div className="text-gray-500 font-mono">{proc.orden}</div>
-                                                                                <div className="font-medium text-xs md:text-sm truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
-                                                                                <div>
-                                                                                    <Badge className={cn(
-                                                                                        "text-[10px] shadow-none font-medium",
-                                                                                        proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
-                                                                                        proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
-                                                                                        "bg-gray-100 text-gray-800 border-gray-200"
-                                                                                    )}>
-                                                                                        {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
-                                                                                    </Badge>
-                                                                                </div>
-                                                                                <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
-                                                                                <div className="text-center font-bold text-blue-700 text-xs">
-                                                                                    {proc.inicio_real && proc.fin_real
-                                                                                        ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)} min`
-                                                                                        : proc.inicio_real ? "En curso..." : "-"
-                                                                                    }
-                                                                                </div>
-                                                                                <div className="text-gray-700 text-xs font-medium truncate">
-                                                                                    {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
-                                                                                </div>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </React.Fragment>
-                                        ))
+                                        <FilasDeATandas filas={sortedOrders} mostradas={tandas.mostradas} tanda={tandas.tanda} render={filaDeTabla} />
                                     )}
                                 </tbody>
                             </table>
@@ -535,9 +564,13 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                         <div
                             className={`pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
                         />
-                    </Card>
+                    </Card>}
+
+                    {/* Afuera de la tabla a propósito: adentro quedaría en la caja del
+                        scroll horizontal y bajo el `zoom`. */}
+                    <PieDeTandas {...tandas} />
                 </>
             )}
         </div>
     );
-}
+});

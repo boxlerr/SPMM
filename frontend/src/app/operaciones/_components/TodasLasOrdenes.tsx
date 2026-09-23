@@ -18,7 +18,7 @@
  * hechos por Postgres. No trae los procesos: para verlos se abre la OT.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -33,6 +33,9 @@ import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, partesDeFecha, type ColumnaExport } from "@/lib/exportar";
 import { rangoPrioridad } from "@/lib/prioridad";
+import { useDeATandas } from "@/hooks/useDeATandas";
+import { PieDeTandas } from "@/components/common/PieDeTandas";
+import { FilasDeATandas } from "@/components/common/FilasDeATandas";
 import {
     Search, RefreshCw, Plus, CalendarClock, FileText, AlertTriangle,
     ClipboardList, CheckCircle2, CircleDashed, ArrowUpDown, Ban,
@@ -184,7 +187,6 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
     const [busqueda, setBusqueda] = useState("");
     const [huecos, setHuecos] = useState<("procesos" | "tipo" | "plano")[]>([]);
     const [orden, setOrden] = useState<Orden>("prometida");
-    const [visibles, setVisibles] = useState(100);
 
     const [modalAbierto, setModalAbierto] = useState(false);
     const [otAEditar, setOtAEditar] = useState<any>(null);
@@ -206,10 +208,11 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
     };
 
     useEffect(() => { cargar(); }, []);
-    useEffect(() => { setVisibles(100); }, [filtro, busqueda, huecos, orden]);
+    // Búsqueda "diferida": la letra se ve al toque y la lista se pone al día después.
+    const busquedaDiferida = useDeferredValue(busqueda);
 
     const filtradas = useMemo(() => {
-        const q = busqueda.trim().toLowerCase();
+        const q = busquedaDiferida.trim().toLowerCase();
         let lista = ordenes.filter(o => {
             if (filtro === "en_curso" ? o.estado_plan === "entregada"
                 : filtro !== "todas" && o.estado_plan !== filtro) return false;
@@ -237,9 +240,13 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                 || cmp.prometida(a, b),
         };
         return [...lista].sort(cmp[orden]);
-    }, [ordenes, filtro, busqueda, huecos, orden]);
+    }, [ordenes, filtro, busquedaDiferida, huecos, orden]);
 
-    const abrirOT = async (o: OrdenResumen) => {
+    // De a 60 a medida que se baja, como el Historial (ver `useDeATandas`). Antes era
+    // un botón «Ver más» que había que ir tocando para llegar a las de abajo.
+    const tandas = useDeATandas(filtradas, JSON.stringify([filtro, busquedaDiferida, huecos, orden]));
+
+    const abrirOT = useCallback(async (o: OrdenResumen) => {
         try {
             const r = await fetch(`${cleanUrl}/ordenes/${o.id}`, { headers: getAuthHeaders() });
             const json = await r.json();
@@ -250,7 +257,97 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
         } catch {
             showToast("No se pudo abrir la orden de trabajo.", "error");
         }
-    };
+    }, [cleanUrl, showToast]);
+
+    // Cómo se arma cada fila. Estable a propósito: `FilasDeATandas` saltea las tandas ya
+    // dibujadas mientras esto no cambie (bajar o teclear no rearma lo que ya estaba).
+    const filaDeOrden = useCallback((o: OrdenResumen) => {
+        const dias = o.entregada ? null : diasPara(o.fecha_prometida);
+        const atrasada = dias !== null && dias < 0;
+        return (
+            <tr
+                key={o.id}
+                onClick={() => abrirOT(o)}
+                className="hover:bg-red-50/40 cursor-pointer transition-colors"
+            >
+                <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5">
+                        {o.id_otvieja ?? o.id}
+                        <MarcaPausada idOrden={o.id} />
+                    </span>
+                </td>
+                <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate" title={o.cliente || ""}>
+                    {o.cliente || "—"}
+                </td>
+                <td className="px-3 py-2 text-gray-700 max-w-[280px]">
+                    <div className="truncate" title={o.articulo || ""}>{o.articulo || "—"}</div>
+                    {o.codigo && <div className="text-[11px] text-gray-400">{o.codigo}</div>}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
+                    {o.unidades ?? "—"}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                    <span className={cn("tabular-nums", atrasada && "text-red-600 font-semibold")}>
+                        {fecha(o.fecha_prometida)}
+                    </span>
+                    {atrasada && (
+                        <span className="ml-1.5 text-[11px] text-red-600">
+                            {Math.abs(dias!)}d
+                        </span>
+                    )}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                    <TipoTrabajoBadge tipo={o.tipo_trabajo} />
+                </td>
+                <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{o.prioridad || "—"}</td>
+                <td className="px-3 py-2 text-center">
+                    {o.procesos === 0 ? (
+                        <span
+                            className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[11px] font-semibold"
+                            title="Sin procesos cargados: no se puede planificar"
+                        >
+                            <AlertTriangle className="h-3 w-3" /> sin procesos
+                        </span>
+                    ) : (
+                        <span className="tabular-nums text-gray-700">
+                            {o.procesos_finalizados > 0
+                                ? `${o.procesos_finalizados}/${o.procesos}`
+                                : o.procesos}
+                        </span>
+                    )}
+                </td>
+                {/* Tres estados, no dos. "No lleva" y "falta" se veían
+                    iguales y son opuestos: uno se saltea, al otro hay que
+                    ir a buscarlo. */}
+                <td className="px-3 py-2 text-center">
+                    {o.planos > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-blue-700" title={`${o.planos} archivo(s)`}>
+                            <FileText className="h-3.5 w-3.5" />
+                            <span className="tabular-nums text-[11px]">{o.planos}</span>
+                        </span>
+                    ) : o.estado_plano === "no_lleva" ? (
+                        /* Escrito y con su cartelito, no un guioncito gris:
+                           "no lleva" tiene que leerse sin dudar, si no hay
+                           que abrir la OT para saberlo (Lucas, 10/09). */
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
+                              title="El taller marcó que esta pieza no necesita plano: no hay que buscarlo">
+                            <Ban className="h-3 w-3" />
+                            No lleva
+                        </span>
+                    ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                              title="No hay plano cargado y nadie marcó que no lleve: hay que ir a buscarlo">
+                            <AlertTriangle className="h-3 w-3" />
+                            Falta
+                        </span>
+                    )}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                    <EstadoChip orden={o} />
+                </td>
+            </tr>
+        );
+    }, [abrirOT]);
 
     return (
         <div className="space-y-4">
@@ -415,93 +512,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
-                                    {filtradas.slice(0, visibles).map(o => {
-                                        const dias = o.entregada ? null : diasPara(o.fecha_prometida);
-                                        const atrasada = dias !== null && dias < 0;
-                                        return (
-                                            <tr
-                                                key={o.id}
-                                                onClick={() => abrirOT(o)}
-                                                className="hover:bg-red-50/40 cursor-pointer transition-colors"
-                                            >
-                                                <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
-                                                    <span className="inline-flex items-center gap-1.5">
-                                                        {o.id_otvieja ?? o.id}
-                                                        <MarcaPausada idOrden={o.id} />
-                                                    </span>
-                                                </td>
-                                                <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate" title={o.cliente || ""}>
-                                                    {o.cliente || "—"}
-                                                </td>
-                                                <td className="px-3 py-2 text-gray-700 max-w-[280px]">
-                                                    <div className="truncate" title={o.articulo || ""}>{o.articulo || "—"}</div>
-                                                    {o.codigo && <div className="text-[11px] text-gray-400">{o.codigo}</div>}
-                                                </td>
-                                                <td className="px-3 py-2 text-right tabular-nums text-gray-700">
-                                                    {o.unidades ?? "—"}
-                                                </td>
-                                                <td className="px-3 py-2 whitespace-nowrap">
-                                                    <span className={cn("tabular-nums", atrasada && "text-red-600 font-semibold")}>
-                                                        {fecha(o.fecha_prometida)}
-                                                    </span>
-                                                    {atrasada && (
-                                                        <span className="ml-1.5 text-[11px] text-red-600">
-                                                            {Math.abs(dias!)}d
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 whitespace-nowrap">
-                                                    <TipoTrabajoBadge tipo={o.tipo_trabajo} />
-                                                </td>
-                                                <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{o.prioridad || "—"}</td>
-                                                <td className="px-3 py-2 text-center">
-                                                    {o.procesos === 0 ? (
-                                                        <span
-                                                            className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[11px] font-semibold"
-                                                            title="Sin procesos cargados: no se puede planificar"
-                                                        >
-                                                            <AlertTriangle className="h-3 w-3" /> sin procesos
-                                                        </span>
-                                                    ) : (
-                                                        <span className="tabular-nums text-gray-700">
-                                                            {o.procesos_finalizados > 0
-                                                                ? `${o.procesos_finalizados}/${o.procesos}`
-                                                                : o.procesos}
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                {/* Tres estados, no dos. "No lleva" y "falta" se veían
-                                                    iguales y son opuestos: uno se saltea, al otro hay que
-                                                    ir a buscarlo. */}
-                                                <td className="px-3 py-2 text-center">
-                                                    {o.planos > 0 ? (
-                                                        <span className="inline-flex items-center gap-1 text-blue-700" title={`${o.planos} archivo(s)`}>
-                                                            <FileText className="h-3.5 w-3.5" />
-                                                            <span className="tabular-nums text-[11px]">{o.planos}</span>
-                                                        </span>
-                                                    ) : o.estado_plano === "no_lleva" ? (
-                                                        /* Escrito y con su cartelito, no un guioncito gris:
-                                                           "no lleva" tiene que leerse sin dudar, si no hay
-                                                           que abrir la OT para saberlo (Lucas, 10/09). */
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
-                                                              title="El taller marcó que esta pieza no necesita plano: no hay que buscarlo">
-                                                            <Ban className="h-3 w-3" />
-                                                            No lleva
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
-                                                              title="No hay plano cargado y nadie marcó que no lleve: hay que ir a buscarlo">
-                                                            <AlertTriangle className="h-3 w-3" />
-                                                            Falta
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 whitespace-nowrap">
-                                                    <EstadoChip orden={o} />
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                    <FilasDeATandas filas={filtradas} mostradas={tandas.mostradas} tanda={tandas.tanda} render={filaDeOrden} />
                                 </tbody>
                             </table>
                         </div>
@@ -513,13 +524,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                         )}
                     </div>
 
-                    {visibles < filtradas.length && (
-                        <div className="flex justify-center">
-                            <Button variant="outline" onClick={() => setVisibles(v => v + 200)}>
-                                Ver más ({filtradas.length - visibles} restantes)
-                            </Button>
-                        </div>
-                    )}
+                    <PieDeTandas {...tandas} />
                 </>
             )}
 

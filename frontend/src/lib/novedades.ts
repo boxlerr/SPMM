@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "listas-de-ordenes-abren-al-toque",
+        fecha: "2026-09-23",
+        tipo: "mejora",
+        seccion: "Operaciones",
+        titulo: "El Historial y las demás listas de órdenes abren al instante, tengan las órdenes que tengan",
+        detalle:
+            "Antes, al tocar Historial se armaban las más de mil órdenes de una sola vez y en algunas computadoras la pantalla se quedaba trabada unos segundos, y lo mismo con cada letra que escribías en el buscador. Ahora se muestran las primeras y, a medida que bajás, aparecen las siguientes solas: no hay páginas ni botones. El buscador, los filtros, el orden y Exportar siguen mirando todas las órdenes, así que una OT vieja se encuentra igual aunque todavía no esté a la vista. Vale para No Planificadas, Historial y Todas. Además, en No Planificadas e Historial, si vas a otra solapa y volvés, la lista aparece al instante con la búsqueda y los filtros que tenías.",
+        href: "/operaciones",
+    },
+    {
         id: "mover-pasos-y-minutos-desde-la-lista",
         fecha: "2026-09-17",
         tipo: "mejora",
@@ -601,7 +611,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Planos",
         titulo: "Ahora está el plano de casi todos los productos, no de unos pocos",
         detalle:
-            "La biblioteca pasó de 811 productos con plano a 5066, así que de las órdenes abiertas hoy tienen dibujo 171 de 194 en vez de 31. Lo que faltaba no era el sistema: la carpeta de planos del taller se estaba viendo por la mitad y quedaron afuera más de cuatro mil carpetas de producto. Ya están todas cargadas, con sus fotos y sus PDF. Si una orden todavía dice «Sin plano» es porque ese producto no tiene carpeta en el Drive: subiéndola ahí aparece sola, o se puede cargar el archivo desde esta misma pantalla.",
+            "La biblioteca pasó de 811 productos con plano a 5066, así que de las órdenes abiertas hoy tienen dibujo 171 de 194 en vez de 31. Lo que faltaba no era el sistema: la carpeta de planos del taller se estaba viendo por la mitad y quedaron afuera más de cuatro mil carpetas de producto. Ya están todas cargadas, con sus fotos y sus PDF. Si una orden todavía dice «Sin plano» es porque ese producto no tiene carpeta en el Drive. Ojo: una carpeta nueva en el Drive todavía no entra sola, hay que avisar para que se traiga; si no, se puede cargar el archivo desde esta misma pantalla. (Corregido el 23/09: antes esta nota decía que aparecía sola, y no es así.)",
         href: "/planos",
     },
     {

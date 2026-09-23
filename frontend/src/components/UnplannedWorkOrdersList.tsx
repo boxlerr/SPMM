@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { 
     Search, 
     AlertCircle, 
@@ -26,6 +26,9 @@ import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor, parseApiError } from "@/lib/utils";
+import { useDeATandas, useVistaDeTarjetas } from "@/hooks/useDeATandas";
+import { PieDeTandas } from "./common/PieDeTandas";
+import { FilasDeATandas } from "./common/FilasDeATandas";
 import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 
@@ -95,7 +98,41 @@ const COPY_VARIANTE = {
     },
 } as const;
 
-export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100, variante = "no_planificadas" }: UnplannedWorkOrdersListProps) {
+// Un solo formateador para toda la lista: `toLocaleDateString` arma uno nuevo en cada
+// llamada.
+const FORMATO_FECHA = new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+function getEditableProductDescription(order: WorkOrder) {
+    if ((order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones) {
+        return order.observaciones;
+    }
+    return order.articulo?.descripcion;
+}
+
+function formatDate(dateStr?: string) {
+    if (!dateStr || dateStr.startsWith('1950')) return "-";
+    try {
+        const date = new Date(dateStr);
+        if (date.getFullYear() === 1950) return "-";
+        return FORMATO_FECHA.format(date);
+    } catch (e) {
+        return dateStr;
+    }
+}
+
+function getPriorityLabel(priorityId?: number, descripcion?: string) {
+    if (descripcion) return descripcion;
+    switch (priorityId) {
+        case 3: return "Crítica";
+        case 2: return "Urgente";
+        case 1: return "Normal";
+        default: return "Normal";
+    }
+}
+
+// `memo`: esta solapa queda armada aunque se mire otra (ver WorkOrdersListWrapper), y sin
+// esto se volvía a dibujar escondida con cada clic del planificador.
+export const UnplannedWorkOrdersList = React.memo(function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100, variante = "no_planificadas" }: UnplannedWorkOrdersListProps) {
     const copy = COPY_VARIANTE[variante];
     // RF-24: mover pasos, cambiar minutos, sacar o agregar pasos es editar la OT
     // (solapa Órdenes). Sin eso la lista se lee igual y «Editar» abre la OT para mirar.
@@ -121,6 +158,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
     // dinámicamente cuando el usuario llegó al final del scroll horizontal.
     const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
     const [showRightFade, setShowRightFade] = useState(true);
+    // Tarjetas (celular) o tabla: se arma sólo la que se ve.
+    const verTarjetas = useVistaDeTarjetas();
     const [sortConfig, setSortConfig] = useState<{
         key: 'id' | 'id_otvieja' | 'fecha_entrada' | 'cliente' | 'codigo' | 'descripcion' | 'unidades' | 'prioridad' | 'material' | 'proceso' | 'plano' | 'entrega' | 'fecha_prometida' | null;
         direction: 'asc' | 'desc' | null;
@@ -137,9 +176,9 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
      * ABRIR otra. Se deja una sola abierta a propósito — si alguien quiere comparar
      * dos OT, para eso está la solapa Todas, que muestra una fila por orden.
      */
-    const toggleRow = (orderId: number) => {
+    const toggleRow = useCallback((orderId: number) => {
         setExpandedOrderIds(prev => (prev.includes(orderId) ? [] : [orderId]));
-    };
+    }, []);
 
     const handleSort = (key: typeof sortConfig.key) => {
         let direction: 'asc' | 'desc' | null = 'asc';
@@ -159,7 +198,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
      * diga que se editó desde la ficha de la orden.
      */
     const [moviendo, setMoviendo] = useState<number | null>(null);
-    const moverPaso = async (order: WorkOrder, idOtp: number, posicion: number) => {
+    const moverPaso = useCallback(async (order: WorkOrder, idOtp: number, posicion: number) => {
         const lineas = [...(order.procesos ?? [])].sort((a, b) => a.orden - b.orden);
         const desde = lineas.findIndex((l) => (l as any).id === idOtp);
         if (desde < 0) return;
@@ -188,14 +227,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
         } finally {
             setMoviendo(null);
         }
-    };
+    }, [onDataChange]);
 
-    const getEditableProductDescription = (order: WorkOrder) => {
-        if ((order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones) {
-            return order.observaciones;
-        }
-        return order.articulo?.descripcion;
-    };
 
     const SortIcon = ({ column }: { column: typeof sortConfig.key }) => {
         if (sortConfig.key !== column || !sortConfig.direction) return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-50">↕</span>;
@@ -209,6 +242,9 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
         const el = scrollContainerRef.current;
         if (!el) return;
         const updateFade = () => {
+            // Escondida (otra solapa) mide 0: no cambiar nada, si no la lista se vuelve
+            // a dibujar al esconderse y otra vez al volver.
+            if (el.clientWidth === 0) return;
             const remaining = el.scrollWidth - el.scrollLeft - el.clientWidth;
             setShowRightFade(remaining > 2);
         };
@@ -220,10 +256,14 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
             el.removeEventListener('scroll', updateFade);
             ro.disconnect();
         };
-    }, [orders.length, tableZoom]);
+    }, [orders.length, tableZoom, verTarjetas]);
 
-    const filteredOrders = applyWorkOrderFilters(orders, filters).filter(order => {
-        const searchLower = searchTerm.toLowerCase();
+    // Búsqueda "diferida": la letra aparece al toque en el casillero y la lista se pone
+    // al día en cuanto el navegador tiene un respiro, en vez de filtrar y redibujar
+    // entera antes de mostrar cada tecla.
+    const busqueda = useDeferredValue(searchTerm);
+    const filteredOrders = useMemo(() => applyWorkOrderFilters(orders, filters).filter(order => {
+        const searchLower = busqueda.toLowerCase();
         const otId = order.id.toString();
         const oldOtId = order.id_otvieja?.toString() || "";
         const clientRaw = order.cliente;
@@ -237,10 +277,13 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                clientName.includes(searchLower) ||
                article.includes(searchLower) ||
                codArticle.includes(searchLower);
-    });
+    }), [orders, filters, busqueda]);
 
     // ¿La lista está vacía porque no hay nada, o porque lo que buscaron no está acá?
-    const hayBusqueda = searchTerm.trim() !== "" ||
+    // Con la búsqueda diferida, la misma que filtra: si no, por un instante el cartel
+    // decía «no hay ninguna que coincida con 15810» mientras la lista todavía mostraba
+    // lo de la tecla anterior.
+    const hayBusqueda = busqueda.trim() !== "" ||
         JSON.stringify(filters) !== JSON.stringify(initialFilterState);
 
     const sortedOrders = React.useMemo(() => {
@@ -309,30 +352,405 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
         // calculó cuando todavía no había respuesta.
     }, [filteredOrders, sortConfig, ordenesConPlano, planosDisponibles]);
 
-    const formatDate = (dateStr?: string) => {
-        if (!dateStr || dateStr.startsWith('1950')) return "-";
-        try {
-            const date = new Date(dateStr);
-            if (date.getFullYear() === 1950) return "-";
-            return date.toLocaleDateString('es-AR', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric'
-            });
-        } catch (e) {
-            return dateStr;
-        }
-    };
+    // De a 60 a medida que se baja (ver `useDeATandas`). El Exportar sigue mirando
+    // `sortedOrders` entero.
+    const tandas = useDeATandas(sortedOrders, JSON.stringify([filters, busqueda, sortConfig]));
 
-    const getPriorityLabel = (priorityId?: number, descripcion?: string) => {
-        if (descripcion) return descripcion;
-        switch (priorityId) {
-            case 3: return "Crítica";
-            case 2: return "Urgente";
-            case 1: return "Normal";
-            default: return "Normal";
-        }
-    };
+
+
+    // Cómo se arma cada fila. Estables (useCallback) a propósito: `FilasDeATandas`
+    // saltea las tandas ya dibujadas mientras esto no cambie, así que bajar o teclear en
+    // el buscador no vuelve a armar lo que ya estaba.
+    const filaDeTabla = useCallback((order: WorkOrder, index: number) => (
+        <React.Fragment key={order.id}>
+            {/* Un click despliega, doble clic abre la OT — igual que en la
+                otra tabla. Esta es la solapa que ABRE POR DEFECTO y se había
+                quedado afuera del arreglo: acá el click simple no hacía nada,
+                así que al errarle a la flechita la reacción natural es volver
+                a clickear enseguida… y eso ES un doble clic, o sea la OT
+                entera encima. `select-none` para que el doble clic no te
+                seleccione media tabla. */}
+            <tr
+                className={cn("border-b transition-colors duration-150 cursor-pointer select-none", getWorkOrderRowColor(order))}
+                onClick={() => toggleRow(order.id)}
+                onDoubleClick={() => onEdit(order)}
+                title="Un click para ver el detalle · doble clic para abrir la OT"
+            >
+                <td className="p-0">
+                    <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                        aria-expanded={expandedOrderIds.includes(order.id)}
+                        aria-label={expandedOrderIds.includes(order.id)
+                            ? `Ocultar el detalle de la OT ${order.id_otvieja || order.id}`
+                            : `Ver el detalle de la OT ${order.id_otvieja || order.id}`}
+                        className="flex h-10 w-full items-center justify-center rounded hover:bg-black/10 active:bg-black/15 transition-colors"
+                    >
+                        {expandedOrderIds.includes(order.id) ? (
+                            <ChevronDown className="h-5 w-5 text-gray-700" />
+                        ) : (
+                            <ChevronRight className="h-5 w-5 text-gray-500" />
+                        )}
+                    </button>
+                </td>
+                <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
+                <td className="px-3 py-3 font-medium">
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {order.id_otvieja || order.id}
+                        <MarcaPausada idOrden={order.id} />
+                    </span>
+                </td>
+                <td className="px-3 py-3 font-medium">
+                    {formatDate(order.fecha_entrada)}
+                </td>
+                <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
+                <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
+                <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px]">
+                    <span className="line-clamp-2" title={getEditableProductDescription(order)}>
+                        {getEditableProductDescription(order) || "-"}
+                    </span>
+                </td>
+                <td className="px-3 py-3 text-xs text-gray-600">
+                    {order.n_pedido || order.n_ped_l || "-"}
+                </td>
+                <td className="px-3 py-3 text-center font-medium">
+                    {order.unidades ?? "-"}
+                </td>
+                <td className="px-3 py-3 text-center">
+                    <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
+                        {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
+                    </Badge>
+                </td>
+                <td className="px-3 py-3 text-center">
+                    <MaterialChip estado={order.estado_material} noLleva={order.no_lleva_materia_prima} />
+                </td>
+                {/* Proceso: Sí (verde) si tiene al menos un proceso cargado, No (gris) si no. */}
+                <td className="px-3 py-3 text-center">
+                    {(order.procesos && order.procesos.length > 0) ? (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
+                    ) : (
+                        <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
+                    )}
+                </td>
+                {/* Plano: acá decía "Sin archivo" o "No" en TODAS las filas,
+                    porque solo contaba el plano pegado a la orden y en
+                    producción no hay ninguno (los mil y pico que hay cuelgan
+                    del artículo). El plano estaba, la pantalla lo negaba.
+                    Ahora `PlanoDeOrden` muestra el que haya —propio o del
+                    producto— y lo abre en el visor sin salir de la lista, que
+                    es lo que hace falta para planificar mirando la tabla. */}
+                <td className="px-3 py-3 text-center">
+                    <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
+                </td>
+                <td className="px-3 py-3 text-center">
+                    <span className={cn(
+                        "text-xs font-bold",
+                        (order.cantidad_entregada || 0) >= (order.unidades || 1) ? "text-green-700" : "text-orange-600"
+                    )}>
+                        {order.cantidad_entregada || 0} / {order.unidades || 0}
+                    </span>
+                </td>
+                <td className="px-3 py-3 font-medium">
+                    {formatDate(order.fecha_prometida)}
+                </td>
+                <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>
+                    {order.aprobado_por || "-"}
+                </td>
+                <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>
+                    {order.requerido_por || "-"}
+                </td>
+                <td className="px-3 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                        {onDelete && (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                onClick={(e) => { e.stopPropagation(); onDelete(order.id); }}
+                                title="Eliminar Orden"
+                            >
+                                <Trash2 className="w-3 h-3" />
+                            </Button>
+                        )}
+                    </div>
+                </td>
+            </tr>
+            {expandedOrderIds.includes(order.id) && (
+                <tr className="bg-gray-50/20 border-b">
+                    <td colSpan={18} className="px-3 py-3 md:px-6 md:py-4">
+                        {/* Sin `max-w-[1200px]`: la tabla mide 1600px, así que sobraban 400
+                            px muertos a la derecha mientras la grilla de procesos iba
+                            apretada. */}
+                        <div className="flex flex-col gap-3 w-full">
+                            {/* Observaciones y archivos: abajo y PLEGADOS.
+                                Arriba se llevaban media pantalla casi vacíos —una caja con
+                                "Sin observaciones." y otra con las miniaturas— y empujaban
+                                Producción, que es para lo que uno abre la fila.
+                                Se reordena con `order-*` sobre el contenedor flex en vez de mover
+                                el JSX: el mismo resultado sin tocar una sola línea de lo que ya
+                                funciona. `<details>` nativo, sin estado nuevo. */}
+                            <details className="group/extra order-2 rounded-lg border border-gray-200 bg-white">
+                                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight text-gray-500 hover:bg-gray-50">
+                                    <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open/extra:rotate-90" />
+                                    Observaciones y archivos
+                                    {(order.observaciones || order.detalle) && (
+                                        <span className="rounded bg-amber-50 px-1.5 py-0.5 font-semibold normal-case tracking-normal text-amber-700">
+                                            tiene observaciones
+                                        </span>
+                                    )}
+                                </summary>
+                                <div className="border-t border-gray-100 p-3">
+                            {/* Grid layout for meta info - More compact columns */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {/* Observaciones Panel - Smaller min-height, compact header */}
+                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col md:col-span-1 lg:col-span-2">
+                                    <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center gap-2">
+                                        <MessageSquare className="w-3.5 h-3.5 text-gray-400" />
+                                        <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Observaciones</span>
+                                    </div>
+                                    <div className="p-3 text-xs text-gray-600 leading-relaxed min-h-[50px]">
+                                        {order.observaciones || order.detalle ? (
+                                            <div className="whitespace-pre-wrap">{order.observaciones || order.detalle}</div>
+                                        ) : (
+                                            <span className="text-gray-400 italic">Sin observaciones.</span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Archivos Panel - Compact layout */}
+                                <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                                    <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center gap-2">
+                                        <FileText className="w-3.5 h-3.5 text-gray-400" />
+                                        <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Archivos</span>
+                                    </div>
+                                    <div className="p-2">
+                                        <OrderFiles orderId={order.id} />
+                                    </div>
+                                </div>
+                            </div>
+                                </div>
+                            </details>
+
+                            {/* Producción primero: `order-1` contra el `order-2` del
+                                plegable de arriba. */}
+                            <div className="order-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                                <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Settings className="w-3.5 h-3.5 text-gray-400" />
+                                        <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Producción</span>
+                                    </div>
+                                    {order.procesos && order.procesos.length > 0 && (
+                                        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                            {order.procesos.length} PASOS
+                                        </span>
+                                    )}
+                                </div>
+                                
+                                <div className="flex flex-col">
+                                    {order.procesos && order.procesos.length > 0 ? (
+                                        <>
+                                            <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[58px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
+                                                <div>#</div>
+                                                <div>Proceso</div>
+                                                <div>Estado</div>
+                                                <div className="text-center">Min. Est.</div>
+                                                <div className="text-center">Min. Real</div>
+                                                <div>Recurso humano</div>
+                                                <div className="text-right">Acciones</div>
+                                            </div>
+                                            {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
+                                                <div key={`${order.id}-${(proc as any).id ?? proc.proceso.id}`} className={cn(
+                                                    "group/proc grid grid-cols-[58px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
+                                                    pIdx === order.procesos!.length - 1 && "border-b-0"
+                                                )}>
+                                                    {/* El paso se mueve desde acá, igual que en la vista previa del
+                                                        plan: se escribe el número o se usan las flechitas. Julián,
+                                                        17/09/2026: *"eso también lo quiero acá en órdenes no
+                                                        planificadas"*. Acá la lista es la COMPLETA de la OT —no hay
+                                                        pasadas escondidas como en el plan—, así que la posición que se
+                                                        escribe es directamente la de la orden. */}
+                                                    <div className="text-gray-300 font-mono text-[10px]">
+                                                        <PasoEnPlanEditable
+                                                            paso={pIdx + 1}
+                                                            total={order.procesos!.length}
+                                                            claseHover="group-hover/proc:opacity-100"
+                                                            trabajando={moviendo === order.id}
+                                                            bloqueado={!editaOrdenes}
+                                                            onMover={(pos) => void moverPaso(order, (proc as any).id, pos)}
+                                                        />
+                                                    </div>
+                                                    <div className="font-semibold text-xs text-gray-800 truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
+                                                    <div>
+                                                        <Badge className={cn(
+                                                            "text-[9px] px-1.5 py-0 shadow-none font-bold uppercase leading-tight",
+                                                            proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-700 border-green-200" :
+                                                            proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-700 border-blue-200" :
+                                                            "bg-gray-100 text-gray-500 border-gray-200"
+                                                        )}>
+                                                            {proc.estado_proceso?.id === 3 ? "OK" : proc.estado_proceso?.id === 2 ? "Producc." : "Pend."}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="text-center">
+                                                        <MinutosEditables
+                                                            orderId={order.id}
+                                                            idOtp={(proc as any).id}
+                                                            nombre={proc.proceso?.nombre || "el proceso"}
+                                                            minutos={proc.tiempo_proceso}
+                                                            onChanged={() => onDataChange && onDataChange()}
+                                                        />
+                                                    </div>
+                                                    <div className="text-center font-bold text-blue-600 tabular-nums text-[10px]">
+                                                        {proc.inicio_real && proc.fin_real
+                                                            ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)}`
+                                                            : proc.inicio_real ? "..." : "-"
+                                                        }
+                                                    </div>
+                                                    <div className="text-gray-500 text-[10px] font-medium truncate flex items-center gap-1.5 border-l border-gray-100 pl-2 h-4">
+                                                        {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
+                                                    </div>
+                                                    <ProcessRowActions
+                                                        orderId={order.id}
+                                                        idOtp={(proc as any).id}
+                                                        idProceso={proc.proceso.id}
+                                                        nombre={proc.proceso?.nombre || "el proceso"}
+                                                        onChanged={() => onDataChange && onDataChange()}
+                                                    />
+                                                </div>
+                                            ))}
+                                            <div className="bg-gray-50/50 border-t border-gray-100">
+                                                <AddProcessRow 
+                                                    orderId={order.id} 
+                                                    onProcessAdded={() => onDataChange && onDataChange()} 
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        /* El cartel de "sin procesos" ocupaba media pantalla para
+                                           decir que no hay nada — y lo que hace falta ahí es cargar,
+                                           no leer. Queda un renglón: el aviso al costado y el botón
+                                           al lado, con el mismo alto que una fila de proceso. */
+                                        <div className="flex items-center gap-3 bg-white px-3 py-1.5">
+                                            <PlusCircle className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                                            <span className="text-[11px] text-gray-500">Todavía no tiene procesos.</span>
+                                            <div className="ml-auto">
+                                                <AddProcessRow
+                                                    orderId={order.id}
+                                                    onProcessAdded={() => onDataChange && onDataChange()}
+                                                    isCentered={false}
+                                                    label="Agregar proceso"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            )}
+        </React.Fragment>
+    ), [editaOrdenes, expandedOrderIds, toggleRow, moviendo, moverPaso, onEdit, onDelete, onDataChange]);
+
+    const tarjetaDeOrden = useCallback((order: WorkOrder) => (
+        <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
+            <div className="p-4" onClick={() => toggleRow(order.id)}>
+                <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2">
+                        <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
+                        <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
+                        <MarcaPausada idOrden={order.id} />
+                    </div>
+                    <button className="text-gray-400">
+                        {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                    </button>
+                </div>
+                <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                        <span className="font-semibold text-gray-900 line-clamp-1">{order.cliente?.nombre || "-"}</span>
+                        <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
+                    </div>
+                    <div className="text-gray-600 line-clamp-2 text-xs">{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : order.articulo?.descripcion}</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">Cant.</span>
+                            <span className="font-medium">{order.unidades}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">Prioridad</span>
+                            <Badge variant="outline" className="bg-white/50 text-[10px] h-5 px-1.5">
+                                {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
+                            </Badge>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">N° Pedido</span>
+                            <span className="font-medium text-gray-700">{order.n_pedido || order.n_ped_l || "-"}</span>
+                        </div>
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
+                            <span className="font-medium text-gray-700">{order.aprobado_por || "-"}</span>
+                        </div>
+                        {/* En el celular la OT no mostraba nada del plano: había que abrir
+                            la fila y bajar hasta Archivos. Mismo cartelito que en la tabla, y
+                            tocarlo abre el visor en vez de plegar la tarjeta. */}
+                        <div>
+                            <span className="text-gray-500 block text-[10px] uppercase">Plano</span>
+                            <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto className="h-5 px-1.5 text-[10px]" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {expandedOrderIds.includes(order.id) && (
+                <div className="bg-gray-50 border-t p-3 space-y-2">
+                    <div className="text-xs text-gray-600">
+                        <span className="font-bold text-gray-800">Observaciones: </span>
+                        {order.observaciones || order.detalle || "Sin observaciones adicionales"}
+                    </div>
+                    <OrderFiles orderId={order.id} />
+                    {/* Process Sub-Table */}
+                    {order.procesos && order.procesos.length > 0 ? (
+                        <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
+                            <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-2 font-bold border-b border-gray-200">
+                                <div>#</div>
+                                <div>Proceso</div>
+                                <div>Estado</div>
+                                <div className="text-center">Min. Est.</div>
+                            </div>
+                            {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
+                                <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
+                                    <div className="text-gray-500 font-mono">{proc.orden}</div>
+                                    <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
+                                    <div>
+                                        <Badge className={cn(
+                                            "text-[10px] shadow-none",
+                                            proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
+                                            proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
+                                            "bg-gray-100 text-gray-800 border-gray-200"
+                                        )}>
+                                            {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
+                                        </Badge>
+                                    </div>
+                                    <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
+                    )}
+                    <div className="flex gap-2 justify-end pt-2">
+                        <Button variant="ghost" size="sm" className={cn("h-8 gap-1.5 hover:bg-gray-100", copy.acentoOrden)} onClick={() => onEdit(order)}>
+                            <Edit2 className="w-3.5 h-3.5" /> {editaOrdenes ? "Editar" : "Ver"}
+                        </Button>
+                        {onDelete && (
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(order.id)}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            )}
+        </Card>
+    ), [copy, editaOrdenes, expandedOrderIds, toggleRow, onEdit, onDelete]);
 
     return (
         <div className="space-y-3">
@@ -391,8 +809,8 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                 Sin resultados en esta solapa
                             </h4>
                             <p className="text-gray-500 max-w-sm mx-auto text-sm">
-                                {searchTerm
-                                    ? <>No hay ninguna orden que coincida con <span className="font-semibold">«{searchTerm}»</span> entre las {copy.titulo.toLowerCase()}. Puede estar en otra solapa, o el filtro la está tapando.</>
+                                {busqueda
+                                    ? <>No hay ninguna orden que coincida con <span className="font-semibold">«{busqueda}»</span> entre las {copy.titulo.toLowerCase()}. Puede estar en otra solapa, o el filtro la está tapando.</>
                                     : <>Ninguna de las {copy.titulo.toLowerCase()} pasa los filtros puestos.</>}
                             </p>
                         </>
@@ -405,111 +823,14 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                 </div>
             ) : (
                 <>
-                    {/* Mobile Card View */}
-                    <div className="md:hidden space-y-3">
-                        {sortedOrders.map((order) => (
-                            <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
-                                <div className="p-4" onClick={() => toggleRow(order.id)}>
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
-                                            <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
-                                            <MarcaPausada idOrden={order.id} />
-                                        </div>
-                                        <button className="text-gray-400">
-                                            {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                                        </button>
-                                    </div>
-                                    <div className="space-y-2 text-sm">
-                                        <div className="flex justify-between">
-                                            <span className="font-semibold text-gray-900 line-clamp-1">{order.cliente?.nombre || "-"}</span>
-                                            <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">{order.articulo?.cod_articulo}</span>
-                                        </div>
-                                        <div className="text-gray-600 line-clamp-2 text-xs">{(order.articulo?.cod_articulo === 'NO-DEF' || order.articulo?.descripcion?.toLowerCase().includes('heredado')) && order.observaciones ? order.observaciones : order.articulo?.descripcion}</div>
-                                        <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-gray-100/50 mt-2">
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">Cant.</span>
-                                                <span className="font-medium">{order.unidades}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">Prioridad</span>
-                                                <Badge variant="outline" className="bg-white/50 text-[10px] h-5 px-1.5">
-                                                    {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
-                                                </Badge>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">N° Pedido</span>
-                                                <span className="font-medium text-gray-700">{order.n_pedido || order.n_ped_l || "-"}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">Aprobado Por</span>
-                                                <span className="font-medium text-gray-700">{order.aprobado_por || "-"}</span>
-                                            </div>
-                                            {/* En el celular la OT no mostraba nada del plano: había que abrir
-                                                la fila y bajar hasta Archivos. Mismo cartelito que en la tabla, y
-                                                tocarlo abre el visor en vez de plegar la tarjeta. */}
-                                            <div>
-                                                <span className="text-gray-500 block text-[10px] uppercase">Plano</span>
-                                                <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto className="h-5 px-1.5 text-[10px]" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {expandedOrderIds.includes(order.id) && (
-                                    <div className="bg-gray-50 border-t p-3 space-y-2">
-                                        <div className="text-xs text-gray-600">
-                                            <span className="font-bold text-gray-800">Observaciones: </span>
-                                            {order.observaciones || order.detalle || "Sin observaciones adicionales"}
-                                        </div>
-                                        <OrderFiles orderId={order.id} />
-                                        {/* Process Sub-Table */}
-                                        {order.procesos && order.procesos.length > 0 ? (
-                                            <div className="w-full border rounded-md overflow-hidden bg-white shadow-inner">
-                                                <div className="bg-gray-100 text-[11px] uppercase text-gray-600 grid grid-cols-[40px_3fr_110px_70px] gap-3 px-4 py-2 font-bold border-b border-gray-200">
-                                                    <div>#</div>
-                                                    <div>Proceso</div>
-                                                    <div>Estado</div>
-                                                    <div className="text-center">Min. Est.</div>
-                                                </div>
-                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc) => (
-                                                    <div key={`${order.id}-${proc.proceso.id}`} className="grid grid-cols-[40px_3fr_110px_70px] gap-3 px-3 py-3 border-t hover:bg-gray-50 items-center bg-white text-sm">
-                                                        <div className="text-gray-500 font-mono">{proc.orden}</div>
-                                                        <div className="font-medium text-xs truncate">{proc.proceso?.nombre || "-"}</div>
-                                                        <div>
-                                                            <Badge className={cn(
-                                                                "text-[10px] shadow-none",
-                                                                proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-800 border-green-200" :
-                                                                proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-800 border-blue-200" :
-                                                                "bg-gray-100 text-gray-800 border-gray-200"
-                                                            )}>
-                                                                {proc.estado_proceso?.id === 3 ? "Finalizado" : proc.estado_proceso?.id === 2 ? "En Proceso" : "Pendiente"}
-                                                            </Badge>
-                                                        </div>
-                                                        <div className="text-center text-gray-600 text-xs">{proc.tiempo_proceso || "-"}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="text-xs text-gray-400 italic py-2">Sin procesos cargados</div>
-                                        )}
-                                        <div className="flex gap-2 justify-end pt-2">
-                                            <Button variant="ghost" size="sm" className={cn("h-8 gap-1.5 hover:bg-gray-100", copy.acentoOrden)} onClick={() => onEdit(order)}>
-                                                <Edit2 className="w-3.5 h-3.5" /> {editaOrdenes ? "Editar" : "Ver"}
-                                            </Button>
-                                            {onDelete && (
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(order.id)}>
-                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </Card>
-                        ))}
-                    </div>
+                    {/* Mobile Card View. Se arma sólo si es la que se ve: escondida con CSS
+                        el navegador la dibujaba igual, y era el doble de trabajo. */}
+                    {verTarjetas && <div className="md:hidden space-y-3">
+                        <FilasDeATandas filas={sortedOrders} mostradas={tandas.mostradas} tanda={tandas.tanda} render={tarjetaDeOrden} />
+                    </div>}
 
                     {/* Desktop Table View. El `zoom` aplica SOLO acá (no al header ni a los filtros). */}
-                    <Card className="hidden md:block overflow-hidden border border-gray-200 shadow-sm bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
+                    {!verTarjetas && <Card className="hidden md:block overflow-hidden border border-gray-200 shadow-sm bg-white w-full relative" style={{ zoom: tableZoom / 100 }}>
                         <div ref={scrollContainerRef} className="w-full overflow-x-auto scrollbar-horizontal-visible scrollbar-top">
                             <table className="w-full min-w-[1600px] text-sm text-left">
                                 <thead className="text-xs text-gray-700 uppercase bg-gray-100 border-b">
@@ -566,300 +887,11 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                     {sortedOrders.length === 0 ? (
                                         <tr className="bg-gray-50 border-b">
                                             <td colSpan={18} className="px-4 py-8 text-center text-gray-500">
-                                                {searchTerm ? "No se encontraron resultados para la búsqueda." : copy.vacioFila}
+                                                {busqueda ? "No se encontraron resultados para la búsqueda." : copy.vacioFila}
                                             </td>
                                         </tr>
                                     ) : (
-                                        sortedOrders.map((order, index) => (
-                                            <React.Fragment key={order.id}>
-                                                {/* Un click despliega, doble clic abre la OT — igual que en la
-                                                    otra tabla. Esta es la solapa que ABRE POR DEFECTO y se había
-                                                    quedado afuera del arreglo: acá el click simple no hacía nada,
-                                                    así que al errarle a la flechita la reacción natural es volver
-                                                    a clickear enseguida… y eso ES un doble clic, o sea la OT
-                                                    entera encima. `select-none` para que el doble clic no te
-                                                    seleccione media tabla. */}
-                                                <tr
-                                                    className={cn("border-b transition-colors duration-150 cursor-pointer select-none", getWorkOrderRowColor(order))}
-                                                    onClick={() => toggleRow(order.id)}
-                                                    onDoubleClick={() => onEdit(order)}
-                                                    title="Un click para ver el detalle · doble clic para abrir la OT"
-                                                >
-                                                    <td className="p-0">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => { e.stopPropagation(); toggleRow(order.id); }}
-                                                            onDoubleClick={(e) => e.stopPropagation()}
-                                                            aria-expanded={expandedOrderIds.includes(order.id)}
-                                                            aria-label={expandedOrderIds.includes(order.id)
-                                                                ? `Ocultar el detalle de la OT ${order.id_otvieja || order.id}`
-                                                                : `Ver el detalle de la OT ${order.id_otvieja || order.id}`}
-                                                            className="flex h-10 w-full items-center justify-center rounded hover:bg-black/10 active:bg-black/15 transition-colors"
-                                                        >
-                                                            {expandedOrderIds.includes(order.id) ? (
-                                                                <ChevronDown className="h-5 w-5 text-gray-700" />
-                                                            ) : (
-                                                                <ChevronRight className="h-5 w-5 text-gray-500" />
-                                                            )}
-                                                        </button>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                                                    <td className="px-3 py-3 font-medium">
-                                                        <span className="inline-flex flex-wrap items-center gap-1.5">
-                                                            {order.id_otvieja || order.id}
-                                                            <MarcaPausada idOrden={order.id} />
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-3 font-medium">
-                                                        {formatDate(order.fecha_entrada)}
-                                                    </td>
-                                                    <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
-                                                    <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
-                                                    <td className="px-3 py-3 font-medium text-gray-900 min-w-[300px] max-w-[450px]">
-                                                        <span className="line-clamp-2" title={getEditableProductDescription(order)}>
-                                                            {getEditableProductDescription(order) || "-"}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600">
-                                                        {order.n_pedido || order.n_ped_l || "-"}
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center font-medium">
-                                                        {order.unidades ?? "-"}
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <Badge variant="outline" className="bg-white/50 border-gray-400 text-gray-800">
-                                                            {getPriorityLabel(order.id_prioridad, order.prioridad?.descripcion)}
-                                                        </Badge>
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <MaterialChip estado={order.estado_material} noLleva={order.no_lleva_materia_prima} />
-                                                    </td>
-                                                    {/* Proceso: Sí (verde) si tiene al menos un proceso cargado, No (gris) si no. */}
-                                                    <td className="px-3 py-3 text-center">
-                                                        {(order.procesos && order.procesos.length > 0) ? (
-                                                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 font-semibold">Sí</Badge>
-                                                        ) : (
-                                                            <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-300 font-semibold">No</Badge>
-                                                        )}
-                                                    </td>
-                                                    {/* Plano: acá decía "Sin archivo" o "No" en TODAS las filas,
-                                                        porque solo contaba el plano pegado a la orden y en
-                                                        producción no hay ninguno (los mil y pico que hay cuelgan
-                                                        del artículo). El plano estaba, la pantalla lo negaba.
-                                                        Ahora `PlanoDeOrden` muestra el que haya —propio o del
-                                                        producto— y lo abre en el visor sin salir de la lista, que
-                                                        es lo que hace falta para planificar mirando la tabla. */}
-                                                    <td className="px-3 py-3 text-center">
-                                                        <PlanoDeOrden ordenId={order.id} tienePlano={order.tiene_plano} compacto />
-                                                    </td>
-                                                    <td className="px-3 py-3 text-center">
-                                                        <span className={cn(
-                                                            "text-xs font-bold",
-                                                            (order.cantidad_entregada || 0) >= (order.unidades || 1) ? "text-green-700" : "text-orange-600"
-                                                        )}>
-                                                            {order.cantidad_entregada || 0} / {order.unidades || 0}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-3 py-3 font-medium">
-                                                        {formatDate(order.fecha_prometida)}
-                                                    </td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.aprobado_por || "-"}>
-                                                        {order.aprobado_por || "-"}
-                                                    </td>
-                                                    <td className="px-3 py-3 text-xs text-gray-600" title={order.requerido_por || "-"}>
-                                                        {order.requerido_por || "-"}
-                                                    </td>
-                                                    <td className="px-3 py-3">
-                                                        <div className="flex items-center justify-center gap-1">
-                                                            {onDelete && (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-7 w-7 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                                    onClick={(e) => { e.stopPropagation(); onDelete(order.id); }}
-                                                                    title="Eliminar Orden"
-                                                                >
-                                                                    <Trash2 className="w-3 h-3" />
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                                {expandedOrderIds.includes(order.id) && (
-                                                    <tr className="bg-gray-50/20 border-b">
-                                                        <td colSpan={18} className="px-3 py-3 md:px-6 md:py-4">
-                                                            {/* Sin `max-w-[1200px]`: la tabla mide 1600px, así que sobraban 400
-                                                                px muertos a la derecha mientras la grilla de procesos iba
-                                                                apretada. */}
-                                                            <div className="flex flex-col gap-3 w-full">
-                                                                {/* Observaciones y archivos: abajo y PLEGADOS.
-                                                                    Arriba se llevaban media pantalla casi vacíos —una caja con
-                                                                    "Sin observaciones." y otra con las miniaturas— y empujaban
-                                                                    Producción, que es para lo que uno abre la fila.
-                                                                    Se reordena con `order-*` sobre el contenedor flex en vez de mover
-                                                                    el JSX: el mismo resultado sin tocar una sola línea de lo que ya
-                                                                    funciona. `<details>` nativo, sin estado nuevo. */}
-                                                                <details className="group/extra order-2 rounded-lg border border-gray-200 bg-white">
-                                                                    <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight text-gray-500 hover:bg-gray-50">
-                                                                        <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open/extra:rotate-90" />
-                                                                        Observaciones y archivos
-                                                                        {(order.observaciones || order.detalle) && (
-                                                                            <span className="rounded bg-amber-50 px-1.5 py-0.5 font-semibold normal-case tracking-normal text-amber-700">
-                                                                                tiene observaciones
-                                                                            </span>
-                                                                        )}
-                                                                    </summary>
-                                                                    <div className="border-t border-gray-100 p-3">
-                                                                {/* Grid layout for meta info - More compact columns */}
-                                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                                    {/* Observaciones Panel - Smaller min-height, compact header */}
-                                                                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col md:col-span-1 lg:col-span-2">
-                                                                        <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center gap-2">
-                                                                            <MessageSquare className="w-3.5 h-3.5 text-gray-400" />
-                                                                            <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Observaciones</span>
-                                                                        </div>
-                                                                        <div className="p-3 text-xs text-gray-600 leading-relaxed min-h-[50px]">
-                                                                            {order.observaciones || order.detalle ? (
-                                                                                <div className="whitespace-pre-wrap">{order.observaciones || order.detalle}</div>
-                                                                            ) : (
-                                                                                <span className="text-gray-400 italic">Sin observaciones.</span>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {/* Archivos Panel - Compact layout */}
-                                                                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-                                                                        <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center gap-2">
-                                                                            <FileText className="w-3.5 h-3.5 text-gray-400" />
-                                                                            <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Archivos</span>
-                                                                        </div>
-                                                                        <div className="p-2">
-                                                                            <OrderFiles orderId={order.id} />
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                                    </div>
-                                                                </details>
-
-                                                                {/* Producción primero: `order-1` contra el `order-2` del
-                                                                    plegable de arriba. */}
-                                                                <div className="order-1 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-                                                                    <div className="px-3 py-1.5 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <Settings className="w-3.5 h-3.5 text-gray-400" />
-                                                                            <span className="text-[10px] font-bold uppercase tracking-tight text-gray-500">Producción</span>
-                                                                        </div>
-                                                                        {order.procesos && order.procesos.length > 0 && (
-                                                                            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                                                                                {order.procesos.length} PASOS
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    
-                                                                    <div className="flex flex-col">
-                                                                        {order.procesos && order.procesos.length > 0 ? (
-                                                                            <>
-                                                                                <div className="bg-gray-50/30 text-[9px] uppercase text-gray-400 grid grid-cols-[58px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-1.5 font-bold border-b border-gray-100">
-                                                                                    <div>#</div>
-                                                                                    <div>Proceso</div>
-                                                                                    <div>Estado</div>
-                                                                                    <div className="text-center">Min. Est.</div>
-                                                                                    <div className="text-center">Min. Real</div>
-                                                                                    <div>Recurso humano</div>
-                                                                                    <div className="text-right">Acciones</div>
-                                                                                </div>
-                                                                                {[...order.procesos].sort((a, b) => a.orden - b.orden).map((proc, pIdx) => (
-                                                                                    <div key={`${order.id}-${(proc as any).id ?? proc.proceso.id}`} className={cn(
-                                                                                        "group/proc grid grid-cols-[58px_3fr_100px_80px_80px_2fr_70px] gap-3 px-4 py-2.5 border-b hover:bg-gray-50/80 items-center bg-white transition-colors",
-                                                                                        pIdx === order.procesos!.length - 1 && "border-b-0"
-                                                                                    )}>
-                                                                                        {/* El paso se mueve desde acá, igual que en la vista previa del
-                                                                                            plan: se escribe el número o se usan las flechitas. Julián,
-                                                                                            17/09/2026: *"eso también lo quiero acá en órdenes no
-                                                                                            planificadas"*. Acá la lista es la COMPLETA de la OT —no hay
-                                                                                            pasadas escondidas como en el plan—, así que la posición que se
-                                                                                            escribe es directamente la de la orden. */}
-                                                                                        <div className="text-gray-300 font-mono text-[10px]">
-                                                                                            <PasoEnPlanEditable
-                                                                                                paso={pIdx + 1}
-                                                                                                total={order.procesos!.length}
-                                                                                                claseHover="group-hover/proc:opacity-100"
-                                                                                                trabajando={moviendo === order.id}
-                                                                                                bloqueado={!editaOrdenes}
-                                                                                                onMover={(pos) => void moverPaso(order, (proc as any).id, pos)}
-                                                                                            />
-                                                                                        </div>
-                                                                                        <div className="font-semibold text-xs text-gray-800 truncate" title={proc.proceso?.nombre || "-"}>{proc.proceso?.nombre || "-"}</div>
-                                                                                        <div>
-                                                                                            <Badge className={cn(
-                                                                                                "text-[9px] px-1.5 py-0 shadow-none font-bold uppercase leading-tight",
-                                                                                                proc.estado_proceso?.id === 3 ? "bg-green-100 text-green-700 border-green-200" :
-                                                                                                proc.estado_proceso?.id === 2 ? "bg-blue-100 text-blue-700 border-blue-200" :
-                                                                                                "bg-gray-100 text-gray-500 border-gray-200"
-                                                                                            )}>
-                                                                                                {proc.estado_proceso?.id === 3 ? "OK" : proc.estado_proceso?.id === 2 ? "Producc." : "Pend."}
-                                                                                            </Badge>
-                                                                                        </div>
-                                                                                        <div className="text-center">
-                                                                                            <MinutosEditables
-                                                                                                orderId={order.id}
-                                                                                                idOtp={(proc as any).id}
-                                                                                                nombre={proc.proceso?.nombre || "el proceso"}
-                                                                                                minutos={proc.tiempo_proceso}
-                                                                                                onChanged={() => onDataChange && onDataChange()}
-                                                                                            />
-                                                                                        </div>
-                                                                                        <div className="text-center font-bold text-blue-600 tabular-nums text-[10px]">
-                                                                                            {proc.inicio_real && proc.fin_real
-                                                                                                ? `${Math.round((new Date(proc.fin_real).getTime() - new Date(proc.inicio_real).getTime()) / 60000)}`
-                                                                                                : proc.inicio_real ? "..." : "-"
-                                                                                            }
-                                                                                        </div>
-                                                                                        <div className="text-gray-500 text-[10px] font-medium truncate flex items-center gap-1.5 border-l border-gray-100 pl-2 h-4">
-                                                                                            {proc.operario_nombre ? proc.operario_nombre.toLowerCase().split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Sin Asignar"}
-                                                                                        </div>
-                                                                                        <ProcessRowActions
-                                                                                            orderId={order.id}
-                                                                                            idOtp={(proc as any).id}
-                                                                                            idProceso={proc.proceso.id}
-                                                                                            nombre={proc.proceso?.nombre || "el proceso"}
-                                                                                            onChanged={() => onDataChange && onDataChange()}
-                                                                                        />
-                                                                                    </div>
-                                                                                ))}
-                                                                                <div className="bg-gray-50/50 border-t border-gray-100">
-                                                                                    <AddProcessRow 
-                                                                                        orderId={order.id} 
-                                                                                        onProcessAdded={() => onDataChange && onDataChange()} 
-                                                                                    />
-                                                                                </div>
-                                                                            </>
-                                                                        ) : (
-                                                                            /* El cartel de "sin procesos" ocupaba media pantalla para
-                                                                               decir que no hay nada — y lo que hace falta ahí es cargar,
-                                                                               no leer. Queda un renglón: el aviso al costado y el botón
-                                                                               al lado, con el mismo alto que una fila de proceso. */
-                                                                            <div className="flex items-center gap-3 bg-white px-3 py-1.5">
-                                                                                <PlusCircle className="w-3.5 h-3.5 shrink-0 text-blue-500" />
-                                                                                <span className="text-[11px] text-gray-500">Todavía no tiene procesos.</span>
-                                                                                <div className="ml-auto">
-                                                                                    <AddProcessRow
-                                                                                        orderId={order.id}
-                                                                                        onProcessAdded={() => onDataChange && onDataChange()}
-                                                                                        isCentered={false}
-                                                                                        label="Agregar proceso"
-                                                                                    />
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </React.Fragment>
-                                        ))
+                                        <FilasDeATandas filas={sortedOrders} mostradas={tandas.mostradas} tanda={tandas.tanda} render={filaDeTabla} />
                                     )}
                                 </tbody>
                             </table>
@@ -870,9 +902,13 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                         <div
                             className={`pointer-events-none absolute top-0 right-0 h-full w-12 bg-gradient-to-l from-white via-white/80 to-transparent transition-opacity duration-200 ${showRightFade ? 'opacity-100' : 'opacity-0'}`}
                         />
-                    </Card>
+                    </Card>}
+
+                    {/* Afuera de la tabla a propósito: adentro quedaría en la caja del
+                        scroll horizontal y bajo el `zoom`. */}
+                    <PieDeTandas {...tandas} />
                 </>
             )}
         </div>
     );
-}
+});

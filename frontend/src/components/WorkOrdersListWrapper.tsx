@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PlanificacionItem, WorkOrder } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnplannedWorkOrdersList } from "./UnplannedWorkOrdersList";
@@ -90,6 +90,25 @@ export default function WorkOrdersListWrapper({
     const [subTabLocal, setSubTabLocal] = useState("no_planificadas");
     const subTab = subTabExterna ?? subTabLocal;
 
+    // Las solapas de lista que ya se abrieron una vez quedan ARMADAS (escondidas) al
+    // irse a otra, en vez de desarmarse y volver a dibujarse de cero al volver. Ir y
+    // venir entre No Planificadas e Historial rehacía la lista entera cada vez; ahora
+    // vuelve al instante, con la búsqueda y los filtros que tenía. (La altura del scroll
+    // no: la comparten todas las solapas.) No se arman de entrada: la que nunca se abrió
+    // no cuesta nada. «Todas» no entra acá a propósito: trae sus propios datos al
+    // abrirse, y armada se quedaría mostrando los de la primera vez.
+    //
+    // Escondidas, además, no trabajan: las listas son `memo` y todo lo que les llega
+    // está memoizado abajo, así que un clic en el planificador —que vive en la misma
+    // página— no las vuelve a dibujar; y el observador que trae más filas no dispara con
+    // la lista oculta. (<Activity> haría lo mismo, pero el React que trae Next 15.5 no lo
+    // tiene: importarlo rompía la pantalla entera.)
+    const [visitadas, setVisitadas] = useState<Set<string>>(() => new Set([subTab]));
+    useEffect(() => {
+        setVisitadas(prev => (prev.has(subTab) ? prev : new Set(prev).add(subTab)));
+    }, [subTab]);
+    const quedaArmada = (solapa: string) => (visitadas.has(solapa) ? (true as const) : undefined);
+
 
     // El fetch de /ordenes, /planificacion y /operarios ya no vive acá:
     // la página padre (OperacionesPage) los carga UNA VEZ y los pasa por props.
@@ -112,25 +131,36 @@ export default function WorkOrdersListWrapper({
     // crudo y la lista de Planificadas se armaba aparte, desde la planificación: por eso
     // el contador decía "Planificadas (0)" y adentro se veían 24 OTs que en realidad ya
     // estaban entregadas y tenían que estar en el Historial.
-    const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
+    // Memoizadas: son lo que reciben las listas, y un arreglo nuevo en cada render las
+    // obligaba a volver a filtrar, ordenar y dibujar aunque no hubiera cambiado nada.
+    const { completedOrders, plannedOrders, unplannedOrders } = useMemo(() => {
+        const plannedOrderIds = new Set(rawPlanificacion.map(p => p.orden_id));
+        const activeOrders = orders.filter(o => !isOrderCompleted(o));
+        return {
+            completedOrders: orders.filter(isOrderCompleted),
+            plannedOrders: activeOrders.filter(o => plannedOrderIds.has(o.id)),
+            unplannedOrders: activeOrders.filter(o => !plannedOrderIds.has(o.id)),
+        };
+    }, [orders, rawPlanificacion]);
 
-    const completedOrders = orders.filter(isOrderCompleted);
-    const activeOrders = orders.filter(o => !isOrderCompleted(o));
-    const plannedOrders = activeOrders.filter(o => plannedOrderIds.has(o.id));
-    const unplannedOrders = activeOrders.filter(o => !plannedOrderIds.has(o.id));
-
-    const handleEditOrder = (order: WorkOrder) => {
+    const handleEditOrder = useCallback((order: WorkOrder) => {
         setOrderToEdit(order);
         setIsEditModalOpen(true);
-    };
+    }, []);
+
+    // `onRefresh` es el `fetchData` de Operaciones, que es una función nueva en cada
+    // render de la página. Pasado tal cual, las listas memoizadas se redibujaban igual.
+    const onRefreshActual = useRef(onRefresh);
+    onRefreshActual.current = onRefresh;
+    const refrescar = useCallback(() => onRefreshActual.current?.(), []);
 
     const handleEditSuccess = () => {
         onRefresh?.();
     };
 
-    const handleDeleteOrder = (id: number) => {
+    const handleDeleteOrder = useCallback((id: number) => {
         setDeleteOrderId(id);
-    };
+    }, []);
 
     const confirmDelete = async () => {
         if (!deleteOrderId) return;
@@ -215,14 +245,14 @@ export default function WorkOrdersListWrapper({
                     </div>
                 </div>
 
-                <TabsContent value="no_planificadas" className="mt-0">
+                <TabsContent value="no_planificadas" className="mt-0 data-[state=inactive]:hidden" forceMount={quedaArmada("no_planificadas")}>
                     {/* El zoom va como prop para que el componente lo aplique SOLO a la
                         tabla, no al header (icono + buscador) ni a los filtros. */}
                     <UnplannedWorkOrdersList
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
                         onDelete={editaOrdenes ? handleDeleteOrder : undefined}
-                        onDataChange={onRefresh}
+                        onDataChange={refrescar}
                         tableZoom={zoom}
                     />
                 </TabsContent>
@@ -241,13 +271,13 @@ export default function WorkOrdersListWrapper({
                             orders={plannedOrders}
                             onEdit={handleEditOrder}
                             onDelete={editaOrdenes ? handleDeleteOrder : undefined}
-                            onDataChange={onRefresh}
+                            onDataChange={refrescar}
                             tableZoom={zoom}
                         />
                     )}
                 </TabsContent>
 
-                <TabsContent value="historial" className="mt-0">
+                <TabsContent value="historial" className="mt-0 data-[state=inactive]:hidden" forceMount={quedaArmada("historial")}>
                     <CompletedWorkOrdersList
                         orders={completedOrders}
                         onEdit={handleEditOrder}
