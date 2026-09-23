@@ -6,7 +6,7 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield, AlertTriangle, PackageMinus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import UsuariosTable from '@/components/usuarios/UsuariosTable';
+import UsuariosYPermisos from '@/components/usuarios/UsuariosYPermisos';
 import CambiarPassword from '@/components/usuarios/CambiarPassword';
 import { formatNotificationMessage } from '@/lib/utils';
 import { API_URL } from '@/config';
@@ -65,7 +65,7 @@ export default function ConfiguracionPage() {
   const todasLasSolapas = [
     {
       id: 'usuarios',
-      label: 'Usuario',
+      label: 'Usuarios',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -102,15 +102,11 @@ export default function ConfiguracionPage() {
   const renderTabContent = () => {
     switch (solapaActiva) {
       case 'usuarios':
+        // RF-24: la lista de usuarios, la matriz de roles, las secciones confidenciales
+        // y los permisos puntuales (la pantalla de usuarios de Don Joaquín).
         return (
           <div className="p-4 sm:p-6">
-            <div className="mb-6">
-              <h3 className="text-xl font-semibold text-gray-900 mb-1">Gestión de Usuarios</h3>
-              <p className="text-sm text-gray-500">
-                Administra los usuarios del sistema, crea nuevos usuarios y gestiona permisos
-              </p>
-            </div>
-            <UsuariosTable />
+            <UsuariosYPermisos />
           </div>
         );
       case 'notificaciones':

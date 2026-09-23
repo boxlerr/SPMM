@@ -25,6 +25,7 @@ from backend.core.security import (
 )
 from backend.application.reglas_de_roles import (
     admin_permanente,
+    admins_permanentes,
     conflicto,
     cuidar_administradores,
     validar_rol,
@@ -349,14 +350,21 @@ async def _ver_un_usuario(
 async def listar_usuarios(
     db=Depends(get_db),
     current_user: dict = Depends(get_current_user),
+    sesiones=Depends(get_sesiones_permisos),
 ):
     """
     Lista todos los usuarios del sistema
     
     Requiere autenticación (Bearer Token)
     RF-24: pide ver la sección «Usuarios y permisos» (el admin la tiene siempre).
+
+    `admin_permanente` va para que la pantalla ponga el candado en el selector de rol
+    (DJ admins-permanentes.ts): True/False, o None si la columna todavía no existe en
+    esa base (migración sin correr). Se lee ANTES y con su propia sesión: si la columna
+    falta, esa consulta no se lleva puesta la de la lista.
     """
     try:
+        permanentes = await admins_permanentes(sesiones)
         usuario_repository = UsuarioRepository(db)
         
         # Obtener todos los usuarios
@@ -376,6 +384,7 @@ async def listar_usuarios(
                 "fecha_creacion": u.fecha_creacion.isoformat() if u.fecha_creacion else None,
                 "ultimo_login": u.ultimo_login.isoformat() if u.ultimo_login else None,
                 **_estado_de_bloqueo(u, ahora),
+                "admin_permanente": None if permanentes is None else u.id_usuario in permanentes,
             }
             for u in usuarios
         ]

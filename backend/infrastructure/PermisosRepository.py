@@ -82,6 +82,27 @@ class PermisosRepository:
             return None
         return None if valor is None else bool(valor)
 
+    async def admins_permanentes(self) -> Optional[set[int]]:
+        """Los ids con la marca de administrador permanente, o None si la columna todavía
+        no existe en esta base. Es lo que la lista de usuarios necesita para poner el
+        candado en el selector de rol sin preguntar persona por persona.
+
+        Mismo cuidado que admin_permanente: si falla, rollback (usarla con una sesión
+        propia)."""
+        try:
+            filas = (await self.db.execute(
+                # `== True` como en el resto del repo: es lo que ya corre contra Supabase.
+                select(Usuario.id_usuario).where(Usuario.admin_permanente == True)  # noqa: E712
+            )).all()
+        except Exception as e:
+            await self.db.rollback()
+            logger.warning(
+                "Permisos: no se pudo leer usuario.admin_permanente (%s). "
+                "¿Falta la migración 2026-09-22_permisos_por_rol_y_area?", e,
+            )
+            return None
+        return {int(f.id_usuario) for f in filas}
+
     # ─────────────────────────── los datos para resolver ───────────────────────────
 
     async def datos_de_permisos(self, rol: Optional[str], id_usuario: int, activo: bool = True) -> DatosDePermisos:

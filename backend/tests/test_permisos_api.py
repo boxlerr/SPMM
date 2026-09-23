@@ -265,6 +265,8 @@ async def test_sin_la_migracion_los_admins_entran_y_ven_todo(cliente_sin_migraci
     # la columna que falta).
     r = await c.get("/auth/usuarios", headers=_token(JULIAN))
     assert r.status_code == 200, r.text
+    # El candado de la pantalla: «no se sabe» (None) para todos, sin romper la lista.
+    assert {u["admin_permanente"] for u in r.json()["data"]} == {None}
     r = await c.post("/auth/usuarios", headers=_token(JULIAN), json={
         "username": "nuevo", "email": "nuevo@metlo.com.ar", "password": "123456",
         "nombre": "Nuevo", "apellido": "Prueba", "rol": "admin"})

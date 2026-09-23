@@ -137,6 +137,28 @@ async def test_la_lista_de_usuarios_es_la_seccion_confidencial(cliente):
     assert (await cliente.get("/auth/usuarios", headers=ADMIN)).status_code == 200
 
 
+async def test_la_lista_dice_quien_es_administrador_permanente(cliente):
+    """El candado del selector de rol en la pantalla (DJ admins-permanentes.ts) sale de
+    acá, para no preguntar persona por persona. La migración no prende a nadie."""
+    r = await cliente.get("/auth/usuarios", headers=ADMIN)
+    assert r.status_code == 200, r.text
+    marcas = {u["id_usuario"]: u["admin_permanente"] for u in r.json()["data"]}
+    assert marcas and set(marcas.values()) == {False}
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == LUCAS)
+                    .values(admin_permanente=True))
+    r = await cliente.get("/auth/usuarios", headers=ADMIN)
+    marcas = {u["id_usuario"]: u["admin_permanente"] for u in r.json()["data"]}
+    assert marcas[LUCAS] is True
+    assert [i for i, m in marcas.items() if m] == [LUCAS]
+    # Quien sólo ve la lista (sección otorgada) también ve el candado: es información,
+    # no un permiso.
+    await _ejecutar(cliente, insert(UsuarioSeccion).values(
+        id_usuario=SOFIA, seccion_codigo="configuracion_usuarios", nivel="read", creado_en=ahora_ar()))
+    r = await cliente.get("/auth/usuarios", headers=_token(SOFIA, "supervisor"))
+    assert r.status_code == 200
+    assert {u["id_usuario"]: u["admin_permanente"] for u in r.json()["data"]}[LUCAS] is True
+
+
 # ─────────────────────────── la matriz ───────────────────────────
 
 

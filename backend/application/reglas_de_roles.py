@@ -29,6 +29,17 @@ async def admin_permanente(sesiones, id_usuario: int):
         return await PermisosRepository(s).admin_permanente(id_usuario)
 
 
+async def admins_permanentes(sesiones):
+    """Los ids de los administradores permanentes, o None si no se pudo saber (la columna
+    todavía no existe, o la base no contestó). Sólo informa: la regla la hace cumplir
+    cuidar_administradores, que vuelve a mirar la base persona por persona."""
+    try:
+        async with sesiones() as s:
+            return await PermisosRepository(s).admins_permanentes()
+    except Exception:
+        return None
+
+
 async def validar_rol(sesiones, rol: str) -> None:
     """Que el rol exista en la tabla `rol`.
 
