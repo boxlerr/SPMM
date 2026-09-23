@@ -560,6 +560,68 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON CONFLICT (codigo) DO NOTHING",
         ],
     ),
+    (
+        # RF-03. Una tabla nueva y nada más: ninguna columna de las tablas que se leen
+        # en cada pantalla, así que si esto no llegara a aplicarse las OT se siguen
+        # leyendo igual. Lo único que no anda es pausar (y el planificador planifica
+        # todo, como antes: lee las pausas en un savepoint y sin la tabla sigue).
+        "2026-09-22_pausas_de_ot",
+        [
+            "CREATE TABLE IF NOT EXISTS orden_trabajo_pausa ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "id_orden_trabajo INTEGER NOT NULL REFERENCES orden_trabajo (id) ON DELETE CASCADE, "
+            "id_otp BIGINT, "
+            "paso INTEGER, "
+            "nombre_proceso VARCHAR(200), "
+            "motivo VARCHAR(30) NOT NULL, "
+            "observacion VARCHAR(500), "
+            "desde TIMESTAMP NOT NULL, "
+            "hasta TIMESTAMP, "
+            "cierre VARCHAR(20), "
+            "id_usuario_pausa INTEGER, "
+            "usuario_pausa VARCHAR(120), "
+            "id_usuario_reanuda INTEGER, "
+            "usuario_reanuda VARCHAR(120), "
+            "CONSTRAINT ck_pausa_motivo CHECK (motivo IN ('FALTA_MATERIAL', 'MAQUINA_ROTA', "
+            "'ESPERA_CLIENTE', 'CAMBIO_PRIORIDAD', 'OTRO')), "
+            "CONSTRAINT ck_pausa_cierre CHECK (cierre IS NULL OR cierre IN ('REANUDADA', "
+            "'PASO_EN_PROCESO', 'PASO_TERMINADO', 'OT_TERMINADA')), "
+            "CONSTRAINT ck_pausa_hasta_despues CHECK (hasta IS NULL OR hasta >= desde))",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE orden_trabajo_pausa IS "
+            "'Pausas de una OT entera o de uno de sus pasos (RF-03): motivo, desde, hasta y "
+            "quién pausó y reanudó. La escribe SPMM; el sync no la mira. No cambia el estado "
+            "de ningún paso: un paso en proceso que se pausa sigue en proceso.'",
+            "COMMENT ON COLUMN orden_trabajo_pausa.id_otp IS "
+            "'El paso pausado (orden_trabajo_proceso.id). NULL = la OT entera. Sin FK a "
+            "propósito: el guardado completo de la OT borra y recrea pasos, y la pausa vieja "
+            "no puede trabarlo. Por eso se copian paso y nombre_proceso.'",
+            "COMMENT ON COLUMN orden_trabajo_pausa.motivo IS "
+            "'FALTA_MATERIAL, MAQUINA_ROTA, ESPERA_CLIENTE, CAMBIO_PRIORIDAD u OTRO. Lista "
+            "cerrada para poder contar por motivo; con OTRO la observacion es obligatoria.'",
+            "COMMENT ON COLUMN orden_trabajo_pausa.desde IS "
+            "'Cuándo se pausó, en hora local del taller y sin zona, como todas las fechas de "
+            "esta base.'",
+            "COMMENT ON COLUMN orden_trabajo_pausa.hasta IS "
+            "'Cuándo se reanudó. NULL = sigue pausada. Una sola pausa abierta por OT entera y "
+            "una por paso (los dos índices únicos parciales).'",
+            "COMMENT ON COLUMN orden_trabajo_pausa.cierre IS "
+            "'Cómo terminó: REANUDADA (alguien apretó Reanudar), PASO_EN_PROCESO o "
+            "PASO_TERMINADO (se movió el paso pausado) u OT_TERMINADA (se terminaron todos los "
+            "pasos). NULL mientras sigue abierta.'",
+            "COMMENT ON COLUMN orden_trabajo_pausa.usuario_pausa IS "
+            "'Nombre y apellido de quien pausó, tomado del token y congelado. NULL = no se "
+            "registró (un script); nunca un autor inventado. Igual usuario_reanuda.'",
+            "CREATE INDEX IF NOT EXISTS ix_pausa_ot "
+            "ON orden_trabajo_pausa (id_orden_trabajo, desde)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_pausa_abierta_ot "
+            "ON orden_trabajo_pausa (id_orden_trabajo) "
+            "WHERE hasta IS NULL AND id_otp IS NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_pausa_abierta_paso "
+            "ON orden_trabajo_pausa (id_otp) "
+            "WHERE hasta IS NULL AND id_otp IS NOT NULL",
+        ],
+    ),
 ]
 
 

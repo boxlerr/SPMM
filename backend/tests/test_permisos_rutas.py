@@ -220,6 +220,12 @@ MATRIZ = [
     ("GET", "/consumos-material", OK, OK, OK),
     ("POST", "/consumos-material", OK, OK, NO),
     ("PUT", "/consumos-material/1/anular", OK, OK, NO),
+    # RF-03: pausar y reanudar es tocar la OT (la solapa Órdenes); las pausas se leen
+    # con Operaciones.
+    ("GET", "/ordenes-pausadas", OK, OK, OK),
+    ("GET", "/ordenes/1/pausas", OK, OK, OK),
+    ("POST", "/ordenes/1/pausar", OK, OK, NO),
+    ("POST", "/ordenes/1/reanudar", OK, OK, NO),
     # el plan y el planificador
     ("GET", "/planificacion", OK, OK, OK),
     ("POST", "/planificar", OK, OK, NO),
@@ -381,6 +387,8 @@ PANTALLAS = {
         "/ordenes/1/procesos/versiones", "/ordenes-trabajo-piezas", "/consumos-material",
         "/planos/orden/1", "/planos/articulo/1", "/planos/1", "/planos/1/archivo",
         "/ordenes/1/incidencias", "/auditoria/procesos?id_orden=1",
+        # RF-03: el cartel de «Pausada» de las listas y el historial de pausas de la ficha
+        "/ordenes-pausadas", "/ordenes/1/pausas",
         # el plan, el Gantt y el planificador
         "/planificacion", "/planificacion/borradores", "/planificacion/borradores/1",
         "/config/availability", "/planos/ordenes-con-plano", "/planos/ordenes-con-plano-disponible",

@@ -233,6 +233,11 @@ def partes_del_camino(ruta: str) -> tuple[str, str | None]:
 # destrabó una cuenta (RF-26). Con esto la frase dice «desbloqueó usuario #3».
 VERBO = {
     "desbloquear": "desbloqueó",
+    # RF-03. «POST /ordenes/1081/pausar» no crea nada: para la OT (o un paso). La frase
+    # buena, con el número de OT y el motivo, la deja el endpoint (PausaAPI); esto es
+    # para los intentos que no pasaron, que igual tienen que decir qué se intentó.
+    "pausar": "pausó",
+    "reanudar": "reanudó",
 }
 
 

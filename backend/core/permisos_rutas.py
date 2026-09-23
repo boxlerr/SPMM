@@ -54,7 +54,7 @@ y como solapa de Recursos):
 
   pantalla (área)    lee
   Dashboard          /api/dashboard/*, /incidencias/metricas
-  Operaciones        /ordenes*, /ordenes-resumen, /planificacion*, /planificar,
+  Operaciones        /ordenes*, /ordenes-resumen, /ordenes-pausadas, /planificacion*, /planificar,
                      /config/availability, /ordenes-trabajo-piezas, /consumos-material,
                      /planos/orden/*, /planos/{id}/archivo, /ordenes/{id}/incidencias,
                      /auditoria/procesos?id_orden= (historial de UNA OT) y los catálogos
@@ -228,6 +228,10 @@ POLITICAS: dict[str, Politica] = {
     # La materia prima de cada OT y lo que se consumió (RF-15): se cargan en la ficha.
     "ordenes_trabajo_piezas": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
     "consumos_material": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
+    # Pausar y reanudar una OT o un paso (RF-03). Es tocar la OT —lo mismo que cambiarle
+    # el estado a un paso—, así que pide la solapa Órdenes. Las pausas vigentes las leen
+    # las listas de Operaciones (el cartel de «Pausada»), la ficha y el planificador.
+    "pausas": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
     # El plan. Lo leen Operaciones (el Gantt) y Recursos (lo que tiene asignado cada
     # persona). Moverlo —planificar, borradores, confirmar, quitar órdenes, correr una
     # fecha— es del planificador.

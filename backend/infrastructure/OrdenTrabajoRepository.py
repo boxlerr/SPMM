@@ -636,6 +636,7 @@ class OrdenTrabajoRepository:
                 logger.info("Repository - Relación Orden-Proceso no encontrada.")
                 return False
 
+            estado_anterior = ot_proceso.id_estado
             ot_proceso.id_estado = id_estado
             
             # Logic for Real Minutes Tracking
@@ -657,6 +658,19 @@ class OrdenTrabajoRepository:
             # Mover un proceso de la OT es modificar la OT: es el cambio que más se
             # hace y el que más se pregunta después ("¿quién lo dio por terminado?").
             await self._sellar_modificacion(id_orden, usuario)
+
+            # RF-03. Si el paso estaba pausado y alguien lo puso en proceso o lo
+            # terminó, ya no está parado: se cierra su pausa (y la de la OT, si con
+            # esto quedó todo terminado). Sólo si el estado CAMBIÓ: elegir otra vez el
+            # mismo estado en la lista no es arrancar nada. En su propio savepoint:
+            # si falla, el cambio de estado se guarda igual (ver PausaRepository).
+            if estado_anterior != id_estado:
+                from backend.infrastructure.PausaRepository import PausaRepository
+                await PausaRepository(self.db).cerrar_al_cambiar_estado(
+                    id_orden=id_orden, id_otp=ot_proceso.id, id_estado=id_estado,
+                    cuando=_ahora_ar(), id_usuario=(usuario or {}).get("id_usuario"),
+                    usuario=(nombre_de(usuario) or "")[:120] or None,
+                )
 
             await self.db.commit()
             await self.db.refresh(ot_proceso)
@@ -874,6 +888,15 @@ class OrdenTrabajoRepository:
                 return {"id_estado": id_estado, "fin_real": ahora}
 
             await auditoria_proc.anotar(self.db, previas, "edicion", nuevos=_como_queda)
+
+            # RF-03. Todos los pasos quedaron en el mismo estado: las pausas que eso
+            # deja sin sentido se cierran (ver PausaRepository.cerrar_al_marcar_varias).
+            from backend.infrastructure.PausaRepository import PausaRepository
+            await PausaRepository(self.db).cerrar_al_marcar_varias(
+                ordenes_ids=ids, id_estado=id_estado, cuando=ahora,
+                id_usuario=(usuario or {}).get("id_usuario"),
+                usuario=(nombre_de(usuario) or "")[:120] or None,
+            )
 
             # La OT queda entregada sólo si TODOS sus pasos quedaron terminados, que es
             # exactamente lo que acaba de pasar cuando el estado pedido es "finalizado".

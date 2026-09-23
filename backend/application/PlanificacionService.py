@@ -14,6 +14,7 @@ from backend.infrastructure.OperarioProcesoSkillRepository import OperarioProces
 from backend.infrastructure.PlanoRepository import PlanoRepository
 from backend.infrastructure.RangoRepository import RangoRepository
 from backend.infrastructure.DiaBloqueadoRepository import DiaBloqueadoRepository
+from backend.infrastructure.PausaRepository import PausaRepository
 from datetime import timedelta
 
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -2473,6 +2474,76 @@ def _lineas_ordenadas(rels):
     return list(enumerate(ordenadas, start=1))
 
 
+def _indexar_pausas(pausas_abiertas):
+    """(pausa de la OT entera por orden_id, pausa del paso por id de pasada).
+
+    `pausas_abiertas` es lo que devuelve PausaRepository.abiertas_sin_romper: una lista
+    de (pausa, id_otvieja), o None si no se pudo leer. Con None no se saltea nada: es lo
+    que hacía el planificador antes de RF-03, y es mejor un plan con una OT pausada
+    adentro que ningún plan.
+    """
+    por_ot, por_paso = {}, {}
+    for pausa, _nro in pausas_abiertas or ():
+        if pausa.id_otp is None:
+            por_ot[pausa.id_orden_trabajo] = pausa
+        else:
+            por_paso[pausa.id_otp] = pausa
+    return por_ot, por_paso
+
+
+def _sacar_lo_pausado(orden, lineas, pausa_ot, pausas_paso):
+    """RF-03: lo pausado no se programa. Devuelve (lineas_que_entran, saltado | None).
+
+    · OT entera pausada → no entra ninguna de sus pasadas.
+    · Un paso pausado → no entra ese paso NI LOS QUE VAN DESPUÉS en la OT. Los pasos van
+      en secuencia (el solver los encadena, ver _agregar_restricciones_secuencia):
+      sacar sólo el pausado dejaba al siguiente pegado al anterior, y el plan mandaba
+      a soldar una pieza que todavía no salió del torno roto. Los de antes sí entran.
+      El corte se mira sobre TODOS los pasos de la OT y no sólo sobre los elegidos: si
+      se eligió planificar el 4 y el 5 y el 3 está pausado, el 4 tampoco se puede hacer.
+
+    `saltado` es lo que necesita el aviso (DiagnosticoPlanificacion.diagnosticos_de_pausas):
+    la pausa, qué se dejó afuera y cuánto trabajo era. Sólo cuenta lo NO terminado: una
+    pasada terminada no es trabajo que se pierda del plan.
+    """
+    if not lineas:
+        return lineas, None
+
+    def _clave(rel):
+        return ((rel.orden or 0), (getattr(rel, "id", 0) or 0))
+
+    def _saltado(pausa, alcance, afuera, despues=0):
+        pendientes = [r for r in afuera if getattr(r, "id_estado", 1) != 3]
+        if not pendientes:
+            return None
+        return {
+            "orden_id": orden.id,
+            "numero": getattr(orden, "id_otvieja", None) or orden.id,
+            "pausa": pausa,
+            "alcance": alcance,
+            "procesos": len(pendientes),
+            "minutos": sum(int(r.tiempo_proceso or 1) for r in pendientes),
+            "despues": despues,
+        }
+
+    if pausa_ot is not None:
+        return [], _saltado(pausa_ot, "ot", lineas)
+
+    if not pausas_paso:
+        return lineas, None
+    todas = sorted(getattr(orden, "procesos", None) or lineas, key=_clave)
+    pausado = next((r for r in todas
+                    if getattr(r, "id", None) in pausas_paso and getattr(r, "id_estado", 1) != 3),
+                   None)
+    if pausado is None:
+        return lineas, None
+    corte = _clave(pausado)
+    entran = [r for r in lineas if _clave(r) < corte]
+    afuera = [r for r in lineas if _clave(r) >= corte]
+    despues = len([r for r in afuera if r is not pausado and getattr(r, "id_estado", 1) != 3])
+    return entran, _saltado(pausas_paso[pausado.id], "paso", afuera, despues)
+
+
 def _marcar_lineas(resultados, linea_por_clave):
     """
     Le pega a cada fila del resultado el id de la PASADA que la originó, para que
@@ -2633,6 +2704,12 @@ async def planificar(
 
     operarios = await repo_operario.find_with_rangos()
 
+    # 🔹 RF-03: lo pausado no se programa. Se lee en un savepoint: si la tabla de pausas
+    #    no está (migración sin correr), el plan sale como antes, con todo adentro.
+    pausas_ot, pausas_paso = _indexar_pausas(
+        await PausaRepository(db).abiertas_sin_romper([o.id for o in ordenes]))
+    saltadas_por_pausa = []
+
     # OTs con plano REALMENTE adjunto: sus procesos exigen saber interpretar planos.
     # Se mira la tabla `plano`, no la bandera `tiene_plano` del legacy — ver
     # PlanoRepository.find_ordenes_con_plano.
@@ -2687,6 +2764,10 @@ async def planificar(
         _elegidas = _filtrar_lineas_por_orden(orden.procesos, orden.id, lineas_por_orden)
         if _elegidas is None:
             _elegidas = _filtrar_procesos_por_orden(orden.procesos, orden.id, procesos_por_orden)
+        _elegidas, _saltado = _sacar_lo_pausado(
+            orden, _elegidas, pausas_ot.get(orden.id), pausas_paso)
+        if _saltado:
+            saltadas_por_pausa.append(_saltado)
 
         # `secuencia` es la POSICIÓN en la OT, no `rel.orden`: ver _lineas_ordenadas.
         for secuencia, rel in _lineas_ordenadas(_elegidas):
@@ -2917,6 +2998,22 @@ async def planificar(
         logger.error(f"Service - No se pudieron construir los diagnósticos: {e}")
         diagnosticos = []
 
+    # RF-03: lo que quedó afuera por estar pausado, con el formato de los demás avisos.
+    # Va aparte del bloque de arriba a propósito: si el diagnóstico de trabas falla, que
+    # el plan no avise que dejó una OT afuera sería peor que no tener las trabas.
+    if saltadas_por_pausa:
+        try:
+            from backend.application.DiagnosticoPlanificacion import (
+                diagnosticos_de_pausas, ordenar_diagnosticos,
+            )
+            _nro = {o.id: (o.id_otvieja or o.id) for o in ordenes}
+            avisos_pausa = diagnosticos_de_pausas(saltadas_por_pausa)
+            for d in avisos_pausa:
+                d["impacto"]["ots"] = [_nro.get(i, i) for i in d["impacto"]["ots"]]
+            diagnosticos = ordenar_diagnosticos(diagnosticos + avisos_pausa)
+        except Exception as e:
+            logger.error(f"Service - No se pudieron armar los avisos de lo pausado: {e}")
+
     if preview:
         # `inicio_base` viaja a la pantalla y vuelve al confirmar: es lo que ata las
         # fechas que se miran a las fechas que se guardan.
@@ -2968,6 +3065,11 @@ async def planificar_pendientes(
             logger.info("Service - No hay procesos pendientes para planificar.")
             return []
 
+        # RF-03: lo pausado tampoco se re-planifica. Este camino no devuelve avisos
+        # (la pantalla que lo llama no los muestra), así que queda en el log.
+        pausas_ot, pausas_paso = _indexar_pausas(
+            await PausaRepository(db).abiertas_sin_romper([o.id for o in ordenes]))
+
         operarios = await repo_operario.find_with_rangos()
         op_planos = await repo_operario.find_interpreta_planos()
         calendarios = calendarios_de_operarios(await repo_operario.find_all())
@@ -2996,6 +3098,12 @@ async def planificar_pendientes(
             prioridad_desc = orden.prioridad.descripcion.strip().lower() if orden.prioridad else None
 
             _pendientes = [rel for rel in orden.procesos if rel.id_estado != 3]
+            _pendientes, _saltado = _sacar_lo_pausado(
+                orden, _pendientes, pausas_ot.get(orden.id), pausas_paso)
+            if _saltado:
+                logger.info(
+                    f"PLANIFICADOR (pendientes): OT {_saltado['numero']} pausada "
+                    f"({_saltado['pausa'].motivo}): {_saltado['procesos']} pasos quedan afuera.")
             for secuencia, rel in _lineas_ordenadas(_pendientes):
                 linea_por_clave[(orden.id, secuencia)] = getattr(rel, "id", None)
                 cant_op_map[(orden.id, secuencia)] = max(1, int(getattr(rel, "cant_operarios", 1) or 1))
