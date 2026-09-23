@@ -14,6 +14,7 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import OperarioEditForm from "./OperarioEditForm";
 import { parseApiError } from "@/lib/utils";
 import { API_URL } from "@/config"
+import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import type { ColumnaExport } from "@/lib/exportar";
 
@@ -88,6 +89,13 @@ const ordenarSkills = (a: ProcesoSkill, b: ProcesoSkill, nombre: (s: ProcesoSkil
 export default function DetalleOperario({ operario, tasks: initialTasks = [], onClose, onCambiarEstado, onOperatorUpdated }: DetalleOperarioProps) {
   const { showToast } = useToast();
   const { addNotification } = useNotifications();
+  // RF-24. Esta ficha se abre desde Recursos y desde Operaciones, y toca dos cosas:
+  // la persona (estado, datos, habilidades: la solapa Recurso humano de Recursos) y los
+  // pasos de las OT que tiene asignados (la solapa Órdenes de Operaciones). Cada control
+  // pide lo suyo, igual que el backend; sin permiso se ve y no se cambia.
+  const { puedeSeccion } = usePermisos();
+  const editaPersona = puedeSeccion("recursos_humano", "write");
+  const editaPasos = puedeSeccion("operaciones_ordenes", "write");
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [procesosMap, setProcesosMap] = useState<Record<number, string>>({});
@@ -477,7 +485,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
 
                   <div className="mt-2 flex gap-2 items-center justify-center">
                     <Select
-                      disabled={isUpdating}
+                      disabled={isUpdating || !editaPersona}
                       value={operario.disponible ? "Activo" : "Ausente"}
                       onValueChange={handleOperatorStatusChange}
                     >
@@ -493,15 +501,17 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       </SelectContent>
                     </Select>
 
-                    <Button
-                      variant={isEditing ? "destructive" : "outline"}
-                      size="sm"
-                      onClick={() => setIsEditing(!isEditing)}
-                      className="w-[118px] h-7 text-xs"
-                    >
-                      <Pencil className="h-3 w-3 mr-1.5" />
-                      {isEditing ? "Cancelar" : "Editar"}
-                    </Button>
+                    {editaPersona && (
+                      <Button
+                        variant={isEditing ? "destructive" : "outline"}
+                        size="sm"
+                        onClick={() => setIsEditing(!isEditing)}
+                        className="w-[118px] h-7 text-xs"
+                      >
+                        <Pencil className="h-3 w-3 mr-1.5" />
+                        {isEditing ? "Cancelar" : "Editar"}
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -582,14 +592,16 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                   {/* El editor con arrastrar no entra en esta columna: vive en el modal de
                       edición, que tiene ancho para las dos listas. Sin este aviso no se
                       encuentra y parece que la pantalla no cambió. */}
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing(true)}
-                    className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-violet-300 bg-violet-50/60 px-2 py-1.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100/70"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    Agregar manuales y reordenar (en Editar)
-                  </button>
+                  {editaPersona && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="w-full mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-violet-300 bg-violet-50/60 px-2 py-1.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100/70"
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Agregar manuales y reordenar (en Editar)
+                    </button>
+                  )}
                   <div className="relative mb-2">
                     <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
                     <input
@@ -674,7 +686,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                               el movimiento. El arrastrar vive en el modal de edición,
                                               que tiene lugar para las dos columnas. */}
                                           <select
-                                            disabled={ocupado || !skill.habilitado}
+                                            disabled={ocupado || !skill.habilitado || !editaPersona}
                                             value=""
                                             onChange={(e) => handleCambiarNivel(skill.id_proceso, parseInt(e.target.value, 10))}
                                             aria-label={`Mover ${nombre} a otra prioridad`}
@@ -691,7 +703,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                               ))}
                                           </select>
                                           <button
-                                            disabled={ocupado}
+                                            disabled={ocupado || !editaPersona}
                                             onClick={() => handleNativeSkillToggle(skill.id_proceso, skill.habilitado)}
                                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50 ${skill.habilitado ? 'bg-emerald-500' : 'bg-slate-300'}`}
                                             title={skill.habilitado ? "Desactivar habilidad" : "Activar habilidad"}
@@ -838,6 +850,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                                           <Select
                                             value={(task.id_estado ?? 1).toString()}
                                             onValueChange={(val) => handleTaskStatusChange(task, val)}
+                                            disabled={!editaPasos}
                                           >
                                             <SelectTrigger className="w-[120px] h-7 text-xs bg-slate-50 shrink-0">
                                               <SelectValue placeholder="Estado" />

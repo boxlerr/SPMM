@@ -58,7 +58,8 @@ export default function LoginPage() {
         }
         
         console.log('Login exitoso');
-        router.push('/dashboard');
+        // RF-24: la primera pantalla que puede ver (sin permisos, el Dashboard).
+        router.push(result.inicio || '/dashboard');
       } else {
         setError(result.error || 'Error al iniciar sesión');
         setBloqueado(!!result.bloqueado);

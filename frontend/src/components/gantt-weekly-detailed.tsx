@@ -23,7 +23,7 @@ import {
     toTitleCase,
     isOperatorQualified,
 } from "@/lib/gantt-utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { motion, AnimatePresence } from "framer-motion"
 import { cn } from "@/lib/utils"

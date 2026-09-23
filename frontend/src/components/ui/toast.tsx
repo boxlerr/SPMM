@@ -3,6 +3,7 @@
 import React, { useEffect, useState, createContext, useContext } from "react";
 import { CheckCircle2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { huboSinPermisoReciente } from "@/lib/sinPermiso";
 
 interface ToastProps {
   message: string;
@@ -53,6 +54,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    // RF-24: si la API acaba de contestar 403 ya está a la vista «No tenés permiso para
+    // esto» (lib/sinPermiso.ts). El error genérico de la pantalla no suma nada encima.
+    if (type === "error" && huboSinPermisoReciente()) return;
     setToast({ message, type });
   };
 

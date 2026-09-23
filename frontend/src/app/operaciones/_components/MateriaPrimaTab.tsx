@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Search, ChevronLeft, ChevronRight, Loader2, AlertTriangle, Pencil } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { estaBajoMinimo, formatearCantidad, leerMinimo } from "@/lib/stockMinimo";
+import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 
@@ -533,6 +534,10 @@ function CeldaMinimo({
     // Enter cierra el campo y, al desmontarse, algunos navegadores disparan además el
     // blur: sin esta marca se guardaría dos veces.
     const cerrado = useRef(false);
+    // RF-24: el mínimo se cambia desde la solapa Materia prima en escritura (así lo
+    // pide el backend). Con lectura sola se ve el número, sin el lápiz.
+    const { puedeSeccion } = usePermisos();
+    const puedeEditar = puedeSeccion("operaciones_materia_prima", "write");
 
     const abrir = () => {
         cerrado.current = false;
@@ -557,6 +562,14 @@ function CeldaMinimo({
         cerrado.current = true;
         setEditando(false);
     };
+
+    if (!puedeEditar) {
+        return pieza.stock_minimo == null ? (
+            <span className="text-gray-400">Sin mínimo</span>
+        ) : (
+            <span className="font-medium text-gray-900">{formatearCantidad(pieza.stock_minimo)}</span>
+        );
+    }
 
     if (editando) {
         return (

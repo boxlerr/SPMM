@@ -30,9 +30,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
+import { usePermisos } from "@/hooks/usePermisos";
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { fechaDeFiltro, type ColumnaExport } from "@/lib/exportar";
 
@@ -98,6 +100,10 @@ const fmtHoras = (min: number) => {
 };
 
 export default function NoConformidadesPage() {
+    // RF-24: clasificarlas, anotar qué se hizo y cerrarlas pide el área en escritura.
+    // Con lectura sola se ven igual, pero el panel muestra lo cargado sin botones.
+    const { puede } = usePermisos();
+    const puedeEditar = puede("no_conformidades", "write");
     const [filas, setFilas] = useState<NoConformidad[]>([]);
     const [resumen, setResumen] = useState<Resumen | null>(null);
     const [hayMas, setHayMas] = useState(false);
@@ -279,9 +285,10 @@ export default function NoConformidadesPage() {
                 botones le quedaban justo debajo. Desde `lg` hay aire de sobra. */}
             <div className="flex items-start justify-between gap-3 mb-6 flex-wrap pr-12 lg:pr-0">
                 <div>
-                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex items-center gap-2">
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight flex flex-wrap items-center gap-2">
                         <FileWarning className="h-6 w-6 sm:h-7 sm:w-7 text-amber-600 shrink-0" />
                         No conformidades
+                        {!puedeEditar && <MarcaSoloLectura que="las no conformidades" />}
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
                         Todo lo que salió mal en una orden: qué pasó, qué tan grave fue, cuántas piezas
@@ -482,6 +489,7 @@ export default function NoConformidadesPage() {
                                         fila={f}
                                         gravedades={gravedades}
                                         onGuardar={guardar}
+                                        soloLectura={!puedeEditar}
                                     />
                                 )}
                             </li>
@@ -536,14 +544,43 @@ function Tarjeta({ titulo, valor, tono }: { titulo: string; valor: string; tono?
  * Lo que se puede hacer con una no conformidad: clasificarla, anotar qué se hizo y
  * cerrarla. Nada de borrar — un registro de calidad se cierra, no desaparece.
  */
-function Panel({ fila, gravedades, onGuardar }: {
+function Panel({ fila, gravedades, onGuardar, soloLectura = false }: {
     fila: NoConformidad;
     gravedades: Listas;
     onGuardar: (id: number, ruta: string, cuerpo: Record<string, unknown>) => Promise<boolean>;
+    /** RF-24: sin permiso de escritura, lo cargado se lee y no hay botones. */
+    soloLectura?: boolean;
 }) {
     const [accion, setAccion] = useState(fila.accion_correctiva ?? "");
     const [guardando, setGuardando] = useState(false);
     const cerrada = fila.estado === "CERRADA";
+
+    if (soloLectura) {
+        return (
+            <div className="px-4 pb-4 pt-1 bg-muted/20 border-t space-y-2 text-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-muted-foreground">Gravedad:</span>
+                    <span className="text-xs font-medium">
+                        {fila.gravedad ? (gravedades[fila.gravedad] ?? fila.gravedad) : "Sin clasificar"}
+                    </span>
+                    {fila.usuario && (
+                        <span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <User className="h-3 w-3" /> La reportó {fila.usuario}
+                        </span>
+                    )}
+                </div>
+                <div>
+                    <p className="text-xs text-muted-foreground">Qué se hizo</p>
+                    <p className="mt-0.5 whitespace-pre-wrap text-foreground/80">
+                        {fila.accion_correctiva || <span className="italic text-muted-foreground">Todavía no se anotó.</span>}
+                    </p>
+                </div>
+                {cerrada && (
+                    <p className="text-xs text-muted-foreground">Cerrada el {fmtFecha(fila.fecha_cierre)}</p>
+                )}
+            </div>
+        );
+    }
 
     const conGuardado = async (ruta: string, cuerpo: Record<string, unknown>, aviso: string) => {
         setGuardando(true);

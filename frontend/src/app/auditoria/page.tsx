@@ -35,6 +35,7 @@ import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos"
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
+import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import type { ColumnaExport } from "@/lib/exportar";
 
@@ -165,7 +166,19 @@ export default function AuditoriaPage() {
     // botón hace lo que dice también estando parado ahí.
     const [refresco, setRefresco] = useState(0);
 
+    // RF-24: cada solapa es una sección y el rol puede cerrar algunas. Sólo se muestran
+    // (y sólo se piden) las que se pueden leer; abre la primera de ésas.
+    const { puedeSeccion } = usePermisos();
+    const veTodo = puedeSeccion("auditoria_movimientos");
+    const vePasos = puedeSeccion("auditoria_procesos");
+    const vePlanificaciones = puedeSeccion("auditoria_planificacion");
+    const solapaInicial = veTodo ? "todo" : vePasos ? "procesos" : "planificacion";
+
     const cargar = useCallback(async () => {
+        if (!vePlanificaciones) {
+            setCargando(false);
+            return;
+        }
         setCargando(true);
         setError(null);
         try {
@@ -181,7 +194,7 @@ export default function AuditoriaPage() {
         } finally {
             setCargando(false);
         }
-    }, []);
+    }, [vePlanificaciones]);
 
     useEffect(() => {
         cargar();
@@ -217,25 +230,28 @@ export default function AuditoriaPage() {
                 </Button>
             </div>
 
-            <Tabs defaultValue="todo">
+            <Tabs defaultValue={solapaInicial}>
                 {/* `flex-wrap h-auto`: «Todo lo que se hizo», «Pasos de las OT» y
                     «Planificaciones» suman ~430px y en un teléfono la tercera quedaba
                     afuera sin forma de llegar. Ahora baja a otra fila; en la computadora
                     entran en una y miden los mismos 40px de siempre. */}
                 <TabsList className="mb-4 max-w-full h-auto flex-wrap justify-start">
-                    <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>
-                    <TabsTrigger value="procesos">Pasos de las OT</TabsTrigger>
-                    <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>
+                    {veTodo && <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>}
+                    {vePasos && <TabsTrigger value="procesos">Pasos de las OT</TabsTrigger>}
+                    {vePlanificaciones && <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>}
                 </TabsList>
 
-                <TabsContent value="todo">
-                    <RegistroDeMovimientos />
-                </TabsContent>
+                {veTodo && (
+                    <TabsContent value="todo">
+                        <RegistroDeMovimientos />
+                    </TabsContent>
+                )}
 
                 {/* Los pasos tienen su propia solapa y no se mezclan con el resto: allá
                     se guarda el PEDIDO (la dirección y el cuerpo que mandó el navegador)
                     y acá el CAMBIO ya comparado, fila por fila y campo por campo. Un
                     guardado de OT deja UNA línea allá y una por paso tocado acá. */}
+                {vePasos && (
                 <TabsContent value="procesos">
                     <p className="text-sm text-muted-foreground mb-3">
                         Cada vez que se agrega, se cambia o se saca un paso de una orden,
@@ -243,7 +259,9 @@ export default function AuditoriaPage() {
                     </p>
                     <HistorialDeProcesos key={refresco} />
                 </TabsContent>
+                )}
 
+                {vePlanificaciones && (
                 <TabsContent value="planificacion">
 
             {error && (
@@ -416,6 +434,7 @@ export default function AuditoriaPage() {
                 </>
             )}
                 </TabsContent>
+                )}
             </Tabs>
         </div>
     );

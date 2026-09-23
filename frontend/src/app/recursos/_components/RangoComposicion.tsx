@@ -27,6 +27,7 @@ import { parseApiError } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import { API_URL } from "@/config";
 import AgregarHabilidad, { ProcesoItem } from "./AgregarHabilidad";
+import { usePermisos } from "@/hooks/usePermisos";
 
 interface ItemRef {
     id: number;
@@ -69,6 +70,11 @@ const porNombre = (a: ItemRef, b: ItemRef) => a.nombre.localeCompare(b.nombre);
 export default function RangoComposicion({ idRango, nombreRango }: Props) {
     const cleanUrl = API_URL.replace(/\/$/, "");
     const { showToast } = useToast();
+    // RF-24: qué habilita un rango se edita en la solapa Rangos (recursos_rangos en
+    // escritura; el backend pide eso para /rangos/{id}/procesos y /maquinarias). Con
+    // lectura sola se ve la composición sin agregar ni quitar nada.
+    const { puedeSeccion } = usePermisos();
+    const soloLectura = !puedeSeccion("recursos_rangos", "write");
 
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -223,7 +229,9 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                         {/* En singular la coletilla "no a uno solo" se contradice sola,
                             así que el texto cambia entero, no solo el plural. */}
                         <span>
-                            {alcance === 1 ? (
+                            {soloLectura ? (
+                                <>Lo {alcance === 1 ? "tiene" : "tienen"} <strong>{alcance} de recurso humano</strong>:</>
+                            ) : alcance === 1 ? (
                                 <>
                                     Lo que cambies acá aplica a{" "}
                                     <strong>este recurso humano</strong>. Si querés
@@ -272,14 +280,14 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                             {procesos.length}
                         </span>
                     </div>
-                    <AgregarHabilidad
+                    {!soloLectura && <AgregarHabilidad
                         catalogo={catProcesos}
                         yaTiene={idsProcesos}
                         etiqueta="Agregar proceso"
                         sustantivo="proceso"
                         nota="Se lo habilita a todo el recurso humano con este rango."
                         onAgregar={(p) => setProcesos((prev) => [...prev, p].sort(porNombre))}
-                    />
+                    />}
                 </div>
                 {procesos.length === 0 ? (
                     <p className="rounded-md border border-dashed px-3 py-3 text-[13px] text-muted-foreground">
@@ -293,16 +301,18 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                                 className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white py-1 pl-2.5 pr-1 text-[12px] text-slate-700"
                             >
                                 {p.nombre}
-                                <button
-                                    type="button"
-                                    aria-label={`Quitar ${p.nombre}`}
-                                    onClick={() =>
-                                        setProcesos((prev) => prev.filter((x) => x.id !== p.id))
-                                    }
-                                    className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                >
-                                    <X className="h-3 w-3" />
-                                </button>
+                                {!soloLectura && (
+                                    <button
+                                        type="button"
+                                        aria-label={`Quitar ${p.nombre}`}
+                                        onClick={() =>
+                                            setProcesos((prev) => prev.filter((x) => x.id !== p.id))
+                                        }
+                                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                    >
+                                        <X className="h-3 w-3" />
+                                    </button>
+                                )}
                             </span>
                         ))}
                     </div>
@@ -319,7 +329,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                             {maquinarias.length}
                         </span>
                     </div>
-                    <AgregarHabilidad
+                    {!soloLectura && <AgregarHabilidad
                         catalogo={catalogoMaquinasParaBuscar}
                         yaTiene={idsMaquinarias}
                         etiqueta="Agregar recurso maquinaria"
@@ -330,7 +340,7 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                             const real = catMaquinarias.find((x) => x.id === m.id);
                             if (real) setMaquinarias((prev) => [...prev, real].sort(porNombre));
                         }}
-                    />
+                    />}
                 </div>
                 {maquinarias.length === 0 ? (
                     <p className="rounded-md border border-dashed px-3 py-3 text-[13px] text-muted-foreground">
@@ -349,23 +359,25 @@ export default function RangoComposicion({ idRango, nombreRango }: Props) {
                                         {m.cod_maquina}
                                     </span>
                                 )}
-                                <button
-                                    type="button"
-                                    aria-label={`Quitar ${m.nombre}`}
-                                    onClick={() =>
-                                        setMaquinarias((prev) => prev.filter((x) => x.id !== m.id))
-                                    }
-                                    className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                                >
-                                    <X className="h-3 w-3" />
-                                </button>
+                                {!soloLectura && (
+                                    <button
+                                        type="button"
+                                        aria-label={`Quitar ${m.nombre}`}
+                                        onClick={() =>
+                                            setMaquinarias((prev) => prev.filter((x) => x.id !== m.id))
+                                        }
+                                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                    >
+                                        <X className="h-3 w-3" />
+                                    </button>
+                                )}
                             </span>
                         ))}
                     </div>
                 )}
             </section>
 
-            {sucio && (
+            {sucio && !soloLectura && (
                 <div className="flex items-center justify-end gap-2 border-t pt-3">
                     <Button variant="ghost" size="sm" onClick={descartar} disabled={guardando}>
                         Descartar

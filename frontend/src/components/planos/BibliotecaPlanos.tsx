@@ -15,7 +15,7 @@ import {
     UploadCloud,
     Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -33,6 +33,8 @@ import { PlanoThumb } from "@/components/common/PlanoThumb";
 import { FileViewerModal } from "@/components/common/FileViewerModal";
 import { SubirPlanoModal } from "@/components/planos/SubirPlanoModal";
 import { invalidarOrdenesConPlano } from "@/hooks/useOrdenesConPlano";
+import { usePermisos } from "@/hooks/usePermisos";
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 
@@ -119,6 +121,10 @@ export function BibliotecaPlanos({
     conEncabezado = true,
 }: BibliotecaPlanosProps) {
     const base = API_URL.replace(/\/$/, "");
+    // RF-24: subir y borrar planos pide el área Planos en escritura (sea desde esta
+    // pantalla o desde la solapa de Recursos). Ver, bajar e imprimir, con leer alcanza.
+    const { puede } = usePermisos();
+    const puedeEditar = puede("planos", "write");
 
     const [items, setItems] = React.useState<PlanoBiblioteca[]>([]);
     const [total, setTotal] = React.useState(0);
@@ -364,10 +370,14 @@ export function BibliotecaPlanos({
                     ? `Salen los ${items.length} que ya se ven, de ${total}. Para sumar más, tocá «Ver más planos» abajo.`
                     : undefined}
             />
-            <Button onClick={() => setSubidaAbierta(true)} size="sm">
-                <UploadCloud className="h-4 w-4 mr-2" />
-                Subir plano
-            </Button>
+            {puedeEditar ? (
+                <Button onClick={() => setSubidaAbierta(true)} size="sm">
+                    <UploadCloud className="h-4 w-4 mr-2" />
+                    Subir plano
+                </Button>
+            ) : (
+                <MarcaSoloLectura que="los planos" />
+            )}
             <Button
                 onClick={() => cargar(consulta, 0)}
                 disabled={cargando}
@@ -579,14 +589,16 @@ export function BibliotecaPlanos({
                                             >
                                                 <Printer className="w-3.5 h-3.5" />
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setABorrar(plano)}
-                                                title="Eliminar el plano"
-                                                className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                                            >
-                                                <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
+                                            {puedeEditar && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setABorrar(plano)}
+                                                    title="Eliminar el plano"
+                                                    className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
                                         </div>
                                     </div>
                                 );

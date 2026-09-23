@@ -39,12 +39,13 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, Cog, Info, Layers, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { antiguedadTexto } from "@/lib/borradorPlan";
 import { claveDeAjuste, descripcionDeAccion, type AccionDeSolucion, type AjusteDelPlan } from "@/lib/ajustesPlan";
+import { usePermisos } from "@/hooks/usePermisos";
 
 /** Cuántas líneas se ven antes de "Ver todas". */
 // Con la tarjeta compacta seis avisos ocupan casi lo mismo que ocupaban cuatro filas
@@ -587,6 +588,18 @@ export function DiagnosticosPlan({
     const [verTodas, setVerTodas] = useState(false);
     const [aplicando, setAplicando] = useState<string | null>(null);
     const [aplicadas, setAplicadas] = useState<Set<string>>(new Set());
+    /**
+     * RF-24: «Guardar en Recursos» escribe en Recursos, no en el plan, y el backend pide
+     * lo mismo que si se hiciera desde allá: los rangos de un proceso o de una máquina
+     * son la solapa Rangos; la habilidad de una persona, la solapa Recurso humano. Quien
+     * planifica sin eso ve el aviso y puede usar «Solo en este plan», pero no el botón
+     * que guarda.
+     */
+    const { puedeSeccion } = usePermisos();
+    const puedeGuardarEnRecursos = (accion: AccionDeSolucion) =>
+        accion.tipo === "skill_nativa"
+            ? puedeSeccion("recursos_humano", "write")
+            : puedeSeccion("recursos_rangos", "write");
     /**
      * Cuál de los botones índigo disparó el recálculo que está corriendo.
      *
@@ -1589,7 +1602,7 @@ export function DiagnosticosPlan({
                                                 y recalcular" no decía nada de eso, y al lado de un
                                                 botón que aplica y recalcula sin guardar era
                                                 directamente indistinguible. */}
-                                            {sol?.accion && (
+                                            {sol?.accion && puedeGuardarEnRecursos(sol.accion) && (
                                                 <Button
                                                     size="sm"
                                                     disabled={hecha || aplicando !== null}
@@ -1794,7 +1807,7 @@ export function DiagnosticosPlan({
                                                                         </button>
                                                                     </>
                                                                 )}
-                                                                {s.accion && (
+                                                                {s.accion && puedeGuardarEnRecursos(s.accion) && (
                                                                     <>
                                                                         {" "}
                                                                         <Button

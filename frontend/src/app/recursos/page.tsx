@@ -16,7 +16,7 @@ import CatalogoSimple from "./_components/CatalogoSimple";
 import RangoComposicion from "./_components/RangoComposicion";
 import DetalleOperario from "./_components/DetalleOperario";
 import DetalleMaquina from "./_components/DetalleMaquina";
-import { EstadoMaquinaSelector } from "./_components/EstadoMaquina";
+import { EstadoBadge, EstadoMaquinaSelector } from "./_components/EstadoMaquina";
 import { backendConoceEstado, infoEstado, type EstadoOperativo } from "./_maquinaOpciones";
 import { parseApiError } from "@/lib/utils";
 import CambiarEstado from "./_components/CambiarEstado";
@@ -30,6 +30,24 @@ import { useCoberturaRangos, problemaDelProceso } from "@/hooks/useCoberturaRang
 import EditorRangosDe from "./_components/EditorRangosDe";
 import EditorMaquinasDe from "./_components/EditorMaquinasDe";
 import { BibliotecaPlanos } from "@/components/planos/BibliotecaPlanos";
+import { usePermisos } from "@/hooks/usePermisos";
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
+import type { SeccionCodigo } from "@/lib/permisos";
+
+type SolapaRecursos = "operarios" | "maquinas" | "procesos" | "rangos" | "sectores" | "planos";
+
+/**
+ * RF-24: cada solapa es una sección de Recursos (el rol puede cerrar algunas), salvo
+ * Planos, que es la misma biblioteca de la pantalla Planos y va por esa área.
+ */
+const SECCION_DE_SOLAPA: Record<Exclude<SolapaRecursos, "planos">, SeccionCodigo> = {
+  operarios: "recursos_humano",
+  maquinas: "recursos_maquinaria",
+  procesos: "recursos_procesos",
+  rangos: "recursos_rangos",
+  sectores: "recursos_sectores",
+};
+const ORDEN_SOLAPAS: SolapaRecursos[] = ["operarios", "maquinas", "procesos", "rangos", "sectores", "planos"];
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import { etiquetaTipo } from "./_maquinaOpciones";
@@ -59,7 +77,25 @@ export default function RecursosPage() {
   // unas decenas. Sin esto hay que buscarlos a ojo entre todos.
   const [soloProblemas, setSoloProblemas] = useState(false);
 
-  const [tabActiva, setTabActiva] = useState<"operarios" | "maquinas" | "procesos" | "rangos" | "sectores" | "planos">("operarios");
+  const [tabElegida, setTabActiva] = useState<SolapaRecursos>("operarios");
+
+  // RF-24. Qué solapas se ven y en cuáles se puede escribir. Si la elegida (la de
+  // siempre, o la que pidió un ?tab=) no se puede ver, se abre la primera que sí: la
+  // pantalla nunca queda parada en una solapa cerrada.
+  const { puede, puedeSeccion } = usePermisos();
+  const veSolapa = (t: SolapaRecursos) =>
+    t === "planos" ? puede("planos") : puedeSeccion(SECCION_DE_SOLAPA[t]);
+  const editaSolapa = (t: SolapaRecursos) =>
+    t === "planos" ? puede("planos", "write") : puedeSeccion(SECCION_DE_SOLAPA[t], "write");
+  const tabActiva: SolapaRecursos = veSolapa(tabElegida)
+    ? tabElegida
+    : (ORDEN_SOLAPAS.find(veSolapa) ?? tabElegida);
+  const editaPersonas = editaSolapa("operarios");
+  const editaMaquinas = editaSolapa("maquinas");
+  const editaProcesos = editaSolapa("procesos");
+  // Qué rangos habilitan una máquina o un proceso se edita en la solapa Rangos: el
+  // backend pide eso para /maquinarias/{id}/rangos y /procesos/{id}/rangos.
+  const editaRangos = editaSolapa("rangos");
   const [operarios, setOperarios] = useState<Operario[]>([]);
   const [maquinas, setMaquinas] = useState<Maquina[]>([]);
   // ¿El backend ya sabe de tipo, estado y frecuencia (RF-08)? Mientras el deploy a mano
@@ -150,7 +186,7 @@ export default function RecursosPage() {
     if (!["operarios", "maquinas", "procesos", "rangos", "sectores", "planos"].includes(tab)) return;
     focoAplicado.current = true;
 
-    setTabActiva(tab as typeof tabActiva);
+    setTabActiva(tab as SolapaRecursos);
     const q = params.get("q");
     if (q && tab === "procesos") setBusquedaProceso(q);
 
@@ -499,16 +535,19 @@ export default function RecursosPage() {
     // del título, abajo de `lg`, deja libre la esquina de la campana de avisos.
     <div className="min-h-screen bg-background p-1 sm:p-4 md:p-6">
       <div className="mb-4 md:mb-6">
-        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4 pr-12 lg:pr-0">
+        <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4 pr-12 lg:pr-0 flex flex-wrap items-center gap-x-3 gap-y-1">
           Administración de Recursos
+          {!editaSolapa(tabActiva) && <MarcaSoloLectura />}
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
           {(tabActiva === "operarios" || tabActiva === "maquinas" || tabActiva === "procesos") && (
             <>
-              <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
-                <Plus className="h-4 w-4 mr-2" />
-                {tabActiva === "operarios" ? "Nuevo recurso humano" : tabActiva === "maquinas" ? "Nuevo recurso maquinaria" : "Nuevo Proceso"}
-              </Button>
+              {editaSolapa(tabActiva) && (
+                <Button onClick={handleAbrirCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
+                  <Plus className="h-4 w-4 mr-2" />
+                  {tabActiva === "operarios" ? "Nuevo recurso humano" : tabActiva === "maquinas" ? "Nuevo recurso maquinaria" : "Nuevo Proceso"}
+                </Button>
+              )}
               <Button
                 onClick={tabActiva === "operarios" ? fetchOperarios : tabActiva === "maquinas" ? fetchMaquinas : fetchProcesos}
                 disabled={api.loading}
@@ -538,54 +577,54 @@ export default function RecursosPage() {
           ícono pide ~155: el botón se estiraba y descuadraba la grilla. Ahí el rótulo
           puede bajar a un segundo renglón; desde `sm` vuelve a ir en una línea. */}
       <div className="mb-4 md:mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Button
+        {veSolapa("operarios") && <Button
           variant={tabActiva === "operarios" ? "default" : "outline"}
           onClick={() => setTabActiva("operarios")}
           className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "operarios" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <User className="h-4 w-4 mr-2" />
           <span>Recurso humano</span>
-        </Button>
-        <Button
+        </Button>}
+        {veSolapa("maquinas") && <Button
           variant={tabActiva === "maquinas" ? "default" : "outline"}
           onClick={() => setTabActiva("maquinas")}
           className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "maquinas" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Factory className="h-4 w-4 mr-2" />
           <span>Recurso maquinaria</span>
-        </Button>
-        <Button
+        </Button>}
+        {veSolapa("procesos") && <Button
           variant={tabActiva === "procesos" ? "default" : "outline"}
           onClick={() => setTabActiva("procesos")}
           className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "procesos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Layers className="h-4 w-4 mr-2" />
           <span>Procesos</span>
-        </Button>
-        <Button
+        </Button>}
+        {veSolapa("rangos") && <Button
           variant={tabActiva === "rangos" ? "default" : "outline"}
           onClick={() => setTabActiva("rangos")}
           className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "rangos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Target className="h-4 w-4 mr-2" />
           <span>Rangos</span>
-        </Button>
-        <Button
+        </Button>}
+        {veSolapa("sectores") && <Button
           variant={tabActiva === "sectores" ? "default" : "outline"}
           onClick={() => setTabActiva("sectores")}
           className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "sectores" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <MapPin className="h-4 w-4 mr-2" />
           <span>Sectores</span>
-        </Button>
-        <Button
+        </Button>}
+        {veSolapa("planos") && <Button
           variant={tabActiva === "planos" ? "default" : "outline"}
           onClick={() => setTabActiva("planos")}
           className={`flex-1 min-w-0 h-auto min-h-9 has-[>svg]:px-2 sm:has-[>svg]:px-3 whitespace-normal leading-tight sm:whitespace-nowrap ${tabActiva === "planos" ? "bg-[#DC143C] hover:bg-[#B01030] text-white" : ""}`}
         >
           <Ruler className="h-4 w-4 mr-2" />
           <span>Planos</span>
-        </Button>
+        </Button>}
       </div>
 
       {/* TABLA DE OPERARIOS */}
@@ -603,10 +642,10 @@ export default function RecursosPage() {
             operarios={operarios}
             isLoading={api.loading}
             onView={handleVerOperario}
-            onDelete={(op) => {
+            onDelete={editaPersonas ? (op) => {
               setItemAEliminar({ tipo: "operario", id: op.id, nombre: `${op.nombre} ${op.apellido}` });
               setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-            }}
+            } : undefined}
           />
         </div>
       )}
@@ -703,11 +742,15 @@ export default function RecursosPage() {
                         <td className="px-4 py-2 text-sm">{maquina.cod_maquina || "-"}</td>
                         {conoceEstado && (
                           <td className="px-4 py-2 text-sm">
-                            <EstadoMaquinaSelector
-                              valor={maquina.estado_operativo}
-                              nombre={maquina.nombre}
-                              onCambiar={(nuevo) => void cambiarEstadoMaquina(maquina, nuevo)}
-                            />
+                            {editaMaquinas ? (
+                              <EstadoMaquinaSelector
+                                valor={maquina.estado_operativo}
+                                nombre={maquina.nombre}
+                                onCambiar={(nuevo) => void cambiarEstadoMaquina(maquina, nuevo)}
+                              />
+                            ) : (
+                              <EstadoBadge valor={maquina.estado_operativo} />
+                            )}
                           </td>
                         )}
                         {/* Rangos que habilitan la máquina. Sin ninguno, el planificador
@@ -716,6 +759,14 @@ export default function RecursosPage() {
                         <td className="px-4 py-2 text-sm">
                           {!coberturaListo ? (
                             <span className="text-muted-foreground text-xs">—</span>
+                          ) : (rangosPorMaquina.get(maquina.id)?.length ?? 0) > 0 && !editaRangos ? (
+                            <span className="flex flex-wrap gap-1">
+                              {rangosPorMaquina.get(maquina.id)!.map((r) => (
+                                <Badge key={r.id} variant="outline" className="text-xs font-normal">
+                                  {r.nombre}
+                                </Badge>
+                              ))}
+                            </span>
                           ) : (rangosPorMaquina.get(maquina.id)?.length ?? 0) > 0 ? (
                             <button
                               type="button"
@@ -729,6 +780,10 @@ export default function RecursosPage() {
                                 </Badge>
                               ))}
                             </button>
+                          ) : !editaRangos ? (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold">
+                              Sin rango
+                            </Badge>
                           ) : (
                             <Button
                               variant="outline"
@@ -763,24 +818,28 @@ export default function RecursosPage() {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
-                                setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                              }}
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {editaMaquinas && (
+                              <>
+                                <Button variant="ghost" size="icon" onClick={() => handleEditar("maquina", maquina)} className="h-8 w-8">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
+                                    setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                                  }}
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
-                      {maquinaAbierta === maquina.id && coberturaListo && (
+                      {maquinaAbierta === maquina.id && coberturaListo && editaRangos && (
                         <tr>
                           <td colSpan={conoceEstado ? 6 : 5} className="p-0">
                             <EditorRangosDe
@@ -810,11 +869,15 @@ export default function RecursosPage() {
                         <h3 className="font-semibold text-base min-w-0 break-words">{maquina.nombre}</h3>
                         {conoceEstado && (
                           <div className="shrink-0">
-                            <EstadoMaquinaSelector
-                              valor={maquina.estado_operativo}
-                              nombre={maquina.nombre}
-                              onCambiar={(nuevo) => void cambiarEstadoMaquina(maquina, nuevo)}
-                            />
+                            {editaMaquinas ? (
+                              <EstadoMaquinaSelector
+                                valor={maquina.estado_operativo}
+                                nombre={maquina.nombre}
+                                onCambiar={(nuevo) => void cambiarEstadoMaquina(maquina, nuevo)}
+                              />
+                            ) : (
+                              <EstadoBadge valor={maquina.estado_operativo} />
+                            )}
                           </div>
                         )}
                       </div>
@@ -860,26 +923,30 @@ export default function RecursosPage() {
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditar("maquina", maquina)}
-                        className="flex-1"
-                      >
-                        <Pencil className="h-4 w-4 mr-1" />
-                        Editar
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
-                          setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                        }}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {editaMaquinas && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditar("maquina", maquina)}
+                            className="flex-1"
+                          >
+                            <Pencil className="h-4 w-4 mr-1" />
+                            Editar
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setItemAEliminar({ tipo: "maquina", id: maquina.id, nombre: maquina.nombre });
+                              setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                            }}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1009,6 +1076,23 @@ export default function RecursosPage() {
                               caía entera con un TypeError. */}
                           {!coberturaListo || !cob ? (
                             <span className="text-muted-foreground text-xs">—</span>
+                          ) : !(editaRangos || editaProcesos) ? (
+                            // RF-24: sin permiso para cambiar rangos ni máquinas, lo mismo
+                            // que dice la fila pero sin el botón que abre los editores.
+                            <span className="flex flex-wrap items-center gap-1 text-xs">
+                              {sinNadie ? (
+                                <span className={`font-semibold ${enUso ? "text-rose-800" : "text-muted-foreground"}`}>No lo puede hacer nadie</span>
+                              ) : sinRango ? (
+                                <span className={`font-semibold ${enUso ? "text-amber-800" : "text-muted-foreground"}`}>Sin rango</span>
+                              ) : (
+                                <>
+                                  {cob.rangos.map((r) => (
+                                    <Badge key={r.id} variant="outline" className="text-xs font-normal">{r.nombre}</Badge>
+                                  ))}
+                                  <span className="text-muted-foreground ml-1">{cob.habilitados} de recurso humano</span>
+                                </>
+                              )}
+                            </span>
                           ) : sinNadie ? (
                             <Button
                               variant="outline"
@@ -1051,27 +1135,31 @@ export default function RecursosPage() {
                         <td className="px-4 py-2 text-sm">{proceso.descripcion || "-"}</td>
                         <td className="px-4 py-2">
                           <div className="flex justify-end gap-2">
-                            <Button variant="ghost" size="icon" onClick={() => handleEditar("proceso", proceso)} className="h-8 w-8">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setItemAEliminar({ tipo: "proceso", id: proceso.id, nombre: proceso.nombre });
-                                setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
-                              }}
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {editaProcesos && (
+                              <>
+                                <Button variant="ghost" size="icon" onClick={() => handleEditar("proceso", proceso)} className="h-8 w-8">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    setItemAEliminar({ tipo: "proceso", id: proceso.id, nombre: proceso.nombre });
+                                    setMostrarDialogo({ ...mostrarDialogo, eliminar: true });
+                                  }}
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
-                      {procesoAbierto === proceso.id && coberturaListo && (
+                      {procesoAbierto === proceso.id && coberturaListo && (editaRangos || editaProcesos) && (
                         <tr>
                           <td colSpan={4} className="p-0">
-                            <EditorRangosDe
+                            {editaRangos && <EditorRangosDe
                               tipo="proceso"
                               id={proceso.id}
                               nombre={proceso.nombre}
@@ -1079,18 +1167,18 @@ export default function RecursosPage() {
                               catalogo={catalogoRangos}
                               sugeridos={rangosSugeridos ?? undefined}
                               onGuardado={() => { setProcesoAbierto(null); setRangosSugeridos(null); recargarCobertura(); }}
-                            />
+                            />}
                             {/* Quién puede hacerlo y en qué máquina son las dos mitades
                                 de la misma pregunta: hacen falta las dos para que el
                                 planificador pueda reservar. Van juntas, en la misma
                                 fila desplegada. */}
-                            <EditorMaquinasDe
+                            {editaProcesos && <EditorMaquinasDe
                               id={proceso.id}
                               nombre={proceso.nombre}
                               actuales={cob?.maquinas ?? []}
                               catalogo={maquinas}
                               onGuardado={() => { setProcesoAbierto(null); recargarCobertura(); }}
-                            />
+                            />}
                           </td>
                         </tr>
                       )}
@@ -1114,6 +1202,7 @@ export default function RecursosPage() {
                       )}
                     </div>
 
+                    {editaProcesos && (
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
@@ -1136,6 +1225,7 @@ export default function RecursosPage() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1173,6 +1263,7 @@ export default function RecursosPage() {
       {/* TABLA DE RANGOS */}
       {tabActiva === "rangos" && (
         <CatalogoSimple
+          soloLectura={!editaRangos}
           resource="rangos"
           singular="Rango"
           titulo="Rangos"
@@ -1232,6 +1323,7 @@ export default function RecursosPage() {
       {/* TABLA DE SECTORES */}
       {tabActiva === "sectores" && (
         <CatalogoSimple
+          soloLectura={!editaSolapa("sectores")}
           resource="sectores"
           singular="Sector"
           titulo="Sectores"
@@ -1359,10 +1451,10 @@ export default function RecursosPage() {
       <DetalleMaquina
         maquina={maquinaSeleccionada}
         onClose={() => setMaquinaSeleccionada(null)}
-        onEditar={(m) => {
+        onEditar={editaMaquinas ? (m) => {
           setMaquinaSeleccionada(null);
           void handleEditar("maquina", m);
-        }}
+        } : undefined}
       />
 
       <CambiarEstado

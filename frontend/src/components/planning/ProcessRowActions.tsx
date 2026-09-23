@@ -1,10 +1,11 @@
 import React from "react";
 import { Pencil, Trash2, Check, X, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 import { Input } from "@/components/ui/input";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { parseApiError } from "@/lib/utils";
+import { usePermisos } from "@/hooks/usePermisos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -38,6 +39,9 @@ export function MinutosEditables({
     const [valor, setValor] = React.useState(String(minutos ?? ""));
     const [guardando, setGuardando] = React.useState(false);
     const cancelando = React.useRef(false);
+    // RF-24: cambiar los minutos de un paso es editar la OT (solapa Órdenes).
+    const { puedeSeccion } = usePermisos();
+    const puedeEditar = puedeSeccion("operaciones_ordenes", "write");
 
     React.useEffect(() => {
         if (!editando) setValor(String(minutos ?? ""));
@@ -67,6 +71,14 @@ export function MinutosEditables({
             setGuardando(false);
         }
     };
+
+    if (!puedeEditar) {
+        return (
+            <span className="mx-auto flex h-6 items-center justify-center px-1.5 text-[10px] tabular-nums text-gray-500">
+                {minutos || "-"}
+            </span>
+        );
+    }
 
     if (editando) {
         return (
@@ -130,6 +142,9 @@ export function ProcessRowActions({
 }) {
     const [guardando, setGuardando] = React.useState(false);
     const [confirmarBorrado, setConfirmarBorrado] = React.useState(false);
+    // RF-24: sacar un paso es editar la OT (solapa Órdenes). Sin eso, no hay botón.
+    const { puedeSeccion } = usePermisos();
+    const puedeEditar = puedeSeccion("operaciones_ordenes", "write");
 
     const borrar = async () => {
         setGuardando(true);
@@ -150,6 +165,8 @@ export function ProcessRowActions({
             setGuardando(false);
         }
     };
+
+    if (!puedeEditar) return <div aria-hidden />;
 
     return (
         <>

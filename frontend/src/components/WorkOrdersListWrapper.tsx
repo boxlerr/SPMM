@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnplannedWorkOrdersList } from "./UnplannedWorkOrdersList";
 import { CompletedWorkOrdersList } from "./CompletedWorkOrdersList";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import TodasLasOrdenes from "@/app/operaciones/_components/TodasLasOrdenes";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { API_URL } from "@/config";
 import { isOrderCompleted } from "@/lib/utils";
+import { usePermisos } from "@/hooks/usePermisos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -59,6 +60,11 @@ export default function WorkOrdersListWrapper({
     subTab: subTabExterna,
     onSubTabChange,
 }: WorkOrdersListWrapperProps) {
+    // RF-24: crear y borrar OT pide la solapa Órdenes en escritura. Abrir una para
+    // mirarla, no: el modal de la OT se abre igual y queda en solo lectura.
+    const { puedeSeccion } = usePermisos();
+    const editaOrdenes = puedeSeccion("operaciones_ordenes", "write");
+
     // State local para permitir optimistic updates (cambio de operario, estado, etc.)
     // sin tener que esperar el round-trip al backend. Se re-sincroniza desde props
     // cuando el padre vuelve a fetchear.
@@ -197,13 +203,15 @@ export default function WorkOrdersListWrapper({
                             parte del planificador. Acá se ve en las tres solapas y también
                             cuando la lista está vacía. Abre el mismo modal que el de arriba,
                             en modo alta (`orderToEdit` en null). */}
-                        <Button
-                            onClick={() => { setOrderToEdit(null); setIsEditModalOpen(true); }}
-                            className="h-8 gap-1.5 bg-red-700 px-3 text-xs font-semibold text-white hover:bg-red-800"
-                        >
-                            <Plus className="w-3.5 h-3.5" />
-                            Nueva orden
-                        </Button>
+                        {editaOrdenes && (
+                            <Button
+                                onClick={() => { setOrderToEdit(null); setIsEditModalOpen(true); }}
+                                className="h-8 gap-1.5 bg-red-700 px-3 text-xs font-semibold text-white hover:bg-red-800"
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                                Nueva orden
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -213,7 +221,7 @@ export default function WorkOrdersListWrapper({
                     <UnplannedWorkOrdersList
                         orders={unplannedOrders}
                         onEdit={handleEditOrder}
-                        onDelete={handleDeleteOrder}
+                        onDelete={editaOrdenes ? handleDeleteOrder : undefined}
                         onDataChange={onRefresh}
                         tableZoom={zoom}
                     />
@@ -232,7 +240,7 @@ export default function WorkOrdersListWrapper({
                             variante="planificadas"
                             orders={plannedOrders}
                             onEdit={handleEditOrder}
-                            onDelete={handleDeleteOrder}
+                            onDelete={editaOrdenes ? handleDeleteOrder : undefined}
                             onDataChange={onRefresh}
                             tableZoom={zoom}
                         />

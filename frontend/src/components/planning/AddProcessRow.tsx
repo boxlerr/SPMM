@@ -2,12 +2,13 @@ import React from 'react';
 import { Button } from "@/components/ui/button";
 import { PlusCircle, X, Save, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 import { tieneMinutos, ProcesosEditor, ProcesoRow, makeEmptyRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeOrden } from "@/hooks/usePlanos";
 import type { Plano } from "@/lib/planos";
+import { usePermisos } from "@/hooks/usePermisos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -84,6 +85,10 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
     // listado, y pedir los planos siempre sería un pedido por OT en pantalla.
     // El endpoint de la orden ya trae también los planos del producto que fabrica.
     const { planos, cargando: planosCargando, error: planosError } = usePlanosDeOrden(isAdding ? orderId : undefined);
+    // RF-24: agregar pasos es editar la OT (solapa Órdenes). Sin eso, no hay botón:
+    // lo decide acá y no cada lista que lo monta, así ninguna se olvida.
+    const { puedeSeccion } = usePermisos();
+    const puedeAgregar = puedeSeccion("operaciones_ordenes", "write");
 
     const fetchCatalogos = async () => {
         try {
@@ -167,6 +172,8 @@ export function AddProcessRow({ orderId, onProcessAdded, isCentered = false, var
             setLoading(false);
         }
     };
+
+    if (!puedeAgregar) return null;
 
     if (!isAdding) {
         let buttonText = label;

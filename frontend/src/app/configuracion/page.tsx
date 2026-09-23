@@ -10,6 +10,7 @@ import UsuariosTable from '@/components/usuarios/UsuariosTable';
 import CambiarPassword from '@/components/usuarios/CambiarPassword';
 import { formatNotificationMessage } from '@/lib/utils';
 import { API_URL } from '@/config';
+import { usePermisos } from '@/hooks/usePermisos';
 import { ExportarMenu } from '@/components/common/ExportarMenu';
 import type { ColumnaExport } from '@/lib/exportar';
 import type { Notification as Aviso } from '@/contexts/NotificationContext';
@@ -56,6 +57,19 @@ export default function ConfiguracionPage() {
   const { notifications, markAsRead, markAllAsRead, clearNotifications, unreadCount } = useNotifications();
   const { user } = useAuth();
 
+  // RF-24. Configuración es de todos —«Mi cuenta» (cambiar la contraseña) y las
+  // notificaciones no se le esconden a nadie— pero dos solapas no:
+  //   · Usuarios: la sección «Usuarios y permisos», confidencial (cerrada para todo el
+  //     que no sea admin salvo que se la otorguen). El backend contesta 403 la lista.
+  //   · Sistema: el área Configuración.
+  // Si la solapa pedida (por defecto, o por ?tab=) no se puede ver, se abre «Mi cuenta».
+  const { puede, puedeSeccion } = usePermisos();
+  const veUsuarios = puedeSeccion('configuracion_usuarios');
+  const veSistema = puede('configuracion');
+  const solapaVisible = (id: string) =>
+    (id !== 'usuarios' || veUsuarios) && (id !== 'sistema' || veSistema);
+  const solapaActiva = solapaVisible(activeTab) ? activeTab : 'mi-cuenta';
+
   // Actualizar fecha y hora cada segundo para tiempo real
   useEffect(() => {
     // Actualizar inmediatamente al montar
@@ -79,12 +93,12 @@ export default function ConfiguracionPage() {
 
   // Marcar notificaciones como leídas automáticamente cuando se entra a la pestaña de notificaciones
   useEffect(() => {
-    if (activeTab === 'notificaciones' && unreadCount > 0) {
+    if (solapaActiva === 'notificaciones' && unreadCount > 0) {
       markAllAsRead();
     }
-  }, [activeTab]); // Solo cuando cambia la pestaña activa
+  }, [solapaActiva]); // Solo cuando cambia la pestaña activa
 
-  const tabs = [
+  const todasLasSolapas = [
     {
       id: 'usuarios',
       label: 'Usuario',
@@ -119,9 +133,10 @@ export default function ConfiguracionPage() {
       )
     },
   ];
+  const tabs = todasLasSolapas.filter((t) => solapaVisible(t.id));
 
   const renderTabContent = () => {
-    switch (activeTab) {
+    switch (solapaActiva) {
       case 'usuarios':
         return (
           <div className="p-4 sm:p-6">
@@ -474,7 +489,7 @@ export default function ConfiguracionPage() {
               // Actualizar la URL sin recargar la página
               router.replace(`/configuracion?tab=${tab.id}`, { scroll: false });
             }}
-            className={`relative flex items-center justify-center space-x-2 px-4 py-3 rounded-lg transition-all duration-200 border w-full ${activeTab === tab.id
+            className={`relative flex items-center justify-center space-x-2 px-4 py-3 rounded-lg transition-all duration-200 border w-full ${solapaActiva === tab.id
               ? 'bg-[#DC143C] text-white border-[#DC143C] shadow-md hover:bg-[#B01030]'
               : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
               }`}

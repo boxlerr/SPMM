@@ -10,7 +10,7 @@ import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, P
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
 import { Card, CardContent } from "@/components/ui/card";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn, capitalizeName } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,6 +24,8 @@ import { parseApiError } from "@/lib/utils";
 import { ProcesosEditor, pasosSinMinutos, SIN_MAQUINA, ProcesoRow } from "@/components/planning/ProcesosEditor";
 import { PlanoPanel } from "@/components/common/PlanoPanel";
 import { usePlanosDeArticulo, usePlanosDeOrden } from "@/hooks/usePlanos";
+import { usePermisos } from "@/hooks/usePermisos";
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { aNumero } from "@/lib/exportar";
@@ -314,6 +316,10 @@ const huellaDelFormulario = (v: EstadoDelFormulario): string => {
 };
 
 export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, orderToEdit }: CreateWorkOrderModalProps) {
+    // RF-24: ver `soloLectura` más abajo. Crear o borrar un proceso del CATÁLOGO desde
+    // acá es escribir en Recursos › Procesos, y pide eso (así lo pide el backend).
+    const { puedeSeccion } = usePermisos();
+    const editaCatalogoProcesos = puedeSeccion("recursos_procesos", "write");
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [historialLoading, setHistorialLoading] = useState(false);
@@ -866,6 +872,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
      * `disabled` de una: el día que aparezca otra fuente que pise datos, se prende acá.
      */
     const isLegacyOT = false;
+    /**
+     * RF-24: quien no puede editar OT (la solapa Órdenes en escritura) abre la misma
+     * ficha para MIRARLA: todo se ve, nada se cambia y no hay «Guardar». Usa los mismos
+     * `disabled` que dejó preparados el modo legacy de arriba, que es exactamente eso.
+     * El backend igual rechaza el guardado (403); esto es para no dejar escribir algo
+     * que después no se va a poder guardar.
+     */
+    const soloLectura = !puedeSeccion("operaciones_ordenes", "write");
+    const camposBloqueados = isLegacyOT || soloLectura;
 
     /**
      * De dónde salen los planos que muestran la solapa Planos y el panel de Procesos.
@@ -930,6 +945,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        // Solo lectura: un Enter en un campo no guarda nada (el botón ni está).
+        if (soloLectura) return;
 
         // Trigger confirmation if validation passes
         if (validateForm()) {
@@ -1474,7 +1491,10 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                             <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-md shadow-blue-500/20">
                                 <CalendarIcon className="h-5 w-5 text-white" />
                             </div>
-                            <span>{orderToEdit ? `Editar Orden de Trabajo #${orderToEdit.id_otvieja || orderToEdit.id}` : "Nueva Orden de Trabajo"}</span>
+                            <span>{orderToEdit
+                                ? `${soloLectura ? "Orden de Trabajo" : "Editar Orden de Trabajo"} #${orderToEdit.id_otvieja || orderToEdit.id}`
+                                : "Nueva Orden de Trabajo"}</span>
+                            {soloLectura && <MarcaSoloLectura que="la orden" />}
                             {/* Qué clase de trabajo es, arriba de todo.
                                 Camilo, 14/09: "cuando abrís la OT no dice si es fabricación
                                 o reparación o sin cargo. Eso me ayuda de mucho al momento de
@@ -1576,32 +1596,32 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         
                                         <div className="space-y-1.5">
                                             <Label htmlFor="id_otvieja" className="text-[11px] font-bold text-blue-600 uppercase">Nº OT Vieja</Label>
-                                            <Input id="id_otvieja" disabled={isLegacyOT} value={generalData.id_otvieja} onChange={(e) => setGeneralData({ ...generalData, id_otvieja: e.target.value })} className="h-8 text-sm border-blue-200 focus:ring-blue-500 font-mono font-bold" placeholder="No especificado" />
+                                            <Input id="id_otvieja" disabled={camposBloqueados} value={generalData.id_otvieja} onChange={(e) => setGeneralData({ ...generalData, id_otvieja: e.target.value })} className="h-8 text-sm border-blue-200 focus:ring-blue-500 font-mono font-bold" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="n_pedido" className="text-[11px] font-bold text-gray-500 uppercase">N° Pedido</Label>
-                                            <Input id="n_pedido" disabled={isLegacyOT} value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="n_pedido" disabled={camposBloqueados} value={generalData.n_pedido} onChange={(e) => setGeneralData({ ...generalData, n_pedido: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="n_ped_l" className="text-[11px] font-bold text-gray-500 uppercase">N° Ped L</Label>
-                                            <Input id="n_ped_l" disabled={isLegacyOT} value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="n_ped_l" disabled={camposBloqueados} value={generalData.n_ped_l} onChange={(e) => setGeneralData({ ...generalData, n_ped_l: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="prioridad" className="text-[11px] font-bold text-gray-400 uppercase">Prioridad <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" triggerClassName="h-8" />
+                                            <SearchableSelect disabled={camposBloqueados} options={prioridades.map(p => ({ value: p.id.toString(), label: p.nombre }))} value={generalData.prioridad_id} onValueChange={(val) => setGeneralData({ ...generalData, prioridad_id: val })} placeholder="No especificado" triggerClassName="h-8" />
                                         </div>
 
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="cliente" className="text-[11px] font-bold text-gray-400 uppercase">Cliente <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" triggerClassName="h-8" />
+                                            <SearchableSelect disabled={camposBloqueados} options={clientes.map(c => ({ value: c.id.toString(), label: c.nombre }))} value={generalData.cliente_id} onValueChange={(val) => setGeneralData({ ...generalData, cliente_id: val })} placeholder="No especificado" triggerClassName="h-8" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="sector" className="text-[11px] font-bold text-gray-400 uppercase">Sector <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" triggerClassName="h-8" />
+                                            <SearchableSelect disabled={camposBloqueados} options={sectores.map(s => ({ value: s.id.toString(), label: s.nombre }))} value={generalData.sector_id} onValueChange={(val) => setGeneralData({ ...generalData, sector_id: val })} placeholder="No especificado" triggerClassName="h-8" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="subsector" className="text-[11px] font-bold text-gray-400 uppercase">SubSector</Label>
-                                            <Input id="subsector" disabled={isLegacyOT} value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="subsector" disabled={camposBloqueados} value={generalData.subsector} onChange={(e) => setGeneralData({ ...generalData, subsector: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
                                         {/* Section: Logistics & Quantities */}
@@ -1613,25 +1633,25 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                         <div className="space-y-1.5">
                                             <Label htmlFor="cantidad" className="text-[11px] font-bold text-gray-400 uppercase">Cant Fabricar</Label>
-                                            <Input id="cantidad" disabled={isLegacyOT} type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-8 text-sm font-bold text-blue-700" />
+                                            <Input id="cantidad" disabled={camposBloqueados} type="number" value={detailsData.cantidad} onChange={(e) => setDetailsData({ ...detailsData, cantidad: e.target.value })} className="h-8 text-sm font-bold text-blue-700" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="cantidad_entregada" className="text-[11px] font-bold text-gray-400 uppercase">Cant Entregada</Label>
-                                            <Input id="cantidad_entregada" disabled={isLegacyOT} type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="cantidad_entregada" disabled={camposBloqueados} type="number" value={generalData.cantidad_entregada} onChange={(e) => setGeneralData({ ...generalData, cantidad_entregada: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="requerido_por" className="text-[11px] font-bold text-gray-400 uppercase">Requerido por</Label>
-                                            <Input id="requerido_por" disabled={isLegacyOT} value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="requerido_por" disabled={camposBloqueados} value={generalData.requerido_por} onChange={(e) => setGeneralData({ ...generalData, requerido_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="aprobado_por" className="text-[11px] font-bold text-gray-400 uppercase">Aprobado por</Label>
-                                            <Input id="aprobado_por" disabled={isLegacyOT} value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="aprobado_por" disabled={camposBloqueados} value={generalData.aprobado_por} onChange={(e) => setGeneralData({ ...generalData, aprobado_por: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
                                         {/* Producto: selector (busca por código o descripción) + código separado y copiable */}
                                         <div className="md:col-span-3 space-y-1.5">
                                             <Label htmlFor="articulo" className="text-[11px] font-bold text-gray-400 uppercase">Producto / Artículo <span className="text-red-500">*</span></Label>
-                                            <SearchableSelect disabled={isLegacyOT} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Buscá por código o descripción" triggerClassName="h-8" />
+                                            <SearchableSelect disabled={camposBloqueados} options={articulos.map(a => ({ value: a.id.toString(), label: `${a.cod_articulo} - ${a.descripcion}` }))} value={generalData.articulo_id} onValueChange={(val) => setGeneralData({ ...generalData, articulo_id: val })} placeholder="Buscá por código o descripción" triggerClassName="h-8" />
                                         </div>
                                         <div className="md:col-span-1 space-y-1.5">
                                             <Label htmlFor="cod_articulo" className="text-[11px] font-bold text-gray-400 uppercase">Código</Label>
@@ -1657,28 +1677,28 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_orden" className="text-[11px] font-bold text-gray-400 uppercase">Fecha Orden</Label>
-                                            <Input id="fecha_orden" disabled={isLegacyOT} type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="fecha_orden" disabled={camposBloqueados} type="date" value={generalData.fecha_orden} onChange={(e) => setGeneralData({ ...generalData, fecha_orden: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_entrada" className="text-[11px] font-bold text-gray-400 uppercase">Fecha Entrada</Label>
-                                            <Input id="fecha_entrada" disabled={isLegacyOT} type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="fecha_entrada" disabled={camposBloqueados} type="date" value={generalData.fecha_entrada} onChange={(e) => setGeneralData({ ...generalData, fecha_entrada: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_prometida" className="text-[11px] font-bold text-blue-600 uppercase font-black">F. Prometida</Label>
-                                            <Input id="fecha_prometida" type="date" value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className={cn("h-8 text-sm border-blue-200", isLegacyOT && "ring-2 ring-blue-300 ring-offset-1 bg-blue-50/40")} />
+                                            <Input id="fecha_prometida" type="date" disabled={soloLectura} value={generalData.fecha_prometida} onChange={(e) => setGeneralData({ ...generalData, fecha_prometida: e.target.value })} className={cn("h-8 text-sm border-blue-200", isLegacyOT && "ring-2 ring-blue-300 ring-offset-1 bg-blue-50/40")} />
                                         </div>
                                         <div className="space-y-1.5">
                                             <Label htmlFor="fecha_entrega" className="text-[11px] font-bold text-gray-400 uppercase">F. Entrega Real</Label>
-                                            <Input id="fecha_entrega" disabled={isLegacyOT} type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="fecha_entrega" disabled={camposBloqueados} type="date" value={generalData.fecha_entrega} onChange={(e) => setGeneralData({ ...generalData, fecha_entrega: e.target.value })} className="h-8 text-sm" />
                                         </div>
 
                                         <div className="space-y-1.5">
                                             <Label htmlFor="f_disp_material" className="text-[11px] font-bold text-gray-400 uppercase">F. Disp Mat</Label>
-                                            <Input id="f_disp_material" disabled={isLegacyOT} type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-8 text-sm" />
+                                            <Input id="f_disp_material" disabled={camposBloqueados} type="date" value={generalData.f_disp_material} onChange={(e) => setGeneralData({ ...generalData, f_disp_material: e.target.value })} className="h-8 text-sm" />
                                         </div>
                                         <div className="md:col-span-3 space-y-1.5">
                                             <Label htmlFor="remitos_salida" className="text-[11px] font-bold text-gray-400 uppercase">Remitos Salida</Label>
-                                            <Input id="remitos_salida" disabled={isLegacyOT} value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
+                                            <Input id="remitos_salida" disabled={camposBloqueados} value={generalData.remitos_salida} onChange={(e) => setGeneralData({ ...generalData, remitos_salida: e.target.value })} className="h-8 text-sm" placeholder="No especificado" />
                                         </div>
 
                                         {/* Section: Flags (Compact) */}
@@ -1705,7 +1725,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                         <button
                                                             key={clave}
                                                             type="button"
-                                                            disabled={isLegacyOT}
+                                                            disabled={camposBloqueados}
                                                             /* Volver a tocar el que ya está elegido lo apaga: sin eso,
                                                                una OT marcada por error no se puede dejar en blanco. */
                                                             onClick={() => setGeneralData({
@@ -1727,41 +1747,41 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 })}
                                             </div>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="stock" disabled={isLegacyOT} checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> 
+                                                <Checkbox id="stock" disabled={camposBloqueados} checked={generalData.stock} onCheckedChange={(c) => setGeneralData({ ...generalData, stock: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Stock</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="interno" disabled={isLegacyOT} checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> 
+                                                <Checkbox id="interno" disabled={camposBloqueados} checked={generalData.interno} onCheckedChange={(c) => setGeneralData({ ...generalData, interno: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Interno</span>
                                             </Label>
                                             
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="tercerizado_total" disabled={isLegacyOT} checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> 
+                                                <Checkbox id="tercerizado_total" disabled={camposBloqueados} checked={generalData.tercerizado_total} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_total: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Terc. Total</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="tercerizado_parcial" disabled={isLegacyOT} checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> 
+                                                <Checkbox id="tercerizado_parcial" disabled={camposBloqueados} checked={generalData.tercerizado_parcial} onCheckedChange={(c) => setGeneralData({ ...generalData, tercerizado_parcial: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Terc. Parcial</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="email" disabled={isLegacyOT} checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> 
+                                                <Checkbox id="email" disabled={camposBloqueados} checked={generalData.email} onCheckedChange={(c) => setGeneralData({ ...generalData, email: !!c })} /> 
                                                 <span className="text-xs text-gray-600 font-medium tracking-tight">Email</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-orange-50 px-2 py-1 rounded border border-transparent transition-colors text-orange-600 font-bold w-full h-8">
-                                                <Checkbox id="reclamo" disabled={isLegacyOT} className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> 
+                                                <Checkbox id="reclamo" disabled={camposBloqueados} className="border-orange-500 data-[state=checked]:bg-orange-500" checked={generalData.reclamo} onCheckedChange={(c) => setGeneralData({ ...generalData, reclamo: !!c })} /> 
                                                 <span className="text-xs uppercase">Reclamo</span>
                                             </Label>
                                             
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-red-50 px-2 py-1 rounded border border-transparent transition-colors text-red-600 font-bold w-full h-8">
-                                                <Checkbox id="suspendida" disabled={isLegacyOT} className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> 
+                                                <Checkbox id="suspendida" disabled={camposBloqueados} className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> 
                                                 <span className="text-xs uppercase">Suspendida</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="finalizadoparcial" disabled={isLegacyOT} checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> 
+                                                <Checkbox id="finalizadoparcial" disabled={camposBloqueados} checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> 
                                                 <span className="text-xs text-gray-800 font-bold">Fin. Parcial</span>
                                             </Label>
                                             <Label className="md:col-span-2 flex items-center space-x-2 bg-green-50 px-2 py-1 rounded border border-green-200 cursor-pointer hover:bg-green-100 transition-colors w-full h-8">
-                                                <Checkbox id="finalizadototal" disabled={isLegacyOT} checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> 
+                                                <Checkbox id="finalizadototal" disabled={camposBloqueados} checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> 
                                                 <span className="text-xs font-bold text-green-700 uppercase tracking-tighter truncate">Entrega Completa (Total)</span>
                                             </Label>
                                         </div>
@@ -1773,26 +1793,26 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             repartida de siempre. */}
                                         <div className="md:col-span-4 xl:col-span-6 flex flex-wrap md:flex-nowrap items-center justify-start md:justify-between gap-x-3 gap-y-1 md:gap-4 py-2 border-t border-gray-100 mt-1">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="tiene_plano" disabled={isLegacyOT} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c, no_lleva_plano: c ? false : generalData.no_lleva_plano })} /> 
+                                                <Checkbox id="tiene_plano" disabled={camposBloqueados} checked={generalData.tiene_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, tiene_plano: !!c, no_lleva_plano: c ? false : generalData.no_lleva_plano })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Tiene Plano</span>
                                             </Label>
                                             {/* "No lleva" es distinto de "no hay ninguno cargado": con esto marcado,
                                                 el que revisa planos se la saltea en vez de ir a buscarla al Drive
                                                 (Lucas, 10/09: "si dice sin plano lo va a tener que revisar"). */}
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="no_lleva_plano" disabled={isLegacyOT} checked={generalData.no_lleva_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_plano: !!c, tiene_plano: c ? false : generalData.tiene_plano })} /> 
+                                                <Checkbox id="no_lleva_plano" disabled={camposBloqueados} checked={generalData.no_lleva_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_plano: !!c, tiene_plano: c ? false : generalData.tiene_plano })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">No lleva plano</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="programada" disabled={isLegacyOT} checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 
+                                                <Checkbox id="programada" disabled={camposBloqueados} checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Programada</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="en_proceso" disabled={isLegacyOT} checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> 
+                                                <Checkbox id="en_proceso" disabled={camposBloqueados} checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">En Proceso</span>
                                             </Label>
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="revisada" disabled={isLegacyOT} checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> 
+                                                <Checkbox id="revisada" disabled={camposBloqueados} checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Revisada</span>
                                             </Label>
                                         </div>
@@ -1800,25 +1820,25 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         {/* Textareas (Compact Row 8) */}
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="descripcion" className="text-[11px] font-bold text-gray-600 uppercase">Info Gral / Descripción *</Label>
-                                            <Textarea id="descripcion" disabled={isLegacyOT} value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" required />
+                                            <Textarea id="descripcion" disabled={camposBloqueados} value={generalData.descripcion} onChange={(e) => setGeneralData({ ...generalData, descripcion: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" required />
                                         </div>
                                         <div className="md:col-span-2 space-y-1.5">
                                             <Label htmlFor="nota_taller" className="text-[11px] font-bold text-gray-600 uppercase">Nota de Taller</Label>
-                                            <Textarea id="nota_taller" disabled={isLegacyOT} value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
+                                            <Textarea id="nota_taller" disabled={camposBloqueados} value={detailsData.observaciones} onChange={(e) => setDetailsData({ ...detailsData, observaciones: e.target.value })} className="h-16 min-h-[60px] text-sm bg-white" />
                                         </div>
                                         
                                         <div className="md:col-span-4 xl:col-span-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_1" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 1</Label>
-                                                <Input id="nota_1" disabled={isLegacyOT} value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
+                                                <Input id="nota_1" disabled={camposBloqueados} value={detailsData.nota_1} onChange={(e) => setDetailsData({ ...detailsData, nota_1: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_2" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 2</Label>
-                                                <Input id="nota_2" disabled={isLegacyOT} value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
+                                                <Input id="nota_2" disabled={camposBloqueados} value={detailsData.nota_2} onChange={(e) => setDetailsData({ ...detailsData, nota_2: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                             <div className="space-y-1">
                                                 <Label htmlFor="nota_3" className="text-[9px] font-bold text-gray-400 flex items-center justify-between uppercase">Nota 3</Label>
-                                                <Input id="nota_3" disabled={isLegacyOT} value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
+                                                <Input id="nota_3" disabled={camposBloqueados} value={detailsData.nota_3} onChange={(e) => setDetailsData({ ...detailsData, nota_3: e.target.value })} className="h-7 text-xs bg-gray-50/50" />
                                             </div>
                                         </div>
                                     </div>
@@ -1873,10 +1893,10 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 type="file"
                                                 multiple
                                                 accept="image/*,.pdf"
-                                                disabled={isLegacyOT}
+                                                disabled={camposBloqueados}
                                                 className={cn(
                                                     "absolute inset-0 w-full h-full opacity-0 z-10",
-                                                    isLegacyOT ? "cursor-not-allowed" : "cursor-pointer"
+                                                    camposBloqueados ? "cursor-not-allowed" : "cursor-pointer"
                                                 )}
                                                 onChange={(e) => {
                                                     if (e.target.files) {
@@ -1943,7 +1963,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                         >
                                                             {colaDelNombre(file.nombre)}
                                                         </button>
-                                                        {!isLegacyOT && (
+                                                        {!camposBloqueados && (
                                                             <Button
                                                                 type="button"
                                                                 variant="ghost"
@@ -2195,6 +2215,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         >
                                             <Checkbox
                                                 id="no_lleva_mp"
+                                                disabled={soloLectura}
                                                 className="mt-0.5"
                                                 checked={generalData.no_lleva_materia_prima}
                                                 onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_materia_prima: !!c })}
@@ -2251,11 +2272,11 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 maquinarias={maquinarias}
                                                 operarios={operarios}
                                                 planificado={planificado}
-                                                disabled={isLegacyOT}
-                                                onTraerHistorial={isLegacyOT ? undefined : handleTraerHistorial}
+                                                disabled={camposBloqueados}
+                                                onTraerHistorial={camposBloqueados ? undefined : handleTraerHistorial}
                                                 historialLoading={historialLoading}
-                                                onCrearProceso={handleCrearProceso}
-                                                onEliminarProceso={handleEliminarProceso}
+                                                onCrearProceso={editaCatalogoProcesos ? handleCrearProceso : undefined}
+                                                onEliminarProceso={editaCatalogoProcesos ? handleEliminarProceso : undefined}
                                                 quienPuede={quienPuede}
                                             />
                                         </div>
@@ -2422,7 +2443,8 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                         más botón que "Anterior" obliga a volver solo para apretar
                                         Guardar. En Historial, además, sin este botón el pie se
                                         quedaba mostrando un "Siguiente" que no llevaba a ningún lado. */}
-                                    {activeTab === "procesos" || activeTab === "planos" || activeTab === "historial" ? (
+                                    {soloLectura && (activeTab === "procesos" || activeTab === "planos" || activeTab === "historial") ? null
+                                    : activeTab === "procesos" || activeTab === "planos" || activeTab === "historial" ? (
                                         <Button
                                             key="submit-button"
                                             type="submit"

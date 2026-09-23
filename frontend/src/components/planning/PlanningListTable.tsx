@@ -31,7 +31,7 @@ import {
     Users,
     FileWarning
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { OrderFiles } from "@/components/common/OrderFiles";
 import { Button } from "@/components/ui/button";
 import { DeliveryProgress } from "@/components/common/DeliveryProgress";
@@ -59,6 +59,7 @@ import {
 } from "@/lib/plan-fechas";
 import { limitacionDeMaquina } from "@/lib/maquinas";
 import { API_URL } from "@/config";
+import { usePermisos } from "@/hooks/usePermisos";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { rankMaterial, resumirMaterial } from "@/lib/materialOT";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
@@ -236,8 +237,8 @@ function _PlanningListTable({
     onRowClick,
     onProcessStatusChange,
     onProcessReorder,
-    onOperatorChange,
-    onMachineryChange, // Added
+    onOperatorChange: onOperatorChangeProp,
+    onMachineryChange: onMachineryChangeProp, // Added
     selectedIds = [],
     onSelectionChange,
     operarios = [],
@@ -259,6 +260,20 @@ function _PlanningListTable({
     colapsarFilasKey,
     exportar,
 }: PlanningListTableProps) {
+
+    // RF-24. Esta tabla edita dos cosas distintas y cada una pide lo suyo, igual que el
+    // backend: la OT (estado de los pasos, fechas, cantidades, entregas, agregar pasos)
+    // es la solapa Órdenes; el PLAN (quién y en qué máquina, a qué hora) es el
+    // Planificador. Sin permiso, la celda muestra el dato y no se puede tocar. Las
+    // no conformidades se registran con su área.
+    const { puede, puedeSeccion } = usePermisos();
+    const editaOrdenes = puedeSeccion("operaciones_ordenes", "write");
+    const planifica = puedeSeccion("operaciones_planificador", "write");
+    const registraIncidencias = puede("no_conformidades", "write");
+    // Sin el callback la celda ya se dibuja como texto: es lo mismo que pasa en las
+    // pantallas que no lo mandan.
+    const onOperatorChange = planifica ? onOperatorChangeProp : undefined;
+    const onMachineryChange = planifica ? onMachineryChangeProp : undefined;
 
     // Las dos preguntas sobre el plano, que hasta ahora eran una sola y por eso esta
     // columna decía "No" en todas las filas: los más de mil planos que hay cargados
@@ -791,12 +806,13 @@ function _PlanningListTable({
      *  columnas y ocho lápices dibujados todo el tiempo serían ruido, no ayuda.
      *  Mientras la celda se está editando el lápiz no va: taparía el campo. */
     const lapizDeCelda = (ordenId: number, campo: string) => (
-        editingOrder?.id === ordenId && editingOrder.field === campo ? null : (
+        !editaOrdenes || (editingOrder?.id === ordenId && editingOrder.field === campo) ? null : (
             <Pencil className="pointer-events-none absolute right-1 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-400 opacity-0 transition-opacity group-hover/edit:opacity-100" />
         )
     );
 
     const handleTextClick = (orderId: number, field: string, currentValue: string | undefined | number) => {
+        if (!editaOrdenes) return;
         const val = currentValue?.toString() || "";
         setEditingOrder({
             id: orderId,
@@ -807,6 +823,7 @@ function _PlanningListTable({
     };
 
     const handleDateClick = (orderId: number, field: string, currentValue: string | undefined) => {
+        if (!editaOrdenes) return;
         let val = "";
         if (currentValue && !currentValue.startsWith('1950')) {
             try {
@@ -920,6 +937,7 @@ function _PlanningListTable({
     };
 
     const handleStartDateClick = (orderId: number, proc: { id?: number; proceso: { id: number } }) => {
+        if (!planifica) return;
         cancelandoInicio.current = false;
         const item = filaDelPlan(orderId, proc);
         if (!item) return;
@@ -1053,9 +1071,10 @@ function _PlanningListTable({
                 atrás de un rótulo que dice «archivos». */}
             <div className="order-3 p-2 border-t border-gray-200">
                 <div
-                    className="cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all"
+                    className={editaOrdenes ? "cursor-pointer hover:ring-2 ring-blue-100 rounded-xl transition-all" : "rounded-xl"}
                     onClick={(e) => {
                         e.stopPropagation();
+                        if (!editaOrdenes) return;
                         setDeliveryOrder({
                             id: item.id,
                             total: item.unidades || 0,
@@ -1117,7 +1136,7 @@ function _PlanningListTable({
                                                         {proc.cant_operarios}
                                                     </span>
                                                 )}
-                                                <button
+                                                {registraIncidencias && <button
                                                     type="button"
                                                     onClick={() => setIncidencia({
                                                         orderId: item.id,
@@ -1130,7 +1149,7 @@ function _PlanningListTable({
                                                     className="shrink-0 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded p-0.5 transition-colors"
                                                 >
                                                     <FileWarning className="w-3.5 h-3.5" />
-                                                </button>
+                                                </button>}
                                             </div>
                                         </div>
 
@@ -1162,7 +1181,7 @@ function _PlanningListTable({
                                                         // el medio se perdía. Con la clave de la fila el click abre —que es
                                                         // lo que el usuario pidió que funcione— y además «Guardar» puede
                                                         // cerrarlo, que antes lo hacía la recarga de la pantalla.
-                                                        open={horarioAbierto === claveDelHorario}
+                                                        open={planifica && horarioAbierto === claveDelHorario}
                                                         onOpenChange={(abierto) => {
                                                             if (abierto) {
                                                                 setHorarioAbierto(claveDelHorario);
@@ -1175,7 +1194,8 @@ function _PlanningListTable({
                                                         <PopoverTrigger asChild>
                                                             <button
                                                                 type="button"
-                                                                title="Cambiar el horario de este paso"
+                                                                title={planifica ? "Cambiar el horario de este paso" : undefined}
+                                                                disabled={!planifica}
                                                                 className={cn(
                                                                     "group relative flex w-full items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1 text-left transition-all",
                                                                     relacion === "arranca"
@@ -1210,7 +1230,7 @@ function _PlanningListTable({
                                                                 )}
                                                                 {/* El lápiz, siempre a la vista: que la celda se puede tocar
                                                                     no puede depender de pasar el mouse por encima. */}
-                                                                <Pencil className="h-3 w-3 shrink-0 text-amber-400 opacity-60 transition-opacity group-hover:opacity-100" />
+                                                                {planifica && <Pencil className="h-3 w-3 shrink-0 text-amber-400 opacity-60 transition-opacity group-hover:opacity-100" />}
                                                             </button>
                                                         </PopoverTrigger>
                                                         <PopoverContent align="start" className="w-[270px] p-3">
@@ -1264,6 +1284,7 @@ function _PlanningListTable({
                                                 <Select
                                                     defaultValue={proc.estado_proceso?.id?.toString() || "1"}
                                                     onValueChange={(val) => onProcessStatusChange && onProcessStatusChange(item.id, proc.proceso.id, parseInt(val), (proc as any).id)}
+                                                    disabled={!editaOrdenes}
                                                 >
                                                     <SelectTrigger className={cn(
                                                         "h-7 text-xs w-full border-none shadow-none font-medium px-2",
@@ -1370,7 +1391,7 @@ function _PlanningListTable({
                             })}
 
                             <RegisterDeliveryDialog
-                                open={!!deliveryOrder}
+                                open={!!deliveryOrder && editaOrdenes}
                                 onOpenChange={(open) => !open && setDeliveryOrder(null)}
                                 currentOrder={deliveryOrder}
                                 onSuccess={() => {
@@ -1381,6 +1402,7 @@ function _PlanningListTable({
                                     else window.location.reload();
                                 }}
                             />
+                            {editaOrdenes && (
                             <div className="px-3 py-3 bg-gray-50 border-t border-gray-200">
                                 <AddProcessRow
                                     orderId={item.id}
@@ -1389,17 +1411,22 @@ function _PlanningListTable({
                                     }}
                                 />
                             </div>
+                            )}
                         </>
                     ) : (
                         <div className="px-4 py-4 bg-gray-50 border-t border-gray-100">
                             <div className="w-full">
-                                <AddProcessRow
-                                    orderId={item.id}
-                                    onProcessAdded={() => {
-                                        if (onDataChange) onDataChange();
-                                    }}
-                                    isCentered={true}
-                                />
+                                {editaOrdenes ? (
+                                    <AddProcessRow
+                                        orderId={item.id}
+                                        onProcessAdded={() => {
+                                            if (onDataChange) onDataChange();
+                                        }}
+                                        isCentered={true}
+                                    />
+                                ) : (
+                                    <p className="text-center text-xs text-gray-400">Sin procesos cargados.</p>
+                                )}
                             </div>
                         </div>
                     )}
@@ -1455,7 +1482,7 @@ function _PlanningListTable({
         <div className={compacto ? "space-y-1.5" : "space-y-4 mt-6"}>
             {/* B1 (feedback 06/07): barra flotante de cambios pendientes de operario/máquina.
                 Aparece solo cuando hay reasignaciones sin guardar; el avance y las fechas siguen al toque. */}
-            {Object.keys(pendingRes).length > 0 && (
+            {planifica && Object.keys(pendingRes).length > 0 && (
                 /* `bottom-24` y no `bottom-5`: el pie del planificador es sticky y vive
                    en esa misma banda, así que la barra le caía justo encima y tapaba
                    "Planificar". Y con `max-w`/`flex-wrap` no se sale de una pantalla
@@ -2036,16 +2063,17 @@ function _PlanningListTable({
                                             )}
                                             <td className="px-3 py-3">
                                                 <div
-                                                    className="cursor-pointer hover:opacity-70 transition-opacity"
+                                                    className={editaOrdenes ? "cursor-pointer hover:opacity-70 transition-opacity" : undefined}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
+                                                        if (!editaOrdenes) return;
                                                         setDeliveryOrder({
                                                             id: item.id,
                                                             total: item.unidades || 0,
                                                             delivered: item.cantidad_entregada || 0
                                                         });
                                                     }}
-                                                    title="Click para registrar entrega"
+                                                    title={editaOrdenes ? "Click para registrar entrega" : undefined}
                                                 >
                                                     {compacto ? (
                                                         <span className="text-xs font-medium text-gray-700 tabular-nums whitespace-nowrap">

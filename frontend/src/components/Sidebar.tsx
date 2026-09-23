@@ -23,6 +23,7 @@ import {
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
 import { capitalizeName } from "@/lib/utils";
+import { MENU, puedeVerItem, type Permisos } from "@/lib/permisos";
 
 interface SidebarItem {
   name: string;
@@ -91,13 +92,30 @@ const sidebarItems: SidebarItem[] = [
   }
 ];
 
+/**
+ * RF-24: la barra muestra sólo lo que la persona puede LEER.
+ *
+ * Qué pide cada ítem no se decide acá: está en lib/permisos.ts (MENU), que es lo mismo
+ * que usa la guardia de rutas, así el menú y el cartel de «no tenés acceso» no pueden
+ * decir cosas distintas. Un test (test_permisos_front.py) exige que los `href` de esta
+ * lista y los de MENU sean los mismos. Un ítem que no esté en MENU se muestra siempre:
+ * ante la duda, como antes. Sin permisos (backend viejo), se ve todo.
+ */
+function itemsVisibles(permisos: Permisos | null): SidebarItem[] {
+  return sidebarItems.filter((item) => {
+    const delMenu = MENU.find((m) => m.href === item.href);
+    return !delMenu || puedeVerItem(permisos, delMenu);
+  });
+}
+
 export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const { isMobile, isMounted } = useIsMobile();
   const pathname = usePathname();
   const router = useRouter();
-  const { logout, user } = useAuth();
+  const { logout, user, permisos } = useAuth();
+  const visibles = itemsVisibles(permisos);
 
   const toggleSidebar = () => {
     if (isMobile) {
@@ -131,7 +149,7 @@ export default function Sidebar() {
           </div>
         </div>
         <nav className="flex-1 space-y-2 p-2">
-          {sidebarItems.map((item) => {
+          {visibles.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
 
@@ -245,7 +263,7 @@ export default function Sidebar() {
         {/* Navigation */}
         <nav className={`flex-1 space-y-2 ${(!isMobile && isCollapsed) || (isMobile && !isMobileOpen) ? 'p-2' : 'p-4'
           }`}>
-          {sidebarItems.map((item) => {
+          {visibles.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
 
@@ -296,7 +314,9 @@ export default function Sidebar() {
             ) : (
               <div className="flex items-center justify-center p-2">
                 <div className="w-8 h-8 rounded-full bg-[#DC143C] text-white font-semibold flex items-center justify-center text-sm">
-                  {user.nombre.charAt(0).toUpperCase()}{user.apellido.charAt(0).toUpperCase()}
+                  {/* Con `?.`: un usuario guardado sin nombre o sin apellido tumbaba la
+                      app entera acá (el Sidebar está en todas las pantallas). */}
+                  {(user.nombre?.charAt(0) ?? "").toUpperCase()}{(user.apellido?.charAt(0) ?? "").toUpperCase()}
                 </div>
               </div>
             )}
