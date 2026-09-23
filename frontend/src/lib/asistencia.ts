@@ -67,9 +67,13 @@ export interface TareaConTiempo {
   estado: string;
   inicio_real: string;
   fin_real: string | null;
+  /** En proceso y sin fin (un pendiente con arranque NO está en curso). */
   en_curso: boolean;
-  /** Terminado sin fin registrado (o con el fin antes del arranque): no se mide. */
+  /** No se mide: terminado sin fin, fin antes del arranque o pendiente con arranque. */
   sin_datos: boolean;
+  /** Por qué no se mide (sólo con `sin_datos`). Un backend de antes no lo manda. */
+  sin_datos_motivo?: "terminado_sin_fin" | "fin_antes_del_arranque" | "pendiente_con_arranque" | null;
+  sin_datos_texto?: string | null;
   /** «ot» = la persona elegida a mano en la OT; «plan» = según el último plan. */
   origen: "ot" | "plan";
   estimado_min: number | null;
@@ -77,6 +81,18 @@ export interface TareaConTiempo {
   fuera_de_jornada_min: number | null;
   pausa_min: number | null;
   efectivo_min: number | null;
+  /** Lo que estuvo TERMINADO antes de que lo reabrieran: no cuenta como trabajo. */
+  cerrado_min?: number | null;
+  /** Se terminó, se reabrió y se volvió a terminar (o se le pisó el fin). */
+  reabierto?: boolean;
+  /** En proceso hace demasiado: ¿quedó abierto sin querer? Sus horas no suman. */
+  abierto_de_mas?: boolean;
+}
+
+/** Lo que dice el total de horas y lo que dejó afuera (una sola cuenta con Rendimiento). */
+export interface AbiertosDeMas {
+  pasos: number;
+  minutos: number;
 }
 
 export interface TiemposOperario {
@@ -85,18 +101,64 @@ export interface TiemposOperario {
   jornada: string;
   /** false = el servidor no tiene las pausas (RF-03): el efectivo no las descuenta. */
   pausas_disponibles: boolean;
+  /** false = no tiene la asistencia: las horas no descuentan los días de ausencia. */
+  ausencias_disponibles?: boolean;
+  /** Pasadas estas jornadas en proceso, un paso se marca «¿quedó abierto?». */
+  tope_jornadas_abierto?: number;
   recortado: boolean;
   resumen: {
     tareas: number;
     terminadas: number;
     en_curso: number;
+    sin_datos?: number;
+    reabiertas?: number;
     estimado_min: number;
     corrido_min: number;
     pausa_min: number;
     fuera_de_jornada_min: number;
+    /** La suma del efectivo de cada paso ENTERO. */
     efectivo_min: number;
+    /** Lo trabajado EN el período: las mismas «horas trabajadas» de Rendimiento. Un
+     *  backend de antes no lo manda. */
+    trabajado_min?: number;
+    superpuesto_min?: number;
+    en_ausencia_min?: number;
+    abiertos_de_mas?: AbiertosDeMas;
+    fuera_del_periodo_min?: number;
   };
   tareas: TareaConTiempo[];
+}
+
+/** Lo corto del «no se mide», para el renglón. */
+export function sinDatosCorto(t: Pick<TareaConTiempo, "sin_datos" | "sin_datos_motivo">): string {
+  if (!t.sin_datos) return "";
+  switch (t.sin_datos_motivo) {
+    case "pendiente_con_arranque":
+      return "pendiente con arranque";
+    case "fin_antes_del_arranque":
+      return "fin antes del arranque";
+    default:
+      return "sin fin registrado";
+  }
+}
+
+/** Lo largo del «no se mide», para el globito. */
+export function sinDatosLargo(t: Pick<TareaConTiempo, "sin_datos_texto">): string {
+  return t.sin_datos_texto || "Terminado sin fin registrado: no se puede medir.";
+}
+
+/** «Lo trabajado en el período no es la suma de los pasos enteros porque…». Sólo las
+ *  partes que no son cero. */
+export function diferenciaConLosPasos(r: TiemposOperario["resumen"]): string[] {
+  const partes: string[] = [];
+  if (r.fuera_del_periodo_min) partes.push(`${fmtMinutos(r.fuera_del_periodo_min)} caen fuera del período`);
+  if (r.superpuesto_min) partes.push(`${fmtMinutos(r.superpuesto_min)} se superponen (pasos abiertos a la vez: cuentan una vez)`);
+  if (r.en_ausencia_min) partes.push(`${fmtMinutos(r.en_ausencia_min)} caen en días en que figura ausente`);
+  if (r.abiertos_de_mas?.minutos) {
+    const n = r.abiertos_de_mas.pasos;
+    partes.push(`${fmtMinutos(r.abiertos_de_mas.minutos)} son de ${n === 1 ? "un paso que sigue" : `${n} pasos que siguen`} abierto${n === 1 ? "" : "s"} de más`);
+  }
+  return partes;
 }
 
 /**

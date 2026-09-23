@@ -14,7 +14,7 @@ EFECTIVO = lo que cae adentro de la jornada del taller, menos lo que estuvo en p
 adentro de esa jornada. Y se devuelve el desglose entero, para que nada quede
 escondido:
 
-    corrido = efectivo + en pausa + fuera de jornada
+    corrido = efectivo + en pausa + fuera de jornada (+ terminado, si se reabrió)
 
 LA JORNADA ES LA DEL PLANIFICADOR
 
@@ -82,6 +82,10 @@ def _tramos_de_reloj(es_sabado: bool) -> list[tuple[int, int]]:
 RELOJ_LV = _tramos_de_reloj(False)    # [(420, 540), (555, 720), (750, 960)]
 RELOJ_SABADO = _tramos_de_reloj(True)  # [(420, 720)]
 
+# Los minutos de una jornada de lunes a viernes (495): la unidad con la que se dice
+# «lleva cinco jornadas abierto».
+MINUTOS_JORNADA = sum(b - a for a, b in RELOJ_LV)
+
 
 def _hhmm(minutos: int) -> str:
     return f"{minutos // 60:02d}:{minutos % 60:02d}"
@@ -148,18 +152,44 @@ def minutos(tramos: Iterable[Tramo]) -> int:
 
 
 class TiempoDePaso(NamedTuple):
-    """El tiempo de un paso, desglosado. `corrido = efectivo + en_pausa + fuera_de_jornada`."""
+    """El tiempo de un paso, desglosado.
+    `corrido = efectivo + en_pausa + fuera_de_jornada + cerrado`."""
 
     corrido: int           # reloj: del arranque al fin (o a ahora, si sigue)
     fuera_de_jornada: int  # noches, domingos, feriados, desayuno y almuerzo
     en_pausa: int          # lo que estuvo pausado (RF-03) ADENTRO de la jornada
     efectivo: int          # lo que queda: trabajado dentro de la jornada
     en_curso: bool         # sin fin todavía: se cuenta hasta ahora
+    cerrado: int = 0       # lo que estuvo TERMINADO antes de que lo reabrieran
+
+
+# ── Un paso que se reabre ─────────────────────────────────────────────────────
+#
+# Un paso terminado el lunes que alguien vuelve a poner «en proceso» el jueves (y
+# termina de nuevo el viernes) guarda UN arranque —el del lunes— y el fin del viernes:
+# la columna no tiene lugar para los dos tramos. Contado de corrido, el paso «duró» de
+# lunes a viernes, con el martes y el miércoles adentro, cuando estuvo terminado y nadie
+# lo tocaba. Esos tramos (del fin viejo a la reapertura) son `cerrado`: salen de la
+# cuenta como si no fueran del paso. Quién los arma: TiemposOperarioService, desde el
+# historial de pasos de la OT (auditoria_proceso_ot).
+
+
+def _cerrados_del_paso(cerrado: Iterable[Tramo], inicio: datetime, hasta: datetime) -> list[Tramo]:
+    """Los tramos en que el paso estuvo terminado, al minuto y recortados al paso."""
+    salida = []
+    for c_desde, c_hasta in cerrado or ():
+        if c_desde is None or c_hasta is None:
+            continue
+        a, b = max(_al_minuto(c_desde), inicio), min(_al_minuto(c_hasta), hasta)
+        if b > a:
+            salida.append((a, b))
+    return unir(salida)
 
 
 def tiempo_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
                       pausas: Iterable[tuple[datetime, Optional[datetime]]] = (), *,
-                      ahora: datetime, feriados: Iterable[date] = ()) -> Optional[TiempoDePaso]:
+                      ahora: datetime, feriados: Iterable[date] = (),
+                      cerrado: Iterable[Tramo] = ()) -> Optional[TiempoDePaso]:
     """El tiempo corrido y el efectivo de un paso. None si no arrancó.
 
     · `inicio` / `fin`: inicio_real y fin_real del paso. Sin `fin`, el paso sigue en
@@ -169,6 +199,8 @@ def tiempo_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
       `ahora`. Sólo cuenta lo que cae adentro del paso: una pausa que empezó antes del
       arranque o terminó después del fin se recorta.
     · `feriados`: los días bloqueados del calendario del taller.
+    · `cerrado`: (desde, hasta) en que el paso estuvo terminado antes de que lo
+      reabrieran (ver arriba). No son del paso: ni jornada, ni pausa.
 
     Un fin anterior al arranque (un dato roto) da todo en cero: no hay forma honesta de
     decir cuánto duró.
@@ -184,7 +216,9 @@ def tiempo_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
         return TiempoDePaso(0, 0, 0, 0, en_curso)
 
     corrido = int((hasta - inicio).total_seconds() // 60)
-    jornada = tramos_de_jornada(inicio, hasta, feriados)
+    cerrados = _cerrados_del_paso(cerrado, inicio, hasta)
+    cerrado_min = minutos(cerrados)
+    jornada = restar(tramos_de_jornada(inicio, hasta, feriados), cerrados)
     en_jornada = minutos(jornada)
 
     paradas = []
@@ -199,10 +233,11 @@ def tiempo_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
 
     return TiempoDePaso(
         corrido=corrido,
-        fuera_de_jornada=corrido - en_jornada,
+        fuera_de_jornada=corrido - en_jornada - cerrado_min,
         en_pausa=en_pausa,
         efectivo=en_jornada - en_pausa,
         en_curso=en_curso,
+        cerrado=cerrado_min,
     )
 
 
@@ -253,11 +288,13 @@ class TramosDePaso(NamedTuple):
     en_pausa: list[Tramo]           # jornada Y pausado (unidas: cada minuto una vez)
     por_pausa: list[list[Tramo]]    # lo de cada pausa de la entrada, en el mismo orden
     en_curso: bool
+    cerrado: tuple = ()             # lo que estuvo terminado antes de reabrirlo
 
 
 def tramos_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
                       pausas: Iterable[tuple[datetime, Optional[datetime]]] = (), *,
-                      ahora: datetime, feriados: Iterable[date] = ()) -> Optional[TramosDePaso]:
+                      ahora: datetime, feriados: Iterable[date] = (),
+                      cerrado: Iterable[Tramo] = ()) -> Optional[TramosDePaso]:
     """Lo mismo que tiempo_de_un_paso, pero con los tramos. None si no arrancó.
 
     `por_pausa[i]` es lo que la pausa `pausas[i]` paró adentro de la jornada y del paso:
@@ -275,7 +312,8 @@ def tramos_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
     if hasta <= inicio:
         return TramosDePaso([], [], [], [[] for _ in pausas], en_curso)
 
-    jornada = tramos_de_jornada(inicio, hasta, feriados)
+    cerrados = _cerrados_del_paso(cerrado, inicio, hasta)
+    jornada = restar(tramos_de_jornada(inicio, hasta, feriados), cerrados)
     por_pausa: list[list[Tramo]] = []
     for p_desde, p_hasta in pausas:
         if p_desde is None:
@@ -291,4 +329,5 @@ def tramos_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
         en_pausa=en_pausa,
         por_pausa=por_pausa,
         en_curso=en_curso,
+        cerrado=tuple(cerrados),
     )

@@ -9,7 +9,7 @@
  */
 
 import type { ColumnaExport, SeccionExport } from "@/lib/exportar";
-import { fechaCorta, fmtMinutos, isoLocal, rangoDePeriodo } from "@/lib/asistencia";
+import { type AbiertosDeMas, fechaCorta, fmtMinutos, isoLocal, rangoDePeriodo, sinDatosLargo } from "@/lib/asistencia";
 
 // ── Lo que contesta GET /operarios/{id}/rendimiento ───────────────────────────
 
@@ -24,9 +24,12 @@ export interface TareaRendimiento {
   estado: string;
   inicio_real: string;
   fin_real: string | null;
+  /** En proceso y sin fin (un pendiente con arranque NO está en curso). */
   en_curso: boolean;
-  /** Terminado sin fin registrado (o con el fin antes del arranque): no se mide. */
+  /** No se mide: terminado sin fin, fin antes del arranque o pendiente con arranque. */
   sin_datos: boolean;
+  sin_datos_motivo?: "terminado_sin_fin" | "fin_antes_del_arranque" | "pendiente_con_arranque" | null;
+  sin_datos_texto?: string | null;
   /** «ot» = la persona elegida a mano en la OT; «plan» = según el último plan. */
   origen: "ot" | "plan";
   estimado_min: number | null;
@@ -42,6 +45,11 @@ export interface TareaRendimiento {
   /** Completada y con efectivo mayor que cero: entra en el promedio. */
   medible: boolean;
   eficiencia_pct: number | null;
+  /** Lo que estuvo terminado antes de que lo reabrieran: no cuenta. */
+  cerrado_min?: number | null;
+  reabierto?: boolean;
+  /** En proceso hace demasiado: ¿quedó abierto? No suma a las horas. */
+  abierto_de_mas?: boolean;
 }
 
 export type NivelEficiencia = "rapido" | "parejo" | "lento";
@@ -64,8 +72,16 @@ export interface ResumenRendimiento {
     /** La eficiencia en castellano, con los números que la forman. */
     lectura: string;
   };
+  /** Adentro del período, cada hora una vez, sin días de ausencia ni pasos abiertos de
+   *  más. Es el mismo número que el total de la solapa Tiempos. */
   horas_trabajadas_min: number;
   superpuesto_min: number;
+  /** Lo de sus pasos que cayó en días en que figura ausente (no se cuenta). Un backend
+   *  de antes no lo manda; null = no se sabe (sin la asistencia). */
+  en_ausencia_min?: number | null;
+  /** Pasos «en proceso» que nadie cierra hace demasiado: sus horas no se cuentan. */
+  abiertos_de_mas?: AbiertosDeMas;
+  reabiertas?: number;
   pausas: {
     minutos: number;
     cantidad: number;
@@ -85,6 +101,8 @@ export interface RendimientoOperario {
   periodo: { desde: string; hasta: string; dias: number };
   generado: string;
   jornada: string;
+  /** Pasadas estas jornadas en proceso, un paso se marca «¿quedó abierto?». */
+  tope_jornadas_abierto?: number;
   pausas_disponibles: boolean;
   ausencias_disponibles: boolean;
   historial: { pasos: number; ultimo_arranque: string | null };
@@ -125,8 +143,9 @@ export function avisos(d: RendimientoOperario): string[] {
   }
   if (r.sin_datos) {
     salida.push(
-      `${r.sin_datos} ${r.sin_datos === 1 ? "paso figura terminado" : "pasos figuran terminados"} ` +
-      "sin fecha de fin: no se pueden medir ni ubicar en el período.",
+      `${r.sin_datos} ${r.sin_datos === 1 ? "paso no se puede medir" : "pasos no se pueden medir"} ` +
+      "(terminados sin fecha de fin, o pendientes con un arranque que trajo el sistema viejo): " +
+      "no entran en ninguna cuenta.",
     );
   }
   if (r.sin_estimado) {
@@ -139,6 +158,26 @@ export function avisos(d: RendimientoOperario): string[] {
     salida.push(
       `Tuvo pasos abiertos a la vez: ${fmtMinutos(r.superpuesto_min)} se superponen y en las ` +
       "horas trabajadas se cuentan una sola vez.",
+    );
+  }
+  if (r.en_ausencia_min) {
+    salida.push(
+      `${fmtMinutos(r.en_ausencia_min)} de sus pasos caen en días en que figura ausente: ` +
+      "no se cuentan en las horas trabajadas.",
+    );
+  }
+  if (r.abiertos_de_mas?.pasos) {
+    const n = r.abiertos_de_mas.pasos;
+    salida.push(
+      `${n} ${n === 1 ? "paso sigue" : "pasos siguen"} en proceso hace más de ` +
+      `${d.tope_jornadas_abierto ?? 5} jornadas y del doble de lo estimado (¿quedaron abiertos sin querer?): ` +
+      `sus ${fmtMinutos(r.abiertos_de_mas.minutos)} no se cuentan en las horas trabajadas hasta que alguien los cierre.`,
+    );
+  }
+  if (r.reabiertas) {
+    salida.push(
+      `${r.reabiertas} ${r.reabiertas === 1 ? "tarea se reabrió" : "tareas se reabrieron"} después de ` +
+      "terminarla: el tiempo en que estuvo terminada no se cuenta.",
     );
   }
   if (!d.pausas_disponibles) {
@@ -225,12 +264,19 @@ export type TonoEstado = "verde" | "azul" | "ambar" | "gris";
 /** Qué fue de la tarea EN EL PERÍODO: lo mismo en la tabla, el PDF y el Excel. */
 export function estadoEnElPeriodo(t: TareaRendimiento): { texto: string; tono: TonoEstado; ayuda: string } {
   if (t.sin_datos) {
-    return { texto: "Sin fin", tono: "ambar", ayuda: "Figura terminado pero sin fecha de fin: no se puede medir" };
+    return {
+      texto: t.sin_datos_motivo === "pendiente_con_arranque" ? "Sin datos" : "Sin fin",
+      tono: "ambar",
+      ayuda: sinDatosLargo(t),
+    };
   }
   if (t.terminada_en_periodo) {
     return t.medible
       ? { texto: "Completada", tono: "verde", ayuda: "Terminó adentro del período: cuenta como completada" }
       : { texto: "Completada", tono: "verde", ayuda: "Terminó en el período, pero sin tiempo medido (arranque y fin juntos, o fuera de la jornada): no entra en el promedio" };
+  }
+  if (t.en_curso && t.abierto_de_mas) {
+    return { texto: "En curso", tono: "ambar", ayuda: "Sigue en proceso hace demasiado (¿quedó abierto?): no suma a las horas" };
   }
   if (t.en_curso) {
     return { texto: "En curso", tono: "azul", ayuda: "Todavía no terminó: suma a las horas, no a las completadas" };
@@ -244,8 +290,9 @@ export function estadoEnElPeriodo(t: TareaRendimiento): { texto: string; tono: T
 /** El estado como va en un archivo: con la aclaración cuando hace falta. */
 export function estadoParaArchivo(t: TareaRendimiento): string {
   const e = estadoEnElPeriodo(t);
-  if (t.sin_datos) return "Sin fin registrado";
+  if (t.sin_datos) return t.sin_datos_motivo === "pendiente_con_arranque" ? "Pendiente con arranque (sin datos)" : "Sin fin registrado";
   if (t.terminada_en_periodo && !t.medible) return "Completada (sin tiempo medido)";
+  if (t.en_curso && t.abierto_de_mas) return "En curso (¿quedó abierto?; no suma horas)";
   return e.texto;
 }
 
@@ -270,9 +317,11 @@ export function detalleEficiencia(r: ResumenRendimiento): string {
 }
 
 export function detalleHoras(r: ResumenRendimiento): string {
-  return r.superpuesto_min > 0
-    ? `efectivas, en pasos de OT (sin contar dos veces ${fmtMinutos(r.superpuesto_min)} superpuestos)`
-    : "efectivas, en pasos de OT";
+  const sin: string[] = [];
+  if (r.superpuesto_min > 0) sin.push(`sin contar dos veces ${fmtMinutos(r.superpuesto_min)} superpuestos`);
+  if (r.en_ausencia_min) sin.push(`sin ${fmtMinutos(r.en_ausencia_min)} en días de ausencia`);
+  if (r.abiertos_de_mas?.minutos) sin.push(`sin ${fmtMinutos(r.abiertos_de_mas.minutos)} de pasos que siguen abiertos de más`);
+  return sin.length ? `efectivas, en pasos de OT (${sin.join("; ")})` : "efectivas, en pasos de OT";
 }
 
 export function detalleAusencias(r: ResumenRendimiento): string {
@@ -364,6 +413,8 @@ export const COLUMNAS_TAREAS_RENDIMIENTO: ColumnaExport<TareaRendimiento>[] = [
   { titulo: "Fuera de jornada (h)", tipo: "numero", decimales: 2, valor: (t) => horas(t.fuera_de_jornada_min) },
   { titulo: "Corrido (h)", tipo: "numero", decimales: 2, valor: (t) => horas(t.corrido_min) },
   { titulo: "Eficiencia", tipo: "porcentaje", decimales: 0, valor: (t) => t.eficiencia_pct },
+  { titulo: "Reabierta", tipo: "booleano", valor: (t) => !!t.reabierto },
+  { titulo: "Terminada antes de reabrirla (h)", tipo: "numero", decimales: 2, valor: (t) => horas(t.cerrado_min ?? null) },
   { titulo: "Atribución", valor: (t) => ORIGEN[t.origen] ?? t.origen },
 ];
 

@@ -652,7 +652,11 @@ class OrdenTrabajoRepository:
                     ot_proceso.inicio_real = _ahora_ar()
                 # If reverting from finalized to in-process, clear finish time
                 ot_proceso.fin_real = None
-            elif id_estado == 3:  # Finalizado
+            elif id_estado == 3 and estado_anterior != 3:  # Finalizado
+                # Sólo al TERMINARLO. Elegir otra vez «terminado» sobre uno que ya lo
+                # estaba no es terminarlo de nuevo: pisar el fin corría el paso hasta
+                # hoy y el tiempo trabajado (RF-06/07) se llevaba días en que nadie lo
+                # tocó.
                 ot_proceso.fin_real = _ahora_ar()
 
             # Mover un proceso de la OT es modificar la OT: es el cambio que más se
@@ -844,7 +848,10 @@ class OrdenTrabajoRepository:
 
         Las marcas de tiempo siguen la misma regla que el cambio de a uno
         (`update_proceso_status`): pendiente borra las dos, en proceso deja la de
-        arranque si ya estaba, y terminado escribe la de fin.
+        arranque si ya estaba, y terminado escribe la de fin SÓLO en los pasos que no
+        estaban terminados. Marcar como terminada una OT con pasos que se terminaron
+        hace días no les corre el fin a hoy: eso inflaba el tiempo trabajado de cada
+        paso (RF-06) y la eficiencia de quien lo hizo (RF-07).
         """
         try:
             ids = [int(i) for i in (orden_ids or [])]
@@ -868,7 +875,9 @@ class OrdenTrabajoRepository:
                        inicio_real = CASE WHEN :estado = 1 THEN NULL
                                           WHEN :estado = 2 THEN COALESCE(inicio_real, :ahora)
                                           ELSE inicio_real END,
-                       fin_real    = CASE WHEN :estado = 3 THEN :ahora ELSE NULL END
+                       fin_real    = CASE WHEN :estado = 3 AND id_estado = 3 THEN fin_real
+                                          WHEN :estado = 3 THEN :ahora
+                                          ELSE NULL END
                  WHERE id_orden_trabajo = ANY(:ordenes)
             """), {"estado": id_estado, "ahora": ahora, "ordenes": ids})
             procesos = resultado.rowcount or 0
@@ -885,6 +894,9 @@ class OrdenTrabajoRepository:
                     return {"id_estado": id_estado,
                             "inicio_real": fila.get("inicio_real") or ahora,
                             "fin_real": None}
+                if fila.get("id_estado") == 3:
+                    # Ya estaba terminado: el UPDATE no le toca el fin (ver arriba).
+                    return {"id_estado": id_estado, "fin_real": fila.get("fin_real")}
                 return {"id_estado": id_estado, "fin_real": ahora}
 
             await auditoria_proc.anotar(self.db, previas, "edicion", nuevos=_como_queda)

@@ -23,12 +23,16 @@ import {
   type EstadoSeccion,
   type TareaConTiempo,
   type TiemposOperario as DatosTiempos,
+  diferenciaConLosPasos,
   fmtMinutos,
   momentoCorto,
   rangoDePeriodo,
+  sinDatosCorto,
+  sinDatosLargo,
 } from "@/lib/asistencia";
 import { cn } from "@/lib/utils";
 import { SelectorPeriodo } from "./AsistenciaOperario";
+import { MarcasDeTarea } from "./MarcasDeTarea";
 
 const cabeceras = (): HeadersInit => {
   if (typeof window === "undefined") return {};
@@ -113,14 +117,15 @@ function Numero({ titulo, valor, fuerte, alerta }: {
 }
 
 function desglose(t: TareaConTiempo): string {
-  if (t.sin_datos) return "Terminado sin fin registrado: no se puede medir.";
+  if (t.sin_datos) return sinDatosLargo(t);
   const partes = [`Corrido ${fmtMinutos(t.corrido_min)}`, `= efectivo ${fmtMinutos(t.efectivo_min)}`];
   if (t.pausa_min) partes.push(`+ en pausa ${fmtMinutos(t.pausa_min)}`);
   if (t.fuera_de_jornada_min) partes.push(`+ fuera de jornada ${fmtMinutos(t.fuera_de_jornada_min)}`);
+  if (t.cerrado_min) partes.push(`+ terminado antes de reabrirlo ${fmtMinutos(t.cerrado_min)}`);
   return partes.join(" ");
 }
 
-function Renglon({ t }: { t: TareaConTiempo }) {
+function Renglon({ t, topeJornadas }: { t: TareaConTiempo; topeJornadas?: number }) {
   const pasado = t.estimado_min != null && t.efectivo_min != null && t.efectivo_min > t.estimado_min;
   return (
     <li className="py-2 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -136,6 +141,12 @@ function Renglon({ t }: { t: TareaConTiempo }) {
           )}>
             {t.en_curso ? "En curso" : t.estado}
           </span>
+          <MarcasDeTarea
+            reabierto={t.reabierto}
+            cerradoMin={t.cerrado_min}
+            abiertoDeMas={t.abierto_de_mas}
+            topeJornadas={topeJornadas}
+          />
           {t.origen === "plan" && (
             <span className="text-[10px] text-gray-400" title="Nadie la eligió a mano en la OT: se la cuenta por el último plan">
               según el plan
@@ -148,7 +159,7 @@ function Renglon({ t }: { t: TareaConTiempo }) {
             {momentoCorto(t.inicio_real)}
             {t.fin_real ? ` → ${momentoCorto(t.fin_real)}` : t.en_curso ? " → sigue" : ""}
           </span>
-          {t.sin_datos && <span className="text-amber-700"> · sin fin registrado</span>}
+          {t.sin_datos && <span className="text-amber-700"> · {sinDatosCorto(t)}</span>}
           {t.articulo ? ` · ${t.articulo}` : ""}
         </p>
       </div>
@@ -190,6 +201,8 @@ export default function TiemposOperario({ tiempos, periodo, onPeriodo }: {
   }
   if (!datos) return null;
   const r = datos.resumen;
+  const trabajado = typeof r.trabajado_min === "number" ? r.trabajado_min : null;
+  const diferencia = diferenciaConLosPasos(r);
 
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
@@ -201,7 +214,14 @@ export default function TiemposOperario({ tiempos, periodo, onPeriodo }: {
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2">
+      {/* Cuatro números: lo estimado, el reloj y el efectivo de los pasos ENTEROS, y lo
+          trabajado EN el período (el mismo número que las «horas trabajadas» de la solapa
+          Rendimiento: una sola cuenta). Un backend de antes no manda lo trabajado: quedan
+          los tres de siempre. */}
+      <div className={cn(
+        "grid gap-2 rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2",
+        trabajado !== null ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3",
+      )}>
         <div>
           <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500"><Clock className="h-3 w-3" /> Estimado</p>
           <p className="text-sm font-bold tabular-nums text-slate-800">{fmtMinutos(r.estimado_min)}</p>
@@ -210,11 +230,24 @@ export default function TiemposOperario({ tiempos, periodo, onPeriodo }: {
           <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500"><Timer className="h-3 w-3" /> Corrido</p>
           <p className="text-sm font-bold tabular-nums text-slate-800">{fmtMinutos(r.corrido_min)}</p>
         </div>
-        <div>
-          <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-blue-600"><Timer className="h-3 w-3" /> Efectivo</p>
-          <p className="text-sm font-bold tabular-nums text-blue-700">{fmtMinutos(r.efectivo_min)}</p>
+        <div title="La suma del efectivo de cada paso entero, con lo que cae antes o después del período.">
+          <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500">
+            <Timer className="h-3 w-3" /> {trabajado !== null ? "Efectivo de los pasos" : "Efectivo"}
+          </p>
+          <p className={cn("text-sm font-bold tabular-nums", trabajado !== null ? "text-slate-800" : "text-blue-700")}>{fmtMinutos(r.efectivo_min)}</p>
         </div>
+        {trabajado !== null && (
+          <div title="Lo trabajado adentro del período: cada hora una vez, sin los días de ausencia. Es el mismo número que las horas trabajadas de Rendimiento.">
+            <p className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-blue-600"><Timer className="h-3 w-3" /> Trabajado en el período</p>
+            <p className="text-sm font-bold tabular-nums text-blue-700">{fmtMinutos(trabajado)}</p>
+          </div>
+        )}
       </div>
+      {trabajado !== null && diferencia.length > 0 && (
+        <p className="text-[11px] text-gray-500">
+          La suma de los pasos enteros no es lo trabajado en el período: {diferencia.join("; ")}.
+        </p>
+      )}
 
       {!datos.pausas_disponibles && (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
@@ -229,11 +262,16 @@ export default function TiemposOperario({ tiempos, periodo, onPeriodo }: {
         </div>
       ) : (
         <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100 bg-white px-3">
-          {datos.tareas.map((t) => <Renglon key={t.id_otp} t={t} />)}
+          {datos.tareas.map((t) => <Renglon key={t.id_otp} t={t} topeJornadas={datos.tope_jornadas_abierto} />)}
         </ul>
       )}
       {datos.recortado && (
-        <p className="text-[11px] text-gray-500">Se muestran los {datos.tareas.length} más recientes: achicá el período para ver el resto.</p>
+        <p className="text-[11px] text-gray-500">
+          Se muestran los {datos.tareas.length} más recientes: achicá el período para ver el resto. Los totales de arriba son de todos.
+        </p>
+      )}
+      {datos.ausencias_disponibles === false && (
+        <p className="text-[11px] text-gray-500">El servidor todavía no tiene la asistencia: lo trabajado no descuenta los días de ausencia.</p>
       )}
 
       <p className="flex items-start gap-1.5 text-[11px] text-gray-500">
@@ -243,6 +281,11 @@ export default function TiemposOperario({ tiempos, periodo, onPeriodo }: {
           menos lo que el paso o su OT estuvieron en pausa. Lo que cae fuera de ese horario queda
           en el corrido. Cada paso se le cuenta a quien lo tiene elegido en la OT o, si no hay, a
           quien le dio el último plan: el sistema no registra quién lo hizo de verdad.
+          {trabajado !== null && (
+            <> <strong>Trabajado en el período</strong> = el efectivo que cae adentro del período,
+            cada hora una vez aunque tuviera dos pasos abiertos, sin los días en que figura ausente
+            ni los pasos que siguen abiertos de más.</>
+          )}
         </span>
       </p>
     </div>

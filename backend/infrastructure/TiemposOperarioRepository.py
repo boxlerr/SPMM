@@ -1,7 +1,8 @@
 """Los pasos de OT de una persona, con lo que hace falta para medirlos (RF-06).
 
-Sólo lecturas. Las pausas y los feriados se leen en un SAVEPOINT: si la migración de
-las pausas todavía no corrió, los tiempos salen igual (sin descontar pausas, y dicho).
+Sólo lecturas. Las pausas, las ausencias, el historial de los pasos y los feriados se
+leen en un SAVEPOINT: si la migración de alguna de esas tablas todavía no corrió, los
+tiempos salen igual (sin descontar eso, y dicho).
 """
 from datetime import date, datetime
 
@@ -9,6 +10,8 @@ from sqlalchemy import select
 
 from backend.commons.loggers.logger import logger
 from backend.domain.Articulo import Articulo
+from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
+from backend.domain.AusenciaOperario import AusenciaOperario
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
 from backend.domain.PausaOrden import PausaOrden
@@ -104,3 +107,42 @@ class TiemposOperarioRepository:
     async def feriados(self) -> list[date]:
         """Los días bloqueados del calendario del taller (sólo se leen)."""
         return await feriados_sin_romper(self.db)
+
+    async def ausencias_sin_romper(self, id_operario: int, desde: date | None = None,
+                                   hasta: date | None = None) -> list[tuple[date, date | None]] | None:
+        """(desde, vuelve) de las ausencias de la persona que tocan el período (RF-06).
+        None si no se pueden leer (tabla sin crear): las horas salen sin descontarlas y
+        la respuesta lo dice."""
+        try:
+            async with self.db.begin_nested():
+                q = select(AusenciaOperario.desde, AusenciaOperario.vuelve).where(
+                    AusenciaOperario.id_operario == id_operario)
+                if hasta is not None:
+                    q = q.where(AusenciaOperario.desde <= hasta)
+                if desde is not None:
+                    q = q.where((AusenciaOperario.vuelve.is_(None)) | (AusenciaOperario.vuelve > desde))
+                return [tuple(f) for f in (await self.db.execute(q)).all()]
+        except Exception as e:
+            logger.warning(f"Tiempos: no se pudieron leer las ausencias de {id_operario}: {e}")
+            return None
+
+    async def cambios_de_fin_sin_romper(self, ids_otp: list[int]) -> list[tuple] | None:
+        """(paso, cuándo, cambios en JSON) de las ediciones del historial de pasos que
+        tocaron el fin real: de ahí sale cuándo estuvo terminado un paso que después se
+        reabrió (ver TiemposOperarioService.cerrados_del_historial). None si la tabla de
+        auditoría no se puede leer."""
+        if not ids_otp:
+            return []
+        try:
+            async with self.db.begin_nested():
+                return [tuple(f) for f in (await self.db.execute(
+                    select(AuditoriaProcesoOT.id_otp, AuditoriaProcesoOT.creado_en,
+                           AuditoriaProcesoOT.cambios)
+                    .where(AuditoriaProcesoOT.id_otp.in_(list(ids_otp)))
+                    .where(AuditoriaProcesoOT.accion == "edicion")
+                    .where(AuditoriaProcesoOT.cambios.like("%fin real%"))
+                    .order_by(AuditoriaProcesoOT.creado_en, AuditoriaProcesoOT.id)
+                )).all()]
+        except Exception as e:
+            logger.warning(f"Tiempos: no se pudo leer el historial de los pasos: {e}")
+            return None

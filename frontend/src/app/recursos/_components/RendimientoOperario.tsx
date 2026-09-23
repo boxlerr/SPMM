@@ -37,7 +37,7 @@ import {
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { Button } from "@/components/ui/button";
 import { API_URL } from "@/config";
-import { type EstadoSeccion, fechaCorta, fmtMinutos, momentoCorto } from "@/lib/asistencia";
+import { type EstadoSeccion, fechaCorta, fmtMinutos, momentoCorto, sinDatosLargo } from "@/lib/asistencia";
 import {
   COMO_SE_LEE_EFICIENCIA,
   PERIODOS_RENDIMIENTO,
@@ -61,6 +61,7 @@ import {
   textoDelPeriodo,
 } from "@/lib/rendimiento";
 import { cn } from "@/lib/utils";
+import { MarcasDeTarea } from "./MarcasDeTarea";
 
 const cabeceras = (): HeadersInit => {
   if (typeof window === "undefined") return {};
@@ -259,10 +260,11 @@ function cuando(t: TareaRendimiento): string {
 }
 
 function desglose(t: TareaRendimiento): string {
-  if (t.sin_datos) return "Terminado sin fin registrado: no se puede medir.";
+  if (t.sin_datos) return sinDatosLargo(t);
   const partes = [`Corrido ${fmtMinutos(t.corrido_min)} = efectivo ${fmtMinutos(t.efectivo_min)}`];
   if (t.pausa_min) partes.push(`+ en pausa ${fmtMinutos(t.pausa_min)}`);
   if (t.fuera_de_jornada_min) partes.push(`+ fuera de jornada ${fmtMinutos(t.fuera_de_jornada_min)}`);
+  if (t.cerrado_min) partes.push(`+ terminado antes de reabrirlo ${fmtMinutos(t.cerrado_min)}`);
   if (t.efectivo_en_periodo_min !== null && t.efectivo_en_periodo_min !== t.efectivo_min) {
     partes.push(`· adentro del período: ${fmtMinutos(t.efectivo_en_periodo_min)}`);
   }
@@ -270,7 +272,7 @@ function desglose(t: TareaRendimiento): string {
   return partes.join(" ");
 }
 
-function TablaTareas({ tareas }: { tareas: TareaRendimiento[] }) {
+function TablaTareas({ tareas, topeJornadas }: { tareas: TareaRendimiento[]; topeJornadas?: number }) {
   return (
     <>
       {/* Hasta xl, un renglón por tarea (como la solapa Tiempos): la columna derecha de
@@ -286,6 +288,7 @@ function TablaTareas({ tareas }: { tareas: TareaRendimiento[] }) {
                   {t.paso != null ? `${t.paso}. ` : ""}{t.proceso || "Proceso"}
                 </span>
                 <Estado t={t} />
+                <MarcasDeTarea reabierto={t.reabierto} cerradoMin={t.cerrado_min} abiertoDeMas={t.abierto_de_mas} topeJornadas={topeJornadas} />
                 {t.origen === "plan" && <span className="text-[10px] text-gray-400">según el plan</span>}
               </p>
               <p className="truncate text-[11px] text-gray-500">
@@ -342,7 +345,12 @@ function TablaTareas({ tareas }: { tareas: TareaRendimiento[] }) {
                     {t.fin_real ? `→ ${momentoCorto(t.fin_real)}` : t.en_curso ? "→ sigue" : "→ sin fin"}
                   </p>
                 </td>
-                <td className="px-2.5 py-1.5"><Estado t={t} /></td>
+                <td className="px-2.5 py-1.5">
+                  <span className="flex flex-wrap items-center gap-1">
+                    <Estado t={t} />
+                    <MarcasDeTarea reabierto={t.reabierto} cerradoMin={t.cerrado_min} abiertoDeMas={t.abierto_de_mas} topeJornadas={topeJornadas} />
+                  </span>
+                </td>
                 <td className="px-2.5 py-1.5 text-right tabular-nums text-gray-600 whitespace-nowrap">{fmtMinutos(t.estimado_min)}</td>
                 <td className="px-2.5 py-1.5 text-right tabular-nums font-semibold text-slate-900 whitespace-nowrap">
                   {t.sin_datos ? "—" : fmtMinutos(t.efectivo_min)}
@@ -536,7 +544,7 @@ export default function RendimientoOperario({ rendimiento, periodo, onPeriodo, n
               {r.tareas_trabajadas} {r.tareas_trabajadas === 1 ? "trabajada" : "trabajadas"}
             </span>
           </div>
-          <TablaTareas tareas={datos.tareas} />
+          <TablaTareas tareas={datos.tareas} topeJornadas={datos.tope_jornadas_abierto} />
         </>
       )}
 

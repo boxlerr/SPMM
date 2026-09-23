@@ -36,7 +36,12 @@ El período son días del taller, los dos incluidos: [desde 00:00, hasta+1 00:00
   horas trabajadas    el efectivo que cae ADENTRO del período, de todos los pasos que
                       trabajó (terminados o no), y sin contar dos veces la hora en que
                       tenía dos pasos abiertos a la vez (pasa: se arrancan todos los de
-                      una OT de una). Lo que se superpuso se informa aparte.
+                      una OT de una). Sin los días en que figura ausente y sin los pasos
+                      «en proceso» que nadie cierra hace más de TOPE_JORNADAS_ABIERTO
+                      jornadas. Es la misma cuenta que el total de la solapa Tiempos
+                      (TiemposOperarioService.horas_en_el_periodo). Lo que se superpuso, lo
+                      de los días de ausencia y lo de los pasos abiertos de más se informa
+                      aparte.
   pausas              lo que sus pasos estuvieron parados (RF-03) adentro de la jornada
                       y del período, cuántas pausas y por qué.
   días de ausencia    los de su asistencia (RF-06) en el período: corridos y laborables.
@@ -49,6 +54,15 @@ QUÉ NO ENTRA EN EL PROMEDIO NI EN LA EFICIENCIA, y se dice cuántos quedaron af
     fuera de la jornada. Dividir por cero no es una eficiencia;
   · sin estimado en la OT: entra en el promedio, pero no en la eficiencia (no hay contra
     qué comparar).
+
+Tampoco cuenta nada (ni tiempo, ni horas) un paso PENDIENTE con arranque: el sistema
+viejo o una OT migrada lo pueden traer, y no dice si alguien lo trabajó. En curso es sólo
+lo que está en proceso.
+
+UN PASO REABIERTO (terminado, vuelto a poner en proceso y terminado de nuevo) guarda un
+solo arranque y un solo fin. El tiempo en que estuvo terminado sale del historial de
+pasos de la OT y no se cuenta (ver TiemposOperarioService.cerrados_del_historial); el
+paso queda marcado en la tabla.
 
 LO QUE ESTE NÚMERO NO DICE, y la pantalla lo aclara: mide contra el tiempo estimado de
 la OT —si la estimación está mal, la eficiencia también— y quién hizo cada paso es una
@@ -66,14 +80,14 @@ from backend.application.TiempoEfectivo import (
     interseccion,
     jornada_en_palabras,
     minutos,
-    tiempo_de_un_paso,
-    tramos_de_un_paso,
 )
 from backend.application.TiemposOperarioService import (
+    TOPE_JORNADAS_ABIERTO,
     TOPE_TAREAS,
     TiemposOperarioService,
     dato_roto,
     fila_de_tarea,
+    horas_en_el_periodo,
     trabajado_en,
 )
 from backend.commons.ResponseDTO import ResponseDTO
@@ -215,37 +229,32 @@ class RendimientoOperarioService:
         periodo = [(ini_p, fin_p)]
 
         todos = await self.tiempos.pasos_atribuidos(id_operario)
-        # Un dato roto (terminado sin fin) no se sabe hasta cuándo se trabajó: para el
-        # filtro de la solapa Tiempos «sigue abierto», y acá aparecería —y contaría como
-        # trabajada— en todos los períodos que vienen. Va sólo en el que arrancó.
+        # Un dato roto (terminado sin fin, pendiente con arranque) no se sabe hasta
+        # cuándo se trabajó: para el filtro de la solapa Tiempos «sigue abierto», y acá
+        # aparecería —y contaría como trabajada— en todos los períodos que vienen. Va
+        # sólo en el que arrancó.
         pasos = [p for p in todos
                  if (ini_p <= p["inicio_real"] < fin_p if dato_roto(p)
                      else trabajado_en(p, ini_p, fin_p, ahora))]
         pausas_por_ot, pausas_disponibles, feriados = await self.tiempos.pausas_y_feriados(pasos)
+        cerrados = await self.tiempos.cerrados(pasos)
+        ausencias = await self.tiempos.ausencias(id_operario, p_desde, p_hasta, ahora.date())
 
         filas: list[dict] = []
-        efectivos: list = []        # lo trabajado adentro del período, de todos los pasos
-        suma_por_paso = 0           # lo mismo, sumado paso por paso (para ver lo superpuesto)
+        medidos: list = []          # (fila, tramos) de cada paso, para las horas
         parado: list = []           # lo pausado adentro de la jornada y del período
         parado_por_motivo: dict[str, list] = defaultdict(list)
         pausas_contadas: set = set()
 
         for p in pasos:
             fin = fecha_real(p["fin_real"])
-            t = tramos = None
-            if not dato_roto(p):
-                del_paso = self.tiempos.pausas_de(p, pausas_por_ot)
-                entrada = [(x.desde, x.hasta) for x in del_paso]
-                t = tiempo_de_un_paso(p["inicio_real"], fin, entrada, ahora=ahora, feriados=feriados)
-                tramos = tramos_de_un_paso(p["inicio_real"], fin, entrada, ahora=ahora, feriados=feriados)
+            t, tramos, del_paso = self.tiempos.medir(p, pausas_por_ot, cerrados,
+                                                     ahora=ahora, feriados=feriados)
 
             fila = fila_de_tarea(p, t)
             en_periodo = None
             if tramos is not None:
-                propios = interseccion(tramos.efectivos, periodo)
-                en_periodo = minutos(propios)
-                efectivos.extend(propios)
-                suma_por_paso += en_periodo
+                en_periodo = minutos(interseccion(tramos.efectivos, periodo))
                 for pausa, suyos in zip(del_paso, tramos.por_pausa):
                     adentro = interseccion(suyos, periodo)
                     if adentro:
@@ -262,16 +271,22 @@ class RendimientoOperarioService:
                 "eficiencia_pct": eficiencia_pct(fila["estimado_min"], fila["efectivo_min"]) if medible else None,
             })
             filas.append(fila)
+            medidos.append((fila, tramos))
 
         # Lo que sigue en curso arriba; después, lo último que terminó.
         filas.sort(key=lambda f: (f["en_curso"], f["fin_real"] or f["inicio_real"], f["inicio_real"]),
                    reverse=True)
 
         resumen = resumir(filas)
-        horas = minutos(efectivos)
+        horas = horas_en_el_periodo(medidos, periodo, ausencias)
         resumen.update({
-            "horas_trabajadas_min": horas,
-            "superpuesto_min": max(0, suma_por_paso - horas),
+            "horas_trabajadas_min": horas["horas_trabajadas_min"],
+            "superpuesto_min": horas["superpuesto_min"],
+            # Lo de sus pasos que cayó en días en que figura ausente: no se cuenta.
+            "en_ausencia_min": horas["en_ausencia_min"] if ausencias is not None else None,
+            # Pasos «en proceso» que nadie cierra hace demasiado: sus horas no se cuentan.
+            "abiertos_de_mas": horas["abiertos_de_mas"],
+            "reabiertas": sum(1 for f in filas if f["reabierto"]),
             "pausas": {
                 "minutos": minutos(parado),
                 "cantidad": len(pausas_contadas),
@@ -290,6 +305,7 @@ class RendimientoOperarioService:
                         "dias": (p_hasta - p_desde).days + 1},
             "generado": ahora,
             "jornada": jornada_en_palabras(),
+            "tope_jornadas_abierto": TOPE_JORNADAS_ABIERTO,
             # False = el servidor no tiene las pausas (RF-03): el efectivo no las descuenta.
             "pausas_disponibles": pausas_disponibles,
             # False = no tiene la asistencia (RF-06): los días de ausencia no se saben.
