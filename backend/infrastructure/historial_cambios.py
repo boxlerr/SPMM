@@ -372,6 +372,46 @@ async def dejar_dicho_cambios_de_persona(request, db, id_operario: int, antes: d
         logger.warning(f"Historial: no se pudo anotar el cambio de la persona {id_operario}: {e}")
 
 
+# ─────────────────────────── la baja ───────────────────────────
+#
+# RF-17 (23/09, pedido de Julián en la reunión con Lucas): el historial de una persona
+# tiene que contar su alta, sus cambios de nombre y su BAJA. Después del DELETE la fila
+# de `operario` ya no está, y el registro sólo decía «eliminó persona #7»: la línea de
+# tiempo de alguien dado de baja no tenía ni cómo nombrarlo. Ahora la baja deja dicho
+# quién era (nombre, apellido, categoría y sector, legibles; nada de datos personales).
+
+CAMPOS_DE_LA_BAJA = ("nombre", "apellido", "categoria", "sector")
+
+
+async def quien_era_sin_romper(db, id_operario: int) -> dict | None:
+    """{etiqueta: valor} de la persona, leído ANTES de borrarla. None si no existe o si
+    no se pudo leer: el borrado sigue igual, sin el nombre en el registro."""
+    from backend.domain.Operario import Operario
+
+    async def leer():
+        fila = (await db.execute(
+            select(*[getattr(Operario, c) for c in CAMPOS_DE_LA_BAJA]).where(Operario.id == id_operario)
+        )).first()
+        if fila is None:
+            return None
+        m = dict(fila._mapping)
+        return {ETIQUETAS_PERSONA[c]: texto_de(m.get(c)) for c in CAMPOS_DE_LA_BAJA}
+    return await _en_savepoint(db, leer)
+
+
+def dejar_dicho_baja(request, id_operario: int, antes: dict | None) -> None:
+    """Después de borrar a la persona: «dio de baja a Juan Pérez» y quién era (`antes`),
+    para que su historial la siga pudiendo nombrar. Sólo se llama si el borrado salió."""
+    try:
+        if not antes:
+            return
+        quien = " ".join(x for x in (antes.get("nombre"), antes.get("apellido")) if x).strip()
+        _dejar(request, {"frase": f"dio de baja a {quien or f'la persona #{id_operario}'}",
+                         "antes": antes})
+    except Exception as e:
+        logger.warning(f"Historial: no se pudo anotar la baja de la persona {id_operario}: {e}")
+
+
 def dejar_dicho_alta(request, *, id_entidad, frase: str | None) -> None:
     """En un alta el número todavía no está en la dirección (POST /ordenes): sin esto la
     fila del registro no se puede atar a la OT ni a la persona que creó."""

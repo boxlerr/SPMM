@@ -14,11 +14,16 @@
  * «Rendimiento por persona»; sin ella, el servidor no lo manda y la pantalla lo dice.
  * Tocar una OT de la línea de tiempo la abre en «Por orden».
  *
+ * Las personas dadas de baja (RF-17, pedido de Julián: el historial registra el alta, la
+ * baja y el cambio de nombre) ya no están en Recursos, pero se siguen pudiendo elegir:
+ * van en su propia sección, debajo, con quién y cuándo las dio de baja. Su nombre es el
+ * último que quedó en el registro. Contra el backend viejo esa sección no aparece.
+ *
  * Los legajos con archivos (documentos por persona) no están: van en la v2 (Módulo J).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, Info, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, Info, Search, UserX, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +34,7 @@ import {
     NoExiste,
     buscarPersonas,
     historialDePersona,
+    textoDeLaBaja,
     type HistorialDePersona,
     type PersonaDelHistorial,
 } from "@/lib/historial";
@@ -45,6 +51,37 @@ function AvisoNoDisponible() {
             <Info className="h-3.5 w-3.5 mt-px shrink-0" />
             El historial de cada persona llega con la próxima actualización del servidor.
         </p>
+    );
+}
+
+function FilaDePersona({ p, onElegir }: { p: PersonaDelHistorial; onElegir: () => void }) {
+    return (
+        <li>
+            <button
+                type="button"
+                onClick={onElegir}
+                className="w-full px-3 sm:px-4 py-2 flex items-center gap-3 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:bg-muted/40"
+            >
+                <span className="min-w-0 flex-1">
+                    <span className={`block text-sm truncate ${p.dada_de_baja ? "text-gray-600" : "text-gray-800"}`}>
+                        {p.nombre}
+                    </span>
+                    {p.dada_de_baja ? (
+                        <span className="block text-xs text-muted-foreground break-words">{textoDeLaBaja(p)}</span>
+                    ) : (
+                        <span className="block text-xs text-muted-foreground truncate">
+                            {[p.categoria, p.sector].filter(Boolean).join(" · ") || "Sin categoría"}
+                        </span>
+                    )}
+                </span>
+                {!p.dada_de_baja && !p.activo && (
+                    <Badge variant="outline" className="text-[10px] font-normal border-amber-200 text-amber-700 shrink-0">
+                        Ausente
+                    </Badge>
+                )}
+                <ChevronRight className="h-4 w-4 opacity-40 shrink-0" />
+            </button>
+        </li>
     );
 }
 
@@ -81,6 +118,9 @@ export function HistorialPorPersona({ refresco, onVerOT }: {
         const lista = personas ?? [];
         return buscado ? lista.filter((p) => normalizar(p.nombre).includes(buscado)) : lista;
     }, [personas, texto]);
+    // Las cargadas arriba; las dadas de baja, en su sección (el servidor ya las manda así).
+    const cargadas = useMemo(() => filtradas.filter((p) => !p.dada_de_baja), [filtradas]);
+    const bajas = useMemo(() => filtradas.filter((p) => p.dada_de_baja), [filtradas]);
 
     // ── la persona elegida ──
     const [elegida, setElegida] = useState<PersonaDelHistorial | null>(null);
@@ -128,7 +168,11 @@ export function HistorialPorPersona({ refresco, onVerOT }: {
                     <div className="min-w-0">
                         <h2 className="text-lg font-semibold flex flex-wrap items-center gap-2 break-words">
                             {p.nombre}
-                            {!p.activo && (
+                            {p.dada_de_baja ? (
+                                <Badge variant="outline" className="text-xs font-normal border-rose-200 text-rose-700">
+                                    Dada de baja
+                                </Badge>
+                            ) : !p.activo && (
                                 <Badge variant="outline" className="text-xs font-normal border-amber-200 text-amber-700">
                                     Ausente
                                 </Badge>
@@ -137,6 +181,15 @@ export function HistorialPorPersona({ refresco, onVerOT }: {
                         <p className="text-sm text-muted-foreground">
                             {[p.categoria, p.sector].filter(Boolean).join(" · ") || "Sin categoría"}
                         </p>
+                        {p.dada_de_baja && (
+                            <p className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+                                <UserX className="h-3.5 w-3.5 mt-px shrink-0" aria-hidden />
+                                <span>
+                                    {textoDeLaBaja(p)}. Ya no está en Recursos: acá se ve lo que quedó registrado
+                                    (sus ausencias se borraron con ella).
+                                </span>
+                            </p>
+                        )}
                     </div>
                     <Button variant="outline" size="sm" className="self-start shrink-0" onClick={() => setElegida(null)}>
                         <ArrowLeft className="h-4 w-4 mr-1.5" />
@@ -169,7 +222,10 @@ export function HistorialPorPersona({ refresco, onVerOT }: {
                         onPeriodo={setPeriodo}
                         tituloExport={`Auditoría · Historial de ${p.nombre}`}
                         archivoExport={`auditoria_persona_${p.nombre.replace(/\s+/g, "_").toLowerCase()}`}
-                        filtrosExport={[`Persona: ${p.nombre}${p.categoria ? ` (${p.categoria})` : ""}`]}
+                        filtrosExport={[
+                            `Persona: ${p.nombre}${p.categoria ? ` (${p.categoria})` : ""}`,
+                            ...(p.dada_de_baja ? [textoDeLaBaja(p)] : []),
+                        ]}
                         onVerOT={onVerOT}
                         vacio="No hay nada de esta persona en este período."
                     />
@@ -181,9 +237,9 @@ export function HistorialPorPersona({ refresco, onVerOT }: {
     return (
         <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-                Elegí a alguien del taller para ver su historia: cambios en su ficha, habilidades y rangos,
-                ausencias, a qué pasos lo asignaron, qué trabajó, las pausas de sus pasos y las no conformidades
-                en las que figura.
+                Elegí a alguien del taller para ver su historia: su alta, cambios en su ficha (también de
+                nombre), habilidades y rangos, ausencias, a qué pasos lo asignaron, qué trabajó, las pausas de sus
+                pasos y las no conformidades en las que figura. Las personas dadas de baja están al final.
             </p>
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
@@ -209,44 +265,41 @@ export function HistorialPorPersona({ refresco, onVerOT }: {
             <section className="rounded-lg border bg-card overflow-hidden">
                 <div className="px-4 py-2.5 border-b bg-muted/40">
                     <h3 className="text-sm font-semibold">
-                        {personas ? `${filtradas.length} ${filtradas.length === 1 ? "persona" : "personas"}` : "Personas"}
+                        {personas ? `${cargadas.length} ${cargadas.length === 1 ? "persona" : "personas"}` : "Personas"}
                     </h3>
                 </div>
                 {errorLista && !personas ? (
                     <p className="px-4 py-8 text-center text-sm text-rose-700">No se pudo cargar la lista. Probá actualizar.</p>
                 ) : personas === null ? (
                     <div className="flex items-center justify-center py-10"><Spinner className="h-6 w-6" /></div>
-                ) : filtradas.length === 0 ? (
+                ) : cargadas.length === 0 ? (
                     <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                        {texto.trim() ? `Nadie coincide con «${texto.trim()}».` : "No hay personas cargadas."}
+                        {!texto.trim()
+                            ? "No hay personas cargadas."
+                            : bajas.length > 0
+                                ? `Entre las cargadas, nadie coincide con «${texto.trim()}».`
+                                : `Nadie coincide con «${texto.trim()}».`}
                     </p>
                 ) : (
                     <ul className="divide-y">
-                        {filtradas.map((p) => (
-                            <li key={p.id}>
-                                <button
-                                    type="button"
-                                    onClick={() => setElegida(p)}
-                                    className="w-full px-3 sm:px-4 py-2 flex items-center gap-3 text-left hover:bg-muted/30 focus-visible:outline-none focus-visible:bg-muted/40"
-                                >
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block text-sm text-gray-800 truncate">{p.nombre}</span>
-                                        <span className="block text-xs text-muted-foreground truncate">
-                                            {[p.categoria, p.sector].filter(Boolean).join(" · ") || "Sin categoría"}
-                                        </span>
-                                    </span>
-                                    {!p.activo && (
-                                        <Badge variant="outline" className="text-[10px] font-normal border-amber-200 text-amber-700 shrink-0">
-                                            Ausente
-                                        </Badge>
-                                    )}
-                                    <ChevronRight className="h-4 w-4 opacity-40 shrink-0" />
-                                </button>
-                            </li>
-                        ))}
+                        {cargadas.map((p) => <FilaDePersona key={p.id} p={p} onElegir={() => setElegida(p)} />)}
                     </ul>
                 )}
             </section>
+
+            {bajas.length > 0 && (
+                <section className="rounded-lg border bg-card overflow-hidden">
+                    <div className="px-4 py-2.5 border-b bg-muted/40 flex items-center gap-2">
+                        <UserX className="h-4 w-4 text-rose-600 shrink-0" aria-hidden />
+                        <h3 className="text-sm font-semibold">
+                            Dadas de baja <span className="font-normal text-muted-foreground tabular-nums">· {bajas.length}</span>
+                        </h3>
+                    </div>
+                    <ul className="divide-y">
+                        {bajas.map((p) => <FilaDePersona key={p.id} p={p} onElegir={() => setElegida(p)} />)}
+                    </ul>
+                </section>
+            )}
         </div>
     );
 }

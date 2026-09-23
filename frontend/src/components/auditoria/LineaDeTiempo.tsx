@@ -17,7 +17,7 @@
 import { useMemo, useState } from "react";
 import {
     AlertTriangle, Award, Boxes, CalendarRange, CalendarX, Circle, FileText, Info, ListChecks,
-    ListOrdered, Package, PauseCircle, Pencil, PlusCircle, Truck, UserCheck, Wrench,
+    ListOrdered, Package, PauseCircle, Pencil, PlusCircle, Truck, UserCheck, UserX, Wrench,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
@@ -41,6 +41,7 @@ import {
 
 const ICONO: Record<string, typeof Circle> = {
     alta: PlusCircle,
+    baja: UserX,
     cabecera: Pencil,
     ficha: Pencil,
     estado: ListChecks,
@@ -60,6 +61,7 @@ const ICONO: Record<string, typeof Circle> = {
 
 const COLOR: Record<string, string> = {
     alta: "text-emerald-600 bg-emerald-50 ring-emerald-100",
+    baja: "text-rose-600 bg-rose-50 ring-rose-100",
     cabecera: "text-sky-600 bg-sky-50 ring-sky-100",
     ficha: "text-sky-600 bg-sky-50 ring-sky-100",
     estado: "text-indigo-600 bg-indigo-50 ring-indigo-100",

@@ -612,7 +612,7 @@ async def test_la_persona_cuenta_su_ficha_sus_ausencias_y_su_trabajo(api):
     h = await _historial(api, "personas", 7)
     assert h["avisos"] == []
     assert h["persona"] == {"id": 7, "nombre": "Juan Perez", "categoria": "OFICIAL", "sector": None,
-                            "activo": True}
+                            "activo": True, "dada_de_baja": False, "baja": None}
     cuandos = [e["cuando"] for e in h["eventos"]]
     assert cuandos == sorted(cuandos, reverse=True)
     assert not [e for e in h["eventos"] if "#8" in e["titulo"]]
@@ -852,3 +852,183 @@ async def test_el_alta_de_una_persona_queda_atada_a_su_numero(app_real):
     fila = await _ultima(app_real.sesiones, "/operarios", "POST")
     assert fila.id_entidad == str(r.json()["data"]["id"])
     assert fila.descripcion == "Lucas Longchamps dio de alta a Rita Luz"
+
+
+# ─────────────────────────── alta, cambio de nombre y baja (RF-17) ───────────────────────────
+#
+# Julián, en la reunión con Lucas: el historial tiene que registrar el ALTA, la BAJA y el
+# CAMBIO DE NOMBRE de cada persona. Una persona dada de baja ya no tiene fila en
+# `operario`: se la sigue pudiendo elegir y su línea de tiempo sale entera, con el nombre
+# que quedó en el registro.
+
+def _fila(id_, cuando, ruta, metodo, *, estado=200, detalle=None, descripcion="", usuario=LUCAS):
+    return {"id": id_, "creado_en": d(cuando), "usuario": usuario, "id_usuario": 1, "metodo": metodo,
+            "ruta": ruta, "estado": estado, "descripcion": descripcion,
+            "detalle": json.dumps(detalle, ensure_ascii=False) if detalle is not None else None}
+
+
+def test_la_historia_de_la_persona_dice_como_se_llamaba_en_cada_momento():
+    movs = [
+        # Un alta de antes del 23/09: sin cuerpo legible, el nombre sale de la frase.
+        _fila(1, "2026-09-01 08:00", "/operarios", "POST", descripcion=f"{LUCAS} creó persona — Juan Perez"),
+        # Un guardado viejo (sin antes/después): el cambio se deduce contra el alta.
+        _fila(2, "2026-09-10 08:00", "/operarios/9", "PUT",
+              detalle={"datos": {"nombre": "Juan", "apellido": "Pérez", "categoria": "OFICIAL"}}),
+        # Uno nuevo que sólo tocó el apellido: el nombre sale del cuerpo.
+        _fila(3, "2026-09-23 08:00", "/operarios/9", "PUT",
+              detalle={"antes": {"apellido": "Pérez"}, "despues": {"apellido": "Pereyra"},
+                       "datos": {"nombre": "Juan", "apellido": "Pereyra", "categoria": "OFICIAL"}}),
+        # Uno que no cambió el nombre.
+        _fila(4, "2026-09-23 09:00", "/operarios/9", "PUT",
+              detalle={"antes": {"categoría": "OFICIAL"}, "despues": {"categoría": "MEDIO OFICIAL"},
+                       "datos": {"nombre": "Juan", "apellido": "Pereyra", "categoria": "MEDIO OFICIAL"}}),
+        # La baja que no se pudo (pedía confirmar), la que sí y un segundo clic.
+        _fila(5, "2026-09-23 10:00", "/operarios/9", "DELETE", estado=409),
+        _fila(6, "2026-09-23 10:01", "/operarios/9", "DELETE",
+              detalle={"antes": {"nombre": "Juan", "apellido": "Pereyra", "categoría": "MEDIO OFICIAL",
+                                 "sector": "MECANIZADO"}}),
+        _fila(7, "2026-09-23 10:02", "/operarios/9", "DELETE"),
+    ]
+    h = H.historia_de_la_persona(list(reversed(movs)))  # el orden de entrada no importa
+    assert h["nombre"] == "Juan Pereyra"
+    assert h["nombres"] == ["Juan Perez", "Juan Pérez", "Juan Pereyra"]
+    assert h["renombres"] == {2: ("Juan Perez", "Juan Pérez", True), 3: ("Juan Pérez", "Juan Pereyra", False)}
+    assert h["al_momento"][1] == "Juan Perez" and h["al_momento"][6] == "Juan Pereyra"
+    assert h["baja"]["id"] == 6
+    assert h["identidad"]["categoria"] == "MEDIO OFICIAL" and h["identidad"]["sector"] == "MECANIZADO"
+
+    p = H.persona_dada_de_baja(9, h)
+    assert p == {"id": 9, "nombre": "Juan Pereyra", "categoria": "MEDIO OFICIAL", "sector": "MECANIZADO",
+                 "activo": False, "dada_de_baja": True,
+                 "baja": {"cuando": "2026-09-23T10:01:00", "quien": LUCAS}}
+    # Sin nada que la nombre, igual se la puede elegir.
+    assert H.persona_dada_de_baja(9, H.historia_de_la_persona([]))["nombre"] == "Persona #9"
+
+
+async def _lista(cliente):
+    r = await cliente.get("/auditoria/historial/personas")
+    assert r.status_code == 200, r.text
+    return r.json()["personas"]
+
+
+async def test_alta_cambio_de_nombre_y_baja_quedan_en_su_linea_de_tiempo(app_real):
+    """Por los endpoints de verdad y el middleware de verdad: dar de alta a Pedro Gonzalez,
+    corregirle el apellido a González, darlo de baja (primero pide confirmar, después se
+    fuerza) y, con la persona ya borrada, que siga en la lista y cuente las tres cosas."""
+    r = await app_real.post("/operarios", json={"nombre": "Pedro", "apellido": "Gonzalez",
+                                                 "categoria": "OFICIAL", "sector": "MECANIZADO"})
+    assert r.status_code == 200, r.text
+    nuevo = r.json()["data"]["id"]
+    r = await app_real.put(f"/operarios/{nuevo}", json={
+        "nombre": "Pedro", "apellido": "González", "categoria": "OFICIAL", "sector": "MECANIZADO",
+        "disponible": True, "hora_inicio": "07:00", "hora_fin": "16:00", "dni": "30111222"})
+    assert r.status_code == 200, r.text
+    # Lo que tiene en otras tablas con su número: un paso elegido a mano (se le suelta al
+    # borrarlo) y un plan (que no se borra).
+    async with app_real.sesiones() as s:
+        await s.execute(text("UPDATE orden_trabajo_proceso SET id_operario = :o WHERE id = :p"),
+                        {"o": nuevo, "p": OTP2})
+        s.add(Planificacion(orden_id=OT, proceso_id=101, id_orden_trabajo_proceso=OTP2, id_operario=nuevo,
+                            inicio_min=120, fin_min=180, duracion_min=60, prioridad_peso=1,
+                            nombre_proceso="FRESA", id_planificacion_lote=LOTE_SEPT,
+                            descripcion_lote="Planificación septiembre 2026",
+                            creado_en=d("2026-09-14 17:00")))
+        await s.commit()
+
+    r = await app_real.delete(f"/operarios/{nuevo}")
+    assert r.status_code == 409, r.text  # avisar, no bloquear: pide confirmar
+    r = await app_real.delete(f"/operarios/{nuevo}", params={"forzar": "true"})
+    assert r.status_code == 200 and r.json()["status"], r.text
+
+    # La fila del registro: la frase y quién era, sin datos personales.
+    fila = await _ultima(app_real.sesiones, f"/operarios/{nuevo}", "DELETE")
+    assert fila.descripcion == "Lucas Longchamps dio de baja a Pedro González"
+    assert json.loads(fila.detalle)["antes"] == {"nombre": "Pedro", "apellido": "González",
+                                                 "categoría": "OFICIAL", "sector": "MECANIZADO"}
+    assert "30111222" not in fila.detalle
+
+    # 1. Sigue en la lista para elegir, después de las cargadas y marcada.
+    personas = await _lista(app_real)
+    assert [p["dada_de_baja"] for p in personas] == [False, False, True]
+    baja = personas[-1]
+    assert baja["id"] == nuevo and baja["nombre"] == "Pedro González" and baja["activo"] is False
+    assert baja["categoria"] == "OFICIAL" and baja["sector"] == "MECANIZADO"
+    assert baja["baja"]["quien"] == "Lucas Longchamps" and baja["baja"]["cuando"]
+    r = await app_real.get("/auditoria/historial/personas", params={"buscar": "gonzá"})
+    assert [p["id"] for p in r.json()["personas"]] == [nuevo]
+
+    # 2. Su línea de tiempo, sin la fila de `operario`.
+    r = await app_real.get(f"/auditoria/historial/personas/{nuevo}")
+    assert r.status_code == 200, r.text
+    h = r.json()
+    assert h["avisos"] == []
+    assert h["persona"] == baja
+    por_titulo = {e["titulo"]: e for e in h["eventos"]}
+    alta = por_titulo["dio de alta a Pedro Gonzalez"]
+    renombre = por_titulo["cambió el nombre de Pedro Gonzalez a Pedro González"]
+    fin = por_titulo["dio de baja a Pedro González"]
+    assert (alta["tipo"], renombre["tipo"], fin["tipo"]) == ("alta", "ficha", "baja")
+    assert all(e["quien"] == "Lucas Longchamps" and e["salio_bien"] for e in (alta, renombre, fin))
+    assert alta["cuando"] <= renombre["cuando"] <= fin["cuando"]
+    assert not renombre["deducido"]
+    # Del mismo guardado, lo que no es el nombre: el DNI se dice que cambió, no a qué.
+    assert not [l for l in renombre["lineas"] if l.startswith(("nombre:", "apellido:"))]
+    assert "30111222" not in r.text
+    # El intento que pidió confirmar, también.
+    intento = por_titulo["intentó dar de baja a Pedro González (no se pudo: error 409)"]
+    assert intento["tipo"] == "baja" and not intento["salio_bien"] and "confirmar" in intento["nota"]
+    assert {t["tipo"] for t in h["tipos"]} >= {"alta", "ficha", "baja"}
+    # Lo demás no se rompe: el paso que se le soltó al borrarlo (del historial de pasos,
+    # que la nombra) y el plan que le había dado un paso (que conserva su número).
+    soltado = por_titulo["le sacó el paso 2 — FRESA de la OT 15300"]
+    assert soltado["quien"] == "Lucas Longchamps" and soltado["ot"] == {"id": OT, "numero": 15300}
+    assert por_titulo["confirmó el plan «Planificación septiembre 2026», que le dio 1 paso en 1 OT"]
+
+    # Las cargadas siguen como antes.
+    h7 = await _historial(app_real, "personas", 7)
+    assert h7["persona"]["dada_de_baja"] is False and h7["persona"]["nombre"] == "Juan Perez"
+    r = await app_real.get("/auditoria/historial/personas/424242")
+    assert r.status_code == 404
+
+
+async def test_una_baja_de_antes_se_arma_con_lo_que_quedo_en_el_registro(api, base):
+    """Filas escritas antes de este cambio: el alta sin número (se la reconoce por el
+    nombre), dos guardados viejos (el segundo le corrigió el apellido) y una baja que no
+    dice a quién. El nombre sale de los guardados, y la baja igual se cuenta.
+
+    El límite, a propósito: si el primer guardado registrado ya traía otro nombre que el
+    del alta, el alta no se puede atar (no hay cómo saber que era ella) y no se adivina."""
+    async with base() as s:
+        s.add_all([
+            _mov(d("2026-09-02 08:00:00"), "/operarios", metodo="POST", accion="creó", entidad="persona",
+                 id_entidad=None, descripcion=f"{LUCAS} creó persona — Marta Diaz",
+                 detalle={"datos": {"nombre": "Marta", "apellido": "Diaz", "categoria": "MEDIO OFICIAL"}}),
+            _mov(d("2026-09-05 10:00:00"), "/operarios/31", entidad="persona", id_entidad="31",
+                 detalle={"datos": {"nombre": "Marta", "apellido": "Diaz", "categoria": "MEDIO OFICIAL"}}),
+            _mov(d("2026-09-12 10:00:00"), "/operarios/31", entidad="persona", id_entidad="31",
+                 detalle={"datos": {"nombre": "Marta", "apellido": "Díaz", "categoria": "MEDIO OFICIAL"}}),
+            _mov(d("2026-09-20 16:00:00"), "/operarios/31", metodo="DELETE", accion="eliminó",
+                 entidad="persona", id_entidad="31", descripcion=f"{LUCAS} eliminó persona #31"),
+            # Un DELETE que salió mal de alguien que nunca existió: no es una baja.
+            _mov(d("2026-09-20 16:05:00"), "/operarios/32", metodo="DELETE", accion="eliminó",
+                 entidad="persona", id_entidad="32", estado=500),
+        ])
+        await s.commit()
+
+    r = await api.get("/auditoria/historial/personas")
+    personas = r.json()["personas"]
+    assert [(p["id"], p["nombre"], p["dada_de_baja"]) for p in personas] == [
+        (8, "Ana Gomez", False), (7, "Juan Perez", False), (31, "Marta Díaz", True)]
+    assert personas[-1]["baja"] == {"cuando": "2026-09-20T16:00:00", "quien": LUCAS}
+
+    h = await _historial(api, "personas", 31)
+    assert h["persona"]["nombre"] == "Marta Díaz" and h["persona"]["categoria"] == "MEDIO OFICIAL"
+    titulos = [e["titulo"] for e in h["eventos"]]
+    assert titulos == ["dio de baja a Marta Díaz", "cambió el nombre de Marta Diaz a Marta Díaz",
+                       "guardó la ficha de Marta Diaz", "dio de alta a Marta Diaz"]
+    alta, renombre = h["eventos"][3], h["eventos"][1]
+    assert alta["deducido"] and "por el nombre" in alta["nota"]
+    assert renombre["deducido"] and renombre["lineas"] == []
+    # El 32 nunca existió: el DELETE que falló no alcanza para inventarle una historia.
+    r = await api.get("/auditoria/historial/personas/32")
+    assert r.status_code == 404

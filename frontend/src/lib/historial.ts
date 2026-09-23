@@ -82,6 +82,13 @@ export interface PersonaDelHistorial {
     categoria: string | null;
     sector: string | null;
     activo: boolean;
+    /**
+     * Ya no está en Recursos: se borró (RF-17). El nombre es el último que quedó en el
+     * registro. Contra el backend viejo no viene y se toma como `false`.
+     */
+    dada_de_baja: boolean;
+    /** Cuándo y quién la dio de baja (`quien` null = no quedó registrado). */
+    baja: { cuando: string | null; quien: string | null } | null;
 }
 
 export interface HistorialDeOrden extends RespuestaComun {
@@ -180,14 +187,35 @@ export async function historialDeOrden(id: number, p: PeriodoAuditoria, senal?: 
     return { ...comun(data), orden: data?.orden };
 }
 
+/** Lo que falta de una persona, relleno: el backend viejo no manda la baja. */
+function persona(p: any): PersonaDelHistorial {
+    return {
+        ...p,
+        activo: !!p?.activo,
+        dada_de_baja: !!p?.dada_de_baja,
+        baja: p?.baja && typeof p.baja === "object"
+            ? { cuando: p.baja.cuando ?? null, quien: p.baja.quien ?? null }
+            : null,
+    };
+}
+
+/** Las cargadas y, después, las dadas de baja (así las ordena el servidor). */
 export async function buscarPersonas(senal?: AbortSignal): Promise<PersonaDelHistorial[]> {
     const data = await pedir<any>("/auditoria/historial/personas", null, senal);
-    return Array.isArray(data?.personas) ? data.personas : [];
+    return Array.isArray(data?.personas) ? data.personas.map(persona) : [];
 }
 
 export async function historialDePersona(id: number, p: PeriodoAuditoria, senal?: AbortSignal): Promise<HistorialDePersona> {
     const data = await pedir<any>(`/auditoria/historial/personas/${id}`, conPeriodo(p), senal);
-    return { ...comun(data), persona: data?.persona };
+    return { ...comun(data), persona: data?.persona ? persona(data.persona) : data?.persona };
+}
+
+/** «Dada de baja el 23/09/2026 por Lucas Longchamps» (sin autor registrado, sin el «por»). */
+export function textoDeLaBaja(p: Pick<PersonaDelHistorial, "baja">): string {
+    const cuando = p.baja?.cuando;
+    const fecha = cuando ? ` el ${cuando.slice(8, 10)}/${cuando.slice(5, 7)}/${cuando.slice(0, 4)}` : "";
+    const quien = p.baja?.quien ? ` por ${p.baja.quien}` : "";
+    return `Dada de baja${fecha}${quien}`;
 }
 
 // ─────────────────────────── para leer ───────────────────────────

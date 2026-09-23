@@ -43,7 +43,7 @@ async def crear_operario(operario_dto: OperarioRequestDTO, request: Request, db=
 
 # 🔹 DELETE /operarios/{id}
 @router.delete("/operarios/{id}")
-async def eliminar_operario(id: int, forzar: bool = False, db=Depends(get_db)):
+async def eliminar_operario(id: int, request: Request, forzar: bool = False, db=Depends(get_db)):
     """Borra una persona.
 
     Si tiene categorías, habilidades o pasos elegidos a mano, sin `forzar` responde
@@ -51,8 +51,15 @@ async def eliminar_operario(id: int, forzar: bool = False, db=Depends(get_db)):
     contrato que DELETE /procesos/{id}.
     """
     logger.info(f"API - Inicio DELETE /operarios/{id} (forzar={forzar})")
+    # RF-17: quién era, leído ANTES de borrarla. Después la fila ya no está y el
+    # historial de la persona dada de baja no tendría cómo nombrarla. Nunca frena el
+    # borrado (historial_cambios.quien_era_sin_romper).
+    antes = await historial_cambios.quien_era_sin_romper(db, id)
     service = OperarioService(db)
-    return await service.eliminarOperario(id, forzar=forzar)
+    resultado = await service.eliminarOperario(id, forzar=forzar)
+    if getattr(resultado, "status", False):
+        historial_cambios.dejar_dicho_baja(request, id, antes)
+    return resultado
 
 
 # 🔹 GET /operarios
