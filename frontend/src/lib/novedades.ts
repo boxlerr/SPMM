@@ -47,6 +47,36 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "planificar-dias-reales",
+        fecha: "2026-09-23",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Al planificar ves las horas, los días de trabajo y los días hábiles reales que lleva lo que tildaste",
+        detalle:
+            "Arriba de «Planificar órdenes» ahora hay tres números: las horas de trabajo, esas horas pasadas a jornadas (sube con cada OT que sumás) y cuántos días hábiles lleva de verdad («entre 7 y 9 días hábiles, hasta el lun 6/10»). Antes decía «≈ 4,9 días con 12 operarios» y no se movía, porque repartía todo entre todos como si cualquiera hiciera cualquier cosa. La cuenta nueva mira quién sabe hacer cada paso, el orden de los pasos y que una máquina hace una cosa a la vez; si pasás el mouse te dice quién marca el ritmo (por ejemplo, el único que sabe plegar). Si elegís un rango de fechas, te avisa cuántas OT entran («Entran 26 de 39 OT hasta el 30/9»): las que no entran quedan afuera del plan y en la vista previa podés forzarlas. Al lado de «Limpiar filtros» está «Ver solo las tildadas». Y en la vista previa, los días hábiles ya no cuentan los sábados si nadie los trabaja, y la carga de cada persona se compara contra lo que trabaja en esos días, no contra 44 horas fijas.",
+        href: "/operaciones",
+    },
+    {
+        id: "ir-a-arreglarlo-lleva-a-la-fila",
+        fecha: "2026-09-23",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "«Ir a arreglarlo» te lleva justo a lo que hay que tocar, y Recursos ya no queda en blanco",
+        detalle:
+            "Cuando tocás «Ir a arreglarlo» en un aviso del plan, Recursos se abre mostrando solo lo que nombra el aviso (el proceso, o las tres fresadoras), resaltado y desplegado, con el aviso y qué hacer arriba. Antes el de «Preparación de pintura» llevaba a una pantalla que decía «No se encontraron procesos», porque el nombre venía con tilde y en la lista está sin tilde. Si el aviso nombra varias máquinas, al guardar una se abre la siguiente con el rango propuesto ya tildado. Si un filtro deja la lista vacía, te dice qué filtro está puesto y te deja sacarlo con un toque. Y el buscador de procesos encuentra el nombre con o sin tildes.",
+        href: "/recursos",
+    },
+    {
+        id: "planos-del-drive-22-09",
+        fecha: "2026-09-23",
+        tipo: "mejora",
+        seccion: "Planos",
+        titulo: "Entraron los planos que se subieron al Drive el 22/9",
+        detalle:
+            "Se trajeron los 91 planos y fotos de las 46 carpetas nuevas del Drive. Con eso, de las 214 órdenes abiertas 196 tienen plano para mirar (antes 180). Las que siguen «Sin plano» son las que no tienen carpeta, o la carpeta está vacía, o solo tiene archivos DXF: para que se vean hace falta el PDF o una foto. Ojo: una carpeta nueva en el Drive todavía no entra sola; hay que avisar para que se traiga.",
+        href: "/planos",
+    },
+    {
         id: "listas-de-ordenes-abren-al-toque",
         fecha: "2026-09-23",
         tipo: "mejora",
