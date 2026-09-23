@@ -11,7 +11,8 @@ Copias de seguridad (RF-19): la solapa «Copias de seguridad» de Configuración
                                                     la copia no está firmada, confirmarlo
                                                     aparte)
     GET  /backups/automaticas                       las copias que se guardaron solas
-                                                    antes de cada restauración
+                                                    antes de cada restauración (quedan
+                                                    las últimas 10)
     GET  /backups/automaticas/{nombre}/descargar    bajar una de ésas
 
 QUIÉN
@@ -34,6 +35,10 @@ está todo ahora. Se comprueba, no se le cree:
     tiene que ser la misma que la de esa descarga: si alguien guardó algo después, no
     coincide y hay que volver a bajarla. Si no, eso se perdería sin copia.
 Nunca se restaura sin una copia de lo que había.
+
+Después del commit, y sólo si la restauración terminó bien, se borran las automáticas que
+pasen de las 10 más nuevas (deposito_copias.podar_automaticas); cuáles, queda en la
+auditoría de la restauración. Si eso falla, la restauración no cambia.
 
 AUDITORÍA
 
@@ -88,7 +93,11 @@ from backend.infrastructure.copias_de_seguridad import (
     revisar_copia,
 )
 from backend.infrastructure.db import SessionLocal
-from backend.infrastructure.deposito_copias import DepositoEnStorage
+from backend.infrastructure.deposito_copias import (
+    AUTOMATICAS_QUE_QUEDAN,
+    DepositoEnStorage,
+    podar_automaticas,
+)
 
 router = APIRouter(prefix="/backups")
 
@@ -386,7 +395,8 @@ async def estado(deposito=Depends(get_deposito)):
     return ResponseDTO(data={
         "version_formato": VERSION,
         "limite_subida_mb": LIMITE_SUBIDA // (1024 * 1024),
-        "copia_automatica": {"disponible": deposito.disponible(), "donde": deposito.donde},
+        "copia_automatica": {"disponible": deposito.disponible(), "donde": deposito.donde,
+                             "quedan": AUTOMATICAS_QUE_QUEDAN},
         "minutos_descarga_manual": int(VENTANA_DESCARGA_MANUAL.total_seconds() // 60),
     })
 
@@ -627,6 +637,15 @@ async def restaurar(
             request.state.auditoria = {"despues": {"archivo": archivo.filename, "motivo": mensaje}}
             raise _error(500, mensaje, "restauracion")
 
+    # Ya restaurada: recién ahora se borran las automáticas que sobran. Si falla, la
+    # restauración no cambia (ver deposito_copias, «Cuántas se guardan»).
+    automaticas_borradas: list[str] = []
+    if copia_previa.get("nombre"):
+        try:
+            automaticas_borradas = await podar_automaticas(deposito, copia_previa["nombre"])
+        except Exception as e:
+            logger.warning(f"Copias de seguridad: no se pudieron borrar las automáticas viejas: {e}")
+
     filas = resultado["filas_por_tabla"]
     request.state.auditoria = {
         "frase": (
@@ -643,6 +662,7 @@ async def restaurar(
             "con_usuarios": incluir_usuarios,
             "copia_previa": copia_previa.get("nombre") or copia_previa.get("donde"),
             "filas": filas,
+            **({"automaticas_borradas": automaticas_borradas} if automaticas_borradas else {}),
         },
     }
     return ResponseDTO(data={

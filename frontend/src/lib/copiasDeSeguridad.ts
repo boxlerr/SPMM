@@ -17,6 +17,9 @@ export interface CopiaAutomaticaDisponible {
   disponible: boolean;
   /** Dónde queda, en castellano: «el almacenamiento de Supabase (…)». */
   donde: string;
+  /** Cuántas se guardan: las más viejas se borran solas. El backend de antes no lo
+   *  manda (y las guardaba todas): sin el dato, la pantalla no promete nada. */
+  quedan?: number;
 }
 
 /** GET /backups/estado */

@@ -75,6 +75,7 @@ from backend.domain.Proceso import Proceso
 from backend.domain.Sector import Sector
 from backend.domain.Usuario import Usuario
 from backend.infrastructure import copias_de_seguridad as copias
+from backend.infrastructure import deposito_copias
 from backend.infrastructure import storage_planos
 from backend.infrastructure.db import Base
 from backend.presentation import CopiaSeguridadAPI, PermisosAPI, main
@@ -291,6 +292,11 @@ class DepositoDePrueba:
 
     async def bajar(self, nombre):
         return self.guardadas[nombre]
+
+    async def borrar(self, nombre):
+        if not self.anda:
+            raise RuntimeError("Storage HTTP 500")
+        del self.guardadas[nombre]
 
 
 @pytest_asyncio.fixture(params=MOTORES)
@@ -1003,6 +1009,101 @@ async def test_las_copias_automaticas_se_listan_y_se_bajan(cliente):
     assert r.status_code == 200 and r.content == cliente.deposito.guardadas[automatica["nombre"]]
     r = await cliente.get("/backups/automaticas/..%2F..%2Fplanos%2Fx/descargar", headers=ADMIN)
     assert r.status_code == 404
+
+
+# ─────────────────────────── cuántas automáticas quedan ───────────────────────────
+
+
+def _automatica(mes: int, dia: int) -> str:
+    return copias.nombre_de_copia(datetime(2026, mes, dia, 9, 30, 15), antes_de_restaurar=True)
+
+
+def test_quedan_las_diez_automaticas_mas_nuevas():
+    viejas = [_automatica(1, d) for d in range(1, 13)]  # 12, del 1 al 12 de enero
+    recien = _automatica(9, 22)
+    ajena = "spmm_backup_2026-01-01_0900.zip"  # la forma de una bajada a mano
+    sobran = deposito_copias.automaticas_de_sobra(viejas + [recien, ajena, "otra-cosa.zip"], recien)
+    # 13 automáticas: quedan la recién y las 9 más nuevas; se van las 3 del 1 al 3.
+    assert sorted(sobran) == [_automatica(1, 1), _automatica(1, 2), _automatica(1, 3)]
+    assert recien not in sobran and ajena not in sobran
+
+
+def test_sin_la_recien_en_la_lista_no_se_borra_nada():
+    viejas = [_automatica(1, d) for d in range(1, 20)]
+    assert deposito_copias.automaticas_de_sobra(viejas, _automatica(9, 22)) == []
+    # Con el reloj corrido, la recién puede no ser la más nueva: igual no se borra.
+    recien = _automatica(1, 1)
+    assert recien not in deposito_copias.automaticas_de_sobra(viejas, recien)
+
+
+async def test_el_deposito_de_verdad_solo_borra_automaticas(monkeypatch):
+    borradas = []
+
+    async def borrar(ruta):
+        borradas.append(ruta)
+
+    monkeypatch.setattr(storage_planos, "borrar", borrar)
+    deposito = deposito_copias.DepositoEnStorage()
+    for nombre in ("spmm_backup_2026-01-01_0900.zip", "../planos/x.pdf", "articulo/1/a.pdf"):
+        with pytest.raises(ValueError):
+            await deposito.borrar(nombre)
+    await deposito.borrar(_automatica(1, 1))
+    assert borradas == ["copias-de-seguridad/" + _automatica(1, 1)]
+
+
+async def test_al_restaurar_se_borran_las_automaticas_que_sobran(cliente):
+    viejas = {_automatica(1, d): b"vieja" for d in range(1, 13)}
+    ajena = "spmm_backup_2026-01-01_0900.zip"
+    cliente.deposito.guardadas.update(viejas)
+    cliente.deposito.guardadas[ajena] = b"a mano"
+    copia = await _bajar(cliente)
+
+    r = await _restaurar(cliente, copia)
+    assert r.status_code == 200, r.text
+    recien = r.json()["data"]["copia_previa"]["nombre"]
+    automaticas = [n for n in cliente.deposito.guardadas if n.endswith("_antes-de-restaurar.zip")]
+    assert len(automaticas) == 10 and recien in automaticas
+    assert ajena in cliente.deposito.guardadas
+    borradas = sorted(set(viejas) - set(automaticas))
+    assert borradas == [_automatica(1, d) for d in (1, 2, 3)]
+    # Y queda anotado cuáles se borraron.
+    (fila,) = [f for (f,) in await _leer(cliente, select(AuditoriaMovimiento).where(
+        AuditoriaMovimiento.ruta == "/backups/restauracion"))]
+    assert sorted(json.loads(fila.detalle)["despues"]["automaticas_borradas"]) == borradas
+
+
+async def test_si_borrar_falla_la_restauracion_queda_igual(cliente, monkeypatch):
+    cliente.deposito.guardadas.update({_automatica(1, d): b"vieja" for d in range(1, 13)})
+    copia = await _bajar(cliente)
+
+    async def no_anda(_nombre):
+        raise RuntimeError("Storage HTTP 500")
+
+    monkeypatch.setattr(cliente.deposito, "borrar", no_anda)
+    r = await _restaurar(cliente, copia)
+    assert r.status_code == 200, r.text
+    assert len(cliente.deposito.guardadas) == 13  # las 12 de antes y la nueva
+
+
+async def test_si_la_restauracion_falla_no_se_borra_ninguna(cliente, monkeypatch):
+    viejas = {_automatica(1, d): b"vieja" for d in range(1, 13)}
+    cliente.deposito.guardadas.update(viejas)
+    copia = await _bajar(cliente)
+
+    async def falla_despues_de_la_copia(conn, esquema, archivo, revision, **kw):
+        await kw["antes_de_borrar"]()  # la automática se guarda...
+        raise RuntimeError("se cortó la conexión")  # ...y la restauración no termina
+
+    monkeypatch.setattr(CopiaSeguridadAPI, "restaurar_copia", falla_despues_de_la_copia)
+    r = await _restaurar(cliente, copia)
+    assert r.status_code == 500, r.text
+    assert set(viejas) <= set(cliente.deposito.guardadas)
+    assert len(cliente.deposito.guardadas) == 13
+
+
+async def test_el_estado_dice_cuantas_automaticas_quedan(cliente):
+    r = await cliente.get("/backups/estado", headers=ADMIN)
+    assert r.json()["data"]["copia_automatica"]["quedan"] == 10
 
 
 # ─────────────────────────── piezas sueltas ───────────────────────────

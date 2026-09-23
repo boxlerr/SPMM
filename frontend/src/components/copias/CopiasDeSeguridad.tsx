@@ -744,6 +744,9 @@ export default function CopiasDeSeguridad() {
               <p className="text-sm text-gray-600 mt-1">
                 Cada vez que se restaura, antes se guarda sola una copia de cómo estaba todo. Para deshacer una
                 restauración: descargá la de ese momento y restaurala acá arriba.
+                {estado.copia_automatica.quedan
+                  ? ` Quedan las últimas ${estado.copia_automatica.quedan}: al guardar una nueva, la más vieja se borra sola.`
+                  : ""}
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={() => void cargarAutomaticas()} className="shrink-0 self-start">

@@ -18,7 +18,7 @@ import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import type { ColumnaExport } from "@/lib/exportar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { ClavePeriodo } from "@/lib/asistencia";
+import { mostrarSolapa, type ClavePeriodo } from "@/lib/asistencia";
 import AsistenciaOperario, { useAsistencia } from "./AsistenciaOperario";
 import TiemposOperario, { useTiempos } from "./TiemposOperario";
 import RendimientoOperario, { useRendimiento } from "./RendimientoOperario";
@@ -139,9 +139,10 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   const tiempos = useTiempos(operario?.id, periodoTiempos, versionPasos);
   // El reporte junta las dos cosas (pasos y ausencias): se vuelve a pedir con cualquiera.
   const rendimiento = useRendimiento(operario?.id, periodoRendimiento, versionPasos + versionEstado, veRendimiento);
-  const hayTiempos = tiempos.estado !== "no";
-  const hayAsistencia = asistencia.estado !== "no";
-  const hayRendimiento = rendimiento.estado !== "no";
+  // Cargando no se sabe si el backend las tiene: ver `mostrarSolapa`.
+  const hayTiempos = mostrarSolapa("tiempos", tiempos.estado);
+  const hayAsistencia = mostrarSolapa("asistencia", asistencia.estado);
+  const hayRendimiento = mostrarSolapa("rendimiento", rendimiento.estado);
   const solapaVisible =
     (solapa === "tiempos" && !hayTiempos) || (solapa === "asistencia" && !hayAsistencia)
       || (solapa === "rendimiento" && !hayRendimiento) ? "ordenes" : solapa;
@@ -777,19 +778,21 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                 className="flex-1 flex flex-col bg-white overflow-hidden min-h-[70vh] md:min-h-0"
               >
                 {/* RF-06. Las solapas sólo aparecen si hay más de una: con un backend de
-                    antes, la ficha queda exactamente como estaba. */}
+                    antes, la ficha queda exactamente como estaba.
+                    En el teléfono las cuatro no entran en un renglón (a 375px
+                    «Rendimiento» quedaba cortada contra el borde): bajan de renglón. */}
                 {(hayTiempos || hayAsistencia || hayRendimiento) && (
-                  <TabsList className="mx-3 mt-2 mb-0 h-9 shrink-0 justify-start gap-1 rounded-xl bg-gray-100/60 p-1 self-start max-w-[calc(100%-1.5rem)] overflow-x-auto">
-                    <TabsTrigger value="ordenes" className="h-7 rounded-lg px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                  <TabsList className="mx-3 mt-2 mb-0 h-auto min-h-9 shrink-0 flex-wrap justify-start gap-1 rounded-xl bg-gray-100/60 p-1 self-start max-w-[calc(100%-1.5rem)]">
+                    <TabsTrigger value="ordenes" className="h-7 rounded-lg px-2 sm:px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                       <Calendar className="h-3.5 w-3.5 mr-1.5 hidden sm:block" /> Órdenes
                     </TabsTrigger>
                     {hayTiempos && (
-                      <TabsTrigger value="tiempos" className="h-7 rounded-lg px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                      <TabsTrigger value="tiempos" className="h-7 rounded-lg px-2 sm:px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Clock className="h-3.5 w-3.5 mr-1.5 hidden sm:block" /> Tiempos
                       </TabsTrigger>
                     )}
                     {hayAsistencia && (
-                      <TabsTrigger value="asistencia" className="h-7 rounded-lg px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                      <TabsTrigger value="asistencia" className="h-7 rounded-lg px-2 sm:px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <CalendarOff className="h-3.5 w-3.5 mr-1.5 hidden sm:block" /> Asistencia
                         {asistencia.datos && !operario.disponible && (
                           <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-amber-500" aria-label="Ausente" />
@@ -797,7 +800,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       </TabsTrigger>
                     )}
                     {hayRendimiento && (
-                      <TabsTrigger value="rendimiento" className="h-7 rounded-lg px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                      <TabsTrigger value="rendimiento" className="h-7 rounded-lg px-2 sm:px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                         <Gauge className="h-3.5 w-3.5 mr-1.5 hidden sm:block" /> Rendimiento
                       </TabsTrigger>
                     )}
@@ -829,32 +832,34 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                 {/* Stats Overview */}
                 {/* Stats en una sola línea: los números no necesitan tres tarjetas,
                     y cada píxel que se ahorra acá es una OT más visible abajo. */}
-                <div className="flex items-center gap-5 px-4 py-1.5 border-b bg-white shrink-0">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-5 px-4 py-1.5 border-b bg-white shrink-0">
                   <span className="flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                     <span className="text-[13px] font-bold text-slate-800">{totalHours.toFixed(1)}h</span>
-                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Horas</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide whitespace-nowrap">Horas</span>
                   </span>
                   <span className="flex items-center gap-1.5">
                     <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
                     <span className="text-[13px] font-bold text-slate-800">{totalTasks}</span>
-                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">Procesos</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide whitespace-nowrap">Procesos</span>
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Activity className="h-3.5 w-3.5 text-orange-600 shrink-0" />
                     <span className="text-[13px] font-bold text-slate-800">{inProgressTasks}</span>
-                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">En Proceso</span>
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wide whitespace-nowrap">En Proceso</span>
                   </span>
                 </div>
 
                 {/* Tasks List (Grouped by OT) */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  <div className="px-4 py-2 border-b flex items-center justify-between bg-white sticky top-0 z-10">
-                    <h4 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+                  {/* En el teléfono el título y los botones no entran en un renglón:
+                      los botones bajan al de abajo en vez de salirse por el costado. */}
+                  <div className="px-4 py-2 border-b flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 bg-white sticky top-0 z-10">
+                    <h4 className="font-semibold text-sm text-gray-800 flex items-center gap-2 whitespace-nowrap">
                       <Calendar className="h-3.5 w-3.5 text-gray-500" />
                       Órdenes Asignadas
                     </h4>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary" className="text-[11px] bg-gray-100">
                         {groupedTasks.length} Órdenes ({tasks.length} procesos)
                       </Badge>

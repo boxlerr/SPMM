@@ -168,6 +168,25 @@ export function diferenciaConLosPasos(r: TiemposOperario["resumen"]): string[] {
  */
 export type EstadoSeccion = "cargando" | "si" | "no" | "error";
 
+/** Lo que contestó el backend la última vez, por solapa (ver `mostrarSolapa`). */
+const solapasConocidas = new Map<string, boolean>();
+
+/**
+ * Si una solapa de la ficha (Tiempos, Asistencia, Rendimiento) se muestra.
+ *
+ * Mientras se pide todavía no se sabe si el backend la tiene. Mostrarla de entrada y
+ * sacarla cuando el backend de antes contesta 404 era una solapa que aparecía un
+ * instante y se iba. Así que, cargando, se hace lo que contestó la vez anterior en
+ * esta pestaña del navegador; la primera vez, nada: con el backend nuevo las solapas
+ * aparecen cuando contesta, y con el viejo no aparecen nunca.
+ */
+export function mostrarSolapa(clave: string, estado: EstadoSeccion): boolean {
+  if (estado === "cargando") return solapasConocidas.get(clave) === true;
+  const hay = estado !== "no";
+  solapasConocidas.set(clave, hay);
+  return hay;
+}
+
 // ── Fechas: días del taller, sin zona ─────────────────────────────────────────
 
 const dos = (n: number) => String(n).padStart(2, "0");

@@ -13,6 +13,15 @@
  * y el archivo pesa poco, pero sólo tienen los caracteres del castellano de siempre.
  * Lo que no tienen (una flecha, un emoji, un ⚠) se reemplaza por algo que se lea,
  * en vez de salir como basura — ver `textoPdf`.
+ *
+ * UNA SOLA PUERTA A JSPDF
+ *
+ * Los otros PDF (el de la OT y el del rendimiento de una persona) toman jspdf y
+ * jspdf-autotable DE ACÁ (por eso `autoTable` se reexporta abajo), nunca directo del
+ * paquete. El empaquetador arma el trozo con jspdf según el camino por el que se llega
+ * a él: cuando el PDF de la OT importaba jspdf-autotable por su cuenta, salían dos
+ * trozos de ~450 KB con lo mismo adentro, y exportar la lista y después la OT en
+ * Operaciones bajaba jspdf dos veces.
  */
 
 import { jsPDF } from "jspdf";
@@ -25,6 +34,10 @@ import {
     type ReporteExport,
     type SeccionExport,
 } from "./exportar";
+
+/** Ver «Una sola puerta a jspdf», arriba. */
+export { autoTable };
+export type { RowInput };
 
 // ---------------------------------------------------------------------------------
 // Caracteres

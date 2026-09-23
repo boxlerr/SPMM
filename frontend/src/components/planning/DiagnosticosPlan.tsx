@@ -37,7 +37,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, Cog, Info, Layers, ListChecks, Loader2, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, Cog, Info, Layers, ListChecks, Loader2, PauseCircle, RefreshCw, RotateCcw, Save, SlidersHorizontal, Users, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -97,12 +97,19 @@ function conNegritas(texto: string) {
 const RECURSO: Record<string, { texto: string; icono: LucideIcon }> = {
     maquina: { texto: "Recurso maquinaria", icono: Cog },
     humano: { texto: "Recurso humano", icono: Users },
+    // RF-03: la OT (o un paso) que alguien pausó. Es la única excepción a las cuatro
+    // de arriba y no es un recurso que falte: es una decisión del taller (ver
+    // DiagnosticoPlanificacion.py, ORDEN/PAUSA). El ícono es el de la pausa en toda
+    // la app (la franja de la ficha, la marca en las listas). «OT» y no «Orden de
+    // trabajo»: en el teléfono el rótulo largo se cortaba a mitad de palabra.
+    orden: { texto: "OT", icono: PauseCircle },
 };
 
 const SUBTIPO: Record<string, string> = {
     rango: "Rango",
     capacidad: "Capacidad",
     skill: "Skill",
+    pausa: "Pausa",
 };
 
 /**
@@ -112,13 +119,14 @@ const SUBTIPO: Record<string, string> = {
  * Vercel): entre un deploy y el otro los avisos llegan con el formato viejo. Sin
  * esto la columna quedaría vacía justo en la pantalla que Lucas mira.
  */
-const RECURSO_POR_TIPO: Record<string, "maquina" | "humano"> = {
+const RECURSO_POR_TIPO: Record<string, "maquina" | "humano" | "orden"> = {
     proceso_sin_operarios: "humano",
     proceso_sin_rango: "humano",
     puestos_vacantes: "humano",
     maquina_incompatible: "maquina",
     cuello_de_maquina: "maquina",
     trabajo_tercerizado: "maquina",
+    ot_pausada: "orden",
 };
 
 const SUBTIPO_POR_TIPO: Record<string, string> = {
@@ -128,10 +136,12 @@ const SUBTIPO_POR_TIPO: Record<string, string> = {
     maquina_incompatible: "rango",
     cuello_de_maquina: "capacidad",
     trabajo_tercerizado: "capacidad",
+    ot_pausada: "pausa",
 };
 
 const recursoDe = (d: Diagnostico) => RECURSO[d.recurso ?? RECURSO_POR_TIPO[d.tipo] ?? "maquina"];
 const subtipoDe = (d: Diagnostico) => SUBTIPO[d.subtipo ?? SUBTIPO_POR_TIPO[d.tipo] ?? ""] ?? "";
+const esPausa = (d: Diagnostico) => (d.subtipo ?? SUBTIPO_POR_TIPO[d.tipo]) === "pausa";
 
 /**
  * El cambio concreto que hace falta, listo para aplicar desde el aviso.
@@ -182,10 +192,12 @@ export interface Diagnostico {
     id: string;
     tipo: string;
     severidad: "bloqueante" | "advertencia";
-    /** Taxonomía cerrada (Lucas 28/08). Opcionales: el backend viejo no las manda. */
-    recurso?: "maquina" | "humano";
-    subtipo?: "rango" | "capacidad" | "skill";
-    /** Qué tiene hoy el recurso ("Medio oficial") y qué le pide el proceso ("Oficial"). */
+    /** Taxonomía cerrada (Lucas 28/08). Opcionales: el backend viejo no las manda.
+     *  «orden · pausa» es la excepción de RF-03: la OT o el paso que alguien pausó. */
+    recurso?: "maquina" | "humano" | "orden";
+    subtipo?: "rango" | "capacidad" | "skill" | "pausa";
+    /** Qué tiene hoy el recurso ("Medio oficial") y qué le pide el proceso ("Oficial").
+     *  En una pausa, `tiene` es el motivo («Falta material»). */
     tiene?: string;
     pide?: string;
     titulo: string;
@@ -1301,7 +1313,8 @@ export function DiagnosticosPlan({
                         const [impProcesos, impOts, impTiempo] = impacto;
                         const trabajo = [impProcesos, impOts].filter(Boolean).join(" · ");
                         const datos = [
-                            d.tiene && { etiqueta: "Hoy", valor: d.tiene, icono: Icono },
+                            // En una pausa lo que viene en `tiene` es el motivo, no «lo que hay hoy».
+                            d.tiene && { etiqueta: esPausa(d) ? "Motivo" : "Hoy", valor: d.tiene, icono: Icono },
                             d.pide && { etiqueta: "Necesita", valor: d.pide, icono: Wrench },
                             trabajo && { etiqueta: "Trabajo", valor: trabajo, icono: Layers },
                             impTiempo && { etiqueta: "Tiempo", valor: impTiempo, icono: Clock },

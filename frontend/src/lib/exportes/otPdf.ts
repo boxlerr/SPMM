@@ -12,13 +12,23 @@
  * imprime, se llena con birome y se fotocopia. Se suma lo que pide un archivo y no el
  * papel de la impresora: cuándo se generó y el número de página.
  *
- * Se carga con import() recién al tocar «PDF» en la OT (trae jspdf).
+ * Se carga con import() recién al tocar «PDF» en la OT (trae jspdf). jspdf y
+ * jspdf-autotable se toman de lib/exportarPdf y no del paquete: así el trozo con
+ * jspdf es el mismo que el de las listas y se baja una sola vez (ver ahí).
  */
 
-import { autoTable, type RowInput } from "jspdf-autotable";
 import type { jsPDF } from "jspdf";
+import {
+    AZUL,
+    MARGEN,
+    autoTable,
+    cargarLogo,
+    numerarPaginas,
+    nuevoDocumento,
+    textoPdf,
+    type RowInput,
+} from "@/lib/exportarPdf";
 import { ahoraAR, fechaAR, partesDeFecha, textoParaLeer } from "@/lib/exportar";
-import { AZUL, MARGEN, cargarLogo, numerarPaginas, nuevoDocumento, textoPdf } from "@/lib/exportarPdf";
 import type { DatosDeOT } from "./ot";
 
 const GRIS_TEXTO: [number, number, number] = [102, 102, 102];
@@ -213,7 +223,7 @@ export async function pdfDeOT(d: DatosDeOT): Promise<Blob> {
             Array.from({ length: RENGLONES_POR_PROCESO }, (_, k) =>
                 k === 0
                     ? [String(i + 1), textoPdf(p.proceso || "-"), textoPdf(p.maquina || "Sin recurso maquinaria"),
-                        p.minutos != null ? String(p.minutos) : "0", "1", "", "", "", "", ""]
+                        p.minutos != null ? cifra(String(p.minutos)) : "0", "1", "", "", "", "", ""]
                     : ["", "", "", "", String(k + 1), "", "", "", "", ""]))
         : [[{ content: "Sin procesos cargados", colSpan: 10, styles: { halign: "center", textColor: [153, 153, 153] } }]];
 

@@ -235,5 +235,8 @@ def copias_no_tocan_produccion(monkeypatch):
         async def bajar(self, *_):
             raise RuntimeError("Los tests no leen Storage.")
 
+        async def borrar(self, *_):
+            raise RuntimeError("Los tests no borran en Storage.")
+
     monkeypatch.setattr(CopiaSeguridadAPI, "SESIONES_BACKUP", _SinBase)
     monkeypatch.setattr(CopiaSeguridadAPI, "FABRICA_DEPOSITO", _SinStorage)
