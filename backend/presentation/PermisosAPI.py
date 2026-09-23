@@ -31,6 +31,9 @@ QUIÉN PUEDE
   «admin del área de sistema»: nivel admin en Configuración, que esta misma API no deja
   dar a ningún otro rol ni persona —quien puede tocar permisos se hace admin solo—. Por
   la misma razón nadie se da permisos a sí mismo ni se cambia el rol.
+- Y si hay administradores permanentes marcados, sólo ellos (el requireDueño de DJ), y
+  el rol Administrador no se da desde acá: se asigna a mano en la base (ver
+  application/reglas_de_roles.py, «QUIÉN ADMINISTRA»).
 
 LAS REGLAS (las de DJ, más las de SPMM)
 
@@ -66,7 +69,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, update
 
-from backend.application.reglas_de_roles import cuidar_administradores, de_a_uno, validar_rol
+from backend.application.reglas_de_roles import (
+    admin_asignable,
+    cuidar_administradores,
+    de_a_uno,
+    require_gestion_de_usuarios,
+    validar_rol,
+)
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
@@ -92,7 +101,6 @@ from backend.core.security import (
     UsuarioActual,
     get_sesiones_permisos,
     get_usuario_actual,
-    require_admin,
     require_seccion,
 )
 from backend.domain.Permisos import UsuarioArea, UsuarioSeccion
@@ -124,10 +132,11 @@ _ver = require_seccion("configuracion_usuarios")
 
 async def _admin(
     actor: UsuarioActual = Depends(get_usuario_actual),
-    _u: dict = Depends(require_admin),
+    _u: dict = Depends(require_gestion_de_usuarios),
 ) -> UsuarioActual:
-    """Quien cambia algo: admin, según la base. Devuelve su fila (el id es el de la
-    base, no el del token)."""
+    """Quien cambia algo: admin según la base y, si hay administradores permanentes, uno
+    de ellos (el requireDueño de DJ, reglas_de_roles). Devuelve su fila (el id es el de
+    la base, no el del token)."""
     return actor
 
 
@@ -278,7 +287,7 @@ async def catalogo(
 
 
 @router.get("/matriz", response_model=ResponseDTO, dependencies=[Depends(_ver)])
-async def matriz(db=Depends(get_db)):
+async def matriz(db=Depends(get_db), sesiones=Depends(get_sesiones_permisos)):
     """Cada rol con su nivel en cada área, sus overrides por sección (`secciones`, sólo
     las que tiene: la que falta hereda) y lo que termina viendo en cada sección
     (`secciones_efectivas`). El admin sale con admin en todo: lo es por regla."""
@@ -332,7 +341,10 @@ async def matriz(db=Depends(get_db)):
               "pantalla_inicio_disponible": pantallas is not None,
               # Este servidor sabe crear, renombrar y borrar roles (la pantalla lo ofrece
               # sólo si lo dice).
-              "abm_de_roles": True},
+              "abm_de_roles": True,
+              # Si el rol Administrador se puede dar desde la pantalla: no, si hay
+              # administradores permanentes (DJ: a mano en la base).
+              "admin_asignable": await admin_asignable(sesiones)},
     )
 
 

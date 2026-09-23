@@ -91,6 +91,7 @@ function responder(crudo) {
     fijadas,
     tarjetas: p.tarjetasVisibles(leido),
     ve_tarjeta: Object.fromEntries(p.TARJETAS_DASHBOARD.map((t) => [t.codigo, p.puedeVerTarjeta(leido, t.codigo)])),
+    gestiona: p.gestionaUsuarios(leido),
   };
 }
 
@@ -158,6 +159,9 @@ CASOS = {
     "solo_areas": {"rol": "x", "es_admin": False, "areas": {"operaciones": "write", "configuracion": "read"}},
     # Un nivel que no se entiende vale «none», como en el backend.
     "nivel_raro": {"rol": "x", "es_admin": False, "areas": {"dashboard": "superadmin", "planos": "read"}},
+    # Con administradores permanentes marcados (DJ): el dueño administra, otro admin no.
+    "admin_dueno": {**_permisos_del_backend("admin"), "gestiona_usuarios": True},
+    "admin_no_dueno": {**_permisos_del_backend("admin"), "gestiona_usuarios": False},
 }
 
 FIJADAS = ["/planos", "/clientes", "/auditoria", "   ", "no-empieza-con-barra", "/novedades",
@@ -582,3 +586,18 @@ def test_sin_permisos_se_ven_todas_las_tarjetas(front, caso):
     """Backend viejo (producción hasta el deploy a mano): el Dashboard de siempre, entero.
     Nunca se esconde todo porque falte un campo."""
     assert front["casos"][caso]["tarjetas"] == [t.codigo for t in TARJETAS_DASHBOARD]
+
+
+@pytest.mark.parametrize("caso, gestiona", [
+    # Backend viejo (sin permisos, o sin el campo): como siempre, el admin administra.
+    ("null", True), ("vacio", True), ("__undefined__", True), ("admin", True),
+    # Revisión del 23/09 (requireDueño de DJ): con permanentes, sólo ellos.
+    ("admin_dueno", True), ("admin_no_dueno", False),
+    ("supervisor", False), ("operario", False), ("operario_con_extras", False),
+])
+def test_quien_maneja_usuarios_y_permisos(front, caso, gestiona):
+    assert front["casos"][caso]["gestiona"] is gestiona
+    # Y sigue siendo admin para todo lo demás.
+    if caso == "admin_no_dueno":
+        assert front["casos"][caso]["leido"]["es_admin"] is True
+        assert front["casos"][caso]["menu"] == front["casos"]["admin"]["menu"]

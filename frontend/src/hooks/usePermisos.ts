@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { gestionaUsuarios } from "@/lib/permisos";
 
 /**
  * Los permisos de quien está usando la app (RF-24), para decidir qué mostrar.
@@ -28,5 +29,7 @@ export function usePermisos() {
     refrescarPermisos,
     /** Admin, o sin permisos (backend viejo): puede todo. */
     esAdmin: !permisos || permisos.es_admin,
+    /** Maneja usuarios y permisos (admin y, si hay permanentes, uno de ellos: DJ). */
+    gestionaUsuarios: gestionaUsuarios(permisos),
   };
 }

@@ -662,3 +662,16 @@ def test_inicio_segun_los_permisos(correr):
     assert res[3] == {"fijada": "/clientes", "ruta": "/operaciones", "fijadaSinAcceso": True}
     # Una que no es del menú no cuenta como fijada.
     assert res[4] == {"fijada": None, "ruta": "/dashboard", "fijadaSinAcceso": False}
+
+
+@pytest.mark.parametrize("extra, asignable, abm", [
+    ({}, True, False),  # un servidor de antes: como siempre (se ofrece Administrador)
+    ({"admin_asignable": True, "abm_de_roles": True}, True, True),
+    ({"admin_asignable": False, "abm_de_roles": True}, False, True),  # hay dueños: a mano (DJ)
+])
+def test_la_matriz_dice_si_el_administrador_se_da_desde_la_pantalla(correr, extra, asignable, abm):
+    crudo = {"roles": [{"codigo": "admin", "nombre": "Administrador", "es_admin": True,
+                        "usuarios_activos": 1, "areas": {}, "secciones": {}}], **extra}
+    leida = _uno(correr, "admin", "leerMatriz", crudo)
+    assert leida["adminAsignable"] is asignable
+    assert leida["abmDeRoles"] is abm

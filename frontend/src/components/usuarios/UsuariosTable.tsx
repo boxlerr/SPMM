@@ -96,6 +96,11 @@ interface Props {
   onReintentar: () => void;
   /** Los roles que hay. null = no se sabe (backend viejo): el rol se muestra y no se cambia. */
   roles: RolElegible[] | null;
+  /**
+   * Los que se pueden DAR en el selector (sin Administrador cuando va a mano, como DJ). Si
+   * no viene, todos. El que ya tiene la persona se muestra igual.
+   */
+  rolesAsignables?: RolElegible[] | null;
   /** Rol admin: da de alta, edita, cambia roles, desbloquea y elimina. */
   puedeEditar: boolean;
   idActual: number | null;
@@ -117,6 +122,7 @@ export default function UsuariosTable({
   error,
   onReintentar,
   roles,
+  rolesAsignables,
   puedeEditar,
   idActual,
   guardandoRol,
@@ -171,9 +177,10 @@ export default function UsuariosTable({
     const r = reglas(u);
     const guardando = guardandoRol.has(u.id_usuario);
     if (r.rolEditable && roles) {
-      const opciones = roles.some((x) => x.codigo === u.rol)
-        ? roles
-        : [...roles, { codigo: u.rol, nombre: nombreDeRol(u.rol, null) }];
+      const asignables = rolesAsignables ?? roles;
+      const opciones = asignables.some((x) => x.codigo === u.rol)
+        ? asignables
+        : [...asignables, { codigo: u.rol, nombre: nombreDeRol(u.rol, roles) }];
       return (
         <select
           aria-label={`Rol de ${nombreDePersona(u)}`}

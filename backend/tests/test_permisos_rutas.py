@@ -160,7 +160,7 @@ def test_las_rutas_de_administracion_piden_lo_suyo():
         if r.path == "/permisos/catalogo":
             continue  # los nombres de las pantallas: cualquiera con cuenta activa
         nombres = {getattr(d.call, "__name__", "") for d in r.dependant.dependencies}
-        pide = nombres & {"require_admin", "_admin", "_ver_un_usuario",
+        pide = nombres & {"require_admin", "require_gestion_de_usuarios", "_admin", "_ver_un_usuario",
                           "require_seccion_configuracion_usuarios_read"}
         assert pide, f"{sorted(r.methods)} {r.path} sólo pide sesión"
 

@@ -49,8 +49,11 @@ import { claseDeRol } from './area-meta';
  * - La solapa entera es la sección confidencial «Usuarios y permisos» (la esconde la
  *   página de Configuración a quien no la tiene).
  * - CAMBIAR cualquier cosa es sólo del rol Administrador (el backend lo exige contra la
- *   base: quien toca permisos se da admin solo). A otro que tenga la sección abierta se le
- *   muestra todo en lectura, con la marca «Solo lectura».
+ *   base: quien toca permisos se da admin solo) y, si hay administradores permanentes
+ *   marcados, sólo de ellos, como en DJ. A otro que tenga la sección abierta se le muestra
+ *   todo en lectura, con la marca «Solo lectura».
+ * - Con administradores permanentes, además, el rol Administrador no se ofrece en ningún
+ *   selector: se asigna a mano en la base (DJ). Sin ellos, como siempre.
  *
  * BACKEND VIEJO
  * Producción corre un backend de antes de esta pantalla hasta que Julián lo deploya a
@@ -78,7 +81,9 @@ type EstadoPermisos =
 
 export default function UsuariosYPermisos() {
   const { user } = useAuth();
-  const { esAdmin } = usePermisos();
+  // Quién cambia algo acá: admin y, si hay administradores permanentes, uno de ellos (el
+  // requireDueño de DJ; lo exige el backend). Al resto, todo en lectura.
+  const { gestionaUsuarios: esAdmin } = usePermisos();
   const { showToast } = useToast();
   const idActual = typeof user?.id_usuario === 'number' ? user.id_usuario : null;
   const nombreActual = user ? nombreDePersona(user) : null;
@@ -162,6 +167,11 @@ export default function UsuariosYPermisos() {
   const roles: RolElegible[] | null = useMemo(
     () => (matriz ? matriz.roles.map((r) => ({ codigo: r.codigo, nombre: r.nombre })) : null),
     [matriz],
+  );
+  // Los que se pueden DAR: sin Administrador si el servidor dice que ése va a mano.
+  const rolesAsignables: RolElegible[] | null = useMemo(
+    () => (roles && matriz && !matriz.adminAsignable ? roles.filter((r) => r.codigo !== 'admin') : roles),
+    [roles, matriz],
   );
 
   // ── cambiar el rol, desde la lista ──
@@ -458,6 +468,7 @@ export default function UsuariosYPermisos() {
         error={errorUsuarios}
         onReintentar={() => void cargarUsuarios(false)}
         roles={roles}
+        rolesAsignables={rolesAsignables}
         puedeEditar={esAdmin}
         idActual={idActual}
         guardandoRol={guardandoRol}
@@ -504,7 +515,7 @@ export default function UsuariosYPermisos() {
       <NuevoUsuarioDialog
         open={nuevoAbierto}
         onOpenChange={setNuevoAbierto}
-        roles={roles}
+        roles={rolesAsignables}
         matriz={matriz}
         onCreado={alCrear}
       />

@@ -261,10 +261,20 @@ class AuthService:
 
         db = self.usuario_repository.db
         try:
-            permisos = await PermisosRepository(db).permisos_de_usuario(
+            repo = PermisosRepository(db)
+            permisos = await repo.permisos_de_usuario(
                 id_usuario=id_usuario, con_admin_permanente=True
             )
-            return permisos.como_dict() if permisos is not None else None
+            if permisos is None:
+                return None
+            salida = permisos.como_dict()
+            # Si maneja usuarios y permisos (reglas_de_roles.gestiona): admin y, si hay
+            # administradores permanentes, uno de ellos. Lo mismo que dice /auth/me.
+            permanentes = await repo.admins_permanentes()
+            salida["gestiona_usuarios"] = bool(permisos.es_admin) and (
+                not permanentes or id_usuario in permanentes
+            )
+            return salida
         except Exception as e:
             logger.warning(f"LOGIN: no se pudieron resolver los permisos de #{id_usuario}: {e}")
             try:

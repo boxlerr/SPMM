@@ -20,7 +20,6 @@ from backend.core.security import (
     get_sesiones_permisos,
     get_usuario_actual,
     get_usuario_actual_aunque_deba_cambiar_la_clave,
-    require_admin,
     require_seccion,
     resolver_permisos_actuales,
 )
@@ -30,6 +29,8 @@ from backend.application.reglas_de_roles import (
     conflicto,
     cuidar_administradores,
     de_a_uno,
+    gestiona,
+    require_gestion_de_usuarios,
     validar_rol,
 )
 from backend.commons.ResponseDTO import ResponseDTO
@@ -259,13 +260,17 @@ async def get_current_user_info(
     """
     permisos = await resolver_permisos_actuales(usuario, sesiones)
     admin_permanente = await _admin_permanente(sesiones, usuario.id_usuario)
+    # Si maneja usuarios y permisos: admin y, si hay permanentes, uno de ellos (DJ). La
+    # pantalla muestra «Usuarios y permisos» en lectura a quien no.
+    gestiona_usuarios = gestiona(usuario, await admins_permanentes(sesiones))
     return ResponseDTO(
         status=True,
         message="Usuario autenticado",
         data={
             **current_user,
             "rol": usuario.rol,
-            "permisos": {**permisos.como_dict(), "admin_permanente": admin_permanente},
+            "permisos": {**permisos.como_dict(), "admin_permanente": admin_permanente,
+                         "gestiona_usuarios": gestiona_usuarios},
             # RF-28: la pantalla fijada (la suya pisa la de su rol), o None. La pantalla la
             # usa sólo si la puede abrir (lib/permisos.ts, rutaInicio).
             "pantalla_inicio": await _pantalla_de_inicio(sesiones, usuario.id_usuario),
@@ -384,8 +389,9 @@ def _estado_de_bloqueo(bloqueo, ahora=None) -> dict:
 # propósito. CAMBIARLOS (alta, edición, baja, desbloqueo) es sólo del admin: es el
 # «admin del área de sistema» —nivel admin en Configuración, que la API de permisos no
 # le deja dar a nadie más que al rol Administrador—, porque quien puede tocar usuarios
-# se hace admin solo. Por eso esos endpoints siguen con require_admin (que mira la
-# base, no el token).
+# se hace admin solo. Por eso esos endpoints piden require_gestion_de_usuarios: admin
+# según la base (no el token) y, si hay administradores permanentes, uno de ellos (el
+# requireDueño de DJ, ver reglas_de_roles).
 _ver_usuarios = require_seccion("configuracion_usuarios")
 
 
@@ -550,7 +556,7 @@ from backend.dto.UsuarioRequestDTO import UsuarioCreateDTO, UsuarioUpdateDTO
 async def crear_usuario(
     usuario_dto: UsuarioCreateDTO,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(require_gestion_de_usuarios),
     sesiones=Depends(get_sesiones_permisos),
 ):
     """
@@ -658,7 +664,7 @@ async def actualizar_usuario(
     id_usuario: int,
     usuario_dto: UsuarioUpdateDTO,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(require_gestion_de_usuarios),
     sesiones=Depends(get_sesiones_permisos),
 ):
     """
@@ -787,7 +793,7 @@ async def actualizar_usuario(
 async def eliminar_usuario(
     id_usuario: int,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin),
+    current_user: dict = Depends(require_gestion_de_usuarios),
     sesiones=Depends(get_sesiones_permisos),
 ):
     """
@@ -877,7 +883,7 @@ async def eliminar_usuario(
 async def desbloquear_usuario(
     id_usuario: int,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_gestion_de_usuarios)
 ):
     """
     Levanta el bloqueo por intentos fallidos (RF-26) y deja la cuenta en cero.

@@ -195,6 +195,11 @@ export interface Matriz {
   inicioDisponible: boolean;
   /** El servidor sabe crear, renombrar y borrar roles (el ABM de roles de DJ). */
   abmDeRoles: boolean;
+  /**
+   * El rol Administrador se puede dar desde la pantalla. No, si hay administradores
+   * permanentes (DJ: a mano en la base). Si el servidor no lo dice, sí, como siempre.
+   */
+  adminAsignable: boolean;
 }
 
 function objeto(x: unknown): Record<string, unknown> | null {
@@ -282,6 +287,7 @@ export function leerMatriz(crudo: unknown): Matriz | null {
     // guardar algo que el servidor no sabe guardar.
     inicioDisponible: o.pantalla_inicio_disponible === true && roles.every((r) => r.pantalla_inicio !== undefined),
     abmDeRoles: o.abm_de_roles === true,
+    adminAsignable: o.admin_asignable !== false,
   };
 }
 
@@ -526,6 +532,7 @@ function permisosDeAdmin(rol: string): Permisos {
     rol,
     es_admin: true,
     admin_permanente: null,
+    gestiona_usuarios: null,
     areas: Object.fromEntries(AREAS.map((a) => [a.codigo, "admin"])) as Permisos["areas"],
     secciones: Object.fromEntries(SECCIONES.map((s) => [s.codigo, "admin"])) as Permisos["secciones"],
   };
@@ -542,7 +549,7 @@ export function permisosDeRol(rol: RolDeLaMatriz): Permisos {
   for (const a of AREAS) areas[a.codigo] = nivelValido(rol.areas[a.codigo]);
   const secciones = {} as Record<SeccionCodigo, Nivel>;
   for (const s of SECCIONES) secciones[s.codigo] = nivelValido(rol.secciones_efectivas[s.codigo]);
-  return { rol: rol.codigo, es_admin: false, admin_permanente: null, areas, secciones };
+  return { rol: rol.codigo, es_admin: false, admin_permanente: null, gestiona_usuarios: null, areas, secciones };
 }
 
 /**
@@ -580,7 +587,7 @@ export function permisosDePersona(
     if (suma !== null && rango(suma) > rango(nivel)) nivel = suma;
     secciones[s.codigo] = nivel;
   }
-  return { rol: rol.codigo, es_admin: false, admin_permanente: null, areas, secciones };
+  return { rol: rol.codigo, es_admin: false, admin_permanente: null, gestiona_usuarios: null, areas, secciones };
 }
 
 export interface Inicio {

@@ -141,6 +141,12 @@ export interface Permisos {
   es_admin: boolean;
   /** null = el backend no lo pudo leer (la columna todavía no existe en esa base). */
   admin_permanente: boolean | null;
+  /**
+   * Si maneja usuarios y permisos: admin y, si hay administradores permanentes, uno de
+   * ellos (como DJ). null = el backend no lo manda (de antes del 23/09): lo que diga
+   * `es_admin`, como siempre.
+   */
+  gestiona_usuarios: boolean | null;
   areas: Partial<Record<AreaCodigo, Nivel>>;
   secciones: Partial<Record<SeccionCodigo, Nivel>>;
 }
@@ -176,6 +182,7 @@ export function leerPermisos(crudo: unknown): Permisos | null {
     rol,
     es_admin: p.es_admin === true || rol === "admin",
     admin_permanente: typeof p.admin_permanente === "boolean" ? p.admin_permanente : null,
+    gestiona_usuarios: typeof p.gestiona_usuarios === "boolean" ? p.gestiona_usuarios : null,
     areas: mapaDeNiveles(p.areas) as Permisos["areas"],
     secciones: mapaDeNiveles(p.secciones) as Permisos["secciones"],
   };
@@ -529,4 +536,14 @@ export function seccionesDelArbol(): SeccionCodigo[] {
   const salida: SeccionCodigo[] = [];
   for (const pagina of ARBOL) for (const hoja of pagina.secciones) salida.push(hoja.seccion);
   return salida;
+}
+
+/**
+ * ¿Maneja usuarios y permisos? Sin permisos (backend viejo), sí, como siempre. Con
+ * permisos: admin, salvo que el backend diga que no (hay administradores permanentes y no
+ * es uno de ellos: el requireDueño de DJ). Esconderlo es comodidad: el backend lo exige.
+ */
+export function gestionaUsuarios(permisos: Permisos | null | undefined): boolean {
+  if (!permisos) return true;
+  return permisos.es_admin && permisos.gestiona_usuarios !== false;
 }

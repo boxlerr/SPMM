@@ -585,7 +585,8 @@ async def test_al_admin_que_se_baja_no_le_alcanza_el_token_viejo(cliente):
 
 
 async def test_un_admin_permanente_no_se_baja_ni_se_desactiva_ni_se_elimina(cliente):
-    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == LUCAS)
+    # Julián también es dueño: con permanentes marcados, sólo ellos administran (DJ).
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario.in_([JULIAN, LUCAS]))
                     .values(admin_permanente=True))
     for cuerpo in ({"rol": "supervisor"}, {"activo": False}):
         r = await cliente.put(f"/auth/usuarios/{LUCAS}", headers=_token(JULIAN), json=cuerpo)

@@ -76,8 +76,9 @@ const SOLAPAS: Solapa[] = [
         consejo: (
           <>
             Los que tienen <Lock className="inline h-3 w-3 -mt-0.5" /> <b>Permanente</b> son administradores fijos:
-            no se les cambia el rol, ni se los desactiva ni se los elimina. Y el sistema nunca se queda sin un
-            Administrador.
+            no se les cambia el rol, ni se los desactiva ni se los elimina. Si hay alguno, sólo ellos manejan
+            usuarios y permisos, y el rol Administrador no se da desde acá (se asigna a mano en la base). Y el
+            sistema nunca se queda sin un Administrador.
           </>
         ),
       },

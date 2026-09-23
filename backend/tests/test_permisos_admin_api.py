@@ -367,7 +367,10 @@ async def test_cambiar_el_rol_de_una_persona(cliente):
 
 
 async def test_a_un_admin_permanente_no_se_le_cambia_el_rol_por_ningun_camino(cliente):
-    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == LUCAS).values(admin_permanente=True))
+    # Los dos son dueños: con permanentes marcados, sólo ellos administran (DJ), así que
+    # quien actúa también tiene que serlo para que la regla que se prueba sea ésta.
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario.in_([JULIAN, LUCAS]))
+                    .values(admin_permanente=True))
     r = await cliente.put(f"/permisos/usuarios/{LUCAS}/rol", headers=ADMIN, json={"rol": "supervisor"})
     assert r.status_code == 409 and "administrador permanente" in _msg(r)
     r = await cliente.put(f"/auth/usuarios/{LUCAS}", headers=ADMIN, json={"rol": "supervisor"})

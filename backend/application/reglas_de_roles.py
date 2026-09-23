@@ -3,6 +3,17 @@ Las reglas duras sobre roles y administradores (RF-24). Las usan el ABM de usuar
 (AuthAPI) y la administración de permisos (PermisosAPI): tienen que ser LAS MISMAS por
 los dos caminos, o la regla se saltea por el otro.
 
+QUIÉN ADMINISTRA (como Don Joaquín, desde el 23/09)
+
+En DJ la gestión de usuarios y permisos es sólo de los administradores permanentes
+(requireDueño: «ni siquiera otro admin la maneja») y el rol Administrador no se asigna
+nunca desde la pantalla («solo a mano en la base de datos»). Acá es igual, con una
+condición: que haya al menos un administrador permanente marcado. La marca
+(usuario.admin_permanente) se pone a mano en la base —ninguna migración la prende, no se
+conocen los ids de producción—, y hasta que alguien la ponga, administra cualquier admin y
+el rol Administrador se puede dar, como hasta hoy. Si no, el día del deploy nadie podría
+dar de alta a nadie. Con la marca puesta en los dueños, rige lo de DJ entero.
+
 Todo lo que se lee acá va con una sesión PROPIA (la de los permisos) y no con la del
 endpoint: `admin_permanente` y la tabla `rol` pueden no existir todavía (migración sin
 correr), y en Postgres una consulta que falla deja inservible la transacción en la que
@@ -15,9 +26,17 @@ from contextlib import asynccontextmanager
 from fastapi import HTTPException, status
 from sqlalchemy import text
 
+from fastapi import Depends
+
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
 from backend.core.permisos import ROL_ADMIN
+from backend.core.security import (
+    UsuarioActual,
+    get_sesiones_permisos,
+    get_usuario_actual,
+    require_admin,
+)
 from backend.infrastructure.PermisosRepository import PermisosRepository
 
 
@@ -46,16 +65,53 @@ async def admins_permanentes(sesiones):
         return None
 
 
+def gestiona(usuario: UsuarioActual, permanentes) -> bool:
+    """¿Maneja usuarios y permisos? Un admin, y si hay administradores permanentes
+    marcados, sólo ellos (ver «QUIÉN ADMINISTRA» arriba)."""
+    return usuario.es_admin and (not permanentes or usuario.id_usuario in permanentes)
+
+
+SOLO_LOS_DUENOS = (
+    "Manejar usuarios y permisos es sólo de los administradores permanentes (los dueños "
+    "del sistema)."
+)
+ADMIN_A_MANO = "El rol Administrador sólo se asigna a mano en la base de datos."
+
+
+async def require_gestion_de_usuarios(
+    admin: dict = Depends(require_admin),
+    usuario: UsuarioActual = Depends(get_usuario_actual),
+    sesiones=Depends(get_sesiones_permisos),
+) -> dict:
+    """Dependencia: el requireDueño de DJ. Admin según la base y, si hay administradores
+    permanentes, uno de ellos. Devuelve el mismo dict que require_admin."""
+    if not gestiona(usuario, await admins_permanentes(sesiones)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": SOLO_LOS_DUENOS, "campo": "permiso"},
+        )
+    return admin
+
+
+async def admin_asignable(sesiones) -> bool:
+    """¿Se puede dar el rol Administrador desde la pantalla? Sólo mientras no haya
+    administradores permanentes marcados (después, como DJ: a mano en la base)."""
+    return not await admins_permanentes(sesiones)
+
+
 async def validar_rol(sesiones, rol: str) -> None:
     """Que el rol exista en la tabla `rol`.
 
-    `admin` vale siempre, sin mirar la tabla: es admin por regla, no por su fila, y es
-    lo que manda el front de hoy en cada alta.
+    `admin` no mira la tabla (es admin por regla, no por su fila, y es lo que manda el
+    front de antes en cada alta), pero si hay administradores permanentes no se da desde
+    acá: como en DJ, se asigna a mano en la base (ver «QUIÉN ADMINISTRA»).
 
     Si la tabla todavía no existe (backend nuevo con la migración sin correr), se
     acepta sólo `admin`, que es lo que se aceptaba antes: asignar otro rol sin las
     tablas que lo definen dejaría a esa persona sin ningún permiso."""
     if rol == ROL_ADMIN:
+        if not await admin_asignable(sesiones):
+            raise BusinessException(ADMIN_A_MANO)
         return
     async with sesiones() as s:
         roles = await PermisosRepository(s).roles()
