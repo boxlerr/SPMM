@@ -312,3 +312,7 @@ Documentación oficial de Supabase, consultada el 22/09/2026:
 - Cambiar de plan: <https://supabase.com/docs/guides/platform/manage-your-subscription>
 - Facturación por organización: <https://supabase.com/docs/guides/platform/billing-on-supabase>
 - Management API, listar backups: <https://supabase.com/docs/reference/api/v1-list-all-backups>
+
+### Verificación del 23/09/2026
+
+Verificado desde el conector de Supabase, en solo lectura: la organización «metlo» está en **plan Pro** y el proyecto de producción (sa-east-1) está activo y sano. Con Pro hay backup diario con 7 días de retención, así que RF-18 y RF-20 quedan cubiertos. Julián también lo confirmó.
