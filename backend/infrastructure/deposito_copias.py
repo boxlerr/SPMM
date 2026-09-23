@@ -9,6 +9,13 @@ ninguna variable de entorno ni bucket nuevo que dar de alta a mano. Nada de esto
 al navegador por una URL de Storage: se baja por la API, con el token de siempre y
 sólo el admin.
 
+Estas copias traen TODOS los datos, y el bucket es el mismo que sirve los planos a
+cualquiera que los vea. Por eso lo que sirve o borra planos no toca esta carpeta
+(storage_planos.ruta_permitida_para_planos, en PlanoService), y una restauración no
+acepta una fila de `plano` que apunte acá (storage_planos.es_ruta_de_plano). Si algún
+día se quiere más aislamiento, el cambio es un bucket propio y privado: sólo PREFIJO y
+las tres llamadas de abajo.
+
 Si Storage no está configurado o rechaza la subida, la restauración NO sigue sola: el
 admin tiene que haber bajado él mismo la copia del estado actual en ese momento (ver
 CopiaSeguridadAPI). Nunca se restaura sin una copia de lo que había.

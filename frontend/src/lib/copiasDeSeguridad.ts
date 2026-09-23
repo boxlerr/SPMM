@@ -51,6 +51,15 @@ export interface VistaPrevia {
   ignoradas: string[];
   avisos: string[];
   incluir_usuarios: boolean;
+  /** Con los usuarios: qué pasa con cada cuenta que cambia, ya en castellano. */
+  cambios_de_usuarios?: string[];
+  /** Planos de la copia sin archivo en ningún lado, que no vuelven. */
+  planos_sin_archivo?: number;
+  /**
+   * ¿La hizo este servidor y nadie la tocó? Sin firma, nunca con los usuarios, y los
+   * datos sólo si se confirma aparte. Un backend sin firma no lo manda: vale como firmada.
+   */
+  firma?: { valida: boolean; motivo: string | null };
   copia_automatica: CopiaAutomaticaDisponible;
 }
 
@@ -62,6 +71,7 @@ export interface ResultadoRestauracion {
   conservadas: string[];
   copia_previa: { nombre?: string | null; donde?: string; filas?: number } | null;
   archivos_conservados: number;
+  planos_sin_archivo?: number;
   avisos: string[];
 }
 
@@ -100,6 +110,23 @@ export const ACCIONES: Record<AccionTabla, { texto: string; ayuda: string; cambi
 
 export function cambia(t: TablaDeLaVista): boolean {
   return ACCIONES[t.accion]?.cambia ?? false;
+}
+
+/** ¿La copia tiene la firma de este servidor? Sin el dato (backend viejo), sí. */
+export function estaFirmada(vista: Pick<VistaPrevia, "firma"> | null | undefined): boolean {
+  return vista?.firma?.valida !== false;
+}
+
+/**
+ * Los bytes, en hexadecimal y en minúsculas: la forma en que el servidor escribe un
+ * sha256. Es la «huella» del archivo que se acaba de bajar: el servidor la compara con
+ * la que anotó al mandarlo, para saber que lo que tenés es ESE archivo entero.
+ */
+export function hexDeBytes(bytes: ArrayBuffer | Uint8Array): string {
+  const vista = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let hex = "";
+  for (let i = 0; i < vista.length; i += 1) hex += vista[i].toString(16).padStart(2, "0");
+  return hex;
 }
 
 /**
@@ -188,9 +215,21 @@ export function motivoParaNoRestaurar(opciones: {
   confirmacion: string;
   hayCopiaAutomatica: boolean;
   yaDescargo: boolean;
+  /** La huella de la copia completa que se bajó desde esta pantalla (null: ninguna). */
+  huellaDeLaDescarga: string | null;
+  /** false: la copia no tiene la firma de este servidor. */
+  firmaValida: boolean;
+  /** Marcó «restaurar igual» para una copia sin firma. */
+  aceptaSinFirma: boolean;
 }): string | null {
+  if (!opciones.firmaValida && !opciones.aceptaSinFirma) {
+    return "Esta copia no tiene la firma de este servidor: si igual querés restaurarla, marcá «Restaurar igual».";
+  }
   if (!opciones.hayCopiaAutomatica && !opciones.yaDescargo) {
     return "Primero descargá la copia de cómo está todo ahora y marcá la casilla.";
+  }
+  if (!opciones.hayCopiaAutomatica && !opciones.huellaDeLaDescarga) {
+    return "Descargá la copia de cómo está todo ahora desde esta pantalla: así se comprueba que la tenés entera.";
   }
   if (!confirmacionValida(opciones.confirmacion)) {
     return `Escribí ${CONFIRMACION}, en mayúsculas, para confirmar.`;

@@ -114,7 +114,14 @@ async def auditar_movimientos(request: Request, call_next):
 
 async def _auditar(request, call_next, metodo, ruta, usuario):
     if not auditoria_mov.se_audita(metodo, ruta):
-        return await call_next(request)
+        # Una lectura no se guarda, salvo el intento rechazado de bajar lo que es sólo
+        # del admin (las copias de seguridad, RF-19): ver se_audita_el_rechazo.
+        arranque = time.monotonic()
+        respuesta = await call_next(request)
+        if auditoria_mov.se_audita_el_rechazo(metodo, ruta, respuesta.status_code):
+            await _guardar_movimiento(request, metodo, ruta, respuesta.status_code, arranque,
+                                      None, usuario)
+        return respuesta
 
     # El cuerpo se lee ANTES de que lo lea el endpoint. Starlette lo cachea y se lo
     # reentrega al handler (_CachedRequest), así que leerlo acá no lo consume — pero

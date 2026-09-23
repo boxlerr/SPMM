@@ -173,7 +173,15 @@ class PlanoService:
             raise NotFoundException(f"No se encontró el Plano con ID {id}")
 
         contenido = plano.archivo
-        if plano.storage_path:
+        if plano.storage_path and not storage_planos.ruta_permitida_para_planos(plano.storage_path):
+            # Una fila que apunta fuera de los planos (la carpeta de las copias de
+            # seguridad, un `..`) no se sirve: el objeto no es un plano y lo podría
+            # pedir cualquiera que vea planos. Ver storage_planos.CARPETA_COPIAS.
+            logger.error(f"Service - El plano {id} apunta fuera de la carpeta de planos "
+                         f"({plano.storage_path!r}): no se sirve.")
+            if contenido is None:
+                raise InfrastructureException("No se pudo abrir el archivo del plano.")
+        elif plano.storage_path:
             try:
                 contenido = await storage_planos.bajar(plano.storage_path)
             except Exception as e:
@@ -198,7 +206,12 @@ class PlanoService:
         # fila ya no está, que es lo que el usuario pidió. Un objeto que quede en el
         # bucket lo levanta `migrar_planos_a_storage --huerfanos`; en cambio fallar acá
         # dejaría el plano listado y sin poder borrarlo.
-        if ruta:
+        if ruta and not storage_planos.ruta_permitida_para_planos(ruta):
+            # Borrar la fila no puede llevarse puesto un objeto que no es un plano (una
+            # copia de seguridad automática, por ejemplo).
+            logger.error(f"Service - Plano {id} borrado; su ruta apuntaba fuera de la "
+                         f"carpeta de planos ({ruta!r}) y el objeto no se tocó.")
+        elif ruta:
             try:
                 await storage_planos.borrar(ruta)
             except Exception as e:

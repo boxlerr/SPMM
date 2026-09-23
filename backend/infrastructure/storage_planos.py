@@ -33,6 +33,11 @@ BUCKET = "planos"
 # La carpeta del mismo bucket donde quedan las copias de seguridad automáticas (RF-19,
 # infrastructure/deposito_copias.py). Está acá para que el barrido de huérfanos de
 # scripts/planos la saltee sin importar nada más.
+#
+# Esas copias traen TODOS los datos: nada que sirva o borre planos puede tocar esta
+# carpeta. Lo cuidan `ruta_permitida_para_planos` (PlanoService no lee ni borra nada de
+# acá, diga lo que diga la fila) y `es_ruta_de_plano` (una restauración no acepta una
+# fila de `plano` que apunte fuera de las carpetas de planos).
 CARPETA_COPIAS = "copias-de-seguridad/"
 
 # Supabase corta las subidas grandes; el objeto más pesado de la carpeta del taller es
@@ -91,6 +96,36 @@ def ruta_para(nombre: str, id_articulo: int | None = None,
     carpeta = (f"articulo/{id_articulo}" if id_articulo
                else f"orden/{id_orden}" if id_orden else "sueltos")
     return f"{carpeta}/{uuid.uuid4().hex}-{_limpiar(nombre)}"
+
+
+# La forma EXACTA de lo que arma ruta_para (el alta, la modificación, el import del
+# Drive y la migración de los blobs pasan todos por ahí).
+_RUTA_DE_PLANO = re.compile(r"^(?:articulo/\d+|orden/\d+|sueltos)/[A-Za-z0-9._-]+$")
+_CARACTERES_DE_RUTA = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+def es_ruta_de_plano(ruta) -> bool:
+    """¿Tiene la forma exacta de una ruta de plano? Es lo que exige una restauración
+    (RF-19): una fila de `plano` que llega de un archivo y apunta a otra cosa —la carpeta
+    de las copias, `..`— no entra."""
+    if not isinstance(ruta, str) or not _RUTA_DE_PLANO.match(ruta):
+        return False
+    return ruta.rsplit("/", 1)[1] not in (".", "..")
+
+
+def ruta_permitida_para_planos(ruta) -> bool:
+    """Lo mínimo para leer o borrar un objeto COMO PLANO: que no se salga de los planos.
+
+    Más flojo que es_ruta_de_plano a propósito: esto lo mira PlanoService en cada plano
+    que se abre o se borra, y una ruta vieja con otra forma no puede dejar un plano sin
+    abrir. Lo que no se acepta nunca: la carpeta de las copias de seguridad, un tramo
+    vacío, `.` o `..`, una barra al principio y cualquier carácter que ruta_para no
+    genera (un `%` se decodifica del otro lado y vuelve a abrir la puerta del `..`)."""
+    if not isinstance(ruta, str) or not ruta or not _CARACTERES_DE_RUTA.match(ruta):
+        return False
+    if ruta.startswith(CARPETA_COPIAS):
+        return False
+    return all(tramo not in ("", ".", "..") for tramo in ruta.split("/"))
 
 
 def subir_sync(ruta: str, datos: bytes, mime: str | None) -> str:

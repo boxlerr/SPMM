@@ -248,7 +248,7 @@ VERBO = {
 def describir(metodo: str, ruta: str, estado: int, usuario: str | None,
               etiqueta: str | None = None) -> tuple[str, str, str | None, str]:
     """(accion, entidad, id_entidad, frase). La frase es lo único que se lee."""
-    accion = ACCION.get(metodo, metodo.lower())
+    accion = ACCION.get(metodo) or (ACCION_LECTURA if metodo == "GET" else metodo.lower())
     verbo = next((VERBO[t] for t in ruta.split("/") if t in VERBO), None)
     if verbo:
         accion = verbo
@@ -302,6 +302,20 @@ def se_audita(metodo: str, ruta: str) -> bool:
     if metodo not in ACCION:
         return False
     return not any(m == metodo and p in ruta for m, p in SIN_AUDITAR)
+
+
+# Las lecturas no se guardan (ver arriba), salvo UNA cosa: que alguien sin permiso
+# intente LEER lo que es sólo del administrador y que se lleva todos los datos de una —
+# bajar una copia de seguridad completa (RF-19)—. La lectura que sí pasa la anota el
+# propio endpoint (CopiaSeguridadAPI); el intento rechazado (401/403) lo corta la
+# política del router antes de llegar al endpoint, y sin esto no quedaría en ningún lado.
+LECTURAS_VIGILADAS = ("/backups/",)
+ACCION_LECTURA = "consultó"
+
+
+def se_audita_el_rechazo(metodo: str, ruta: str, estado: int) -> bool:
+    return (metodo == "GET" and estado in (401, 403)
+            and any(ruta.startswith(p) for p in LECTURAS_VIGILADAS))
 
 
 def se_lee_el_cuerpo(ruta: str, content_type: str, largo: int) -> bool:

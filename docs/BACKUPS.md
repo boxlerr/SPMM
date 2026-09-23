@@ -117,12 +117,18 @@ sentido si el cliente pide perder menos de un día de datos.
    seguridad*, solo para el admin (`backend/infrastructure/copias_de_seguridad.py`, el porqué
    completo está ahí). El admin baja un `spmm_backup_<fecha>.zip` con todas las tablas y lo puede
    volver a cargar. Al cargarlo, el archivo se revisa entero antes de tocar nada (versión, hash
-   por tabla, tipos, tamaño) y se muestra qué cambia; se confirma escribiendo RESTAURAR; antes de
-   pisar nada se guarda sola una copia de lo que había en el bucket `planos`, carpeta
-   `copias-de-seguridad/`; y se restaura en **una** transacción (si algo falla, no cambia nada).
-   Lo que **no** hace: no trae los archivos de los planos (mismo problema que el punto 1), y por
-   defecto no toca usuarios, roles, permisos ni la auditoría. Cada descarga y cada restauración
-   quedan en la Auditoría.
+   por tabla, tipos, tamaño, y la **firma** del servidor: un HMAC sobre el manifiesto con una
+   clave que sale de `SECRET_KEY`) y se muestra qué cambia; se confirma escribiendo RESTAURAR;
+   antes de pisar nada se guarda sola una copia de lo que había en el bucket `planos`, carpeta
+   `copias-de-seguridad/` (que la pantalla de planos no sirve ni borra); y se restaura en
+   **una** transacción (si algo falla, no cambia nada).
+   Lo que **no** hace: no trae los archivos de los planos (mismo problema que el punto 1), no
+   trae contraseñas ni tokens de recuperación, y por defecto no toca usuarios, roles, permisos
+   ni la auditoría. Una copia sin firma válida (editada, o de otra instalación o de otra
+   `SECRET_KEY`) se puede restaurar sólo confirmándolo aparte y **nunca** con los usuarios.
+   Cada descarga (anotada antes del primer byte, aunque se corte), cada intento rechazado y
+   cada restauración quedan en la Auditoría. **Si cambia `SECRET_KEY`, las copias anteriores
+   dejan de estar firmadas** para el servidor nuevo.
 3. **Restaurar una sola OT o una sola tabla.** El backup se restaura **entero**: vuelve toda la
    base al momento del backup y se pierde todo lo cargado después. Para recuperar solo unas
    filas está «Restore to a new project» (sección 5.B).

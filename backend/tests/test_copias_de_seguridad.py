@@ -6,7 +6,9 @@ Lo que se prueba:
 
 - La ida y vuelta: copia -> se cambian datos -> se restaura -> todo igual que antes.
 - Que un archivo adulterado (hash que no coincide), dañado, de otra versión, de otro
-  tamaño o una bomba de zip se rechace SIN tocar nada.
+  tamaño o una bomba de zip se rechace SIN tocar nada. Y que uno adulterado con los
+  hashes rehechos (sin la firma del servidor) nunca traiga los usuarios, y los datos
+  sólo si se confirma aparte.
 - Que una tabla o columna desconocida (aun con un nombre armado para inyectar SQL) se
   informe y se ignore.
 - Que sea sólo del admin (403 para el resto).
@@ -14,10 +16,15 @@ Lo que se prueba:
 - Que la copia del estado actual se arme ANTES de tocar datos, y que sin ella no se
   restaure.
 - Que los usuarios no se toquen salvo que se pida, y que ni así el admin que restaura
-  quede afuera.
+  quede afuera; que nadie vuelva a una contraseña vieja, que no se reactive a nadie y
+  que los administradores permanentes queden como están.
+- Que la copia no lleve contraseñas ni tokens de recuperación.
+- Que una fila de `plano` no pueda apuntar a la carpeta de las copias automáticas.
+- Que la salida «ya bajé la copia» no pierda lo que se guardó después de bajarla.
 - Que las secuencias queden bien: después de restaurar se crea una fila nueva sin
   chocar ids.
-- La auditoría: quién bajó, quién restauró qué y cuántas filas.
+- La auditoría: quién bajó (anotado antes del primer byte, también si se corta), quién
+  intentó bajar sin permiso, quién restauró qué y cuántas filas.
 
 CONTRA QUÉ BASE
 
@@ -30,6 +37,7 @@ JSONB, una clave foránea que el modelo no declara), las mismas pruebas otra vez
 Esa base se BORRA ENTERA en cada prueba (DROP SCHEMA public CASCADE): por eso sólo se
 acepta localhost. Nunca Supabase.
 """
+import asyncio
 import hashlib
 import io
 import json
@@ -37,6 +45,7 @@ import os
 import uuid
 import zipfile
 from datetime import date, datetime, time
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
@@ -47,7 +56,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 
-from backend.core.security import get_password_hash, get_sesiones_permisos
+from backend.commons.exceptions.InfrastructureException import InfrastructureException
+from backend.core.security import get_password_hash, get_sesiones_permisos, verify_password
 from backend.domain.Articulo import Articulo
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
 from backend.domain.Cliente import Cliente
@@ -65,10 +75,11 @@ from backend.domain.Proceso import Proceso
 from backend.domain.Sector import Sector
 from backend.domain.Usuario import Usuario
 from backend.infrastructure import copias_de_seguridad as copias
+from backend.infrastructure import storage_planos
 from backend.infrastructure.db import Base
-from backend.presentation import CopiaSeguridadAPI, main
+from backend.presentation import CopiaSeguridadAPI, PermisosAPI, main
 from backend.presentation.main import app
-from backend.tests.test_permisos_api import JULIAN, MATIAS, PERSONAS, SOFIA, _token
+from backend.tests.test_permisos_api import JULIAN, LUCAS, MATIAS, PERSONAS, SOFIA, _token
 from backend.tests.test_permisos_migracion import sembrar_permisos
 
 ADMIN = _token(JULIAN)
@@ -114,17 +125,38 @@ def _ddl_extras(motor: str) -> list[str]:
             "FOREIGN KEY (id_orden_trabajo_proceso) REFERENCES orden_trabajo_proceso(id) "
             "ON DELETE CASCADE"
         )
+        # Las de los planos, como en producción (2026-09-06_planos_por_articulo.sql y
+        # 2026-09-09_planos_en_storage.sql): un plano tiene el archivo en algún lado.
+        sentencias += [
+            "ALTER TABLE plano ADD CONSTRAINT ck_plano_destino "
+            "CHECK (id_articulo IS NOT NULL OR id_orden_trabajo IS NOT NULL)",
+            "ALTER TABLE plano ADD CONSTRAINT ck_plano_tiene_archivo "
+            "CHECK (archivo IS NOT NULL OR storage_path IS NOT NULL)",
+        ]
+    else:
+        # SQLite no agrega un CHECK a una tabla que ya existe: un trigger hace lo mismo.
+        sentencias.append(
+            "CREATE TRIGGER ck_plano_tiene_archivo BEFORE INSERT ON plano "
+            "WHEN NEW.archivo IS NULL AND NEW.storage_path IS NULL "
+            "BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: ck_plano_tiene_archivo'); END"
+        )
     return sentencias
 
 
-async def _armar_base(motor: str):
+async def _armar_base(motor: str, archivo_sqlite: str | None = None):
+    """`archivo_sqlite`: una SQLite en un archivo, con una conexión por sesión (como
+    Postgres). La de memoria comparte UNA conexión entre todas las sesiones, y cortar una
+    consulta a la mitad (una descarga que se corta) se la lleva puesta con la base."""
     if motor == "postgres":
         engine = create_async_engine(PG_URL, poolclass=NullPool)
     else:
-        engine = create_async_engine(
-            "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
-            connect_args={"check_same_thread": False},
-        )
+        if archivo_sqlite:
+            engine = create_async_engine(f"sqlite+aiosqlite:///{archivo_sqlite}", poolclass=NullPool)
+        else:
+            engine = create_async_engine(
+                "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
+                connect_args={"check_same_thread": False},
+            )
 
         @event.listens_for(engine.sync_engine, "connect")
         def _fks(dbapi_conn, _):
@@ -263,7 +295,20 @@ class DepositoDePrueba:
 
 @pytest_asyncio.fixture(params=MOTORES)
 async def cliente(request, monkeypatch):
-    engine, Sesion = await _armar_base(request.param)
+    async for c in _cliente(request.param, monkeypatch):
+        yield c
+
+
+@pytest_asyncio.fixture(params=MOTORES)
+async def cliente_cortable(request, monkeypatch, tmp_path):
+    """Para cortar una descarga a la mitad: cada sesión con su conexión."""
+    archivo = str(tmp_path / "copias.db") if request.param == "sqlite" else None
+    async for c in _cliente(request.param, monkeypatch, archivo):
+        yield c
+
+
+async def _cliente(motor, monkeypatch, archivo_sqlite=None):
+    engine, Sesion = await _armar_base(motor, archivo_sqlite)
     deposito = DepositoDePrueba()
     app.dependency_overrides[get_sesiones_permisos] = lambda: Sesion
     app.dependency_overrides[CopiaSeguridadAPI.get_sesiones_backup] = lambda: Sesion
@@ -273,7 +318,7 @@ async def cliente(request, monkeypatch):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         c.sesiones = Sesion
         c.deposito = deposito
-        c.motor = request.param
+        c.motor = motor
         yield c
     app.dependency_overrides.clear()
     await engine.dispose()
@@ -327,16 +372,23 @@ async def _revisar(c, datos: bytes, *, incluir_usuarios=False, headers=ADMIN, no
 
 
 async def _restaurar(c, datos: bytes, *, huella=None, confirmacion="RESTAURAR", incluir_usuarios=False,
-                     ya_descargue=False, headers=ADMIN, nombre="copia.zip"):
+                     ya_descargue=False, la_de_hoy: bytes | None = None, sin_firma=False,
+                     headers=ADMIN, nombre="copia.zip"):
+    """`la_de_hoy`: la copia que el admin acaba de bajar (el navegador manda su sha256).
+    `sin_firma`: confirma aparte una copia que no tiene la firma de este servidor."""
+    data = {
+        "huella": huella or hashlib.sha256(datos).hexdigest(),
+        "confirmacion": confirmacion,
+        "incluir_usuarios": "true" if incluir_usuarios else "false",
+        "ya_descargue_la_copia_actual": "true" if ya_descargue else "false",
+        "aceptar_copia_sin_firma": "true" if sin_firma else "false",
+    }
+    if la_de_hoy is not None:
+        data["huella_copia_actual"] = hashlib.sha256(la_de_hoy).hexdigest()
     return await c.post(
         "/backups/restauracion", headers=headers,
         files={"archivo": (nombre, datos, "application/zip")},
-        data={
-            "huella": huella or hashlib.sha256(datos).hexdigest(),
-            "confirmacion": confirmacion,
-            "incluir_usuarios": "true" if incluir_usuarios else "false",
-            "ya_descargue_la_copia_actual": "true" if ya_descargue else "false",
-        },
+        data=data,
     )
 
 
@@ -360,11 +412,18 @@ def _jsonl(filas: list) -> bytes:
 
 
 def _reempaquetar(datos: bytes, *, tablas: dict | None = None, cambiar_manifiesto=None,
-                  recalcular: bool = True, extra: dict | None = None, al_final=None) -> bytes:
+                  recalcular: bool = True, extra: dict | None = None, al_final=None,
+                  firmar: bool | None = None) -> bytes:
     """Arma otra copia a partir de `datos`: reemplaza el contenido de algunas tablas y
-    (si `recalcular`) vuelve a calcular hashes y cantidades, como haría alguien que
-    sabe lo que hace. Con `recalcular=False`, es una copia adulterada a mano.
-    `al_final` toca el manifiesto después de recalcular."""
+    (si `recalcular`) vuelve a calcular hashes y cantidades. Con `recalcular=False`, es
+    una copia adulterada a mano. `al_final` toca el manifiesto después de recalcular.
+
+    `firmar` (por defecto, lo mismo que `recalcular`) la vuelve a firmar con la clave del
+    servidor: es la copia que ESTE servidor habría hecho con ese contenido (una copia de
+    antes de una migración, por ejemplo). Con `firmar=False` y los hashes rehechos es lo
+    que haría alguien que edita la copia sin tener la clave: la firma no coincide."""
+    if firmar is None:
+        firmar = recalcular
     tablas = tablas or {}
     zin = zipfile.ZipFile(io.BytesIO(datos))
     m = json.loads(zin.read("manifiesto.json"))
@@ -388,6 +447,8 @@ def _reempaquetar(datos: bytes, *, tablas: dict | None = None, cambiar_manifiest
             zout.writestr(nombre, contenido)
         if al_final:
             al_final(m)
+        if firmar:
+            m["firma"] = copias.firmar_manifiesto(m)
         zout.writestr("manifiesto.json", json.dumps(m, ensure_ascii=False))
     return salida.getvalue()
 
@@ -431,11 +492,16 @@ async def test_bajar_queda_en_la_auditoria(cliente):
     datos = await _bajar(cliente)
     filas = await _leer(cliente, select(AuditoriaMovimiento).where(
         AuditoriaMovimiento.ruta == "/backups/descargar"))
-    assert len(filas) == 1
+    assert len(filas) == 1  # una sola fila: la de «empezó», completada al terminar
     fila = filas[0][0]
     assert fila.id_usuario == JULIAN and fila.accion == "descargó" and fila.estado == 200
     assert "descargó una copia de seguridad completa" in fila.descripcion
     assert _manifiesto(datos)["generado_en"][:10] in fila.descripcion.replace("_", "-")
+    detalle = json.loads(fila.detalle)["despues"]
+    # Lo que después reconoce ESTE archivo (la salida «ya la bajé» de restaurar).
+    assert detalle["completa"] is True
+    assert detalle["sha256"] == hashlib.sha256(datos).hexdigest()
+    assert set(detalle["contenido"]) == {"datos", "acceso"}
 
 
 # ─────────────────────────── ida y vuelta ───────────────────────────
@@ -793,13 +859,13 @@ async def test_sin_copia_previa_no_se_restaura(cliente):
     # Decir «ya la descargué» sin haberla bajado no alcanza.
     await _ejecutar(cliente, AuditoriaMovimiento.__table__.delete().where(
         AuditoriaMovimiento.ruta == "/backups/descargar"))
-    r = await _restaurar(cliente, copia, ya_descargue=True)
+    r = await _restaurar(cliente, copia, ya_descargue=True, la_de_hoy=copia)
     assert r.status_code == 409, r.text
     assert await _foto(cliente) == antes
 
-    # Bajada recién (queda en la auditoría) y confirmada: ahora sí.
-    await _bajar(cliente)
-    r = await _restaurar(cliente, copia, ya_descargue=True)
+    # Bajada recién (queda en la auditoría, con su huella) y confirmada: ahora sí.
+    hoy = await _bajar(cliente)
+    r = await _restaurar(cliente, copia, ya_descargue=True, la_de_hoy=hoy)
     assert r.status_code == 200, r.text
     assert r.json()["data"]["copia_previa"]["donde"] == "la copia que descargaste recién"
 
@@ -812,8 +878,8 @@ async def test_sin_storage_configurado_pide_la_descarga(cliente):
     await _ejecutar(cliente, AuditoriaMovimiento.__table__.delete())
     r = await _restaurar(cliente, copia)
     assert r.status_code == 409 and "no hay dónde guardar" in _msg(r)
-    await _bajar(cliente)
-    assert (await _restaurar(cliente, copia, ya_descargue=True)).status_code == 200
+    hoy = await _bajar(cliente)
+    assert (await _restaurar(cliente, copia, ya_descargue=True, la_de_hoy=hoy)).status_code == 200
 
 
 # ─────────────────────────── usuarios ───────────────────────────
@@ -859,7 +925,8 @@ async def test_incluir_usuarios_devuelve_los_de_la_copia_menos_el_admin_que_rest
     assert r.status_code == 200, r.text
     usuarios = {f.id_usuario: f for f in await _leer(cliente, select(Usuario.__table__))}
     assert set(usuarios) == {1, 2, 3, 4, 5}  # el nuevo no estaba en la copia
-    assert usuarios[SOFIA].nombre == "Sofia" and usuarios[SOFIA].password_hash == HASH_VIEJO
+    # Los datos vuelven a los de la copia; la contraseña, NO: queda la de hoy.
+    assert usuarios[SOFIA].nombre == "Sofia" and usuarios[SOFIA].password_hash == HASH_NUEVO
     # Julián restauró: su cuenta queda como estaba recién (su clave de hoy, admin, activa).
     assert tuple(usuarios[JULIAN]) == julian_ahora
     assert usuarios[JULIAN].rol == "admin" and usuarios[JULIAN].activo
@@ -956,3 +1023,482 @@ def test_el_nombre_del_archivo():
         "spmm_backup_2026-09-22_153012_antes-de-restaurar.zip"
     assert copias.NOMBRE_DE_ARCHIVO.match(copias.nombre_de_copia(cuando))
     assert not copias.NOMBRE_DE_ARCHIVO.match("../planos/x.zip")
+
+
+# ═══════════════════════ segunda vuelta: lo que encontró la verificación ═══════════════════════
+
+
+async def _descargas(c) -> list:
+    return [f for (f,) in await _leer(c, select(AuditoriaMovimiento).where(
+        AuditoriaMovimiento.ruta == "/backups/descargar").order_by(AuditoriaMovimiento.id))]
+
+
+def _sin_columna(datos: bytes, tabla: str, columna: str) -> bytes:
+    """La misma copia como la habría hecho este servidor antes de que existiera
+    `columna` (firmada)."""
+    columnas, filas = _filas(datos, tabla)
+    i = columnas.index(columna)
+
+    def _sacar(m):
+        t = m["tablas"][tabla]
+        t["columnas"] = t["columnas"][:i] + t["columnas"][i + 1:]
+        t["tipos"] = t["tipos"][:i] + t["tipos"][i + 1:]
+        t["columnas_vaciadas"] = [c for c in t.get("columnas_vaciadas", []) if c != columna]
+
+    return _reempaquetar(datos, tablas={tabla: _jsonl([f[:i] + f[i + 1:] for f in filas])},
+                         cambiar_manifiesto=_sacar)
+
+
+# ── «ya descargué la copia de hoy» no puede perder lo que se guardó después ──
+
+
+async def test_ya_la_descargue_no_alcanza_si_despues_se_guardo_algo(cliente):
+    cliente.deposito.anda = False
+    vieja = await _bajar(cliente)
+    hoy = await _bajar(cliente)
+    # Alguien guarda algo DESPUÉS de que el admin bajó la copia de hoy.
+    await _ejecutar(cliente, update(Cliente).where(Cliente.id == 1).values(nombre="Acme (después)"))
+    antes = await _foto(cliente)
+
+    r = await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=hoy)
+    assert r.status_code == 409, r.text
+    assert r.json()["errors"][0]["campo"] == "copia_previa"
+    assert "guardó cambios" in _msg(r) and "No se restauró nada" in _msg(r)
+    assert await _foto(cliente) == antes
+
+    # Bajada otra vez (ya con el cambio adentro): ahora sí, y lo nuevo está en esa copia.
+    otra = await _bajar(cliente)
+    columnas, filas = _filas(otra, "cliente")
+    assert "Acme (después)" in [f[columnas.index("nombre")] for f in filas]
+    r = await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=otra)
+    assert r.status_code == 200, r.text
+
+
+async def test_ya_la_descargue_pide_ese_archivo_entero_y_de_quien_restaura(cliente):
+    cliente.deposito.anda = False
+    vieja = await _bajar(cliente)
+    antes = await _foto(cliente)
+    # Sin decir qué archivo tiene, o con uno que no se bajó de acá: no.
+    assert (await _restaurar(cliente, vieja, ya_descargue=True)).status_code == 409
+    assert (await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=b"otro")).status_code == 409
+    # La bajó OTRO admin: tampoco (tiene que tenerla quien restaura).
+    de_lucas = await _bajar(cliente, headers=_token(LUCAS))
+    assert (await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=de_lucas)).status_code == 409
+    # Una descarga que se cortó no cuenta.
+    hoy = await _bajar(cliente)
+    await _ejecutar(cliente, update(AuditoriaMovimiento).where(
+        AuditoriaMovimiento.id == (await _descargas(cliente))[-1].id).values(estado=499))
+    assert (await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=hoy)).status_code == 409
+    assert await _foto(cliente) == antes
+
+
+async def test_ya_la_descargue_con_los_usuarios_mira_tambien_las_cuentas(cliente):
+    cliente.deposito.anda = False
+    vieja = await _bajar(cliente)
+    hoy = await _bajar(cliente)
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == MATIAS).values(rol="supervisor"))
+    # Con los usuarios, el cambio de rol de después de bajarla se perdería: no.
+    r = await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=hoy, incluir_usuarios=True)
+    assert r.status_code == 409 and "guardó cambios" in _msg(r)
+    # Sin los usuarios, las cuentas no se tocan: los datos siguen siendo los de la copia de hoy.
+    r = await _restaurar(cliente, vieja, ya_descargue=True, la_de_hoy=hoy)
+    assert r.status_code == 200, r.text
+
+
+# ── la firma ──
+
+
+async def test_la_copia_va_firmada_y_una_editada_se_nota(cliente):
+    copia = await _bajar(cliente)
+    assert _manifiesto(copia)["firma"]["algoritmo"] == "hmac-sha256"
+    r = await _revisar(cliente, copia)
+    assert r.json()["data"]["firma"] == {"valida": True, "motivo": None}
+
+    # Alguien cambia un dato y rehace hashes y cantidades, pero no tiene la clave.
+    columnas, filas = _filas(copia, "cliente")
+    filas[0][columnas.index("nombre")] = "Cambiado a mano"
+    editada = _reempaquetar(copia, tablas={"cliente": _jsonl(filas)}, firmar=False)
+    await _ejecutar(cliente, update(Cliente).where(Cliente.id == 2).values(nombre="hoy"))
+    antes = await _foto(cliente)
+
+    r = await _revisar(cliente, editada)
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["firma"] == {"valida": False, "motivo": copias.SIN_FIRMA}
+    # Con los usuarios, nunca: ni revisarla ni restaurarla, aunque se confirme.
+    r = await _revisar(cliente, editada, incluir_usuarios=True)
+    assert r.status_code == 422 and "no se pueden incluir los usuarios" in _msg(r)
+    r = await _restaurar(cliente, editada, incluir_usuarios=True, sin_firma=True)
+    assert r.status_code == 422
+    # Los datos, sólo confirmándolo aparte.
+    r = await _restaurar(cliente, editada)
+    assert r.status_code == 409 and r.json()["errors"][0]["campo"] == "firma"
+    assert await _foto(cliente) == antes
+    assert cliente.deposito.guardadas == {}
+    r = await _restaurar(cliente, editada, sin_firma=True)
+    assert r.status_code == 200, r.text
+    assert [n for (n,) in await _leer(cliente, select(Cliente.nombre).order_by(Cliente.id))] == \
+        ["Cambiado a mano", "Metlo SA"]
+    (fila,) = [f for (f,) in await _leer(cliente, select(AuditoriaMovimiento).where(
+        AuditoriaMovimiento.ruta == "/backups/restauracion", AuditoriaMovimiento.estado == 200))]
+    assert "sin la firma de este servidor" in fila.descripcion
+
+
+async def test_una_copia_de_otro_servidor_no_esta_firmada(cliente, monkeypatch):
+    copia = await _bajar(cliente)
+    # Otra instalación (u otra SECRET_KEY): otra clave de firma.
+    monkeypatch.setattr(copias, "_clave_de_firma", lambda: b"la-clave-de-otra-instalacion")
+    r = await _revisar(cliente, copia)
+    assert r.status_code == 200 and r.json()["data"]["firma"]["valida"] is False
+
+
+async def test_una_cuenta_de_admin_inventada_no_entra(cliente):
+    """El ataque de la verificación: agregar a la copia un admin permanente con una clave
+    conocida y rehacer los hashes. No entra, y su token no abre nada."""
+    copia = await _bajar(cliente)
+    columnas, filas = _filas(copia, "usuario")
+    intruso = list(filas[0])
+    for campo, valor in (("id_usuario", 77), ("username", "intruso"), ("email", "intruso@x.com"),
+                         ("rol", "admin"), ("activo", True), ("admin_permanente", True),
+                         ("password_hash", HASH_VIEJO)):
+        intruso[columnas.index(campo)] = valor
+    columnas_ua, _ = _filas(copia, "usuario_area")
+    de_mas = {"id": 1, "id_usuario": SOFIA, "area_codigo": "configuracion", "nivel": "admin",
+              "creado_en": "2026-09-01T00:00:00"}
+    editada = _reempaquetar(copia, firmar=False, tablas={
+        "usuario": _jsonl(filas + [intruso]),
+        "usuario_area": _jsonl([[de_mas.get(c) for c in columnas_ua]]),
+    })
+    antes = await _foto(cliente)
+    assert (await _revisar(cliente, editada, incluir_usuarios=True)).status_code == 422
+    for sin_firma in (False, True):
+        r = await _restaurar(cliente, editada, incluir_usuarios=True, sin_firma=sin_firma)
+        assert r.status_code == 422, r.text
+    assert await _foto(cliente) == antes
+    assert (await cliente.get("/backups/estado", headers=_token(77))).status_code == 401
+    assert (await cliente.get("/backups/descargar", headers=_token(SOFIA, "supervisor"))).status_code == 403
+
+
+async def test_la_copia_no_puede_dar_lo_que_la_pantalla_de_permisos_no_deja(cliente):
+    """Aunque la copia esté firmada (defensa en profundidad): «administrar» en
+    Configuración es sólo del rol admin."""
+    copia = await _bajar(cliente)
+    columnas_ua, _ = _filas(copia, "usuario_area")
+    de_mas = {"id": 1, "id_usuario": SOFIA, "area_codigo": "configuracion", "nivel": "admin",
+              "creado_en": "2026-09-01T00:00:00"}
+    mala = _reempaquetar(copia, tablas={"usuario_area": _jsonl([[de_mas.get(c) for c in columnas_ua]])})
+    r = await _revisar(cliente, mala, incluir_usuarios=True)
+    assert r.status_code == 422 and "sólo del rol Administrador" in _msg(r)
+    # Sin los usuarios, esa tabla no se toca: la copia se puede restaurar.
+    assert (await _revisar(cliente, mala)).status_code == 200
+
+    columnas_ra, filas_ra = _filas(copia, "rol_area")
+    i_rol, i_area, i_nivel = (columnas_ra.index(c) for c in ("rol_codigo", "area_codigo", "nivel"))
+    for f in filas_ra:
+        if f[i_rol] == "supervisor" and f[i_area] == "configuracion":
+            f[i_nivel] = "admin"
+    mala = _reempaquetar(copia, tablas={"rol_area": _jsonl(filas_ra)})
+    r = await _revisar(cliente, mala, incluir_usuarios=True)
+    assert r.status_code == 422 and "al rol «supervisor»" in _msg(r)
+
+
+def test_los_topes_son_los_de_la_pantalla_de_permisos():
+    assert copias.TOPE_AREA_NO_ADMIN == PermisosAPI._TOPE_AREA
+    assert copias.TOPE_SECCION_NO_ADMIN == PermisosAPI._TOPE_SECCION
+
+
+# ── las copias automáticas no se pueden bajar como si fueran un plano ──
+
+
+async def test_un_plano_no_puede_apuntar_fuera_de_los_planos(cliente):
+    copia = await _bajar(cliente)
+    antes = await _foto(cliente)
+    columnas, filas = _filas(copia, "plano")
+    i = columnas.index("storage_path")
+    for ruta in ("copias-de-seguridad/spmm_backup_2026-09-22_153012_antes-de-restaurar.zip",
+                 "articulo/1/../../copias-de-seguridad/x.zip", "/articulo/1/x.pdf", "otra/1/x.pdf"):
+        filas[0][i] = ruta
+        for firmar in (False, True):
+            mala = _reempaquetar(copia, tablas={"plano": _jsonl(filas)}, firmar=firmar)
+            r = await _revisar(cliente, mala)
+            assert r.status_code == 422, (ruta, r.text)
+            assert "no es el archivo de un plano" in _msg(r)
+            assert (await _restaurar(cliente, mala, sin_firma=True)).status_code == 422
+    assert await _foto(cliente) == antes
+
+
+async def test_plano_service_no_sirve_ni_borra_nada_fuera_de_los_planos(monkeypatch):
+    from backend.application.PlanoService import PlanoService
+
+    pedidos = []
+
+    async def _bajar_objeto(ruta):
+        pedidos.append(("bajar", ruta))
+        return b"lo que haya"
+
+    async def _borrar_objeto(ruta):
+        pedidos.append(("borrar", ruta))
+
+    monkeypatch.setattr(storage_planos, "bajar", _bajar_objeto)
+    monkeypatch.setattr(storage_planos, "borrar", _borrar_objeto)
+
+    def _servicio(ruta, archivo=None):
+        class _Repo:
+            async def find_by_id(self, _id):
+                return SimpleNamespace(archivo=archivo, storage_path=ruta, tipo_archivo="pdf", nombre="x")
+
+            async def find_storage_path(self, _id):
+                return ruta
+
+            async def delete(self, _id):
+                return True
+
+        servicio = PlanoService(None)
+        servicio.repository = _Repo()
+        return servicio
+
+    copia = "copias-de-seguridad/spmm_backup_2026-09-22_153012_antes-de-restaurar.zip"
+    for ruta in (copia, "articulo/1/../../" + copia, "articulo/1/%2e%2e/x"):
+        with pytest.raises(InfrastructureException):
+            await _servicio(ruta).obtenerContenidoPlano(1)
+        # Con el blob del camino viejo, se sirve el blob (nunca el objeto).
+        assert (await _servicio(ruta, b"blob").obtenerContenidoPlano(1))[0] == b"blob"
+        await _servicio(ruta).eliminarPlano(1)
+    assert pedidos == []
+
+    # Y un plano de verdad, como siempre.
+    ruta = storage_planos.ruta_para("Plano (1).pdf", id_articulo=7)
+    assert (await _servicio(ruta).obtenerContenidoPlano(1))[0] == b"lo que haya"
+    await _servicio(ruta).eliminarPlano(1)
+    assert pedidos == [("bajar", ruta), ("borrar", ruta)]
+
+
+def test_las_rutas_de_plano():
+    for ruta in (storage_planos.ruta_para("Plano (1).pdf", id_articulo=7),
+                 storage_planos.ruta_para("croquis Ø.png", id_orden=10),
+                 storage_planos.ruta_para("..")):
+        assert storage_planos.es_ruta_de_plano(ruta), ruta
+        assert storage_planos.ruta_permitida_para_planos(ruta), ruta
+    for ruta in ("copias-de-seguridad/x.zip", "articulo/1/../x", "articulo/1/..", "/articulo/1/x",
+                 "articulo//x", "articulo/1/x?y", "articulo/1/%2e%2e", "", None, 5):
+        assert not storage_planos.es_ruta_de_plano(ruta), ruta
+        assert not storage_planos.ruta_permitida_para_planos(ruta), ruta
+    # Una ruta vieja con otra forma se sigue abriendo; restaurarla, no.
+    assert storage_planos.ruta_permitida_para_planos("planos/viejo.pdf")
+    assert not storage_planos.es_ruta_de_plano("planos/viejo.pdf")
+
+
+# ── la copia no lleva contraseñas ni tokens de recuperación ──
+
+
+async def test_la_copia_no_lleva_contrasenas_ni_tokens(cliente):
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == SOFIA).values(
+        reset_token="TOKEN-VIVO-DE-RESETEO", reset_token_expiry=datetime(2026, 9, 23, 12)))
+    datos = await _bajar(cliente)
+    columnas, filas = _filas(datos, "usuario")
+    for columna in ("password_hash", "reset_token", "reset_token_expiry"):
+        assert all(f[columnas.index(columna)] is None for f in filas), columna
+    assert _manifiesto(datos)["tablas"]["usuario"]["columnas_vaciadas"] == \
+        ["password_hash", "reset_token", "reset_token_expiry"]
+    zf = zipfile.ZipFile(io.BytesIO(datos))
+    todo = b"".join(zf.read(n) for n in zf.namelist())
+    assert b"TOKEN-VIVO-DE-RESETEO" not in todo and b"$2b$" not in todo
+
+    # Y restaurarla, aun con los usuarios, no le cambia la contraseña a nadie.
+    r = await _restaurar(cliente, datos, incluir_usuarios=True)
+    assert r.status_code == 200, r.text
+    claves = {i: h for (i, h) in await _leer(cliente, select(Usuario.id_usuario, Usuario.password_hash))}
+    assert set(claves.values()) == {HASH_VIEJO}
+
+
+def test_lo_que_no_viaja_son_columnas_del_modelo():
+    for tabla, columnas in copias.COLUMNAS_QUE_NO_VIAJAN.items():
+        assert set(columnas) <= set(Base.metadata.tables[tabla].c.keys())
+    assert set(copias.CAMPOS_DE_HOY) <= set(Usuario.__table__.c.keys())
+    assert not verify_password("", copias.CLAVE_INUSABLE)
+    assert not verify_password(copias.CLAVE_INUSABLE, copias.CLAVE_INUSABLE)
+
+
+# ── incluir usuarios con las reglas de RF-24 y RF-26 ──
+
+
+async def test_incluir_usuarios_no_reactiva_ni_toca_a_los_permanentes(cliente):
+    # Cuando se hizo la copia: Lucas era supervisor, Sofía estaba activa y existía Pepe.
+    await _ejecutar(
+        cliente,
+        update(Usuario).where(Usuario.id_usuario == LUCAS).values(rol="supervisor"),
+        insert(Usuario).values(id_usuario=6, username="pepe", email="pepe@metlo.com.ar",
+                               password_hash=HASH_VIEJO, nombre="Pepe", apellido="Prueba",
+                               rol="operario"),
+    )
+    copia = await _bajar(cliente)
+    # Después: Lucas volvió a admin y es permanente (con otra clave), Sofía se fue (se
+    # desactivó), Pepe se borró y Matías pasó a supervisor.
+    await _ejecutar(
+        cliente,
+        update(Usuario).where(Usuario.id_usuario == LUCAS).values(
+            rol="admin", admin_permanente=True, password_hash=HASH_NUEVO),
+        update(Usuario).where(Usuario.id_usuario == SOFIA).values(activo=False, password_hash=HASH_NUEVO),
+        Usuario.__table__.delete().where(Usuario.id_usuario == 6),
+        update(Usuario).where(Usuario.id_usuario == MATIAS).values(rol="supervisor"),
+    )
+    (lucas_hoy,) = [tuple(f) for f in await _leer(
+        cliente, select(Usuario.__table__).where(Usuario.id_usuario == LUCAS))]
+
+    r = await _revisar(cliente, copia, incluir_usuarios=True)
+    assert r.status_code == 200, r.text
+    cambios = " ".join(r.json()["data"]["cambios_de_usuarios"])
+    assert "administradores permanentes (Lucas Prueba (lucas))" in cambios
+    assert "Vuelven desactivadas y sin contraseña" in cambios and "Pepe Prueba (pepe)" in cambios
+    assert "Matias Prueba (matias) (supervisor → operario)" in cambios
+    assert "Siguen desactivadas" in cambios and "Sofia Prueba (sofia)" in cambios
+
+    r = await _restaurar(cliente, copia, incluir_usuarios=True)
+    assert r.status_code == 200, r.text
+    usuarios = {f.id_usuario: f for f in await _leer(cliente, select(Usuario.__table__))}
+    # El permanente, tal cual está hoy: admin, permanente y su clave de hoy.
+    assert tuple(usuarios[LUCAS]) == lucas_hoy
+    # Nadie se reactiva, y cada uno conserva su clave de hoy.
+    assert usuarios[SOFIA].activo is False and usuarios[SOFIA].password_hash == HASH_NUEVO
+    assert usuarios[MATIAS].rol == "operario"
+    # Pepe vuelve, pero desactivado y sin clave que sirva.
+    assert usuarios[6].activo is False and usuarios[6].admin_permanente is False
+    assert usuarios[6].password_hash == copias.CLAVE_INUSABLE
+    assert usuarios[6].reset_token is None and usuarios[6].debe_cambiar_password is True
+    assert not verify_password("la-de-antes", usuarios[6].password_hash)
+
+
+async def test_una_copia_vieja_no_le_saca_la_marca_de_permanente_a_nadie(cliente):
+    """Una copia de antes de que existiera admin_permanente: la columna queda como hoy."""
+    vieja = _sin_columna(await _bajar(cliente), "usuario", "admin_permanente")
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == LUCAS).values(admin_permanente=True))
+    r = await _restaurar(cliente, vieja, incluir_usuarios=True)
+    assert r.status_code == 200, r.text
+    ((permanente,),) = await _leer(cliente, select(Usuario.admin_permanente).where(Usuario.id_usuario == LUCAS))
+    assert permanente is True
+
+
+async def test_un_permanente_no_puede_chocar_con_otra_cuenta_de_la_copia(cliente):
+    copia = await _bajar(cliente)
+    columnas, filas = _filas(copia, "usuario")
+    for f in filas:
+        if f[columnas.index("id_usuario")] == LUCAS:
+            f[columnas.index("id_usuario")] = 98
+    otra = _reempaquetar(copia, tablas={"usuario": _jsonl(filas)})
+    await _ejecutar(cliente, update(Usuario).where(Usuario.id_usuario == LUCAS).values(admin_permanente=True))
+    antes = await _foto(cliente)
+    r = await _revisar(cliente, otra, incluir_usuarios=True)
+    assert r.status_code == 422 and "administrador permanente" in _msg(r)
+    assert (await _restaurar(cliente, otra, incluir_usuarios=True)).status_code == 422
+    assert await _foto(cliente) == antes
+
+
+# ── la auditoría de las descargas ──
+
+
+async def _descargar_y_cortar(headers: dict, cortar_despues: int) -> int:
+    """Pide la copia directo a la app ASGI y corta la conexión cuando llegaron
+    `cortar_despues` bytes, como un navegador que se cierra a la mitad."""
+    recibido = bytearray()
+    cortar = asyncio.Event()
+    pedido = {"enviado": False}
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+        "scheme": "http", "path": "/backups/descargar", "raw_path": b"/backups/descargar",
+        "query_string": b"", "root_path": "", "client": ("127.0.0.1", 1), "server": ("test", 80),
+        "headers": [(b"host", b"test"), (b"authorization", headers["Authorization"].encode())],
+    }
+
+    async def receive():
+        if not pedido["enviado"]:
+            pedido["enviado"] = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await cortar.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(mensaje):
+        if mensaje["type"] == "http.response.body":
+            recibido.extend(mensaje.get("body", b""))
+            if len(recibido) >= cortar_despues:
+                cortar.set()
+
+    try:
+        await app(scope, receive, send)
+    except Exception:
+        pass  # según la versión, cortar puede terminar en una excepción: da igual
+    return len(recibido)
+
+
+async def test_una_descarga_cortada_queda_anotada(cliente_cortable, monkeypatch):
+    cliente = cliente_cortable
+    monkeypatch.setattr(copias, "LOTE", 1)  # muchos pedazos, para cortar a la mitad
+    entera = len(await _bajar(cliente))
+    await _ejecutar(cliente, AuditoriaMovimiento.__table__.delete())
+    llegaron = await _descargar_y_cortar(ADMIN, cortar_despues=2000)
+    assert 0 < llegaron < entera
+    (fila,) = await _descargas(cliente)
+    assert fila.id_usuario == JULIAN and fila.estado == 499
+    assert "se cortó" in fila.descripcion
+    assert json.loads(fila.detalle)["despues"]["completa"] is False
+
+
+async def test_la_descarga_se_anota_antes_del_primer_byte(cliente_cortable, monkeypatch):
+    cliente = cliente_cortable
+    monkeypatch.setattr(copias, "LOTE", 1)
+
+    async def _nunca_termina_de_anotar(*_, **__):
+        return None
+    monkeypatch.setattr(CopiaSeguridadAPI, "_anotar_fin", _nunca_termina_de_anotar)
+    assert await _descargar_y_cortar(ADMIN, cortar_despues=2000) > 0
+    # Aunque no se haya podido completar, la fila de «empezó» está.
+    (fila,) = await _descargas(cliente)
+    assert fila.id_usuario == JULIAN and fila.estado is None
+    assert "empezó a descargar una copia de seguridad completa" in fila.descripcion
+
+
+async def test_sin_poder_anotarla_no_hay_copia(cliente, monkeypatch):
+    async def _falla(*_, **__):
+        raise RuntimeError("la base de la auditoría no contesta")
+    monkeypatch.setattr(CopiaSeguridadAPI, "_anotar_inicio", _falla)
+    r = await cliente.get("/backups/descargar", headers=ADMIN)
+    assert r.status_code == 503 and "sin dejar rastro" in _msg(r)
+    assert not r.content.startswith(b"PK")
+
+
+async def test_un_intento_sin_permiso_de_bajar_queda_anotado(cliente):
+    for ruta in ("/backups/descargar", "/backups/automaticas"):
+        r = await cliente.get(ruta, headers=_token(SOFIA, "supervisor"))
+        assert r.status_code == 403
+    filas = [f for (f,) in await _leer(cliente, select(AuditoriaMovimiento).where(
+        AuditoriaMovimiento.ruta.like("/backups/%")).order_by(AuditoriaMovimiento.id))]
+    assert [(f.id_usuario, f.ruta, f.estado) for f in filas] == [
+        (SOFIA, "/backups/descargar", 403), (SOFIA, "/backups/automaticas", 403)]
+    assert filas[0].descripcion == "Sofia Prueba descargó copia de seguridad (no se pudo: error 403)"
+    # Las lecturas de siempre siguen sin anotarse.
+    assert (await cliente.get("/backups/estado", headers=ADMIN)).status_code == 200
+    assert len(await _leer(cliente, select(AuditoriaMovimiento.id).where(
+        AuditoriaMovimiento.ruta == "/backups/estado"))) == 0
+
+
+# ── los planos del camino viejo ──
+
+
+async def test_un_plano_viejo_que_despues_se_paso_a_storage_conserva_su_ruta(cliente):
+    copia = await _bajar(cliente)  # el plano 2 está adentro de la base, sin ruta
+    ruta = "orden/10/0123456789abcdef0123456789abcdef-croquis.png"
+    await _ejecutar(cliente, update(Plano).where(Plano.id == 2).values(archivo=None, storage_path=ruta))
+    r = await _restaurar(cliente, copia)
+    assert r.status_code == 200, r.text
+    assert await _leer(cliente, select(Plano.storage_path, Plano.archivo).where(Plano.id == 2)) == [(ruta, None)]
+
+
+async def test_un_plano_sin_archivo_en_ningun_lado_no_vuelve_y_se_avisa(cliente):
+    copia = await _bajar(cliente)
+    await _ejecutar(cliente, Plano.__table__.delete().where(Plano.id == 2))
+    r = await _revisar(cliente, copia)
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["planos_sin_archivo"] == 1
+    assert any("Un plano de la copia no tiene el archivo en ningún lado" in a for a in r.json()["data"]["avisos"])
+    r = await _restaurar(cliente, copia)
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["planos_sin_archivo"] == 1
+    assert [i for (i,) in await _leer(cliente, select(Plano.id))] == [1]

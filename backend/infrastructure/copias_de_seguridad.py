@@ -17,10 +17,33 @@ EL ARCHIVO
                              orden de `columnas` del manifiesto
       manifiesto.json        formato y versión, cuándo y quién, y por tabla: columnas y
                              tipos (la firma del esquema), cantidad de filas y el sha256
-                             de su .jsonl
+                             de su .jsonl. Y la FIRMA del servidor (ver abajo).
 
 El manifiesto va AL FINAL del zip porque recién ahí se saben las cantidades y los
 hashes: la copia se arma mientras se manda (streaming), sin juntar nada en memoria.
+
+LA FIRMA: QUE LA COPIA LA HIZO ESTE SERVIDOR Y NADIE LA TOCÓ
+
+Los sha256 de cada tabla solos no prueban nada: cualquiera que edite un .jsonl los
+vuelve a calcular. Por eso el manifiesto va firmado con un HMAC-SHA256 cuya clave sale
+de SECRET_KEY (la misma que firma los tokens: quien la tiene ya es dueño del sistema) y
+que nunca sale del servidor. Como el manifiesto lleva el sha256 de cada tabla, la firma
+cubre la copia entera.
+
+Una copia sin firma válida —editada a mano, o hecha en otra instalación o con otra
+SECRET_KEY— se revisa igual (que el zip esté sano, hashes, tipos) pero:
+  · NUNCA con los usuarios: usuarios, roles y permisos sólo vuelven de una copia firmada.
+  · Para los datos, el admin tiene que confirmarlo aparte («restaurar igual»), después
+    de ver el aviso. Avisar y dejar decidir, como en el resto de la app; no frenar a
+    quien cambió la clave del servidor y tiene sólo copias viejas.
+
+LO QUE NO VIAJA EN LA COPIA, AUNQUE ESTÉ EN LA BASE
+
+  · Las contraseñas (usuario.password_hash) y los tokens de recuperación
+    (usuario.reset_token y su vencimiento): la columna va, con null en cada fila. Un zip
+    termina en Descargas, en un mail o en un Drive; un hash se puede atacar fuera de
+    línea y un token de recuperación vivo se usa tal cual. Al restaurar, nadie vuelve a
+    una contraseña vieja (ver «usuarios», abajo).
 
 QUÉ TABLAS: TODAS LAS QUE HAY EN LA BASE, LEÍDAS DE LA BASE
 
@@ -64,10 +87,21 @@ RESTAURAR, EN ORDEN (todo en UNA transacción)
 LO QUE NO SE RESTAURA, A PROPÓSITO (decisión conservadora, pendiente de validar)
 
   · Usuarios, roles y permisos: quedan los de ahora. Si no, alguien puede perder el
-    acceso a mitad de camino o volver a entrar con una contraseña vieja. Hay una opción
-    avanzada que los incluye, pero la cuenta del admin que restaura queda como está
-    (su contraseña, su rol, activa): nunca se deja afuera a sí mismo ni al sistema sin
-    administrador.
+    acceso a mitad de camino. Hay una opción avanzada que los incluye (sólo con una copia
+    firmada), con las mismas reglas que la API de usuarios y permisos (RF-24, RF-26):
+      - La cuenta del admin que restaura y las de los administradores permanentes
+        (admin_permanente) quedan EXACTAMENTE como están hoy: rol, activa, contraseña.
+      - Nadie vuelve a una contraseña vieja: la de cada cuenta que existe hoy queda la de
+        hoy, igual que su bloqueo por intentos fallidos y la marca de administrador
+        permanente (que sólo se pone a mano en la base, nunca desde una copia).
+      - Ninguna cuenta desactivada hoy se reactiva. Una cuenta que hoy no existe y la
+        copia trae vuelve DESACTIVADA y sin contraseña (se activa en Usuarios y entra con
+        «Olvidé mi contraseña»).
+      - La copia no puede dar lo que la API no deja dar: «administrar» en Configuración
+        (o más que «ver» en Usuarios y permisos) a un rol que no sea admin o a una
+        persona. Se revisa antes de tocar nada.
+    La vista previa dice cuenta por cuenta qué pasa. No hay sesiones que cortar: el
+    token dice quién sos y la base, en cada pedido, si seguís activo y qué podés.
   · La auditoría: es lo que registra la restauración misma. Borrarla con una copia vieja
     sería borrar justo quién la restauró.
 
@@ -78,11 +112,15 @@ SEGURIDAD DEL ARCHIVO
     identificadores los cita el dialecto). Lo que no coincide se ignora.
   · Nada de pickle ni eval: JSON y nada más, con topes de tamaño por archivo, por renglón
     y en total, y de relación comprimido/descomprimido (bomba de zip).
+  · Una fila de `plano` sólo vuelve si su ruta tiene la forma exacta de una ruta de plano
+    (storage_planos.es_ruta_de_plano): una que apunte a la carpeta de las copias
+    automáticas —que traen todos los datos— haría que cualquiera que ve planos la baje.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import io
 import json
 import re
@@ -99,6 +137,8 @@ from sqlalchemy import MetaData, Table, exc as sa_exc, func, null, select, text,
 from sqlalchemy.sql import sqltypes
 
 import backend.domain  # noqa: F401  registra los modelos en Base.metadata
+from backend.core.config import settings
+from backend.core.permisos import ROL_ADMIN, rango
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
 from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
 from backend.domain.Permisos import (
@@ -110,7 +150,9 @@ from backend.domain.Permisos import (
     UsuarioArea,
     UsuarioSeccion,
 )
+from backend.domain.Plano import Plano
 from backend.domain.Usuario import Usuario
+from backend.infrastructure import storage_planos
 from backend.infrastructure.auditoria_movimientos import ahora_ar
 from backend.infrastructure.db import Base
 
@@ -166,6 +208,78 @@ TABLAS_DE_AUDITORIA = frozenset({
     "planificacion_intento",
     "planificacion_borrada",
 })
+
+# ─────────────────────────── lo que no viaja ───────────────────────────
+#
+# Columnas que van en la copia VACÍAS (null en cada fila): la columna está, el valor no.
+# Ver «LO QUE NO VIAJA» arriba. Un test exige que sean columnas del modelo.
+COLUMNAS_QUE_NO_VIAJAN = {
+    Usuario.__tablename__: ("password_hash", "reset_token", "reset_token_expiry"),
+}
+
+# ─────────────────────────── usuarios (la opción avanzada) ───────────────────────────
+#
+# De una cuenta que existe hoy, esto queda como está hoy aunque la copia diga otra cosa:
+# nadie vuelve a una contraseña vieja ni a un token de recuperación viejo, un bloqueo por
+# intentos fallidos (RF-26) no se levanta restaurando, y la marca de administrador
+# permanente (RF-24) sólo se pone a mano en la base. `activo` no está: se combina (ver
+# restaurar_copia). Las que no existen en la base de hoy se saltean solas.
+CAMPOS_DE_HOY = ("password_hash", "reset_token", "reset_token_expiry", "intentos_fallidos",
+                 "bloqueado_hasta", "debe_cambiar_password", "admin_permanente")
+
+# La contraseña de una cuenta que vuelve y hoy no existe. No es un hash de bcrypt: no
+# coincide con ninguna clave (verify_password da False) y se reemplaza con «Olvidé mi
+# contraseña». La cuenta vuelve además desactivada.
+CLAVE_INUSABLE = "!sin-clave: volvió con una copia de seguridad"
+
+# Lo que la API de permisos no deja dar a ningún rol que no sea admin ni a ninguna
+# persona (PermisosAPI._TOPE_AREA y _TOPE_SECCION; un test exige que sean iguales). Una
+# copia que lo trae no se restaura con los usuarios.
+TOPE_AREA_NO_ADMIN = {"configuracion": "write"}
+TOPE_SECCION_NO_ADMIN = {"configuracion_usuarios": "read"}
+# tabla -> (columna del código, topes, columna del rol o None si es de una persona)
+_TOPES_DE_PERMISOS = {
+    RolArea.__tablename__: ("area_codigo", TOPE_AREA_NO_ADMIN, "rol_codigo"),
+    RolSeccion.__tablename__: ("seccion_codigo", TOPE_SECCION_NO_ADMIN, "rol_codigo"),
+    UsuarioArea.__tablename__: ("area_codigo", TOPE_AREA_NO_ADMIN, None),
+    UsuarioSeccion.__tablename__: ("seccion_codigo", TOPE_SECCION_NO_ADMIN, None),
+}
+_DICHO_NIVEL = {"none": "sin acceso", "read": "ver", "write": "editar", "admin": "administrar"}
+
+# ─────────────────────────── la firma ───────────────────────────
+
+ALGORITMO_DE_FIRMA = "hmac-sha256"
+# Separa esta clave de cualquier otro uso de SECRET_KEY (los tokens): la misma SECRET_KEY
+# da claves distintas para cosas distintas.
+_ETIQUETA_DE_LA_CLAVE = b"spmm/copias-de-seguridad/firma-del-manifiesto/v1"
+
+
+def _clave_de_firma() -> bytes:
+    return hmac.new(settings.SECRET_KEY.encode("utf-8"), _ETIQUETA_DE_LA_CLAVE,
+                    hashlib.sha256).digest()
+
+
+def _manifiesto_canonico(manifiesto: dict) -> bytes:
+    """El manifiesto sin la firma, en una sola forma posible (claves ordenadas, sin
+    espacios): lo que se firma y lo que se vuelve a calcular al revisar."""
+    sin_firma = {k: v for k, v in manifiesto.items() if k != "firma"}
+    return json.dumps(sin_firma, sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":")).encode("utf-8")
+
+
+def firmar_manifiesto(manifiesto: dict) -> dict:
+    valor = hmac.new(_clave_de_firma(), _manifiesto_canonico(manifiesto), hashlib.sha256)
+    return {"algoritmo": ALGORITMO_DE_FIRMA, "valor": valor.hexdigest()}
+
+
+def firma_valida(manifiesto: dict) -> bool:
+    firma = manifiesto.get("firma")
+    if not isinstance(firma, dict) or firma.get("algoritmo") != ALGORITMO_DE_FIRMA:
+        return False
+    valor = firma.get("valor")
+    if not isinstance(valor, str) or not _SHA256.match(valor):
+        return False
+    return hmac.compare_digest(firmar_manifiesto(manifiesto)["valor"], valor)
 
 # Cómo se llama cada tabla en el taller, para la pantalla. Sólo para mostrar: la que
 # no esté acá se muestra con su nombre crudo, y eso no rompe nada.
@@ -474,12 +588,15 @@ def _texto_leeme(cuando: datetime, generado_por: Optional[dict]) -> str:
         "renglón por fila), y manifiesto.json con qué hay y cómo comprobar que nada\n"
         "se modificó.\n\n"
         "Qué NO trae: los archivos de los planos. Viven aparte, en el almacenamiento\n"
-        "de Supabase; la copia tiene la lista de planos y dónde está cada archivo.\n\n"
-        "Cuidado: trae los usuarios del sistema (sin contraseñas legibles, pero con\n"
-        "sus datos). Guardala en un lugar seguro.\n\n"
+        "de Supabase; la copia tiene la lista de planos y dónde está cada archivo.\n"
+        "Tampoco trae contraseñas ni enlaces para recuperarlas.\n\n"
+        "Cuidado: trae todos los datos del taller y los usuarios del sistema (nombre,\n"
+        "email, rol). Guardala en un lugar seguro.\n\n"
         "Para volver a cargarla: SPMM > Configuración > Copias de seguridad >\n"
-        "Restaurar. No hace falta descomprimirla ni tocar nada adentro: si algo se\n"
-        "modificó, la app la rechaza.\n"
+        "Restaurar. No hace falta descomprimirla ni tocar nada adentro. La copia va\n"
+        "firmada por el servidor que la hizo: si algo adentro se modificó, la app lo\n"
+        "detecta y lo avisa antes de tocar nada, y no deja restaurar los usuarios con\n"
+        "ella.\n"
     )
 
 
@@ -516,6 +633,24 @@ async def _por_paginas(conn, tabla: Table, columnas: list) -> AsyncIterator[list
         ultima = [filas[-1][i] for i in posiciones]
 
 
+def _columnas_de_la_copia(tabla: Table) -> tuple[list, list, set]:
+    """(columnas que van, binarias que no van, posiciones que van vacías)."""
+    columnas = [c for c in tabla.columns if not _es_archivo(c)]
+    omitidas = [c.name for c in tabla.columns if _es_archivo(c)]
+    no_viajan = set(COLUMNAS_QUE_NO_VIAJAN.get(tabla.name, ()))
+    vacias = {i for i, c in enumerate(columnas) if c.name in no_viajan}
+    return columnas, omitidas, vacias
+
+
+async def _renglones_de(conn, tabla: Table, columnas: list, vacias: set) -> AsyncIterator[tuple[bytes, int]]:
+    """El .jsonl de una tabla, de a lotes: (bytes, cuántas filas). Lo usan la copia y la
+    huella del contenido, así las dos cuentan exactamente lo mismo."""
+    async for lote in _por_paginas(conn, tabla, columnas):
+        if vacias:
+            lote = [[None if i in vacias else v for i, v in enumerate(f)] for f in lote]
+        yield b"".join(_fila_a_json(f) + b"\n" for f in lote), len(lote)
+
+
 @dataclass
 class ResumenCopia:
     """Lo que se supo al terminar de armar una copia (para la auditoría y la pantalla)."""
@@ -523,6 +658,9 @@ class ResumenCopia:
     nombre: str = ""
     generado_en: Optional[datetime] = None
     filas_por_tabla: dict = field(default_factory=dict)
+    # El sha256 del .jsonl de cada tabla: con esto se arma la huella del CONTENIDO
+    # (huellas_de_contenido), que no depende de la hora ni de cómo se comprimió el zip.
+    sha256_por_tabla: dict = field(default_factory=dict)
     bytes: int = 0
     completa: bool = False
 
@@ -561,61 +699,112 @@ async def generar_copia(
         resumen.bytes += len(datos)
         return datos
 
-    zf.writestr(_entrada(LEEME, cuando), _texto_leeme(cuando, generado_por).encode("utf-8"))
-    yield _salida()
+    try:
+        zf.writestr(_entrada(LEEME, cuando), _texto_leeme(cuando, generado_por).encode("utf-8"))
+        yield _salida()
 
-    for tabla in tablas_en_orden(esquema):
-        columnas = [c for c in tabla.columns if not _es_archivo(c)]
-        omitidas = [c.name for c in tabla.columns if _es_archivo(c)]
-        suma = hashlib.sha256()
-        filas = 0
-        archivo = f"{CARPETA}{tabla.name}.jsonl"
-        if columnas:
-            with zf.open(_entrada(archivo, cuando), "w", force_zip64=True) as destino:
-                async for lote in _por_paginas(conn, tabla, columnas):
-                    datos = b"".join(_fila_a_json(f) + b"\n" for f in lote)
-                    suma.update(datos)
-                    destino.write(datos)
-                    filas += len(lote)
-                    trozo = _salida()
-                    if trozo:
-                        yield trozo
-        else:
-            zf.writestr(_entrada(archivo, cuando), b"")
-        tablas_manifiesto[tabla.name] = {
-            "archivo": archivo,
-            "filas": filas,
-            "sha256": suma.hexdigest(),
-            "columnas": [c.name for c in columnas],
-            "tipos": [_tipo(c, dialecto) for c in columnas],
-            "columnas_omitidas": omitidas,
+        for tabla in tablas_en_orden(esquema):
+            columnas, omitidas, vacias = _columnas_de_la_copia(tabla)
+            suma = hashlib.sha256()
+            filas = 0
+            archivo = f"{CARPETA}{tabla.name}.jsonl"
+            if columnas:
+                with zf.open(_entrada(archivo, cuando), "w", force_zip64=True) as destino:
+                    async for datos, cuantas in _renglones_de(conn, tabla, columnas, vacias):
+                        suma.update(datos)
+                        destino.write(datos)
+                        filas += cuantas
+                        trozo = _salida()
+                        if trozo:
+                            yield trozo
+            else:
+                zf.writestr(_entrada(archivo, cuando), b"")
+            tablas_manifiesto[tabla.name] = {
+                "archivo": archivo,
+                "filas": filas,
+                "sha256": suma.hexdigest(),
+                "columnas": [c.name for c in columnas],
+                "tipos": [_tipo(c, dialecto) for c in columnas],
+                "columnas_omitidas": omitidas,
+                "columnas_vaciadas": sorted(columnas[i].name for i in vacias),
+            }
+            firma[tabla.name] = [[c.name, _tipo(c, dialecto)] for c in columnas]
+            resumen.filas_por_tabla[tabla.name] = filas
+            resumen.sha256_por_tabla[tabla.name] = suma.hexdigest()
+            trozo = _salida()
+            if trozo:
+                yield trozo
+
+        manifiesto = {
+            "formato": FORMATO,
+            "version": VERSION,
+            "generado_en": cuando.isoformat(timespec="seconds"),
+            "generado_por": generado_por,
+            "motivo": motivo,
+            "motor": dialecto.name,
+            "archivos_de_planos": (
+                "No están en esta copia: viven en Supabase Storage (bucket «planos»). La tabla "
+                "«plano» sí está, con la ruta de cada archivo."
+            ),
+            "contrasenas": (
+                "No están en esta copia: usuario.password_hash, reset_token y "
+                "reset_token_expiry van vacíos en cada fila."
+            ),
+            "firma_del_esquema": firma_del_esquema(firma),
+            "total_filas": resumen.total_filas,
+            "tablas": tablas_manifiesto,
         }
-        firma[tabla.name] = [[c.name, _tipo(c, dialecto)] for c in columnas]
-        resumen.filas_por_tabla[tabla.name] = filas
-        trozo = _salida()
-        if trozo:
-            yield trozo
+        manifiesto["firma"] = firmar_manifiesto(manifiesto)
+        zf.writestr(_entrada(MANIFIESTO, cuando),
+                    json.dumps(manifiesto, ensure_ascii=False, indent=2).encode("utf-8"))
+        zf.close()
+        resumen.completa = True
+        yield _salida()
+    finally:
+        if not resumen.completa:
+            # Se cortó a la mitad (el navegador cerró, se canceló el pedido): se cierra
+            # el zip acá, en memoria, y no cuando lo junte el recolector de basura, que
+            # lo intenta sobre un tubo ya cerrado y deja un error suelto en el log.
+            try:
+                zf.close()
+            except Exception:
+                pass
 
-    manifiesto = {
-        "formato": FORMATO,
-        "version": VERSION,
-        "generado_en": cuando.isoformat(timespec="seconds"),
-        "generado_por": generado_por,
-        "motivo": motivo,
-        "motor": dialecto.name,
-        "archivos_de_planos": (
-            "No están en esta copia: viven en Supabase Storage (bucket «planos»). La tabla "
-            "«plano» sí está, con la ruta de cada archivo."
-        ),
-        "firma_del_esquema": firma_del_esquema(firma),
-        "total_filas": resumen.total_filas,
-        "tablas": tablas_manifiesto,
+
+def huellas_de_contenido(sha256_por_tabla: dict) -> dict:
+    """La huella de lo que hay en la base, por grupo: {"datos": …, "acceso": …}.
+
+    Sale de los sha256 de cada tabla, no del zip: dos copias del mismo contenido hechas
+    en minutos distintos tienen la misma huella. Es lo que prueba que la copia que un
+    admin acaba de bajar ES cómo está todo ahora (ver CopiaSeguridadAPI, «ya la bajé»).
+    La auditoría queda afuera: la escribe cada pedido, empezando por la revisión misma.
+    """
+    grupos: dict = {"datos": {}, "acceso": {}}
+    for tabla, suma in sha256_por_tabla.items():
+        grupo = grupo_de(tabla)
+        if grupo in grupos:
+            grupos[grupo][tabla] = suma
+    return {
+        grupo: hashlib.sha256(
+            json.dumps(tablas, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        for grupo, tablas in grupos.items()
     }
-    zf.writestr(_entrada(MANIFIESTO, cuando),
-                json.dumps(manifiesto, ensure_ascii=False, indent=2).encode("utf-8"))
-    zf.close()
-    resumen.completa = True
-    yield _salida()
+
+
+async def huellas_actuales(conn, esquema: MetaData) -> dict:
+    """huellas_de_contenido de cómo está la base ahora, sin armar ningún zip."""
+    sumas = {}
+    for tabla in tablas_en_orden(esquema):
+        if grupo_de(tabla.name) == "auditoria":
+            continue
+        columnas, _, vacias = _columnas_de_la_copia(tabla)
+        suma = hashlib.sha256()
+        if columnas:
+            async for datos, _cuantas in _renglones_de(conn, tabla, columnas, vacias):
+                suma.update(datos)
+        sumas[tabla.name] = suma.hexdigest()
+    return huellas_de_contenido(sumas)
 
 
 async def copia_a_archivo(conn, esquema: MetaData, **kwargs) -> tuple[BinaryIO, ResumenCopia]:
@@ -815,6 +1004,13 @@ class Revision:
     ignoradas: list  # tablas de la copia que hoy no existen
     incluir_usuarios: bool = False
     usuarios_de_la_copia: list = field(default_factory=list)
+    # ¿La firmó este servidor? (ver «LA FIRMA»). Sin firma: nunca con los usuarios, y
+    # los datos sólo si el admin lo confirma aparte.
+    firmada: bool = True
+    # Con los usuarios: qué pasa cuenta por cuenta, en castellano, para la vista previa.
+    cambios_de_usuarios: list = field(default_factory=list)
+    # Planos de la copia que no tienen el archivo en ningún lado y no se restauran.
+    planos_sin_archivo: int = 0
 
     def plan(self, nombre: str) -> Optional[PlanTabla]:
         return next((t for t in self.tablas if t.nombre == nombre), None)
@@ -847,18 +1043,32 @@ def _depende_de(tabla: Table, otras: set) -> set:
             if fk.column.table.name in otras and fk.column.table.name != tabla.name}
 
 
+SIN_FIRMA = (
+    "Esta copia no tiene la firma de este servidor: o se modificó algo adentro después "
+    "de bajarla, o se hizo en otra instalación de SPMM (o antes de que cambiara la clave "
+    "del servidor). El archivo está sano y completo, pero no se puede comprobar que nadie "
+    "haya cambiado los datos."
+)
+
+
 def revisar_copia(
     archivo: BinaryIO,
     esquema: MetaData,
     *,
     incluir_usuarios: bool = False,
     admin_actual: Optional[dict] = None,
+    usuarios_actuales: Optional[list] = None,
+    planos_con_archivo_hoy: Optional[set] = None,
 ) -> Revision:
     """Revisa el archivo ENTERO contra la base de HOY, sin escribir nada.
 
     Lee cada tabla completa: hash, cantidad de filas y que cada valor se pueda cargar en
     la columna que hay hoy. Devuelve el plan tabla por tabla y los avisos. Cualquier
     cosa que impida restaurar levanta CopiaInvalida con el motivo en castellano.
+
+    `usuarios_actuales` (las cuentas de hoy, con admin_permanente si la columna existe)
+    hace falta para incluir los usuarios; `planos_con_archivo_hoy` (ids de los planos
+    que hoy tienen su archivo en algún lado), para avisar qué planos no vuelven.
 
     Es sincrónica y hace CPU: desde la API se corre en un hilo aparte.
     """
@@ -867,6 +1077,12 @@ def revisar_copia(
     m = leer_manifiesto(zf)
     avisos: list[str] = []
     ignoradas: list[str] = []
+    firmada = firma_valida(m)
+    if not firmada and incluir_usuarios:
+        raise CopiaInvalida(
+            f"{SIN_FIRMA} Con una copia así no se pueden incluir los usuarios, roles y "
+            "permisos. Destildá esa opción para ver qué pasaría con el resto de los datos."
+        )
 
     # ── Las tablas de la copia, contra las de hoy ──
     de_la_copia: dict = {}
@@ -995,6 +1211,7 @@ def revisar_copia(
 
     # ── Leer todo: hash, cantidad y que cada valor entre ──
     usuarios: list[dict] = []
+    planos_sin_archivo = 0
     for t in orden:
         p = planes[t.name]
         if t.name not in de_la_copia:
@@ -1004,6 +1221,8 @@ def revisar_copia(
         convertir = p.accion == "reemplaza"
         ancho = len(p.columnas_copia)
         juntar_usuarios = incluir_usuarios and t.name == Usuario.__tablename__ and p.accion == "reemplaza"
+        es_plano = convertir and t.name == Plano.__tablename__
+        tope = _TOPES_DE_PERMISOS.get(t.name) if convertir else None
         lector = _LectorDeTabla(zf, info)
         n = 0
         for renglon in lector:
@@ -1014,7 +1233,12 @@ def revisar_copia(
             if convertir:
                 valores = _convertir_fila(fila, p, t.name, n)
                 if juntar_usuarios:
-                    usuarios.append({k: valores.get(k) for k in ("id_usuario", "username", "email")})
+                    usuarios.append({k: valores.get(k) for k in (
+                        "id_usuario", "username", "email", "nombre", "apellido", "rol", "activo")})
+                if es_plano and not _plano_con_archivo(valores, n, planos_con_archivo_hoy):
+                    planos_sin_archivo += 1
+                if tope:
+                    _revisar_tope(valores, t.name, n, tope)
         if n != p.filas_copia:
             raise CopiaInvalida(
                 f"La tabla «{nombre_llano(t.name)}» no tiene las filas que dice el manifiesto "
@@ -1027,8 +1251,17 @@ def revisar_copia(
                 "modificó o se dañó después de descargarlo. No se tocó nada."
             )
 
+    cambios_de_usuarios: list = []
     if incluir_usuarios:
-        _revisar_usuarios(planes.get(Usuario.__tablename__), usuarios, admin_actual, avisos)
+        cambios_de_usuarios = _revisar_usuarios(
+            planes.get(Usuario.__tablename__), usuarios, admin_actual, usuarios_actuales, avisos)
+    if planos_sin_archivo:
+        avisos.append(
+            (f"{planos_sin_archivo} planos de la copia no tienen" if planos_sin_archivo > 1
+             else "Un plano de la copia no tiene")
+            + " el archivo en ningún lado (ni adentro de la base ni en el almacenamiento): "
+            + ("no se restauran." if planos_sin_archivo > 1 else "no se restaura.")
+        )
 
     return Revision(
         huella=huella,
@@ -1040,7 +1273,41 @@ def revisar_copia(
         ignoradas=ignoradas,
         incluir_usuarios=incluir_usuarios,
         usuarios_de_la_copia=usuarios,
+        firmada=firmada,
+        cambios_de_usuarios=cambios_de_usuarios,
+        planos_sin_archivo=planos_sin_archivo,
     )
+
+
+def _plano_con_archivo(valores: dict, n: int, con_archivo_hoy: Optional[set]) -> bool:
+    """Revisa la ruta de un plano de la copia. False: no tiene el archivo en ningún lado
+    (no viene con ruta y hoy, con ese número, no hay ni blob ni ruta) y no se restaura."""
+    ruta = valores.get("storage_path")
+    if ruta is not None and not storage_planos.es_ruta_de_plano(ruta):
+        raise CopiaInvalida(
+            f"La fila {n} de «{nombre_llano(Plano.__tablename__)}» apunta a algo que no es el "
+            f"archivo de un plano ({str(ruta)[:80]!r}): esa copia no se puede restaurar."
+        )
+    if ruta is None and con_archivo_hoy is not None:
+        return valores.get("id") in con_archivo_hoy
+    return True
+
+
+def _revisar_tope(valores: dict, tabla: str, n: int, tope: tuple) -> None:
+    columna, topes, columna_rol = tope
+    codigo = valores.get(columna)
+    maximo = topes.get(codigo)
+    if not maximo or (columna_rol and valores.get(columna_rol) == ROL_ADMIN):
+        return
+    nivel = valores.get("nivel")
+    if rango(nivel) > rango(maximo):
+        quien = (f"al rol «{valores.get(columna_rol)}»" if columna_rol
+                 else f"a la persona #{valores.get('id_usuario')}")
+        raise CopiaInvalida(
+            f"La fila {n} de «{nombre_llano(tabla)}» le da «{_DICHO_NIVEL.get(nivel, nivel)}» en "
+            f"«{codigo}» {quien}, y eso es sólo del rol Administrador (la pantalla de permisos "
+            "no deja darlo). No se puede restaurar con los usuarios; sin ellos, sí."
+        )
 
 
 def _decodificar(renglon: bytes, tabla: str, n: int, ancho: int) -> list:
@@ -1069,28 +1336,92 @@ def _convertir_fila(fila: list, plan: PlanTabla, tabla: str, n: int) -> dict:
     return valores
 
 
-def _revisar_usuarios(plan: Optional[PlanTabla], usuarios: list, admin: Optional[dict], avisos: list) -> None:
-    """La opción avanzada: los usuarios vuelven a los de la copia, salvo el admin que
-    restaura, que queda como está. Que eso sea posible se revisa acá, antes."""
+def _nombre_de_cuenta(u: dict) -> str:
+    nombre = " ".join(str(p) for p in (u.get("nombre"), u.get("apellido")) if p).strip()
+    usuario = u.get("username")
+    if nombre and usuario:
+        return f"{nombre} ({usuario})"
+    return nombre or usuario or f"#{u.get('id_usuario')}"
+
+
+def _lista(cuentas: list) -> str:
+    return ", ".join(cuentas)
+
+
+def _revisar_usuarios(plan: Optional[PlanTabla], usuarios: list, admin: Optional[dict],
+                      usuarios_actuales: Optional[list], avisos: list) -> list:
+    """La opción avanzada: los usuarios vuelven a los de la copia con las reglas de
+    «LO QUE NO SE RESTAURA». Que eso sea posible se revisa acá, antes; y se devuelve,
+    en castellano, qué pasa con cada cuenta que cambia."""
     if plan is None or plan.accion != "reemplaza":
         avisos.append("La copia no trae usuarios: se dejan los de ahora.")
-        return
+        return []
     if not admin:
         raise CopiaInvalida("No se sabe quién restaura: no se pueden incluir los usuarios.")
+    hoy = {u["id_usuario"]: u for u in (usuarios_actuales or []) if u.get("id_usuario") is not None}
+    hoy.setdefault(admin["id_usuario"], admin)
+    intocables = {admin["id_usuario"]} | {i for i, u in hoy.items() if u.get("admin_permanente")}
+
+    # Una cuenta que queda como está no puede chocar con otra de la copia: mismo usuario
+    # o email con otro número haría fallar la carga (o dejaría a esa persona afuera).
     for u in usuarios:
-        if u.get("id_usuario") == admin.get("id_usuario"):
+        if u.get("id_usuario") in intocables:
             continue
-        if u.get("username") == admin.get("username") or (
-            admin.get("email") and u.get("email") == admin.get("email")
-        ):
-            raise CopiaInvalida(
-                "En la copia tu usuario (o tu email) es de otra cuenta, con otro número: "
-                "si se incluyen los usuarios quedarías afuera. Restaurá sin incluir usuarios."
-            )
-    avisos.append(
-        "Los usuarios vuelven a como estaban en la copia, con sus contraseñas de ese momento. "
-        "Tu cuenta queda como está ahora."
+        for i in intocables:
+            h = hoy.get(i) or {}
+            if ((u.get("username") and u.get("username") == h.get("username"))
+                    or (u.get("email") and u.get("email") == h.get("email"))):
+                if i == admin["id_usuario"]:
+                    raise CopiaInvalida(
+                        "En la copia tu usuario (o tu email) es de otra cuenta, con otro número: "
+                        "si se incluyen los usuarios quedarías afuera. Restaurá sin incluir usuarios."
+                    )
+                raise CopiaInvalida(
+                    f"En la copia, el usuario (o el email) de {_nombre_de_cuenta(h)}, que es "
+                    "administrador permanente, es de otra cuenta, con otro número: no se pueden "
+                    "incluir los usuarios sin tocar su cuenta. Restaurá sin incluir usuarios."
+                )
+
+    de_la_copia = {u["id_usuario"]: u for u in usuarios if u.get("id_usuario") is not None}
+    cambios: list[str] = []
+    permanentes = [_nombre_de_cuenta(hoy[i]) for i in sorted(intocables)
+                   if i != admin["id_usuario"] and i in hoy]
+    cambios.append(
+        "Tu cuenta" + (f" y la de los administradores permanentes ({_lista(permanentes)})"
+                       if permanentes else "")
+        + " quedan exactamente como están hoy: rol, contraseña y activas."
     )
+    se_borran = [_nombre_de_cuenta(u) for i, u in sorted(hoy.items())
+                 if i not in de_la_copia and i not in intocables]
+    if se_borran:
+        cambios.append(f"Se borran, porque no estaban en la copia: {_lista(se_borran)}.")
+    vuelven = [_nombre_de_cuenta(u) for i, u in sorted(de_la_copia.items())
+               if i not in hoy and i not in intocables]
+    if vuelven:
+        cambios.append(
+            f"Vuelven desactivadas y sin contraseña, porque hoy no existen: {_lista(vuelven)}. "
+            "Para que alguna vuelva a entrar, activala en Usuarios y que use «Olvidé mi contraseña»."
+        )
+    en_las_dos = [(hoy[i], u) for i, u in sorted(de_la_copia.items()) if i in hoy and i not in intocables]
+    cambian_rol = [f"{_nombre_de_cuenta(h)} ({h.get('rol')} → {u.get('rol')})"
+                   for h, u in en_las_dos if u.get("rol") != h.get("rol")]
+    if cambian_rol:
+        cambios.append(f"Cambian de rol: {_lista(cambian_rol)}.")
+    se_desactivan = [_nombre_de_cuenta(h) for h, u in en_las_dos if h.get("activo") and not u.get("activo")]
+    if se_desactivan:
+        cambios.append(f"Quedan desactivadas, como en la copia: {_lista(se_desactivan)}.")
+    siguen = [_nombre_de_cuenta(h) for h, u in en_las_dos if not h.get("activo") and u.get("activo")]
+    if siguen:
+        cambios.append(
+            f"Siguen desactivadas aunque en la copia estaban activas (restaurar no reactiva a "
+            f"nadie): {_lista(siguen)}."
+        )
+    cambios.append("Nadie vuelve a una contraseña vieja: cada cuenta que existe hoy conserva la suya.")
+    avisos.append(
+        "Los usuarios, roles y permisos vuelven a los de la copia, salvo lo que se detalla en "
+        "«Qué pasa con las cuentas». Tu cuenta queda como está ahora."
+    )
+    return cambios
 
 
 # ─────────────────────────── restaurar ───────────────────────────
@@ -1251,8 +1582,10 @@ async def restaurar_copia(
         await antes_de_borrar()
 
     # Lo que no viaja en la copia y se conserva: los archivos adentro de la base (el
-    # camino viejo de los planos), para las filas que vuelven.
-    archivos_guardados: dict = {}
+    # camino viejo de los planos), para las filas que vuelven. Se ponen EN el INSERT y no
+    # con un UPDATE después: un plano del camino viejo no tiene ruta, y sin el archivo la
+    # fila choca con ck_plano_tiene_archivo (archivo o ruta, alguno) al insertarla.
+    archivos_guardados: dict = {}   # tabla -> {columna: {clave: contenido}}
     for t in a_reemplazar:
         clave = list(t.primary_key.columns)
         binarias = [c for c in t.columns if _es_archivo(c)]
@@ -1261,28 +1594,46 @@ async def restaurar_copia(
         for col in binarias:
             filas = (await conn.execute(select(clave[0], col).where(col.is_not(None)))).all()
             if filas:
-                archivos_guardados[(t.name, col.name)] = dict(filas)
+                archivos_guardados.setdefault(t.name, {})[col.name] = dict(filas)
 
-    # La cuenta del admin que restaura, tal como está, si se incluyen los usuarios.
-    fila_admin = None
+    # Planos: la ruta de HOY de cada uno, para una fila que la copia trae sin ruta (era
+    # del camino viejo) y que después se pasó a Storage.
+    t_plano = tablas.get(Plano.__tablename__)
+    plano_vuelve = (
+        t_plano is not None and any(t is t_plano for t in a_reemplazar)
+        and revision.plan(t_plano.name).accion == "reemplaza"
+        and "storage_path" in t_plano.c and "id" in t_plano.c
+    )
+    rutas_de_hoy: dict = {}
+    if plano_vuelve:
+        rutas_de_hoy = dict((await conn.execute(
+            select(t_plano.c.id, t_plano.c.storage_path).where(t_plano.c.storage_path.is_not(None))
+        )).all())
+
+    # Con los usuarios: las cuentas de hoy, enteras, antes de vaciar nada.
     t_usuario = tablas.get(Usuario.__tablename__)
     incluye_usuarios = (
         t_usuario is not None and revision.plan(t_usuario.name) is not None
         and revision.plan(t_usuario.name).accion == "reemplaza"
     )
+    cuentas_de_hoy: dict = {}
+    intocables: set = set()
     if incluye_usuarios:
         if not admin_actual or admin_actual.get("id_usuario") is None:
             raise CopiaInvalida("No se sabe quién restaura: no se pueden incluir los usuarios.")
-        fila = (await conn.execute(
-            select(t_usuario).where(t_usuario.c.id_usuario == admin_actual["id_usuario"])
-        )).mappings().first()
-        if fila is None:
+        cuentas_de_hoy = {f["id_usuario"]: dict(f)
+                          for f in (await conn.execute(select(t_usuario))).mappings().all()}
+        if admin_actual["id_usuario"] not in cuentas_de_hoy:
             raise CopiaInvalida("Tu usuario no está en la base: no se pueden incluir los usuarios.")
-        fila_admin = dict(fila)
+        # Tu cuenta y las de los administradores permanentes: tal cual están hoy.
+        intocables = {admin_actual["id_usuario"]} | {
+            i for i, f in cuentas_de_hoy.items() if f.get("admin_permanente")}
 
     await _vaciar(conn, a_reemplazar)
 
     cargadas: dict = {}
+    archivos_conservados = 0
+    planos_sin_archivo = 0
     for t in a_reemplazar:
         plan = revision.plan(t.name)
         if plan.accion != "reemplaza":
@@ -1293,7 +1644,9 @@ async def restaurar_copia(
         autorreferencias = _autorreferencias(t)
         clave = [c.name for c in t.primary_key.columns]
         diferidas_cols = [c for c in autorreferencias if clave and any(n == c for (_, n, _) in plan.lectura)]
-        con_admin = fila_admin is not None and t is t_usuario
+        son_usuarios = incluye_usuarios and t is t_usuario
+        guardados = archivos_guardados.get(t.name, {})
+        es_plano = plano_vuelve and t is t_plano
         diferidas: list = []  # (valores de la clave, {columna: valor})
         claves_cargadas: set = set()
         total = 0
@@ -1302,8 +1655,35 @@ async def restaurar_copia(
             lote = await _en_hilo(_siguiente, iterador)
             if lote is _FIN:
                 break
-            if con_admin:
-                lote = [f for f in lote if f.get("id_usuario") != fila_admin["id_usuario"]]
+            if son_usuarios:
+                lote = [_cuenta_que_vuelve(f, cuentas_de_hoy.get(f.get("id_usuario")), t)
+                        for f in lote if f.get("id_usuario") not in intocables]
+            if guardados:
+                # Todas las filas con la columna (un INSERT de varias filas pide las
+                # mismas columnas en todas): la que no tenía archivo, con NULL.
+                for f in lote:
+                    for columna, valores in guardados.items():
+                        f[columna] = valores.get(f.get(clave[0]))
+                        if f[columna] is not None:
+                            archivos_conservados += 1
+            if es_plano:
+                quedan = []
+                for f in lote:
+                    ruta = f.get("storage_path")
+                    if ruta is not None and not storage_planos.es_ruta_de_plano(ruta):
+                        raise CopiaInvalida(
+                            f"Un plano de la copia apunta a algo que no es un plano ({str(ruta)[:80]!r})."
+                        )
+                    f["storage_path"] = ruta
+                    if ruta is None and f.get("archivo") is None:
+                        f["storage_path"] = rutas_de_hoy.get(f.get("id"))
+                        if f["storage_path"] is None:
+                            # Ni blob ni ruta, ni en la copia ni hoy: no tiene archivo en
+                            # ningún lado. La revisión ya lo avisó.
+                            planos_sin_archivo += 1
+                            continue
+                    quedan.append(f)
+                lote = quedan
             for f in lote:
                 if diferidas_cols:
                     pendientes = {c: f[c] for c in diferidas_cols if f.get(c) is not None}
@@ -1311,38 +1691,30 @@ async def restaurar_copia(
                         diferidas.append(({k: f[k] for k in clave}, pendientes))
                     for c in diferidas_cols:
                         f[c] = None
-                if len(clave) == 1 and (diferidas_cols or con_admin):
+                if len(clave) == 1 and (diferidas_cols or son_usuarios):
                     claves_cargadas.add(f.get(clave[0]))
             if lote:
                 await conn.execute(t.insert(), lote)
                 total += len(lote)
-        if con_admin:
-            propia = dict(fila_admin)
-            pendientes = {c: propia[c] for c in autorreferencias if propia.get(c) is not None}
-            for c in autorreferencias:
-                propia[c] = None
-            await conn.execute(t.insert(), [propia])
-            total += 1
-            claves_cargadas.add(propia["id_usuario"])
-            # Quién la creó o la tocó por última vez, sólo si esa cuenta sigue existiendo.
-            pendientes = {c: v for c, v in pendientes.items() if v in claves_cargadas}
-            if pendientes:
-                diferidas.append(({"id_usuario": propia["id_usuario"]}, pendientes))
+        if son_usuarios:
+            propias = [dict(cuentas_de_hoy[i]) for i in sorted(intocables) if i in cuentas_de_hoy]
+            for propia in propias:
+                claves_cargadas.add(propia["id_usuario"])
+            for propia in propias:
+                pendientes = {c: propia[c] for c in autorreferencias if propia.get(c) is not None}
+                for c in autorreferencias:
+                    propia[c] = None
+                # Quién la creó o la tocó por última vez, sólo si esa cuenta sigue existiendo.
+                pendientes = {c: v for c, v in pendientes.items() if v in claves_cargadas}
+                if pendientes:
+                    diferidas.append(({"id_usuario": propia["id_usuario"]}, pendientes))
+            if propias:
+                await conn.execute(t.insert(), propias)
+                total += len(propias)
         for valores_clave, pendientes in diferidas:
             condicion = [t.c[k] == v for k, v in valores_clave.items()]
             await conn.execute(update(t).where(*condicion).values(**pendientes))
         cargadas[t.name] = total
-
-    # Los archivos de antes, a las filas que volvieron.
-    archivos_conservados = 0
-    for (nombre, columna), valores in archivos_guardados.items():
-        t = tablas[nombre]
-        clave = list(t.primary_key.columns)[0]
-        presentes = set((await conn.execute(select(clave))).scalars().all())
-        for id_, contenido in valores.items():
-            if id_ in presentes:
-                await conn.execute(update(t).where(clave == id_).values({columna: contenido}))
-                archivos_conservados += 1
 
     await _ajustar_secuencias(conn, a_reemplazar)
 
@@ -1350,7 +1722,41 @@ async def restaurar_copia(
         "filas_por_tabla": cargadas,
         "total_filas": sum(cargadas.values()),
         "archivos_conservados": archivos_conservados,
+        "planos_sin_archivo": planos_sin_archivo,
     }
+
+
+def _cuenta_que_vuelve(fila: dict, hoy: Optional[dict], tabla: Table) -> dict:
+    """Una cuenta de la copia, con las reglas de «LO QUE NO SE RESTAURA» (usuarios).
+
+    Todas las filas salen con las mismas columnas (un INSERT de varias filas lo pide):
+    las de CAMPOS_DE_HOY que existan hoy, y `activo`."""
+    columnas = set(tabla.c.keys())
+    if hoy is not None:
+        # Existe hoy: la contraseña, el bloqueo y la marca de permanente, los de hoy. Y
+        # activa sólo si lo está en la copia Y hoy: restaurar no reactiva a nadie.
+        for c in CAMPOS_DE_HOY:
+            if c in columnas:
+                fila[c] = hoy.get(c)
+        if "activo" in columnas:
+            fila["activo"] = bool(fila.get("activo", True)) and bool(hoy.get("activo"))
+        return fila
+    # Hoy no existe (se borró después de la copia): vuelve desactivada y sin contraseña.
+    nueva = {
+        "password_hash": CLAVE_INUSABLE,
+        "reset_token": None,
+        "reset_token_expiry": None,
+        "intentos_fallidos": 0,
+        "bloqueado_hasta": None,
+        "debe_cambiar_password": True,
+        "admin_permanente": False,
+    }
+    for c in CAMPOS_DE_HOY:
+        if c in columnas:
+            fila[c] = nueva[c]
+    if "activo" in columnas:
+        fila["activo"] = False
+    return fila
 
 
 async def contar_filas(conn, esquema: MetaData) -> dict:

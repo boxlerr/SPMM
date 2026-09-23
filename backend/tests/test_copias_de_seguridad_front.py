@@ -7,6 +7,7 @@ otra hora o deja apretar un botón que el servidor va a rechazar.
 
 Se compila y se corre de verdad, con el tsc del repo (igual que test_permisos_front.py).
 """
+import hashlib
 import json
 import shutil
 import subprocess
@@ -25,6 +26,10 @@ TSC = RAIZ / "frontend" / "node_modules" / ".bin" / "tsc"
 
 CUANDO = datetime(2026, 9, 22, 15, 30, 12)
 
+# Todo en orden para restaurar sin copia automática: firmada, bajada desde acá, confirmada.
+_BIEN = {"confirmacion": CONFIRMACION, "hayCopiaAutomatica": False, "yaDescargo": True,
+         "huellaDeLaDescarga": "ab" * 32, "firmaValida": True, "aceptaSinFirma": False}
+
 DRIVER = r"""
 const c = require('./copiasDeSeguridad.js');
 const fs = require('fs');
@@ -40,6 +45,8 @@ console.log(JSON.stringify({
   numeros: e.numeros.map((x) => c.numero(x)),
   motivos: e.motivos.map((x) => c.motivoParaNoRestaurar(x)),
   cambian: ['reemplaza', 'vacia', 'conserva', 'sin_copia'].map((accion) => c.cambia({ accion })),
+  hex: e.hex.map((x) => c.hexDeBytes(new Uint8Array(x))),
+  firmadas: e.firmas.map((x) => c.estaFirmada(x)),
 }));
 """
 
@@ -70,11 +77,19 @@ def front():
         "tamanos": [0, 900, 1536, 3355443, 250 * 1024 * 1024, None, -1],
         "numeros": [0, 999, 1000, 1234567, None],
         "motivos": [
-            {"confirmacion": CONFIRMACION, "hayCopiaAutomatica": True, "yaDescargo": False},
-            {"confirmacion": "", "hayCopiaAutomatica": True, "yaDescargo": False},
-            {"confirmacion": CONFIRMACION, "hayCopiaAutomatica": False, "yaDescargo": False},
-            {"confirmacion": CONFIRMACION, "hayCopiaAutomatica": False, "yaDescargo": True},
+            {**_BIEN, "hayCopiaAutomatica": True},
+            {**_BIEN, "hayCopiaAutomatica": True, "confirmacion": ""},
+            {**_BIEN, "yaDescargo": False},
+            {**_BIEN},
+            # Marcó «ya la bajé» pero no la bajó desde acá: no hay huella que mandar.
+            {**_BIEN, "huellaDeLaDescarga": None},
+            # Sin firma: hay que confirmarlo aparte (con o sin copia automática).
+            {**_BIEN, "hayCopiaAutomatica": True, "firmaValida": False},
+            {**_BIEN, "hayCopiaAutomatica": True, "firmaValida": False, "aceptaSinFirma": True},
         ],
+        "hex": [[], [0, 1, 15, 16, 171, 255], list(hashlib.sha256(b"spmm").digest())],
+        "firmas": [None, {}, {"firma": {"valida": True, "motivo": None}},
+                   {"firma": {"valida": False, "motivo": "x"}}],
     }
     with tempfile.TemporaryDirectory() as tmp:
         compilado = subprocess.run(
@@ -128,12 +143,27 @@ def test_tamanos_y_numeros_como_se_escriben_aca(front):
 
 
 def test_el_boton_dice_por_que_no_se_puede(front):
-    sin_motivo, sin_palabra, sin_copia, descargada = front["motivos"]
+    (sin_motivo, sin_palabra, sin_copia, descargada, sin_huella,
+     sin_firma, sin_firma_aceptada) = front["motivos"]
     assert sin_motivo is None
     assert "RESTAURAR" in sin_palabra
     # Sin copia automática, primero hay que bajarla: es lo que el servidor va a pedir.
     assert "descargá la copia" in sin_copia
     assert descargada is None
+    # Y bajarla desde esta pantalla: el servidor pide la huella de ESE archivo.
+    assert "desde esta pantalla" in sin_huella
+    # Una copia sin la firma del servidor se confirma aparte (el servidor da 409 si no).
+    assert "Restaurar igual" in sin_firma
+    assert sin_firma_aceptada is None
+
+
+def test_la_huella_se_escribe_como_la_escribe_el_servidor(front):
+    assert front["hex"] == ["", "00010f10abff", hashlib.sha256(b"spmm").hexdigest()]
+
+
+def test_una_vista_sin_el_dato_de_la_firma_vale_como_firmada(front):
+    # Un backend de antes de la firma no manda el campo: la pantalla no inventa un aviso.
+    assert front["firmadas"] == [True, True, True, False]
 
 
 def test_que_tablas_cambian(front):

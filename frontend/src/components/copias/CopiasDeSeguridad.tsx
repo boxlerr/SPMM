@@ -8,9 +8,13 @@
  *  1. Descargar: un archivo con TODOS los datos del sistema. Los archivos de los planos
  *     no vienen (viven en Supabase Storage) y eso se dice acá, no en letra chica.
  *  2. Restaurar: se elige el archivo, el servidor lo revisa entero SIN tocar nada y
- *     muestra qué pasaría tabla por tabla; recién ahí se confirma escribiendo RESTAURAR
- *     (que el servidor vuelve a exigir). Antes de pisar nada, el servidor guarda sola
- *     una copia de cómo está todo; si no puede, pide que la bajes vos en ese momento.
+ *     muestra qué pasaría tabla por tabla (y, con los usuarios, cuenta por cuenta);
+ *     recién ahí se confirma escribiendo RESTAURAR (que el servidor vuelve a exigir).
+ *     Una copia sin la firma de este servidor se avisa y se confirma aparte. Antes de
+ *     pisar nada, el servidor guarda sola una copia de cómo está todo; si no puede, pide
+ *     que la bajes vos en ese momento, desde acá: la pantalla le manda la huella (sha256)
+ *     del archivo que recibió entero, y el servidor comprueba que sea ése y que nadie
+ *     haya guardado nada después.
  *  3. Las copias que se guardaron solas antes de cada restauración: con una de ésas se
  *     deshace una restauración.
  *
@@ -47,7 +51,9 @@ import {
   type TablaDeLaVista,
   type VistaPrevia,
   cambia,
+  estaFirmada,
   fechaLegible,
+  hexDeBytes,
   motivoParaNoRestaurar,
   nombreDeLaCabecera,
   ordenarParaMostrar,
@@ -80,6 +86,17 @@ async function motivoDelError(res: Response): Promise<{ mensaje: string; campo?:
   return { mensaje: `El servidor contestó ${res.status}. Probá de nuevo en un rato.` };
 }
 
+/** El sha256 del archivo bajado, o null si el navegador no sabe calcularlo. */
+async function huellaDe(blob: Blob): Promise<string | null> {
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) return null;
+    return hexDeBytes(await subtle.digest("SHA-256", await blob.arrayBuffer()));
+  } catch {
+    return null;
+  }
+}
+
 function guardarEnLaCompu(blob: Blob, nombre: string) {
   const url = URL.createObjectURL(blob);
   try {
@@ -105,7 +122,9 @@ export default function CopiasDeSeguridad() {
 
   // Descargas: cuánto va bajado, para que una copia grande no parezca colgada.
   const [bajando, setBajando] = useState<{ que: string; bytes: number } | null>(null);
-  const [ultimaDescarga, setUltimaDescarga] = useState<{ nombre: string; hora: string } | null>(null);
+  const [ultimaDescarga, setUltimaDescarga] = useState<
+    { nombre: string; hora: string; huella: string | null } | null
+  >(null);
 
   // Restaurar.
   const entradaArchivo = useRef<HTMLInputElement>(null);
@@ -118,6 +137,7 @@ export default function CopiasDeSeguridad() {
   const [confirmacion, setConfirmacion] = useState("");
   const [yaDescargo, setYaDescargo] = useState(false);
   const [pideDescarga, setPideDescarga] = useState(false);
+  const [aceptaSinFirma, setAceptaSinFirma] = useState(false);
   const [restaurando, setRestaurando] = useState(false);
   const [errorRestauracion, setErrorRestauracion] = useState<string | null>(null);
   const [resultado, setResultado] = useState<ResultadoRestauracion | null>(null);
@@ -201,15 +221,18 @@ export default function CopiasDeSeguridad() {
       } else {
         partes.push(new Uint8Array(await res.arrayBuffer()));
       }
-      guardarEnLaCompu(new Blob(partes as BlobPart[], { type: "application/zip" }), nombre);
+      const archivoBajado = new Blob(partes as BlobPart[], { type: "application/zip" });
+      guardarEnLaCompu(archivoBajado, nombre);
       if (ruta === "/backups/descargar") {
         const ahora = new Date();
         setUltimaDescarga({
           nombre,
           hora: `${String(ahora.getHours()).padStart(2, "0")}:${String(ahora.getMinutes()).padStart(2, "0")}`,
+          // Lo que se manda al restaurar para probar que es ESTE archivo, entero.
+          huella: await huellaDe(archivoBajado),
         });
         // Si la restauración estaba esperando esta descarga, queda marcada: el servidor
-        // igual comprueba en la auditoría que se haya bajado entera recién.
+        // igual comprueba que sea este archivo, entero, y que nadie guardó nada después.
         if (pideDescarga || (vista && !vista.copia_automatica.disponible)) setYaDescargo(true);
       }
       toast.success(`Listo: se descargó ${nombre}`);
@@ -228,6 +251,7 @@ export default function CopiasDeSeguridad() {
     setConfirmacion("");
     setErrorRestauracion(null);
     setPideDescarga(false);
+    setAceptaSinFirma(false);
     setVerTodas(false);
   };
 
@@ -286,6 +310,8 @@ export default function CopiasDeSeguridad() {
       datos.append("confirmacion", confirmacion.trim());
       datos.append("incluir_usuarios", vista.incluir_usuarios ? "true" : "false");
       datos.append("ya_descargue_la_copia_actual", yaDescargo ? "true" : "false");
+      datos.append("huella_copia_actual", yaDescargo ? (ultimaDescarga?.huella ?? "") : "");
+      datos.append("aceptar_copia_sin_firma", aceptaSinFirma ? "true" : "false");
       const res = await fetch(`${API_URL}/backups/restauracion`, {
         method: "POST",
         headers: cabeceras(),
@@ -299,7 +325,12 @@ export default function CopiasDeSeguridad() {
           setErrorRevision(mensaje);
           return;
         }
-        if (campo === "copia_previa") setPideDescarga(true);
+        if (campo === "copia_previa") {
+          setPideDescarga(true);
+          // La que había bajado ya no sirve (o no la había bajado): hay que bajarla de
+          // nuevo, y al bajarla la casilla se vuelve a marcar sola.
+          setYaDescargo(false);
+        }
         setErrorRestauracion(mensaje);
         return;
       }
@@ -351,9 +382,18 @@ export default function CopiasDeSeguridad() {
   }
 
   const hayAutomatica = vista?.copia_automatica.disponible ?? estado.copia_automatica.disponible;
+  const firmada = estaFirmada(vista);
   const motivo = vista
-    ? motivoParaNoRestaurar({ confirmacion, hayCopiaAutomatica: hayAutomatica && !pideDescarga, yaDescargo })
+    ? motivoParaNoRestaurar({
+        confirmacion,
+        hayCopiaAutomatica: hayAutomatica && !pideDescarga,
+        yaDescargo,
+        huellaDeLaDescarga: ultimaDescarga?.huella ?? null,
+        firmaValida: firmada,
+        aceptaSinFirma,
+      })
     : null;
+  const cambiosDeCuentas = vista?.incluir_usuarios ? (vista.cambios_de_usuarios ?? []) : [];
   const tablasQueCambian = ordenarParaMostrar(vista?.tablas.filter(cambia) ?? []);
   const tablasQueNo = ordenarParaMostrar(vista?.tablas.filter((t) => !cambia(t)) ?? []);
   const minutos = estado.minutos_descarga_manual;
@@ -410,8 +450,8 @@ export default function CopiasDeSeguridad() {
         </div>
         <p className="text-xs text-gray-500 flex gap-1.5">
           <ShieldAlert className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          Guardala en un lugar seguro: trae los datos de todos (las contraseñas no se pueden leer, pero el
-          resto sí). Cada descarga queda anotada en la Auditoría.
+          Guardala en un lugar seguro: no trae contraseñas, pero sí todos los datos del taller y de las
+          personas. Cada descarga queda anotada en la Auditoría, también si se corta a la mitad.
         </p>
         {ultimaDescarga && (
           <p className="text-xs text-emerald-700 flex items-center gap-1.5">
@@ -474,8 +514,9 @@ export default function CopiasDeSeguridad() {
               <span className="text-gray-500">(avanzado)</span>
               <span className="block text-xs text-gray-500 mt-0.5">
                 Sin marcar, los usuarios y sus permisos quedan como están hoy. Marcado, vuelven los de la copia,
-                con sus contraseñas de ese momento; tu cuenta queda como está ahora, así que nunca te quedás
-                afuera. La auditoría no se restaura nunca.
+                pero nadie vuelve a una contraseña vieja ni se reactiva ninguna cuenta; tu cuenta y la de los
+                administradores permanentes quedan como están. Antes de confirmar vas a ver qué pasa con cada
+                cuenta. Sólo con una copia hecha por este sistema. La auditoría no se restaura nunca.
               </span>
             </span>
           </label>
@@ -527,7 +568,7 @@ export default function CopiasDeSeguridad() {
                   como estaban: hoy tienen {numero(vista.resumen.filas_actuales)} filas y la copia trae{" "}
                   {numero(vista.resumen.filas_copia)}.{" "}
                   {vista.incluir_usuarios
-                    ? "Los usuarios, roles y permisos también vuelven a los de la copia (menos tu cuenta). La auditoría no se toca."
+                    ? "Los usuarios, roles y permisos también vuelven a los de la copia (mirá abajo qué pasa con cada cuenta). La auditoría no se toca."
                     : "Los usuarios, roles y permisos no se tocan, y la auditoría tampoco."}
                 </p>
                 <p className="text-xs">
@@ -563,6 +604,40 @@ export default function CopiasDeSeguridad() {
               )}
             </div>
 
+            {!firmada && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 space-y-2">
+                <p className="font-medium flex gap-2">
+                  <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                  Esta copia no se puede comprobar.
+                </p>
+                <p>{vista.firma?.motivo}</p>
+                <p className="text-xs">
+                  Si la bajaste vos de este sistema y nadie la abrió, puede ser que haya cambiado la clave del
+                  servidor. Con una copia así, los usuarios y sus permisos nunca se restauran.
+                </p>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={aceptaSinFirma}
+                    onCheckedChange={(v) => setAceptaSinFirma(v === true)}
+                    disabled={restaurando}
+                    className="mt-0.5"
+                  />
+                  <span>Entiendo el riesgo: restaurar igual los datos de esta copia.</span>
+                </label>
+              </div>
+            )}
+
+            {cambiosDeCuentas.length > 0 && (
+              <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
+                <p className="font-medium mb-1">Qué pasa con las cuentas</p>
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {cambiosDeCuentas.map((c, i) => (
+                    <li key={i} className="break-words">{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {vista.avisos.length > 0 && (
               <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                 <p className="font-medium mb-1">Para tener en cuenta</p>
@@ -590,8 +665,9 @@ export default function CopiasDeSeguridad() {
                   {pideDescarga
                     ? "No se pudo guardar sola la copia de cómo está todo ahora."
                     : "No hay dónde guardar sola una copia de cómo está todo ahora."}{" "}
-                  Antes de restaurar, descargala vos (tiene que ser en los últimos {minutos} minutos) y marcá la
-                  casilla.
+                  Antes de restaurar, descargala vos desde acá (en los últimos {minutos} minutos) y marcá la casilla.
+                  Si alguien guarda algo después de que la bajes, el sistema te va a pedir que la bajes de nuevo:
+                  así no se pierde nada.
                 </p>
                 <div>{botonDescargar}</div>
                 <label className="flex items-start gap-2 cursor-pointer">
@@ -768,6 +844,13 @@ function Resultado({ resultado }: { resultado: ResultadoRestauracion }) {
           ) : (
             <>en {previa.donde}.</>
           )}
+        </p>
+      )}
+      {(resultado.planos_sin_archivo ?? 0) > 0 && (
+        <p className="text-xs">
+          {resultado.planos_sin_archivo === 1
+            ? "Un plano de la copia no tenía el archivo en ningún lado y no se restauró."
+            : `${numero(resultado.planos_sin_archivo)} planos de la copia no tenían el archivo en ningún lado y no se restauraron.`}
         </p>
       )}
       {resultado.archivos_conservados > 0 && (

@@ -7,7 +7,9 @@ Copias de seguridad (RF-19): la solapa «Copias de seguridad» de Configuración
     POST /backups/revisar                           subir un archivo y ver qué haría.
                                                     NO toca nada
     POST /backups/restauracion                      restaurarlo: pide la huella de la
-                                                    revisión y escribir RESTAURAR
+                                                    revisión y escribir RESTAURAR (y, si
+                                                    la copia no está firmada, confirmarlo
+                                                    aparte)
     GET  /backups/automaticas                       las copias que se guardaron solas
                                                     antes de cada restauración
     GET  /backups/automaticas/{nombre}/descargar    bajar una de ésas
@@ -24,28 +26,41 @@ LA COPIA DE ANTES DE RESTAURAR
 Con las tablas ya bloqueadas y antes de vaciar nada, se arma la copia del estado actual
 y se guarda en Storage (infrastructure/deposito_copias.py). Si eso no se puede —Storage
 sin configurar, o que rechace la subida— no se restaura, salvo que el admin haya bajado
-él mismo la copia completa en los últimos 15 minutos (queda en la auditoría: es lo que
-se mira) y lo diga al confirmar. Nunca se restaura sin una copia de lo que había.
+él mismo la copia completa en los últimos 15 minutos Y esa copia sea exactamente cómo
+está todo ahora. Se comprueba, no se le cree:
+  · El navegador manda el sha256 del archivo que recibió entero, y tiene que ser el de
+    una descarga COMPLETA de ese admin anotada en la auditoría (con su sha256).
+  · Con las tablas ya bloqueadas, la huella del contenido de hoy (huellas_actuales)
+    tiene que ser la misma que la de esa descarga: si alguien guardó algo después, no
+    coincide y hay que volver a bajarla. Si no, eso se perdería sin copia.
+Nunca se restaura sin una copia de lo que había.
 
 AUDITORÍA
 
 Bajar una copia (GET) no pasa por el middleware, que sólo registra escrituras: lo anota
-el propio endpoint al terminar de mandarla. Revisar y restaurar sí pasan (son POST); el
-endpoint deja en `request.state.auditoria` la frase —qué copia, de qué fecha— y cuántas
-filas quedaron por tabla.
+el propio endpoint ANTES de mandar el primer byte («empezó a descargar»), y al terminar
+completa esa misma fila con cómo terminó —entera, o cortada y cuánto llegó—, aunque la
+conexión se haya cortado. Si la fila no se puede escribir, la copia no se manda: bajarse
+todos los datos no puede quedar sin rastro. Los intentos rechazados (403) los anota el
+middleware (auditoria_movimientos.se_audita_el_rechazo). Revisar y restaurar sí pasan
+(son POST); el endpoint deja en `request.state.auditoria` la frase —qué copia, de qué
+fecha— y cuántas filas quedaron por tabla.
 
 El porqué de todo lo demás (formato, qué no se restaura, cómo se valida el archivo):
 infrastructure/copias_de_seguridad.py.
 """
 import asyncio
+import hashlib
+import json
 import re
 import time
 from datetime import datetime, timedelta
 from typing import Optional
 
+import anyio
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import or_, select, update
 
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.loggers.logger import logger
@@ -55,6 +70,7 @@ from backend.infrastructure import auditoria_movimientos as auditoria_mov
 from backend.infrastructure.copias_de_seguridad import (
     LIMITE_SUBIDA,
     NOMBRE_DE_ARCHIVO,
+    SIN_FIRMA,
     VERSION,
     CopiaInvalida,
     CopiaPreviaFallo,
@@ -63,6 +79,8 @@ from backend.infrastructure.copias_de_seguridad import (
     copia_a_archivo,
     generar_copia,
     huella_de,
+    huellas_actuales,
+    huellas_de_contenido,
     leer_esquema,
     nombre_de_copia,
     nombre_llano,
@@ -151,50 +169,132 @@ async def _conexion_de_lectura(sesion):
     return await sesion.connection()
 
 
-async def _admin_actual(conn, esquema, usuario: dict) -> Optional[dict]:
-    """La cuenta de quien restaura, como está hoy (para la opción de incluir usuarios)."""
+_COLUMNAS_DE_CUENTA = ("id_usuario", "username", "email", "nombre", "apellido", "rol", "activo",
+                       "admin_permanente")
+
+
+async def _usuarios_actuales(conn, esquema) -> list:
+    """Las cuentas de hoy, para incluir los usuarios: quién restaura, quiénes son
+    administradores permanentes (si la columna existe) y qué cambia en cada una."""
     t = esquema.tables.get("usuario")
     if t is None:
+        return []
+    columnas = [t.c[c] for c in _COLUMNAS_DE_CUENTA if c in t.c]
+    return [dict(f) for f in (await conn.execute(select(*columnas))).mappings().all()]
+
+
+async def _planos_con_archivo(conn, esquema) -> Optional[set]:
+    """Los planos que hoy tienen su archivo en algún lado (blob o ruta)."""
+    t = esquema.tables.get("plano")
+    if t is None or "id" not in t.c or "storage_path" not in t.c:
         return None
-    fila = (await conn.execute(
-        select(t.c.id_usuario, t.c.username, t.c.email).where(t.c.id_usuario == usuario.get("id_usuario"))
-    )).mappings().first()
-    return dict(fila) if fila else None
+    condicion = t.c.storage_path.is_not(None)
+    if "archivo" in t.c:
+        condicion = or_(condicion, t.c.archivo.is_not(None))
+    return set((await conn.execute(select(t.c.id).where(condicion))).scalars().all())
 
 
-async def _anotar_descarga(fabrica, usuario: dict, ruta: str, arranque: float, frase: str,
-                           detalle: dict) -> None:
-    """Una fila de auditoría por cada copia bajada. Nunca rompe la descarga."""
+# ── la auditoría de las descargas ──
+
+async def _anotar_inicio(fabrica, usuario: dict, ruta: str, frase: str, detalle: dict) -> int:
+    """La fila de la descarga, ANTES de mandar nada. Levanta si no se puede: sin fila,
+    no hay copia."""
+    fila = auditoria_mov.armar_fila(
+        usuario=usuario, metodo="GET", ruta=ruta, estado=200, duracion_ms=0,
+        resumen={"frase": frase, "despues": detalle},
+    )
+    # Todavía no terminó: sin estado, como un hecho que está pasando.
+    fila.estado = None
+    async with fabrica() as sesion:
+        sesion.add(fila)
+        await sesion.commit()
+        return fila.id
+
+
+async def _anotar_fin(fabrica, id_fila: int, usuario: dict, *, estado: int, frase: str,
+                      detalle: dict, arranque: float) -> None:
+    """Completa la fila de la descarga con cómo terminó. Nunca levanta: la fila de
+    «empezó a descargar» ya está."""
+    nombre = " ".join(p for p in (usuario.get("nombre"), usuario.get("apellido")) if p).strip()
     try:
         async with fabrica() as sesion:
-            await auditoria_mov.registrar(
-                sesion,
-                usuario=usuario,
-                metodo="GET",
-                ruta=ruta,
-                estado=200,
-                duracion_ms=int((time.monotonic() - arranque) * 1000),
-                resumen={"frase": frase, "despues": detalle},
+            await sesion.execute(
+                update(AuditoriaMovimiento).where(AuditoriaMovimiento.id == id_fila).values(
+                    estado=estado,
+                    descripcion=f"{nombre or usuario.get('username') or 'alguien'} {frase}",
+                    duracion_ms=int((time.monotonic() - arranque) * 1000),
+                    detalle=json.dumps({"despues": auditoria_mov._limpiar(detalle)},
+                                       ensure_ascii=False, default=str)[:auditoria_mov.TOPE_DETALLE],
+                )
             )
+            await sesion.commit()
     except Exception as e:
-        logger.warning(f"Copias de seguridad: no se pudo anotar la descarga en la auditoría: {e}")
+        logger.error(f"Copias de seguridad: no se pudo completar la fila {id_fila} de la auditoría: {e}")
 
 
-async def _descargo_recien(conn, usuario: dict, ahora: datetime) -> bool:
-    """¿Este admin terminó de bajar una copia completa en los últimos 15 minutos?"""
+class _DescargaAnotada(StreamingResponse):
+    """Una respuesta en pedazos que, pase lo que pase —terminó, se cortó la conexión, se
+    canceló el pedido—, al final cierra la copia y completa su fila de auditoría.
+
+    Lo de «al final» va acá y no en el generador: cuando el navegador corta, Starlette
+    cancela el envío y el generador queda colgado en su `yield` (lo cierra el recolector
+    de basura, cuando sea). Esto corre siempre, con la cancelación en pausa (shield) y un
+    tope de tiempo para no colgarse si la base no contesta."""
+
+    def __init__(self, contenido, *, al_terminar, **kwargs):
+        super().__init__(contenido, **kwargs)
+        self._al_terminar = al_terminar
+        self.enviada_entera = False
+
+    async def stream_response(self, send) -> None:
+        await super().stream_response(send)
+        self.enviada_entera = True
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.move_on_after(30, shield=True):
+                cerrar = getattr(self.body_iterator, "aclose", None)
+                if cerrar is not None:
+                    try:
+                        await cerrar()
+                    except Exception as e:
+                        logger.warning(f"Copias de seguridad: no se pudo cerrar la copia: {e}")
+                await self._al_terminar(self.enviada_entera)
+
+
+async def _descarga_reciente(conn, usuario: dict, ahora: datetime, huella: str) -> Optional[dict]:
+    """La descarga COMPLETA de este admin, de los últimos 15 minutos, cuyo archivo tiene
+    esta huella (el sha256 que calculó el navegador). Devuelve su huella del contenido,
+    o None."""
+    huella = (huella or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", huella):
+        return None
     try:
-        cuantas = await conn.scalar(
-            select(func.count()).select_from(AuditoriaMovimiento).where(
-                AuditoriaMovimiento.id_usuario == usuario.get("id_usuario"),
-                AuditoriaMovimiento.ruta == "/backups/descargar",
-                AuditoriaMovimiento.estado == 200,
-                AuditoriaMovimiento.creado_en >= ahora - VENTANA_DESCARGA_MANUAL,
-            )
-        )
+        # En un savepoint: si esta lectura falla, la restauración sigue sana (en Postgres
+        # una consulta que falla deja inservible la transacción entera).
+        async with conn.begin_nested():
+            filas = (await conn.execute(
+                select(AuditoriaMovimiento.detalle).where(
+                    AuditoriaMovimiento.id_usuario == usuario.get("id_usuario"),
+                    AuditoriaMovimiento.ruta == "/backups/descargar",
+                    AuditoriaMovimiento.estado == 200,
+                    AuditoriaMovimiento.creado_en >= ahora - VENTANA_DESCARGA_MANUAL,
+                ).order_by(AuditoriaMovimiento.id.desc())
+            )).scalars().all()
     except Exception as e:
         logger.error(f"Copias de seguridad: no se pudo mirar si hubo una descarga reciente: {e}")
-        return False
-    return bool(cuantas)
+        return None
+    for crudo in filas:
+        try:
+            despues = json.loads(crudo or "{}").get("despues") or {}
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if despues.get("completa") is True and despues.get("sha256") == huella:
+            contenido = despues.get("contenido")
+            return contenido if isinstance(contenido, dict) else None
+    return None
 
 
 def _vista_previa(revision, actuales: dict, nombre_archivo: str, deposito) -> dict:
@@ -227,6 +327,9 @@ def _vista_previa(revision, actuales: dict, nombre_archivo: str, deposito) -> di
         "ignoradas": revision.ignoradas,
         "avisos": revision.avisos,
         "incluir_usuarios": revision.incluir_usuarios,
+        "cambios_de_usuarios": revision.cambios_de_usuarios,
+        "planos_sin_archivo": revision.planos_sin_archivo,
+        "firma": {"valida": revision.firmada, "motivo": None if revision.firmada else SIN_FIRMA},
         "copia_automatica": {"disponible": deposito.disponible(), "donde": deposito.donde},
     }
 
@@ -255,6 +358,26 @@ def _fecha_del_nombre(nombre: str) -> Optional[str]:
         return None
 
 
+class _SinFirma(Exception):
+    """La copia no tiene la firma de este servidor y el admin no la aceptó aparte."""
+
+
+async def _cuentas(conn, esquema, usuario: dict, incluir_usuarios: bool):
+    """(cuentas de hoy, la de quien restaura). Sólo hacen falta con los usuarios."""
+    if not incluir_usuarios:
+        return None, None
+    cuentas = await _usuarios_actuales(conn, esquema)
+    admin = next((c for c in cuentas if c.get("id_usuario") == usuario.get("id_usuario")), None)
+    return cuentas, admin
+
+
+def _revisar(archivo, esquema, incluir_usuarios, admin, cuentas, planos_hoy):
+    return revisar_copia(
+        archivo, esquema, incluir_usuarios=incluir_usuarios, admin_actual=admin,
+        usuarios_actuales=cuentas, planos_con_archivo_hoy=planos_hoy,
+    )
+
+
 # ─────────────────────────── endpoints ───────────────────────────
 
 
@@ -278,6 +401,20 @@ async def descargar(
     nombre = nombre_de_copia(cuando)
     arranque = time.monotonic()
 
+    ruta = "/backups/descargar"
+
+    # Queda anotada ANTES del primer byte. Si no se puede anotar, no se manda nada.
+    try:
+        id_fila = await _anotar_inicio(
+            fabrica, usuario, ruta,
+            f"empezó a descargar una copia de seguridad completa ({nombre})",
+            {"archivo": nombre, "completa": False},
+        )
+    except Exception as e:
+        logger.error(f"Copias de seguridad: no se pudo anotar la descarga en la auditoría: {e}")
+        raise _error(503, "No se pudo anotar la descarga en la auditoría, y una copia con todos los "
+                          "datos no se entrega sin dejar rastro. Probá de nuevo en un rato.")
+
     # La base se abre ANTES de contestar: si no responde, es un 503 con su mensaje y no
     # un .zip cortado a la mitad.
     sesion = fabrica()
@@ -287,26 +424,52 @@ async def descargar(
     except Exception as e:
         await sesion.close()
         logger.error(f"Copias de seguridad: no se pudo leer la base para la copia: {e}")
+        await _anotar_fin(fabrica, id_fila, usuario, estado=503, arranque=arranque,
+                          frase=f"no pudo descargar una copia de seguridad ({nombre}): la base no respondió",
+                          detalle={"archivo": nombre, "completa": False})
         raise _error(503, "No se pudo leer la base para armar la copia. Probá de nuevo en un rato.")
 
     resumen = ResumenCopia(nombre=nombre)
+    suma = hashlib.sha256()
 
     async def cuerpo():
         try:
             async for trozo in generar_copia(conn, esquema, generado_por=_quien(usuario),
                                              motivo="descarga", cuando=cuando, resumen=resumen):
+                suma.update(trozo)
                 yield trozo
         finally:
-            await sesion.close()
-        await _anotar_descarga(
-            fabrica, usuario, "/backups/descargar", arranque,
-            f"descargó una copia de seguridad completa ({nombre}: {resumen.total_filas} filas "
-            f"de {len(resumen.filas_por_tabla)} tablas)",
-            {"archivo": nombre, "filas": resumen.total_filas, "bytes": resumen.bytes},
-        )
+            # Si la conexión se cortó en medio de una consulta, la cancelación sigue viva
+            # acá: sin el shield, el close se cancela también y la conexión queda tomada
+            # hasta que la junte el recolector (y el pooler de Supabase tiene 15).
+            with anyio.move_on_after(10, shield=True):
+                await sesion.close()
 
-    return StreamingResponse(cuerpo(), media_type="application/zip",
-                             headers=_cabeceras_de_descarga(nombre))
+    async def al_terminar(enviada_entera: bool):
+        if enviada_entera and resumen.completa:
+            await _anotar_fin(
+                fabrica, id_fila, usuario, estado=200, arranque=arranque,
+                frase=(f"descargó una copia de seguridad completa ({nombre}: {resumen.total_filas} "
+                       f"filas de {len(resumen.filas_por_tabla)} tablas)"),
+                detalle={
+                    "archivo": nombre, "completa": True, "filas": resumen.total_filas,
+                    "bytes": resumen.bytes,
+                    # Con esto se reconoce después ESTE archivo (el navegador manda su
+                    # sha256) y se comprueba que siga siendo cómo está todo (restaurar).
+                    "sha256": suma.hexdigest(),
+                    "contenido": huellas_de_contenido(resumen.sha256_por_tabla),
+                },
+            )
+        else:
+            await _anotar_fin(
+                fabrica, id_fila, usuario, estado=499, arranque=arranque,
+                frase=(f"empezó a descargar una copia de seguridad completa ({nombre}) y se cortó "
+                       f"(llegaron {resumen.bytes} bytes)"),
+                detalle={"archivo": nombre, "completa": False, "bytes": resumen.bytes},
+            )
+
+    return _DescargaAnotada(cuerpo(), al_terminar=al_terminar, media_type="application/zip",
+                            headers=_cabeceras_de_descarga(nombre))
 
 
 @router.post("/revisar")
@@ -325,11 +488,11 @@ async def revisar(
     async with fabrica() as sesion:
         conn = await sesion.connection()
         esquema = await leer_esquema(conn)
-        admin = await _admin_actual(conn, esquema, usuario) if incluir_usuarios else None
+        cuentas, admin = await _cuentas(conn, esquema, usuario, incluir_usuarios)
+        planos_hoy = await _planos_con_archivo(conn, esquema)
         try:
             revision = await asyncio.to_thread(
-                revisar_copia, archivo.file, esquema,
-                incluir_usuarios=incluir_usuarios, admin_actual=admin,
+                _revisar, archivo.file, esquema, incluir_usuarios, admin, cuentas, planos_hoy,
             )
         except CopiaInvalida as e:
             request.state.auditoria = {"despues": {"archivo": archivo.filename, "motivo": e.message}}
@@ -339,8 +502,10 @@ async def revisar(
 
     request.state.auditoria = {
         "frase": f"revisó la copia de seguridad del {_fecha_legible(revision.generado_en)} "
-                 f"({archivo.filename}) antes de restaurarla",
-        "despues": {"archivo": archivo.filename, "huella": revision.huella},
+                 f"({archivo.filename}) antes de restaurarla"
+                 + ("" if revision.firmada else " (sin la firma de este servidor)"),
+        "despues": {"archivo": archivo.filename, "huella": revision.huella,
+                    "firmada": revision.firmada},
     }
     return ResponseDTO(data=_vista_previa(revision, actuales, archivo.filename or "", deposito))
 
@@ -353,6 +518,10 @@ async def restaurar(
     confirmacion: str = Form(...),
     incluir_usuarios: bool = Form(False),
     ya_descargue_la_copia_actual: bool = Form(False),
+    # El sha256 del archivo que el navegador recibió entero al bajar la copia de hoy.
+    huella_copia_actual: str = Form(""),
+    # Para una copia sin la firma de este servidor: que el admin la quiere igual.
+    aceptar_copia_sin_firma: bool = Form(False),
     usuario: dict = Depends(get_usuario_verificado),
     fabrica=Depends(get_sesiones_backup),
     deposito=Depends(get_deposito),
@@ -380,11 +549,13 @@ async def restaurar(
         conn = await sesion.connection()
         try:
             esquema = await leer_esquema(conn)
-            admin = await _admin_actual(conn, esquema, usuario) if incluir_usuarios else None
+            cuentas, admin = await _cuentas(conn, esquema, usuario, incluir_usuarios)
+            planos_hoy = await _planos_con_archivo(conn, esquema)
             revision = await asyncio.to_thread(
-                revisar_copia, archivo.file, esquema,
-                incluir_usuarios=incluir_usuarios, admin_actual=admin,
+                _revisar, archivo.file, esquema, incluir_usuarios, admin, cuentas, planos_hoy,
             )
+            if not revision.firmada and not aceptar_copia_sin_firma:
+                raise _SinFirma()
 
             async def antes_de_borrar():
                 # Con las tablas bloqueadas: la copia es exactamente lo que se va a pisar.
@@ -407,16 +578,36 @@ async def restaurar(
                         motivo = "no se pudo guardar sola una copia del estado actual"
                 else:
                     motivo = "no hay dónde guardar sola una copia del estado actual"
-                if ya_descargue_la_copia_actual and await _descargo_recien(conn, usuario, cuando):
-                    copia_previa.update(nombre=None, donde="la copia que descargaste recién")
-                    return
-                raise CopiaPreviaFallo(motivo)
+                if not ya_descargue_la_copia_actual:
+                    raise CopiaPreviaFallo(motivo)
+                bajada = await _descarga_reciente(conn, usuario, cuando, huella_copia_actual)
+                if bajada is None:
+                    raise CopiaPreviaFallo(
+                        f"{motivo}, y no hay una descarga completa tuya de los últimos "
+                        f"{int(VENTANA_DESCARGA_MANUAL.total_seconds() // 60)} minutos que sea el "
+                        "archivo que tenés (la descarga tiene que hacerse desde esta pantalla)"
+                    )
+                # Con las tablas ya bloqueadas: ¿lo que bajó sigue siendo cómo está todo?
+                ahora = await huellas_actuales(conn, esquema)
+                grupos = ("datos", "acceso") if incluir_usuarios else ("datos",)
+                if any(ahora.get(g) != bajada.get(g) for g in grupos):
+                    raise CopiaPreviaFallo(
+                        f"{motivo}, y desde que descargaste la copia alguien guardó cambios: esa "
+                        "copia ya no es cómo está todo ahora y lo nuevo se perdería"
+                    )
+                copia_previa.update(nombre=None, donde="la copia que descargaste recién")
 
             resultado = await restaurar_copia(
                 conn, esquema, archivo.file, revision,
                 admin_actual=admin, antes_de_borrar=antes_de_borrar,
             )
             await sesion.commit()
+        except _SinFirma:
+            await sesion.rollback()
+            mensaje = (f"No se restauró nada. {SIN_FIRMA} Si igual querés restaurarla (sin los "
+                       "usuarios), confirmalo marcando «Restaurar igual».")
+            request.state.auditoria = {"despues": {"archivo": archivo.filename, "motivo": mensaje}}
+            raise _error(409, mensaje, "firma")
         except CopiaPreviaFallo as e:
             await sesion.rollback()
             mensaje = (
@@ -442,11 +633,13 @@ async def restaurar(
             f"restauró la copia de seguridad del {_fecha_legible(revision.generado_en)} "
             f"({archivo.filename}): {resultado['total_filas']} filas en {len(filas)} tablas"
             + (", con los usuarios" if incluir_usuarios else "")
+            + ("" if revision.firmada else " (una copia sin la firma de este servidor)")
         ),
         "despues": {
             "archivo": archivo.filename,
             "generada_en": revision.generado_en.isoformat() if revision.generado_en else None,
             "huella": revision.huella,
+            "firmada": revision.firmada,
             "con_usuarios": incluir_usuarios,
             "copia_previa": copia_previa.get("nombre") or copia_previa.get("donde"),
             "filas": filas,
@@ -465,6 +658,7 @@ async def restaurar(
                         if p.accion in ("conserva", "sin_copia")],
         "copia_previa": copia_previa or None,
         "archivos_conservados": resultado["archivos_conservados"],
+        "planos_sin_archivo": resultado["planos_sin_archivo"],
         "avisos": revision.avisos,
     })
 
@@ -494,16 +688,37 @@ async def descargar_automatica(
 ):
     if not NOMBRE_DE_ARCHIVO.match(nombre):
         raise _error(404, "Esa copia no existe.")
-    arranque = time.monotonic()
     try:
         datos = await deposito.bajar(nombre)
     except Exception as e:
         logger.error(f"Copias de seguridad: no se pudo bajar {nombre}: {e}")
         raise _error(404, "No se pudo bajar esa copia: puede que ya no exista.")
-    await _anotar_descarga(
-        fabrica, usuario, f"/backups/automaticas/{nombre}/descargar", arranque,
-        f"descargó la copia automática {nombre}", {"archivo": nombre, "bytes": len(datos)},
-    )
+    # Anotada antes de mandar nada, y sin fila no hay copia (igual que la completa).
+    try:
+        id_fila = await _anotar_inicio(
+            fabrica, usuario, f"/backups/automaticas/{nombre}/descargar",
+            f"descargó la copia automática {nombre}",
+            {"archivo": nombre, "bytes": len(datos), "sha256": hashlib.sha256(datos).hexdigest()},
+        )
+    except Exception as e:
+        logger.error(f"Copias de seguridad: no se pudo anotar la descarga en la auditoría: {e}")
+        raise _error(503, "No se pudo anotar la descarga en la auditoría, y una copia con todos los "
+                          "datos no se entrega sin dejar rastro. Probá de nuevo en un rato.")
+    arranque = time.monotonic()
+
+    async def al_terminar(enviada_entera: bool):
+        await _anotar_fin(
+            fabrica, id_fila, usuario, estado=200 if enviada_entera else 499, arranque=arranque,
+            frase=(f"descargó la copia automática {nombre}" if enviada_entera
+                   else f"empezó a descargar la copia automática {nombre} y se cortó"),
+            detalle={"archivo": nombre, "bytes": len(datos), "completa": enviada_entera,
+                     "sha256": hashlib.sha256(datos).hexdigest()},
+        )
+
     # En pedazos: Cloud Run corta en 32 MB una respuesta que no va por partes.
-    trozos = (datos[i:i + (1 << 20)] for i in range(0, len(datos), 1 << 20))
-    return StreamingResponse(trozos, media_type="application/zip", headers=_cabeceras_de_descarga(nombre))
+    async def trozos():
+        for i in range(0, len(datos), 1 << 20):
+            yield datos[i:i + (1 << 20)]
+
+    return _DescargaAnotada(trozos(), al_terminar=al_terminar, media_type="application/zip",
+                            headers=_cabeceras_de_descarga(nombre))
