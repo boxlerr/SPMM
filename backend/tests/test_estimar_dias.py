@@ -127,3 +127,54 @@ def test_el_endpoint_pide_al_menos_una_ot():
     app.dependency_overrides[PlanificacionAPI.get_db] = _sin_base
     r = TestClient(app).post("/planificacion/estimar", json={"ordenes_ids": []})
     assert r.status_code == 400
+
+
+# ---- Casos que encontró la revisión del 23/09 ----
+
+JUEVES = datetime(2026, 9, 24, 7, 0)
+
+
+def test_cruzar_un_fin_de_semana_no_come_dias_ni_termina_en_sabado():
+    # 35 pasos de 100 min en fila por una persona desde el jueves 24/9: 7,07 jornadas.
+    # Son 8 días hábiles (jue, vie, lun...) y termina el lunes 5/10, no el sábado 3/10.
+    procesos = [_paso(1, s, 100, [OFICIAL]) for s in range(1, 36)]
+    r = _estimar(procesos, [(10, OFICIAL)], inicio=JUEVES)
+    assert r["dias_habiles_minimos"] == 8
+    assert r["dias_habiles_estimados"] == 8
+    fin = datetime.fromisoformat(r["fin_estimado"])
+    assert fin.weekday() < 5
+    assert fin.date() == date(2026, 10, 5)
+
+
+def test_un_paso_que_no_entra_en_el_horario_de_nadie_no_tira_la_cuenta():
+    # Sólo lo puede hacer alguien que sale a las 15:00 (435 min): un paso de 180 min
+    # sólo arranca en el tramo de 12:30 a 16:00, que a esa persona le queda prohibido.
+    # El solver lo deja como excedente; la estimación lo cuenta como sin asignar.
+    cal = {10: {"dias": {0, 1, 2, 3, 4}, "desde": 0, "hasta": 435, "desde_sab": 0, "hasta_sab": 300}}
+    procesos = [_paso(1, 1, 60, [OFICIAL]), _paso(1, 2, 180, [OFICIAL])]
+    r = _estimar(procesos, [(10, OFICIAL)], cal=cal)
+    assert r["sin_asignar_min"] >= 180
+    assert r["dias_habiles_estimados"] >= 1
+
+
+def test_un_rango_que_termina_antes_del_arranque_no_tiene_nada_adentro():
+    procesos = [_paso(ot, 1, 200, [OFICIAL]) for ot in range(1, 4)]
+    r = _estimar(procesos, [(10, OFICIAL)], inicio=JUEVES, fecha_hasta=date(2026, 9, 23))
+    rango = r["rango"]
+    assert rango["dias_habiles"] == 0
+    assert rango["ots_entran"] == 0 and rango["carga_entra_min"] == 0
+    assert rango["arranca"] == "2026-09-24"
+
+
+def test_con_persona_elegida_el_acompanante_tambien_se_ocupa():
+    # Paso de a dos con la persona elegida a mano: el solver le suma un acompañante
+    # del dominio SIN la elección. La estimación también tiene que ocuparlo.
+    procesos = [_paso(1, 1, 300, [OFICIAL])]
+    ops = [(10, OFICIAL), (11, OFICIAL)]
+    r = estimar_plan(
+        procesos, ops, [], None, None, {}, {(1, 1): 2}, {}, {}, set(), {},
+        _cal(10, 11), [], {(1, 1): 10}, {}, LUNES,
+        nombres_operario={10: "Persona 10", 11: "Persona 11"}, numero_ot={}, detalle=True)
+    ocupados = {x["nombre"]: x["jornadas"] for x in r["_recursos"]}
+    assert ocupados.get("Persona 10", 0) > 0
+    assert ocupados.get("Persona 11", 0) > 0

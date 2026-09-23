@@ -139,6 +139,18 @@ def estimar_plan(
      maq_to_familia, op_dom, maq_dom, _, _) = PS._crear_variables_y_dominios(
         cp_model.CpModel(), pn, operarios, maquinarias, {1, 11}, {8, 14}, nativas_off, cant2,
         presel_maq2, op_planos, ots_con_plano, skills_manuales, presel_op2, maquinas_por_proceso)
+    # Los acompañantes (pasos de a 2 o más) salen del MISMO conjunto que usa el solver:
+    # el del principal ANTES de la persona elegida a mano (`operarios_para_acompanantes`
+    # en _crear_variables_y_dominios). Con la persona elegida, el dominio del principal es
+    # esa sola persona y de ahí no sale ningún acompañante. Se lo obtiene armando los
+    # dominios otra vez sin la elección —no leyendo las variables del modelo: sus protos
+    # quedan apuntando a memoria del modelo y al liberarse revientan (segfault)—.
+    acompanantes_de = {}
+    if presel_op2 and any(int(cant2.get(k, 1) or 1) > 1 for k in presel_op2):
+        (_, _, _, _, _, _, _, _, _, _, _, _, _, op_dom_libre, _, _, _) = PS._crear_variables_y_dominios(
+            cp_model.CpModel(), pn, operarios, maquinarias, {1, 11}, {8, 14}, nativas_off, cant2,
+            presel_maq2, op_planos, ots_con_plano, skills_manuales, None, maquinas_por_proceso)
+        acompanantes_de = {k: set(v) for k, v in op_dom_libre.items()}
     op_to_rangos = {}
     for o, r in operarios:
         op_to_rangos.setdefault(o, set()).add(r)
@@ -286,6 +298,7 @@ def estimar_plan(
         fin_de = {}
         par_del_grupo = {}
         listo = {}
+        sin_lugar = [0]
 
         def prohibida(o, w):
             c = cal.get(o)
@@ -372,11 +385,14 @@ def estimar_plan(
                     vistos.add((o, maq))
                     extra = []
                     if gente > 1:
-                        otros = [x for x in op_dom.get(k, []) if x != DOP and x != o and x in reales]
+                        otros = [x for x in (acompanantes_de.get(k) or op_dom.get(k, []))
+                                 if x != DOP and x != o and x in reales]
                         otros.sort(key=lambda x: (ocupado[("op", x)], x))
                         extra = otros[:gente - 1]
                     recursos = [("op", o)] + [("op", x) for x in extra] + ([("maq", maq)] if maq is not None else [])
-                    ini = primer_hueco(desde, dur, recursos, [o] + extra)
+                    # El horario que se mira es el del principal: el solver no le aplica
+                    # el turno a los acompañantes.
+                    ini = primer_hueco(desde, dur, recursos, [o])
                     if ini is None:
                         continue
                     # Al único que sabe algo se le cobra lo que todavía le queda de eso:
@@ -386,7 +402,15 @@ def estimar_plan(
                     if mejor_clave is None or clave < mejor_clave:
                         mejor_clave, mejor = clave, (ini + dur, ini, o, maq, extra)
                 if mejor is None:
-                    return None
+                    # Nadie de los que pueden tiene lugar en su horario (alguien que
+                    # sale a las 15:00 y un paso que sólo entra de 12:30 a 16:00). El
+                    # solver lo deja como excedente; acá se cuenta sin gente y va a
+                    # «nadie del taller puede», en vez de perder la cuenta entera.
+                    ini = primer_hueco(desde, dur, [], [])
+                    if ini is None:
+                        return None
+                    mejor = (ini + dur, ini, None, None, [])
+                    sin_lugar[0] += dur * gente
             fin, ini, o, maq, extra = mejor
             if o is not None:
                 par_del_grupo.setdefault(g, (o, maq if maq is not None else DMAQ))
@@ -405,7 +429,7 @@ def estimar_plan(
                 sig = lista[i + 1]
                 listo[sig] = fin
                 heapq.heappush(cola, (prioridad(sig), sig))
-        return ventanas, fin_de, agenda, ocupado
+        return ventanas, fin_de, agenda, ocupado, sin_lugar[0]
 
     # Varias reglas de reparto y se queda con la que termina antes. Cada una es un plan
     # posible de verdad (respeta todo lo que respeta el solver), así que quedarse con la
@@ -435,28 +459,74 @@ def estimar_plan(
     if salida is None:
         raise RuntimeError("no entró en el horizonte ni duplicándolo")
     semanas = semanas_ok
-    ventanas, fin_de, agenda, ocupado = salida
+    ventanas, fin_de, agenda, ocupado, sin_lugar_min = salida
+    sin_asignar_min += sin_lugar_min
     fin_min = max(fin_de.values()) if fin_de else 0
 
-    # Jornadas del reparto: días completos hasta el último + la fracción del último.
-    inicios_dia = [v.ini for v in ventanas if v.ini_dia == 0]
-    d = bisect_right(inicios_dia, max(0, fin_min - 1))
-    if d == 0:
-        jornadas_estimadas = 0.0
+    # ---- De minutos del reparto a días hábiles y a una fecha ----
+    # Sobre los MISMOS días que usa el reparto: los que tienen ventanas (sin sábados si
+    # nadie los trabaja, sin feriados). No se usa _convertir_minutos_a_fecha: esa le da
+    # 300 minutos a todo sábado, y cada fin de semana le comía ~0,6 días a la cuenta
+    # («entre 7 y 9» cuando era «entre 8 y 9», y un fin que caía en sábado).
+    def dias_habiles_desde(desde: date):
+        d_ = desde
+        while True:
+            if d_.strftime("%Y-%m-%d") not in feriados:
+                if d_.weekday() < 5:
+                    yield d_, PS.MIN_LABORAL_DIA
+                elif d_.weekday() == 5 and hay_sabado:
+                    yield d_, PS.MIN_LABORAL_SABADO
+            d_ += timedelta(days=1)
+
+    gen = dias_habiles_desde(start_date)
+    dias_reparto = [(next(gen), v.ini) for v in ventanas if v.ini_dia == 0]   # ((fecha, largo), minuto de arranque)
+    inis = [ini for _dl, ini in dias_reparto]
+
+    def posicion(minuto: int) -> tuple[int, int]:
+        """(índice de día hábil, minutos adentro de ese día) donde termina algo que
+        termina en `minuto`. Si se pasó del cierre (el solver deja que un paso que
+        arrancó en horario termine después), sigue al día hábil siguiente."""
+        if minuto <= 0 or not inis:
+            return 0, 0
+        idx = max(0, bisect_right(inis, minuto - 1) - 1)
+        resto_ = minuto - inis[idx]
+        while idx < len(dias_reparto) - 1 and resto_ > dias_reparto[idx][0][1]:
+            resto_ -= dias_reparto[idx][0][1]
+            idx += 1
+        return idx, resto_
+
+    def hora_del_dia(fecha: date, minutos: int) -> datetime:
+        """Minutos trabajados del día -> hora de reloj (07:00-09:00 · 09:15-12:00 ·
+        12:30-16:00; el sábado 07:00-12:00 de corrido)."""
+        base = datetime.combine(fecha, PS.HORA_APERTURA)
+        if fecha.weekday() == 5:
+            return base + timedelta(minutes=minutos)
+        pausa = 0
+        if minutos > PS.TRAMOS_LV_LAB[0][1]:
+            pausa += PS.MIN_DESAYUNO
+        if minutos > PS.TRAMOS_LV_LAB[1][1]:
+            pausa += PS.MIN_ALMUERZO
+        return base + timedelta(minutes=minutos + pausa)
+
+    idx_fin, resto_fin = posicion(fin_min)
+    if fin_min <= 0 or not dias_reparto:
+        jornadas_estimadas, dias_est, fin_est = 0.0, 0, None
     else:
-        largo = PS.MIN_LABORAL_DIA if ventanas[[v.ini for v in ventanas].index(inicios_dia[d - 1])].weekday < 5 \
-            else PS.MIN_LABORAL_SABADO
-        jornadas_estimadas = (d - 1) + (fin_min - inicios_dia[d - 1]) / largo
+        (fecha_f, largo_f), _ = dias_reparto[idx_fin]
+        jornadas_estimadas = idx_fin + resto_fin / largo_f
+        dias_est = idx_fin + 1
+        fin_est = hora_del_dia(fecha_f, resto_fin)
     jornadas_estimadas = max(jornadas_estimadas, jornadas_minimas)
 
-    def fecha_fin(minutos: int) -> datetime:
-        f = PS._convertir_minutos_a_fecha(int(round(minutos)), inicio_base, list(feriados), es_fin=True)
-        return f if isinstance(f, datetime) else datetime.fromisoformat(str(f))
-
-    fin_est = fecha_fin(max(fin_min, round(jornadas_minimas * PS.MIN_LABORAL_DIA)))
-    fin_minimo = fecha_fin(round(jornadas_minimas * PS.MIN_LABORAL_DIA))
-    dias_min = _contar_dias_habiles(start_date, fin_minimo.date(), dias_trabajo, feriados)
-    dias_est = _contar_dias_habiles(start_date, fin_est.date(), dias_trabajo, feriados)
+    # El mínimo en días: jornadas enteras de cada día hábil hasta cubrir la cota.
+    falta, dias_min = jornadas_minimas * PS.MIN_LABORAL_DIA, 0
+    gen_min = dias_habiles_desde(start_date)
+    while falta > 1e-6:
+        _f, largo = next(gen_min)
+        falta -= largo
+        dias_min += 1
+    if dias_est < dias_min:   # el reparto nunca termina antes que la cota
+        dias_est = dias_min
 
     # ---- Quién marca el ritmo: el que termina último en el reparto ----
     exclusivo_op, exclusivo_maq = defaultdict(int), defaultdict(int)
@@ -500,6 +570,11 @@ def estimar_plan(
         v_rango = PS.construir_ventanas_semanales(semanas, start_date, list(feriados),
                                                   fecha_hasta=fecha_hasta, incluir_sabado=hay_sabado)
         limite = max((v.fin for v in v_rango), default=0)
+        # Si el rango termina antes del arranque real del plan (se eligió «hoy» con la
+        # jornada ya empezada), no hay ningún día: construir_ventanas_semanales arma igual
+        # un día (el del arranque) y se decía «entran 3 OT» con 0 días hábiles.
+        if fecha_hasta < start_date:
+            limite = 0
         r_urg = repartir(semanas, "urgencia", True, "libre") or salida
         fin_de_r = r_urg[1]
         fin_ot = defaultdict(int)
@@ -516,6 +591,9 @@ def estimar_plan(
             "ots_entran": len(entran),
             "carga_entra_min": int(carga_entra),
             "no_entran": [int(numero_ot.get(ot, ot)) for ot in no_entran],
+            # Desde cuándo puede arrancar el plan de verdad (para decir «el rango no tiene
+            # días hábiles: el plan arranca el lun 28/9»).
+            "arranca": start_date.isoformat(),
         }
 
     resultado = {
@@ -523,8 +601,8 @@ def estimar_plan(
         "jornadas_minimas": round(jornadas_minimas, 2),
         "jornadas_estimadas": round(jornadas_estimadas, 2),
         "dias_habiles_minimos": dias_min,
-        "dias_habiles_estimados": max(dias_est, dias_min),
-        "fin_estimado": fin_est.replace(tzinfo=None).isoformat(timespec="seconds"),
+        "dias_habiles_estimados": dias_est,
+        "fin_estimado": fin_est.isoformat(timespec="seconds") if fin_est else None,
         "cuellos": cuellos,
         "sin_asignar_min": int(sin_asignar_min),
         "rango": rango,
