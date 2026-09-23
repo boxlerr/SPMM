@@ -59,7 +59,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, update
 
-from backend.application.reglas_de_roles import cuidar_administradores, validar_rol
+from backend.application.reglas_de_roles import cuidar_administradores, de_a_uno, validar_rol
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
@@ -666,27 +666,34 @@ async def cambiar_rol(
     (application/reglas_de_roles.py): el rol tiene que existir, nadie se lo cambia a sí
     mismo, a un administrador permanente no se le cambia y el sistema nunca queda sin
     un admin activo. Vale desde su pedido siguiente, sin volver a entrar."""
-    persona = await _persona_o_404(db, id_usuario)
     nuevo = cuerpo.rol
-    if nuevo != persona.rol:
-        try:
-            await validar_rol(sesiones, nuevo)
-        except BusinessException as e:
-            raise _error(400, e.message, "rol")
-        await cuidar_administradores(
-            sesiones,
-            id_objetivo=id_usuario,
-            id_actor=actor.id_usuario,
-            rol_actual=persona.rol,
-            activo_actual=persona.activo,
-            rol_nuevo=nuevo,
-            activo_nuevo=persona.activo,
-        )
-        await db.execute(
-            update(Usuario).where(Usuario.id_usuario == id_usuario)
-            .values(rol=nuevo, actualizado_por=actor.id_usuario, fecha_actualizacion=ahora_ar())
-        )
-        await _guardar(db, "el rol")
+    # De a uno desde que se lee a la persona hasta que se guarda (reglas_de_roles.de_a_uno):
+    # si no, dos admins que se bajan uno al otro a la vez dejan el sistema sin ninguno.
+    async with de_a_uno(db):
+        persona = await _persona_o_404(db, id_usuario)
+        cambia = nuevo != persona.rol
+        if cambia:
+            try:
+                await validar_rol(sesiones, nuevo)
+            except BusinessException as e:
+                raise _error(400, e.message, "rol")
+            await cuidar_administradores(
+                sesiones,
+                id_objetivo=id_usuario,
+                id_actor=actor.id_usuario,
+                rol_actual=persona.rol,
+                activo_actual=persona.activo,
+                rol_nuevo=nuevo,
+                activo_nuevo=persona.activo,
+            )
+            await db.execute(
+                update(Usuario).where(Usuario.id_usuario == id_usuario)
+                .values(rol=nuevo, actualizado_por=actor.id_usuario, fecha_actualizacion=ahora_ar())
+            )
+            await _guardar(db, "el rol")
+        else:
+            await db.rollback()  # nada que guardar: que el candado no espere al final del pedido
+    if cambia:
         frase = f"le cambió el rol a {_nombre_persona(persona)}: {persona.rol} → {nuevo}"
     else:
         frase = f"dejó a {_nombre_persona(persona)} con el rol que tenía ({nuevo})"

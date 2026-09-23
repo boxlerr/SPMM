@@ -29,6 +29,7 @@ from backend.application.reglas_de_roles import (
     admins_permanentes,
     conflicto,
     cuidar_administradores,
+    de_a_uno,
     validar_rol,
 )
 from backend.commons.ResponseDTO import ResponseDTO
@@ -658,56 +659,60 @@ async def actualizar_usuario(
     try:
         usuario_repository = UsuarioRepository(db)
         
-        # Verificar que existe
-        usuario = await usuario_repository.obtener_por_id(id_usuario)
-        if not usuario:
-            raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
+        # RF-24: de a uno desde que se lee a la persona hasta que se guarda (ver
+        # reglas_de_roles.de_a_uno): si no, dos admins que se bajan uno al otro a la vez
+        # dejan el sistema sin ninguno.
+        async with de_a_uno(db):
+            # Verificar que existe
+            usuario = await usuario_repository.obtener_por_id(id_usuario)
+            if not usuario:
+                raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
 
-        # RF-24. Se mira ANTES de tocar nada del objeto. Las lecturas van con su propia
-        # sesión, así que no pueden dejar inservible la de este guardado.
-        rol_nuevo = usuario_dto.rol or usuario.rol
-        activo_nuevo = usuario.activo if usuario_dto.activo is None else usuario_dto.activo
-        if rol_nuevo != usuario.rol:
-            await _validar_rol(sesiones, rol_nuevo)
-        await _cuidar_administradores(
-            sesiones,
-            id_objetivo=id_usuario,
-            id_actor=current_user['id_usuario'],
-            rol_actual=usuario.rol,
-            activo_actual=usuario.activo,
-            rol_nuevo=rol_nuevo,
-            activo_nuevo=activo_nuevo,
-        )
+            # RF-24. Se mira ANTES de tocar nada del objeto. Las lecturas van con su propia
+            # sesión, así que no pueden dejar inservible la de este guardado.
+            rol_nuevo = usuario_dto.rol or usuario.rol
+            activo_nuevo = usuario.activo if usuario_dto.activo is None else usuario_dto.activo
+            if rol_nuevo != usuario.rol:
+                await _validar_rol(sesiones, rol_nuevo)
+            await _cuidar_administradores(
+                sesiones,
+                id_objetivo=id_usuario,
+                id_actor=current_user['id_usuario'],
+                rol_actual=usuario.rol,
+                activo_actual=usuario.activo,
+                rol_nuevo=rol_nuevo,
+                activo_nuevo=activo_nuevo,
+            )
         
-        # Si se actualiza el username, verificar que no esté en uso
-        if usuario_dto.username and usuario_dto.username != usuario.username:
-            usuario_existente = await usuario_repository.obtener_por_username(usuario_dto.username)
-            if usuario_existente and usuario_existente.id_usuario != id_usuario:
-                raise BusinessException(f"El username '{usuario_dto.username}' ya está en uso")
+            # Si se actualiza el username, verificar que no esté en uso
+            if usuario_dto.username and usuario_dto.username != usuario.username:
+                usuario_existente = await usuario_repository.obtener_por_username(usuario_dto.username)
+                if usuario_existente and usuario_existente.id_usuario != id_usuario:
+                    raise BusinessException(f"El username '{usuario_dto.username}' ya está en uso")
         
-        # Si se actualiza el email, verificar que no esté en uso
-        if usuario_dto.email and usuario_dto.email != usuario.email:
-            usuario_existente_email = await usuario_repository.obtener_por_email(usuario_dto.email)
-            if usuario_existente_email and usuario_existente_email.id_usuario != id_usuario:
-                raise BusinessException(f"El email '{usuario_dto.email}' ya está en uso")
+            # Si se actualiza el email, verificar que no esté en uso
+            if usuario_dto.email and usuario_dto.email != usuario.email:
+                usuario_existente_email = await usuario_repository.obtener_por_email(usuario_dto.email)
+                if usuario_existente_email and usuario_existente_email.id_usuario != id_usuario:
+                    raise BusinessException(f"El email '{usuario_dto.email}' ya está en uso")
         
-        # Actualizar campos
-        if usuario_dto.username:
-            usuario.username = usuario_dto.username
-        if usuario_dto.email:
-            usuario.email = usuario_dto.email
-        if usuario_dto.nombre:
-            usuario.nombre = usuario_dto.nombre
-        if usuario_dto.apellido:
-            usuario.apellido = usuario_dto.apellido
-        if usuario_dto.rol:
-            usuario.rol = usuario_dto.rol
-        if usuario_dto.activo is not None:
-            usuario.activo = usuario_dto.activo
+            # Actualizar campos
+            if usuario_dto.username:
+                usuario.username = usuario_dto.username
+            if usuario_dto.email:
+                usuario.email = usuario_dto.email
+            if usuario_dto.nombre:
+                usuario.nombre = usuario_dto.nombre
+            if usuario_dto.apellido:
+                usuario.apellido = usuario_dto.apellido
+            if usuario_dto.rol:
+                usuario.rol = usuario_dto.rol
+            if usuario_dto.activo is not None:
+                usuario.activo = usuario_dto.activo
         
-        usuario.actualizado_por = current_user['id_usuario']
+            usuario.actualizado_por = current_user['id_usuario']
         
-        usuario_actualizado = await usuario_repository.actualizar(usuario)
+            usuario_actualizado = await usuario_repository.actualizar(usuario)
         
         # Crear notificación
         try:
@@ -784,28 +789,30 @@ async def eliminar_usuario(
         
         usuario_repository = UsuarioRepository(db)
         
-        # Verificar que existe
-        usuario = await usuario_repository.obtener_por_id(id_usuario)
-        if not usuario:
-            raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
+        # De a uno (ver actualizar_usuario).
+        async with de_a_uno(db):
+            # Verificar que existe
+            usuario = await usuario_repository.obtener_por_id(id_usuario)
+            if not usuario:
+                raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
 
-        # RF-24. Eliminar es desactivar (soft delete): mismas reglas que desactivarlo.
-        await _cuidar_administradores(
-            sesiones,
-            id_objetivo=id_usuario,
-            id_actor=current_user['id_usuario'],
-            rol_actual=usuario.rol,
-            activo_actual=usuario.activo,
-            rol_nuevo=usuario.rol,
-            activo_nuevo=False,
-        )
+            # RF-24. Eliminar es desactivar (soft delete): mismas reglas que desactivarlo.
+            await _cuidar_administradores(
+                sesiones,
+                id_objetivo=id_usuario,
+                id_actor=current_user['id_usuario'],
+                rol_actual=usuario.rol,
+                activo_actual=usuario.activo,
+                rol_nuevo=usuario.rol,
+                activo_nuevo=False,
+            )
         
-        # Guardar información antes de eliminar para la notificación
-        username_eliminado = usuario.username
-        nombre_eliminado = f"{usuario.nombre} {usuario.apellido}"
+            # Guardar información antes de eliminar para la notificación
+            username_eliminado = usuario.username
+            nombre_eliminado = f"{usuario.nombre} {usuario.apellido}"
         
-        # Eliminar (soft delete)
-        await usuario_repository.eliminar(id_usuario, eliminado_por=current_user['id_usuario'])
+            # Eliminar (soft delete)
+            await usuario_repository.eliminar(id_usuario, eliminado_por=current_user['id_usuario'])
         
         # Crear notificación
         try:

@@ -8,9 +8,15 @@ endpoint: `admin_permanente` y la tabla `rol` pueden no existir todavía (migrac
 correr), y en Postgres una consulta que falla deja inservible la transacción en la que
 corrió. Así una lectura que falla no se lleva puesto el guardado.
 """
+import asyncio
+import weakref
+from contextlib import asynccontextmanager
+
 from fastapi import HTTPException, status
+from sqlalchemy import text
 
 from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.loggers.logger import logger
 from backend.core.permisos import ROL_ADMIN
 from backend.infrastructure.PermisosRepository import PermisosRepository
 
@@ -80,6 +86,9 @@ async def cuidar_administradores(
        CUALQUIER cambio de rol, no sólo si deja de ser admin: la marca es «su rol queda
        fijo», y así vale aunque la base tuviera algo raro.
     3. El sistema nunca queda sin ningún admin activo.
+
+    La 3 lee y después se escribe: el que llama tiene que estar adentro de `de_a_uno`
+    (abajo), o dos cambios a la vez la saltean.
     """
     cambia_rol = rol_nuevo != rol_actual
     se_desactiva = bool(activo_actual) and not activo_nuevo
@@ -106,3 +115,65 @@ async def cuidar_administradores(
                 "Es el único administrador activo: el sistema no puede quedar sin nadie "
                 "que lo administre. Hacé admin a otra persona primero."
             )
+
+
+# ─────────────────────────── de a uno ───────────────────────────
+#
+# «El sistema nunca queda sin admin» es una regla de LEER Y DESPUÉS ESCRIBIR: se cuentan
+# los otros admins activos y, si queda alguno, se baja o se desactiva a éste. Hasta el
+# 23/09 la cuenta y la escritura iban sin ningún candado: dos admins que se bajaban uno
+# al otro al mismo tiempo pasaban los dos la cuenta («queda 1 más») y el sistema quedaba
+# sin ningún admin activo —volver atrás pedía tocar la base a mano—. Reproducido con dos
+# pedidos en paralelo: 200 y 200, cero admins.
+#
+# Ahora todo cambio que puede sacar un admin (cambiar el rol, desactivar, eliminar) va de
+# a uno, desde que se lee a la persona hasta que se guarda:
+#   · en Postgres, pg_advisory_xact_lock en la MISMA transacción del endpoint: el segundo
+#     espera a que el primero confirme (el candado se suelta solo con el COMMIT o el
+#     ROLLBACK), y recién ahí lee y cuenta, ya con lo del primero guardado. Vale entre
+#     instancias de Cloud Run. Es de transacción, no de sesión: anda también a través del
+#     pooler de Supabase.
+#   · además, un candado de asyncio en la instancia: el del andamio de los tests (SQLite
+#     no tiene el de Postgres) y, de paso, ahorra ocupar una conexión esperando.
+
+# El número del candado: cualquiera, mientras sea siempre el mismo (no hay otro en la app).
+CANDADO_DE_ADMINS = 2409_2024
+
+# Uno por loop de asyncio: un Lock queda atado al loop donde se usó por primera vez, y
+# los tests abren un loop por test. En producción hay uno solo (el de uvicorn).
+_candados_locales: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _candado_local() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    candado = _candados_locales.get(loop)
+    if candado is None:
+        candado = _candados_locales[loop] = asyncio.Lock()
+    return candado
+
+
+def _es_postgres(db) -> bool:
+    try:
+        return db.get_bind().dialect.name == "postgresql"
+    except Exception:
+        return False
+
+
+@asynccontextmanager
+async def de_a_uno(db):
+    """Envuelve «leer a la persona → mirar las reglas → guardar» de un cambio que puede
+    sacar un admin. `db` es la sesión del endpoint: el candado de Postgres vive en SU
+    transacción, así que el endpoint tiene que confirmar ADENTRO del bloque. Si algo
+    levanta, se deshace la transacción ahí mismo (y con ella se suelta el candado)."""
+    async with _candado_local():
+        try:
+            if _es_postgres(db):
+                await db.execute(text("SELECT pg_advisory_xact_lock(:clave)"),
+                                 {"clave": CANDADO_DE_ADMINS})
+            yield
+        except BaseException:
+            try:
+                await db.rollback()
+            except Exception as e:  # pragma: no cover - lo único que queda es avisar
+                logger.warning(f"Roles: no se pudo deshacer la transacción: {e}")
+            raise
