@@ -28,6 +28,24 @@ def _ahora_ar() -> datetime:
     return datetime.now(_TZ_AR).replace(tzinfo=None)
 
 
+def _cambio_de_paso(paso, antes, despues) -> dict:
+    """Lo que el registro de uso de máquinas (RF-10) necesita de un paso que cambia de
+    estado. `paso` es la fila del ORM o el dict de auditoria_proc.leer_pasadas."""
+    leer = paso.get if isinstance(paso, dict) else (lambda k: getattr(paso, k, None))
+    return {
+        "id_otp": leer("id"),
+        "id_orden_trabajo": leer("id_orden_trabajo"),
+        "id_proceso": leer("id_proceso"),
+        "orden": leer("orden"),
+        "id_maquinaria": leer("id_maquinaria"),
+        "id_operario": leer("id_operario"),
+        "no_lleva_maquina": leer("no_lleva_maquina"),
+        "tiempo_proceso": leer("tiempo_proceso"),
+        "antes": antes,
+        "despues": despues,
+    }
+
+
 class OrdenTrabajoRepository:
     def __init__(self, db):
         self.db = db
@@ -576,6 +594,9 @@ class OrdenTrabajoRepository:
 
             estado_anterior = ot_proceso.id_estado
             ot_proceso.id_estado = id_estado
+            # UNA hora para todo el cambio: la del arranque o el fin del paso y la del
+            # registro de uso de su máquina (RF-10) tienen que ser la misma.
+            ahora = _ahora_ar()
             
             # Logic for Real Minutes Tracking
             # Logic for Real Minutes Tracking
@@ -587,7 +608,7 @@ class OrdenTrabajoRepository:
                     # Hora local AR. Con datetime.now() pelado, en Cloud Run (TZ=UTC)
                     # el taller veía que un proceso había arrancado 3 horas más tarde
                     # de lo que lo arrancó.
-                    ot_proceso.inicio_real = _ahora_ar()
+                    ot_proceso.inicio_real = ahora
                 # If reverting from finalized to in-process, clear finish time
                 ot_proceso.fin_real = None
             elif id_estado == 3 and estado_anterior != 3:  # Finalizado
@@ -595,7 +616,7 @@ class OrdenTrabajoRepository:
                 # estaba no es terminarlo de nuevo: pisar el fin corría el paso hasta
                 # hoy y el tiempo trabajado (RF-06/07) se llevaba días en que nadie lo
                 # tocó.
-                ot_proceso.fin_real = _ahora_ar()
+                ot_proceso.fin_real = ahora
 
             # Mover un proceso de la OT es modificar la OT: es el cambio que más se
             # hace y el que más se pregunta después ("¿quién lo dio por terminado?").
@@ -610,7 +631,18 @@ class OrdenTrabajoRepository:
                 from backend.infrastructure.PausaRepository import PausaRepository
                 await PausaRepository(self.db).cerrar_al_cambiar_estado(
                     id_orden=id_orden, id_otp=ot_proceso.id, id_estado=id_estado,
-                    cuando=_ahora_ar(), id_usuario=(usuario or {}).get("id_usuario"),
+                    cuando=ahora, id_usuario=(usuario or {}).get("id_usuario"),
+                    usuario=(nombre_de(usuario) or "")[:120] or None,
+                )
+
+                # RF-10. Arrancar el paso abre el registro de uso de su máquina (la
+                # elegida a mano o la del plan) y terminarlo lo cierra con sus horas.
+                # Después de cerrar las pausas: las horas efectivas las descuentan. En su
+                # propio savepoint: si falla, el cambio de estado se guarda igual.
+                from backend.infrastructure.UsoMaquinaRepository import UsoMaquinaRepository
+                await UsoMaquinaRepository(self.db).anotar_cambios_sin_romper(
+                    [_cambio_de_paso(ot_proceso, estado_anterior, id_estado)],
+                    cuando=ahora, id_usuario=(usuario or {}).get("id_usuario"),
                     usuario=(nombre_de(usuario) or "")[:120] or None,
                 )
 
@@ -845,6 +877,18 @@ class OrdenTrabajoRepository:
             await PausaRepository(self.db).cerrar_al_marcar_varias(
                 ordenes_ids=ids, id_estado=id_estado, cuando=ahora,
                 id_usuario=(usuario or {}).get("id_usuario"),
+                usuario=(nombre_de(usuario) or "")[:120] or None,
+            )
+
+            # RF-10. Lo mismo que el cambio de a uno: los pasos que arrancan (o se
+            # reabren) abren el registro de uso de su máquina y los que se terminan lo
+            # cierran. Sale de `previas`, leídas ANTES del UPDATE: es lo único que sabe
+            # en qué estado estaba cada paso. Si no se pudieron leer, no se registra uso
+            # (y el cambio se guarda igual).
+            from backend.infrastructure.UsoMaquinaRepository import UsoMaquinaRepository
+            await UsoMaquinaRepository(self.db).anotar_cambios_sin_romper(
+                [_cambio_de_paso(f, f.get("id_estado"), id_estado) for f in previas],
+                cuando=ahora, id_usuario=(usuario or {}).get("id_usuario"),
                 usuario=(nombre_de(usuario) or "")[:120] or None,
             )
 

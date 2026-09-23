@@ -31,10 +31,12 @@ from backend.presentation.PausaAPI import router as pausa_router
 from backend.presentation.AsistenciaAPI import router as asistencia_router
 from backend.presentation.RendimientoOperarioAPI import router as rendimiento_operario_router
 from backend.presentation.RangoAPI import router as rango_router
+from backend.presentation.UsoMaquinaAPI import router as uso_maquina_router
 from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
 from backend.application.AlertaRetrasoService import AlertaRetrasoService, TOPE_POR_CORRIDA
 from backend.application.AlertaStockService import AlertaStockService
+from backend.application.MantenimientoMaquinaService import MantenimientoMaquinaService
 from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
@@ -310,6 +312,10 @@ app.include_router(asistencia_router, tags=["asistencia"], dependencies=_protegi
 app.include_router(rendimiento_operario_router, tags=["rendimiento_operario"],
                    dependencies=_protegido("rendimiento_operario"))
 app.include_router(rango_router, tags=["rangos"], dependencies=_protegido("rangos"))
+# RF-10: las horas de uso de cada máquina (las escribe solo el cambio de estado de los
+# pasos) y su mantenimiento preventivo, en Recursos › Recurso maquinaria. Tablas propias
+# de SPMM; el sync no las mira y el planificador tampoco.
+app.include_router(uso_maquina_router, tags=["uso_maquinas"], dependencies=_protegido("maquinas_uso"))
 app.include_router(auditoria_router, tags=["auditoria"], dependencies=_protegido("auditoria"))
 # RF-19: bajar una copia completa y restaurarla. Sólo admin (la política «backups»).
 app.include_router(copia_seguridad_router, tags=["copias de seguridad"], dependencies=_protegido("backups"))
@@ -427,8 +433,10 @@ async def internal_alertas(
     tope: int = TOPE_POR_CORRIDA,
     db=Depends(get_db_interno),
 ):
-    """Corre TODOS los avisos automáticos en una pasada: órdenes retrasadas (RF-04) y
-    stock bajo (RF-14).
+    """Corre TODOS los avisos automáticos en una pasada: órdenes retrasadas (RF-04),
+    stock bajo (RF-14) y mantenimiento de máquinas (RF-10, el único que además manda
+    email: a los usuarios elegidos en cada máquina; si el email no está configurado o
+    falla, el aviso de la campanita queda igual y la corrida no falla por eso).
 
     POR QUÉ UNO SOLO Y NO UNO POR AVISO
 
@@ -463,6 +471,7 @@ async def internal_alertas(
     avisos = (
         ("retraso", lambda: AlertaRetrasoService(db).detectarYAvisarRetrasos(tope=tope)),
         ("stock", lambda: AlertaStockService(db).detectarYAvisarStockBajo(tope=tope)),
+        ("mantenimiento", lambda: MantenimientoMaquinaService(db).detectarYAvisar(tope=tope)),
     )
     resultados, fallas = {}, {}
     for nombre, correr in avisos:

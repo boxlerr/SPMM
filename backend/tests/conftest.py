@@ -73,6 +73,16 @@ from backend.domain.PausaOrden import PausaOrden
 # Las ausencias (RF-06) cuelgan de la persona con ON DELETE CASCADE: borrar a alguien que
 # alguna vez faltó tiene que andar, y eso sólo se ve con la tabla creada.
 from backend.domain.AusenciaOperario import AusenciaOperario
+# El uso y el mantenimiento de las máquinas (RF-10) cuelgan de la máquina con ON DELETE
+# CASCADE: borrar una máquina usada tiene que andar. Y el cambio de estado de un paso
+# escribe en uso_maquina, y el disparador de avisos lee las del mantenimiento.
+from backend.domain.UsoMaquina import UsoMaquina
+from backend.domain.MantenimientoMaquina import (
+    MantenimientoAviso,
+    MantenimientoConfig,
+    MantenimientoDestinatario,
+    MantenimientoHecho,
+)
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -104,6 +114,11 @@ TEST_TABLES = [
     ConsumoMaterial.__table__,
     PausaOrden.__table__,
     AusenciaOperario.__table__,
+    UsoMaquina.__table__,
+    MantenimientoConfig.__table__,
+    MantenimientoHecho.__table__,
+    MantenimientoDestinatario.__table__,
+    MantenimientoAviso.__table__,
 ]
 
 

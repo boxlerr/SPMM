@@ -189,8 +189,12 @@ class MaquinariaService:
         # un paso de una OT, y eso se pierde sin dejar rastro.
         pasos = (await db.execute(_text(
             "SELECT COUNT(*) FROM orden_trabajo_proceso WHERE id_maquinaria = :m"), {"m": id})).scalar() or 0
+        # RF-10: su historial de uso y de mantenimiento se va con ella (ON DELETE CASCADE).
+        # Leído en un savepoint: si esas tablas todavía no están, se borra como antes.
+        from backend.infrastructure.UsoMaquinaRepository import UsoMaquinaRepository
+        usos, hechos = (await UsoMaquinaRepository(db).contar_de_la_maquina_sin_romper(id)) or (0, 0)
 
-        if (procesos or rangos or pasos) and not forzar:
+        if (procesos or rangos or pasos or usos or hechos) and not forzar:
             partes = []
             if pasos:
                 partes.append(f"{pasos} {'paso' if pasos == 1 else 'pasos'} de órdenes "
@@ -201,11 +205,21 @@ class MaquinariaService:
             if rangos:
                 partes.append(f"{rangos} {'categoría' if rangos == 1 else 'categorías'} "
                               f"{'la puede' if rangos == 1 else 'la pueden'} usar")
-            raise ConfirmacionRequeridaException(
-                f"«{maq.nombre}» está en uso: " + ", ".join(partes) +
-                ". Si la eliminás, esos pasos quedan sin máquina y el planificador "
-                "les va a buscar otra."
-            )
+            historial = []
+            if usos:
+                historial.append(f"{usos} {'registro' if usos == 1 else 'registros'} de uso")
+            if hechos:
+                historial.append(f"{hechos} {'mantenimiento registrado' if hechos == 1 else 'mantenimientos registrados'}")
+            if partes:
+                texto = (f"«{maq.nombre}» está en uso: " + ", ".join(partes) +
+                         ". Si la eliminás, esos pasos quedan sin máquina y el planificador "
+                         "les va a buscar otra.")
+                if historial:
+                    texto += " También se pierde su historial: " + " y ".join(historial) + "."
+            else:
+                texto = (f"«{maq.nombre}» tiene historial: " + " y ".join(historial) +
+                         ". Si la eliminás, se pierde.")
+            raise ConfirmacionRequeridaException(texto)
 
         try:
             # Qué pasos quedan sin su máquina elegida, anotado ANTES de blanquearlos:

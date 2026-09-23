@@ -303,6 +303,22 @@ POLITICAS: dict[str, Politica] = {
     # el botón «arreglar» de los diagnósticos del plan hace lo mismo: pide lo mismo).
     "rangos": Politica(leer=LIBRE, escribir=(seccion("recursos_rangos", "write"),)),
     "sectores": Politica(leer=LIBRE, escribir=(seccion("recursos_sectores", "write"),)),
+    # RF-10: el uso de cada máquina y su mantenimiento preventivo. NO es catálogo: la
+    # lista de uso dice qué persona usó qué máquina en qué OT y cuánto tiempo (lo mismo
+    # que los tiempos de RF-06), y el mantenimiento nombra a los usuarios que reciben el
+    # aviso. Se lee y se edita en la solapa Recurso maquinaria de Recursos, que es la
+    # única pantalla que lo muestra.
+    "maquinas_uso": Politica(
+        leer=(seccion("recursos_maquinaria"),),
+        escribir=(seccion("recursos_maquinaria", "write"),),
+        excepciones=(
+            Excepcion("GET", "/maquinarias-mantenimiento/destinatarios",
+                      (seccion("recursos_maquinaria", "write"),),
+                      "La lista de usuarios para elegir a quién le llega el aviso: sólo la "
+                      "necesita quien lo configura. Aun así los emails salen tapados salvo "
+                      "para quien tiene «Usuarios y permisos» (UsoMaquinaAPI)."),
+        ),
+    ),
     # Sin solapa propia: van por el área.
     "prioridades": Politica(leer=LIBRE, escribir=(area("recursos", "write"),)),
     # Los artículos vienen del sistema viejo y no tienen pantalla que los edite; si

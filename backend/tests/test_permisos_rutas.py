@@ -194,6 +194,17 @@ MATRIZ = [
     ("PUT", "/operarios/1/skills-nativas/2/estado", OK, NO, NO),
     ("GET", "/maquinarias", OK, OK, OK),
     ("DELETE", "/maquinarias/1", OK, NO, NO),
+    # RF-10: el uso y el mantenimiento de cada máquina NO son catálogo (dicen quién usó
+    # qué máquina y a qué usuarios les llega el aviso): se leen con la solapa Recurso
+    # maquinaria y se configuran con ella en «editar». La lista de usuarios para elegir a
+    # quién avisar, sólo quien puede configurarlo.
+    ("GET", "/maquinarias-uso", OK, OK, NO),
+    ("GET", "/maquinarias/1/uso", OK, OK, NO),
+    ("GET", "/maquinarias/1/mantenimiento", OK, OK, NO),
+    ("PUT", "/maquinarias/1/mantenimiento", OK, NO, NO),
+    ("POST", "/maquinarias/1/mantenimientos", OK, NO, NO),
+    ("DELETE", "/maquinarias/1/mantenimientos/2", OK, NO, NO),
+    ("GET", "/maquinarias-mantenimiento/destinatarios", OK, NO, NO),
     ("GET", "/rangos/cobertura", OK, OK, OK),
     ("PUT", "/rangos/1/procesos", OK, NO, NO),
     ("PUT", "/maquinarias/1/rangos", OK, NO, NO),
@@ -447,6 +458,10 @@ PANTALLAS = {
         "/planificacion",  # lo que tiene asignado cada persona
         # RF-06: la asistencia y los tiempos de su ficha
         "/operarios/1/ausencias", "/operarios/1/tiempos",
+        # RF-10: las horas del mes de la tabla de máquinas, y el uso y el mantenimiento del
+        # detalle de cada una (la lista de usuarios para elegir a quién avisar, no: sólo la
+        # pide quien puede editar)
+        "/maquinarias-uso", "/maquinarias/1/uso", "/maquinarias/1/mantenimiento",
         # (la solapa Planos va por el área Planos, igual que la pantalla)
     ],
     "clientes": ["/clientes", "/clientes/1"],
