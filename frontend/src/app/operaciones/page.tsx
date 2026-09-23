@@ -41,6 +41,7 @@ import { useBorradorPlan } from "@/hooks/useBorradorPlan"
 import type { BorradorPlan, TandaManual } from "@/lib/borradorPlan"
 import { payloadDeAjustes, type AjusteDelPlan, type AjustesDelPlanPayload } from "@/lib/ajustesPlan"
 import { huellaRecursos } from "@/lib/huellaRecursos"
+import { FILTRO_RECURSOS_VACIO, type FiltroRecursos } from "@/lib/filtroRecursos"
 import {
   Select,
   SelectContent,
@@ -385,6 +386,10 @@ export default function OperacionesPage() {
   // OTs tildadas en la tabla de Planificadas/Completadas. Se usan para sacarlas
   // de la planificación con el tachito de la barra de acciones.
   const [selectedPlanIds, setSelectedPlanIds] = useState<number[]>([])
+  /** RF-29: el filtro por recurso humano y por máquina de las solapas de lo
+   *  planificado. Vive acá y no en cada tabla para que siga puesto al cambiar de
+   *  solapa: se elige a Juan en Pendientes y se mira su semana y su día. */
+  const [filtroRecursos, setFiltroRecursos] = useState<FiltroRecursos>(FILTRO_RECURSOS_VACIO)
   const [isQuitarOtsDialogOpen, setIsQuitarOtsDialogOpen] = useState(false)
   const [isQuitandoOts, setIsQuitandoOts] = useState(false)
   /** Qué estado se está por aplicar a todas las OTs tildadas (null = ninguno). */
@@ -674,8 +679,15 @@ export default function OperacionesPage() {
     () => plannedOrdenes.filter(o => !estaTerminadaEnElTaller(o) && !isOrderCompleted(o)),
     [plannedOrdenes]);
 
-  /** De lo que falta hacer, lo que cae en la semana que se está mirando. */
-  const otsDeLaSemana = React.useMemo(() => {
+  /**
+   * Las reglas de fecha de Semanal y de Diaria, para UN paso del plan.
+   *
+   * Están separadas de las listas porque las usan dos: la lista (qué OT entra en la
+   * solapa) y el filtro por recurso humano o máquina (RF-29), que con esto cuenta
+   * sólo los pasos de esa semana o de ese día. Escritas una sola vez, la lista y el
+   * filtro no pueden decir cosas distintas sobre qué es «esta semana».
+   */
+  const pasoEnLaSemana = React.useMemo(() => {
     const dia = fechaReferencia.getDay();
     const lunes = new Date(fechaReferencia);
     lunes.setDate(fechaReferencia.getDate() - dia + (dia === 0 ? -6 : 1));
@@ -683,33 +695,42 @@ export default function OperacionesPage() {
     const domingo = new Date(lunes);
     domingo.setDate(lunes.getDate() + 6);
     domingo.setHours(23, 59, 59, 999);
-    return otsPendientes.filter(order => {
-      const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
-      return procesos.some(p => {
-        const inicio = inicioDeLaFila(p);
-        return !!inicio && inicio >= lunes && inicio <= domingo;
-      });
-    });
+    return (p: PlanificacionItem) => {
+      const inicio = inicioDeLaFila(p);
+      return !!inicio && inicio >= lunes && inicio <= domingo;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- ver `diaDeReferencia`
-  }, [otsPendientes, filteredPlanificacion, diaDeReferencia]);
+  }, [diaDeReferencia]);
 
-  /** De lo que falta hacer, lo que se toca el día que se está mirando. */
-  const otsDelDia = React.useMemo(() => {
+  const pasoEnElDia = React.useMemo(() => {
     const desde = new Date(fechaReferencia);
     desde.setHours(0, 0, 0, 0);
     const hasta = new Date(fechaReferencia);
     hasta.setHours(23, 59, 59, 999);
+    return (p: PlanificacionItem) => {
+      const inicio = inicioDeLaFila(p);
+      const fin = finDeLaFila(p);
+      // Se cruza con el día: empieza antes de que termine y termina después de que empieza.
+      return !!inicio && !!fin && inicio <= hasta && fin >= desde;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ver `diaDeReferencia`
+  }, [diaDeReferencia]);
+
+  /** De lo que falta hacer, lo que cae en la semana que se está mirando. */
+  const otsDeLaSemana = React.useMemo(() => {
     return otsPendientes.filter(order => {
       const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
-      return procesos.some(p => {
-        const inicio = inicioDeLaFila(p);
-        const fin = finDeLaFila(p);
-        // Se cruza con el día: empieza antes de que termine y termina después de que empieza.
-        return !!inicio && !!fin && inicio <= hasta && fin >= desde;
-      });
+      return procesos.some(pasoEnLaSemana);
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- ver `diaDeReferencia`
-  }, [otsPendientes, filteredPlanificacion, diaDeReferencia]);
+  }, [otsPendientes, filteredPlanificacion, pasoEnLaSemana]);
+
+  /** De lo que falta hacer, lo que se toca el día que se está mirando. */
+  const otsDelDia = React.useMemo(() => {
+    return otsPendientes.filter(order => {
+      const procesos = filteredPlanificacion.filter(p => p.orden_id === order.id);
+      return procesos.some(pasoEnElDia);
+    });
+  }, [otsPendientes, filteredPlanificacion, pasoEnElDia]);
 
   /**
    * El primer día con trabajo de la planificación elegida, de hoy en adelante.
@@ -2444,6 +2465,8 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsPendientes}
+                    filtroRecursos={filtroRecursos}
+                    onFiltroRecursosChange={setFiltroRecursos}
                     exportar={{ titulo: "Planificadas · Pendientes", archivo: "plan_pendientes", filtros: filtrosDelPlanExport() }}
                     mensajeVacio="Esta planificación no tiene trabajo pendiente: ya está todo terminado o entregado."
                     selectedIds={selectedPlanIds}
@@ -2584,6 +2607,10 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsDeLaSemana}
+                    filtroRecursos={filtroRecursos}
+                    onFiltroRecursosChange={setFiltroRecursos}
+                    pasoEnVentana={pasoEnLaSemana}
+                    rotuloVentana="esta semana"
                     exportar={{ titulo: "Planificadas · Semanal", archivo: "plan_semanal", filtros: filtrosDelPlanExport(semanaExport) }}
                     mensajeVacio="Esta semana no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
                     selectedIds={selectedPlanIds}
@@ -2719,6 +2746,10 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsDelDia}
+                    filtroRecursos={filtroRecursos}
+                    onFiltroRecursosChange={setFiltroRecursos}
+                    pasoEnVentana={pasoEnElDia}
+                    rotuloVentana="este día"
                     exportar={{ titulo: "Planificadas · Diaria", archivo: "plan_diaria", filtros: filtrosDelPlanExport(diaExport) }}
                     mensajeVacio="Este día no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
                     diaResaltado={fechaReferencia}
@@ -2755,6 +2786,8 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={completedPlannedOrdenes}
+                    filtroRecursos={filtroRecursos}
+                    onFiltroRecursosChange={setFiltroRecursos}
                     exportar={{ titulo: "Planificadas · Entregadas al cliente", archivo: "plan_entregadas", filtros: filtrosDelPlanExport() }}
                     mensajeVacio="Todavía no se entregó ninguna OT de esta planificación."
                     selectedIds={selectedPlanIds}
@@ -2790,6 +2823,8 @@ export default function OperacionesPage() {
                   <PlanningListTable
                     tableZoom={planZoom}
                     data={otsTerminadasSinEntregar}
+                    filtroRecursos={filtroRecursos}
+                    onFiltroRecursosChange={setFiltroRecursos}
                     exportar={{ titulo: "Planificadas · Terminadas en el taller", archivo: "plan_terminadas", filtros: filtrosDelPlanExport() }}
                     mensajeVacio="No hay nada terminado esperando despacho en esta planificación."
                     selectedIds={selectedPlanIds}

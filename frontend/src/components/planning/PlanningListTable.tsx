@@ -29,7 +29,8 @@ import {
     Check,
     CheckCircle2,
     Users,
-    FileWarning
+    FileWarning,
+    SlidersHorizontal
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { OrderFiles } from "@/components/common/OrderFiles";
@@ -72,6 +73,28 @@ import {
     filtroOrden,
     pasosDelPlan,
 } from "@/lib/exportes/ordenes";
+import {
+    claveDelPaso,
+    filasDelPaso,
+    filtrosParaExportar,
+    hayFiltroRecursos,
+    indexarPlan,
+    opcionesDeRecursos,
+    pasosQueCoinciden,
+    recursosDelPaso,
+    type FiltroRecursos,
+} from "@/lib/filtroRecursos";
+import { FranjaDeRecursos, SelectoresDeRecursos } from "@/components/planning/FiltroRecursosPlan";
+
+/**
+ * Hasta cuántas OT se despliegan solas al filtrar por recurso humano o máquina.
+ *
+ * Desplegada, una OT dibuja sus pasos dos veces (la tabla y la tarjeta del celular) y
+ * cada paso trae sus desplegables. Con veinte OT es nada; con un torno que pasa por
+ * noventa, la PC del taller se traba —es lo que ya pasó con el Historial—. Pasado el
+ * tope, las filas quedan cerradas con la marca «N pasos» y se abren a mano.
+ */
+const TOPE_DESPLEGAR_POR_RECURSO = 25;
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -158,6 +181,24 @@ interface PlanningListTableProps {
      * `filtros` son los de afuera de la tabla (qué plan, qué semana, qué día).
      */
     exportar?: { titulo: string; archivo: string; filtros?: string[] };
+    /**
+     * RF-29. Filtro por recurso humano y por máquina de lo planificado. Lo guarda el
+     * padre y no la tabla para que siga puesto al pasar de Pendientes a Semanal o a
+     * Diaria: «¿qué tiene Juan?» se pregunta para la semana y para el día. Sin
+     * `onFiltroRecursosChange` —o en modo compacto, que es el planificador, donde
+     * todavía no hay nadie asignado— los filtros no aparecen.
+     */
+    filtroRecursos?: FiltroRecursos;
+    onFiltroRecursosChange?: (filtro: FiltroRecursos) => void;
+    /**
+     * La regla de fecha de la solapa (Semanal, Diaria), la MISMA con la que el padre
+     * arma la lista. Con el filtro de recurso puesto, sólo cuentan los pasos que caen
+     * ahí: si no, filtrando por Juan en «esta semana» aparecía una OT porque otro
+     * trabaja en ella esta semana y Juan recién la otra.
+     */
+    pasoEnVentana?: (fila: PlanificacionItem) => boolean;
+    /** Cómo se dice esa fecha en el contador: «esta semana», «este día». */
+    rotuloVentana?: string;
 }
 
 /** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
@@ -260,6 +301,10 @@ function _PlanningListTable({
     compacto = false,
     colapsarFilasKey,
     exportar,
+    filtroRecursos,
+    onFiltroRecursosChange,
+    pasoEnVentana,
+    rotuloVentana,
 }: PlanningListTableProps) {
 
     // RF-24. Esta tabla edita dos cosas distintas y cada una pide lo suyo, igual que el
@@ -387,7 +432,7 @@ function _PlanningListTable({
     const [cerradasAMano, setCerradasAMano] = React.useState<Set<number>>(new Set());
 
     const toggleRow = (orderId: number) => {
-        const abiertaPorBusqueda = procesoMatchIds.has(orderId);
+        const abiertaPorBusqueda = procesoMatchIds.has(orderId) || abiertasPorRecurso.has(orderId);
         const estaAbierta = expandedOrderIds.includes(orderId)
             || (abiertaPorBusqueda && !cerradasAMano.has(orderId));
 
@@ -621,7 +666,7 @@ function _PlanningListTable({
         return terms.filter(Boolean);
     }, [searchTerm]);
 
-    const filteredData = React.useMemo(() => {
+    const porBusqueda = React.useMemo(() => {
         if (searchTerms.length === 0) return data;
 
         const matchesTerm = (item: WorkOrder, term: string) =>
@@ -636,6 +681,56 @@ function _PlanningListTable({
 
         return data.filter(item => searchTerms.some(t => matchesTerm(item, t)));
     }, [data, searchTerms]);
+
+    // RF-29: el filtro por recurso humano y máquina, después de la búsqueda. Ver
+    // lib/filtroRecursos para qué paso cuenta y cómo se combina.
+    const conFiltroRecursos = !compacto && !!onFiltroRecursosChange;
+    const filtroRecursosActivo = conFiltroRecursos && hayFiltroRecursos(filtroRecursos);
+    const indicePlan = React.useMemo(() => indexarPlan(planificacion), [planificacion]);
+    /** OT → qué pasos suyos cumplen el filtro. `null` sin filtro puesto. */
+    const pasosCoincidentes = React.useMemo(
+        () => (filtroRecursosActivo && filtroRecursos
+            ? pasosQueCoinciden(porBusqueda, indicePlan, filtroRecursos, pasoEnVentana)
+            : null),
+        [filtroRecursosActivo, filtroRecursos, porBusqueda, indicePlan, pasoEnVentana]);
+    const opcionesRecursos = React.useMemo(
+        () => (conFiltroRecursos
+            ? opcionesDeRecursos(porBusqueda, indicePlan, filtroRecursos ?? { operarios: [], maquinas: [] },
+                { operarios, maquinas: maquinarias }, pasoEnVentana)
+            : { operarios: [], maquinas: [] }),
+        [conFiltroRecursos, porBusqueda, indicePlan, filtroRecursos, operarios, maquinarias, pasoEnVentana]);
+    const totalPasosCoincidentes = React.useMemo(() => {
+        let n = 0;
+        pasosCoincidentes?.forEach(claves => { n += claves.size; });
+        return n;
+    }, [pasosCoincidentes]);
+    /** Cuántos pasos de esta OT cumplen el filtro (0 sin filtro). */
+    const coincidenEnOrden = (ordenId: number) => pasosCoincidentes?.get(ordenId)?.size ?? 0;
+    const pasoCoincide = (ordenId: number, proc: WorkOrder["procesos"][number]) =>
+        !!pasosCoincidentes?.get(ordenId)?.has(claveDelPaso(proc));
+
+    // El panel de filtros del teléfono (y de la tableta), plegado de entrada.
+    const [panelFiltrosAbierto, setPanelFiltrosAbierto] = React.useState(false);
+
+    const filteredData = React.useMemo(
+        () => (pasosCoincidentes ? porBusqueda.filter(o => pasosCoincidentes.has(o.id)) : porBusqueda),
+        [porBusqueda, pasosCoincidentes]);
+
+    /** Las OT que se abren solas para que se vean sus pasos resaltados, hasta el tope. */
+    const abiertasPorRecurso = React.useMemo(() => {
+        if (!pasosCoincidentes || pasosCoincidentes.size > TOPE_DESPLEGAR_POR_RECURSO) return new Set<number>();
+        return new Set(pasosCoincidentes.keys());
+    }, [pasosCoincidentes]);
+
+    // Cambiar el filtro vuelve a abrir lo que coincide, aunque antes se haya cerrado a
+    // mano: es otra pregunta. Se usa una huella de texto porque el padre arma un objeto
+    // nuevo en cada cambio.
+    const huellaFiltroRecursos = filtroRecursosActivo && filtroRecursos
+        ? `${filtroRecursos.operarios.join(",")}|${filtroRecursos.maquinas.join(",")}`
+        : "";
+    React.useEffect(() => {
+        setCerradasAMano(prev => (prev.size === 0 ? prev : new Set()));
+    }, [huellaFiltroRecursos]);
 
     // Al buscar por nombre de proceso, auto-expandir las OT que matchean para que
     // el proceso (con su orden) quede visible sin abrir la fila a mano. Usa los
@@ -663,7 +758,8 @@ function _PlanningListTable({
     // Lo cerrado a mano gana sobre lo que abrió la búsqueda: si alguien la cerró, es
     // porque no la quiere ver, aunque coincida con lo que buscó.
     const isRowExpanded = (id: number) =>
-        expandedOrderIds.includes(id) || (procesoMatchIds.has(id) && !cerradasAMano.has(id));
+        expandedOrderIds.includes(id)
+        || ((procesoMatchIds.has(id) || abiertasPorRecurso.has(id)) && !cerradasAMano.has(id));
 
     /** Lo tildado, para preguntar por fila sin recorrer el array en cada una: con la
      *  selección acumulada `selectedIds` puede ser bastante más larga que la lista. */
@@ -1109,16 +1205,38 @@ function _PlanningListTable({
                             {item.procesos.map((proc, idx) => {
                                 const plannedItem = filaDelPlan(item.id, proc);
                                 const machineName = plannedItem?.nombre_maquinaria || (plannedItem?.id_maquinaria ? "Cargando..." : "Recurso maquinaria sin asignar");
+                                // RF-29: con el filtro de recurso puesto, el paso que lo cumple
+                                // se resalta y los otros de la OT quedan en segundo plano (se ven,
+                                // porque el orden de la OT importa, pero no compiten).
+                                const coincide = pasosCoincidentes ? pasoCoincide(item.id, proc) : null;
+                                // Si coincide por lo elegido a mano en la OT y no por el plan, la
+                                // celda muestra otra persona u otra máquina: se dice de dónde sale.
+                                const aMano = coincide && filtroRecursos
+                                    ? recursosDelPaso(filasDelPaso(indicePlan, item.id, proc), proc).soloAMano
+                                    : null;
+                                const operarioAMano = aMano?.operario && filtroRecursos?.operarios.includes(aMano.operario)
+                                    ? opcionesRecursos.operarios.find(o => o.id === aMano.operario)?.nombre
+                                    : undefined;
+                                const maquinaAMano = aMano?.maquina && filtroRecursos?.maquinas.includes(aMano.maquina)
+                                    ? opcionesRecursos.maquinas.find(m => m.id === aMano.maquina)?.nombre
+                                    : undefined;
 
                                 return (
                                     <div
                                         key={proc.id ?? `${item.id}-${proc.proceso.id}-${idx}`}
-                                        className="flex flex-col md:grid md:grid-cols-[44px_minmax(200px,1.6fr)_150px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-4 md:py-2 border-t hover:bg-gray-50 items-stretch md:items-center bg-white"
+                                        className={cn(
+                                            "flex flex-col md:grid md:grid-cols-[44px_minmax(200px,1.6fr)_150px_118px_72px_72px_minmax(150px,2fr)_minmax(150px,2.4fr)] gap-3 px-4 py-4 md:py-2 border-t items-stretch md:items-center transition-opacity",
+                                            coincide === true
+                                                ? "bg-red-50/70 shadow-[inset_4px_0_0_#DC143C] hover:bg-red-50"
+                                                : coincide === false
+                                                    ? "bg-white opacity-55 hover:opacity-100 hover:bg-gray-50"
+                                                    : "bg-white hover:bg-gray-50",
+                                        )}
                                     >
                                         {/* # */}
                                         <div className="flex flex-row justify-between md:block w-full md:w-auto">
                                             <span className="md:hidden text-xs font-bold text-gray-500 uppercase self-center">Orden</span>
-                                            <div className="flex items-center text-gray-500 font-mono">
+                                            <div className={cn("flex items-center font-mono", coincide ? "font-bold text-red-700" : "text-gray-500")}>
                                                 {proc.orden}
                                             </div>
                                         </div>
@@ -1347,6 +1465,11 @@ function _PlanningListTable({
                                                         {toTitleCase(proc.operario_nombre) || "Sin Asignar"}
                                                     </span>
                                                 )}
+                                                {operarioAMano && (
+                                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta persona elegida a mano en la OT, aunque el plan diga otra">
+                                                        Elegido a mano: {operarioAMano}
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
 
@@ -1384,6 +1507,11 @@ function _PlanningListTable({
                                                     <div className="text-gray-600 text-xs font-medium truncate" title={machineName}>
                                                         {machineName}
                                                     </div>
+                                                )}
+                                                {maquinaAMano && (
+                                                    <span className="mt-0.5 block truncate text-[10px] font-medium text-red-700" title="El paso tiene esta máquina elegida a mano en la OT, aunque el plan diga otra">
+                                                        Elegida a mano: {maquinaAMano}
+                                                    </span>
                                                 )}
                                             </div>
                                         </div>
@@ -1444,6 +1572,25 @@ function _PlanningListTable({
         );
     }
 
+    // RF-29: la lista tiene OT pero ninguna con un paso de esa persona o esa máquina.
+    // Se dice así y no «no hay órdenes»: el que mira tiene que saber que es el filtro.
+    const mensajeSinCoincidencias =
+        `Ningún paso ${rotuloVentana ? `de ${rotuloVentana}` : "de esta lista"} tiene el recurso humano o la máquina que elegiste.`;
+
+    /** La marca de la fila cerrada: cuántos pasos de la OT cumplen el filtro. */
+    const marcaDePasos = (ordenId: number) => {
+        const n = coincidenEnOrden(ordenId);
+        if (!n) return null;
+        return (
+            <span
+                className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 ring-1 ring-inset ring-red-200"
+                title={`${n} paso${n === 1 ? "" : "s"} de esta OT ${n === 1 ? "tiene" : "tienen"} el recurso humano o la máquina del filtro`}
+            >
+                {n} paso{n === 1 ? "" : "s"}
+            </span>
+        );
+    };
+
     // RF-22: lo que se ve, en el orden en que se ve. Los pasos se arman recién al
     // exportar: con 150 OT desplegar todos en cada dibujo sería trabajo tirado.
     const menuExportar = exportar ? (
@@ -1462,13 +1609,26 @@ function _PlanningListTable({
                 },
                 {
                     titulo: planificacion.length ? "Pasos del plan" : "Pasos",
-                    filas: pasosDelPlan(sortedData, planificacion, feriados),
+                    // RF-29: con el filtro de recurso puesto, en la hoja de pasos van
+                    // sólo los que lo cumplen —los resaltados—. La hoja de órdenes sigue
+                    // con la OT entera (cuántos pasos tiene, cuántos terminados).
+                    filas: pasosDelPlan(
+                        pasosCoincidentes
+                            ? sortedData.map(o => ({ ...o, procesos: o.procesos.filter(p => pasoCoincide(o.id, p)) }))
+                            : sortedData,
+                        planificacion, feriados),
                     columnas: planificacion.length ? columnasPasosDelPlan : columnasPasos,
                 },
             ]}
             filtros={() => [
                 ...(exportar.filtros ?? []),
                 ...filtroBusqueda(searchTerm),
+                ...(pasosCoincidentes && filtroRecursos
+                    ? [
+                        ...filtrosParaExportar(filtroRecursos, opcionesRecursos),
+                        `Pasos que coinciden: ${totalPasosCoincidentes} en ${filteredData.length} OT${rotuloVentana ? ` ${rotuloVentana}` : ""}`,
+                    ]
+                    : []),
                 ...filtroOrden(sortConfig.key ? ROTULOS_ORDEN[sortConfig.key] : null, sortConfig.direction),
             ]}
             className={compacto ? undefined : "h-10"}
@@ -1506,6 +1666,7 @@ function _PlanningListTable({
                 entre las dos cosas se veía una banda blanca que Julián marcó dos veces
                 ("quedan esos espacios entre el buscador y las OT, pierde espacio"). */}
             {!compacto && (
+                <div className="space-y-2">
                 <div className="flex items-center gap-2">
                 <div className="relative flex-1 min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1516,7 +1677,65 @@ function _PlanningListTable({
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
+                {/* RF-29. En la computadora, los dos filtros a la vista al lado del
+                    buscador. Más angosto (teléfono, tableta) no entran sin aplastar el
+                    buscador: van en un panel que se despliega con «Filtros». */}
+                {conFiltroRecursos && filtroRecursos && onFiltroRecursosChange && (
+                    <>
+                        <div className="hidden lg:flex items-center gap-2">
+                            <SelectoresDeRecursos
+                                filtro={filtroRecursos}
+                                onChange={onFiltroRecursosChange}
+                                opciones={opcionesRecursos}
+                            />
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setPanelFiltrosAbierto(v => !v)}
+                            aria-expanded={panelFiltrosAbierto}
+                            className={cn(
+                                "lg:hidden h-10 shrink-0 gap-1.5 bg-white px-2.5 text-xs",
+                                (panelFiltrosAbierto || filtroRecursosActivo) && "border-red-300 text-red-700",
+                            )}
+                            title="Filtrar por recurso humano o máquina"
+                        >
+                            <SlidersHorizontal className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Filtros</span>
+                            {filtroRecursosActivo && filtroRecursos && (
+                                <span className="rounded-full bg-red-600 px-1.5 text-[10px] font-bold leading-4 text-white">
+                                    {filtroRecursos.operarios.length + filtroRecursos.maquinas.length}
+                                </span>
+                            )}
+                        </Button>
+                    </>
+                )}
                 {menuExportar}
+                </div>
+                {conFiltroRecursos && filtroRecursos && onFiltroRecursosChange && panelFiltrosAbierto && (
+                    <div className="lg:hidden flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50/80 p-3 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                            Mostrar sólo los pasos de…
+                        </p>
+                        <SelectoresDeRecursos
+                            filtro={filtroRecursos}
+                            onChange={onFiltroRecursosChange}
+                            opciones={opcionesRecursos}
+                            apilados
+                        />
+                    </div>
+                )}
+                {filtroRecursosActivo && filtroRecursos && onFiltroRecursosChange && (
+                    <FranjaDeRecursos
+                        filtro={filtroRecursos}
+                        onChange={onFiltroRecursosChange}
+                        opciones={opcionesRecursos}
+                        pasos={totalPasosCoincidentes}
+                        ordenes={filteredData.length}
+                        rotuloVentana={rotuloVentana}
+                        sinDesplegar={(pasosCoincidentes?.size ?? 0) > TOPE_DESPLEGAR_POR_RECURSO}
+                    />
+                )}
                 </div>
             )}
 
@@ -1526,8 +1745,10 @@ function _PlanningListTable({
                     <div className="flex justify-end">{menuExportar}</div>
                 )}
                 {sortedData.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 bg-white rounded-lg shadow">
-                        {searchTerm ? "No se encontraron resultados." : (mensajeVacio || "No hay órdenes activas.")}
+                    <div className="text-center py-8 px-4 text-gray-500 bg-white rounded-lg shadow">
+                        {pasosCoincidentes && porBusqueda.length > 0
+                            ? mensajeSinCoincidencias
+                            : searchTerm ? "No se encontraron resultados." : (mensajeVacio || "No hay órdenes activas.")}
                     </div>
                 ) : (
                     sortedData.map((item) => (
@@ -1555,6 +1776,7 @@ function _PlanningListTable({
                                         <span className="font-bold text-lg text-gray-800">#{item.id_otvieja || item.id}</span>
                                         {!hideStatus && renderStatusBadge(getOrderStatus(item))}
                                         <MarcaPausada idOrden={item.id} />
+                                        {marcaDePasos(item.id)}
                                     </div>
                                     <button className="text-gray-400">
                                         {isRowExpanded(item.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -1835,7 +2057,9 @@ function _PlanningListTable({
                             {sortedData.length === 0 ? (
                                 <tr className="bg-gray-50 border-b">
                                     <td colSpan={hideStatus ? 19 : 20} className="px-3 py-8 text-center text-gray-500">
-                                        {searchTerm ? "No se encontraron resultados para la búsqueda." : (mensajeVacio || "No hay órdenes activas en este momento.")}
+                                        {pasosCoincidentes && porBusqueda.length > 0
+                                            ? mensajeSinCoincidencias
+                                            : searchTerm ? "No se encontraron resultados para la búsqueda." : (mensajeVacio || "No hay órdenes activas en este momento.")}
                                     </td>
                                 </tr>
 
@@ -1910,6 +2134,7 @@ function _PlanningListTable({
                                                 <span className="inline-flex flex-wrap items-center gap-1.5">
                                                     {item.id_otvieja || item.id}
                                                     <MarcaPausada idOrden={item.id} />
+                                                    {marcaDePasos(item.id)}
                                                 </span>
                                             </td>
                                             <td
