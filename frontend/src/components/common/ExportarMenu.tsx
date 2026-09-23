@@ -46,6 +46,13 @@ export interface ExportarMenuProps<T> {
     filas?: T[];
     columnas?: ColumnaExport<T>[];
     /**
+     * En vez de `filas`: se piden recién al exportar. Es para las listas que el servidor
+     * busca de a páginas (Auditoría, RF-25): la pantalla tiene 100 y el archivo tiene que
+     * traer TODO lo filtrado. Va con `cantidad` (cuántas son, para el menú) y `columnas`.
+     * `filtros`, si es una función, se lee DESPUÉS de cargarlas (puede contar el tope).
+     */
+    cargarFilas?: () => Promise<T[]>;
+    /**
      * En vez de `filas` + `columnas`, varias tablas: una hoja del Excel por cada una.
      * Puede ser una función, para no armarlas en cada dibujo de la pantalla sino recién
      * al exportar.
@@ -80,6 +87,7 @@ export function ExportarMenu<T>({
     archivo,
     filas,
     columnas,
+    cargarFilas,
     secciones,
     cantidad,
     filtros,
@@ -97,10 +105,10 @@ export function ExportarMenu<T>({
     const total = filas ? filas.length : cantidad;
     const vacio = total === 0;
 
-    const armarReporte = (): ReporteExport => {
+    const armarReporte = (cargadas?: T[]): ReporteExport => {
         const secs: SeccionExport[] = typeof secciones === "function"
             ? secciones()
-            : secciones ?? [{ titulo, filas: filas ?? [], columnas: (columnas ?? []) as ColumnaExport<any>[] }];
+            : secciones ?? [{ titulo, filas: cargadas ?? filas ?? [], columnas: (columnas ?? []) as ColumnaExport<any>[] }];
         return {
             titulo,
             archivo,
@@ -119,7 +127,8 @@ export function ExportarMenu<T>({
                 nombre = nombreDeArchivo(archivo, "pdf");
                 bajarArchivo(await pdf(), nombre, "pdf");
             } else {
-                nombre = await exportarReporte(formato, armarReporte());
+                const cargadas = cargarFilas ? await cargarFilas() : undefined;
+                nombre = await exportarReporte(formato, armarReporte(cargadas));
             }
             toast.success(`Listo: se bajó ${nombre}`);
         } catch (e) {

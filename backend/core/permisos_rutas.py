@@ -68,7 +68,9 @@ y como solapa de Recursos):
                      además la sección confidencial «Rendimiento por persona».
   Clientes           /clientes
   No conformidades   /incidencias/*
-  Auditoría          /auditoria/movimientos, /auditoria/procesos, /auditoria/planificacion
+  Auditoría          /auditoria/movimientos (también la vista Ingresos, ?tipo=ingresos),
+                     /auditoria/actividad (Actividad por persona, RF-25),
+                     /auditoria/procesos, /auditoria/planificacion
   Configuración      /auth/usuarios (sección confidencial), /auth/change-password,
                      /backups/* (la solapa Copias de seguridad: sólo admin, RF-19)
   todas              /notificaciones (leer y marcar leída; crear, lo de Recursos; borrar,
@@ -409,6 +411,11 @@ POLITICAS: dict[str, Politica] = {
     ),
 
     # ── Auditoría: sólo lectura, una sección por solapa ──
+    # Las solapas Ingresos y Actividad por persona (RF-25) leen la MISMA tabla que «Todo
+    # lo que se hizo» (/auditoria/movimientos?tipo=ingresos y /auditoria/actividad): van
+    # con su sección. Quien puede leer el registro entero ya puede contar quién hizo
+    # qué; una sección aparte sólo serviría para que alguien vea el resumen y no el
+    # detalle, y nadie lo pidió.
     "auditoria": Politica(
         leer=(seccion("auditoria_movimientos"),),
         escribir=(area("auditoria", "write"),),

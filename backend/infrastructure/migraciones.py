@@ -699,6 +699,26 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "WHERE vuelve IS NULL",
         ],
     ),
+    (
+        # RF-25. Dos índices y un comentario, sobre la tabla del registro (la escribe el
+        # middleware, nadie la lee en el día a día): ninguna pantalla depende de que esto
+        # se aplique. Sin los índices la búsqueda por persona y la vista Ingresos andan
+        # igual, recorriendo la tabla. No reescribe filas.
+        "2026-09-23_auditoria_busqueda_e_ingresos",
+        [
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_mov_usuario_fecha "
+            "ON auditoria_movimiento (id_usuario, creado_en DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_mov_accion_fecha "
+            "ON auditoria_movimiento (accion, creado_en DESC)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN auditoria_movimiento.accion IS "
+            "'Qué pasó, en castellano: creó, editó o eliminó (sale del método HTTP) o un verbo "
+            "propio (pausó, restauró, desbloqueó...). Desde el 23/09/2026 (RF-25) también los "
+            "ingresos: ingresó, salió, intento fallido, cambió su clave, restableció clave, pidió "
+            "recuperar y bloqueó. En esas filas id_entidad es la cuenta (usuario.id_usuario), y un "
+            "intento fallido o un bloqueo no tienen autor: no se sabe quién tipeó.'",
+        ],
+    ),
 ]
 
 

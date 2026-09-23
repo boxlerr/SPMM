@@ -83,6 +83,16 @@ class AuthService:
 
     def __init__(self, usuario_repository: UsuarioRepository):
         self.usuario_repository = usuario_repository
+        # RF-25: qué pasó en el último login / cambio de clave, para la auditoría. Lo
+        # levanta AuthAPI (auditoria_movimientos.resumen_de_intento) y lo deja para el
+        # middleware. Claves: tipeado (lo escrito en «usuario», que la auditoría guarda
+        # recortado y sólo si no es de ninguna cuenta), id_usuario, cuenta (el username),
+        # nombre, motivo (un código de auditoria_movimientos.MOTIVOS, o "ok"),
+        # intentos_restantes, bloqueado_hasta. NUNCA la contraseña ni el hash.
+        self.intento: dict = {}
+
+    def _anotar_cuenta(self, id_usuario: int, username: str, nombre: str):
+        self.intento.update(id_usuario=id_usuario, cuenta=username, nombre=nombre or None)
 
     # ─────────────── RF-26, paso a paso (lo llama login) ───────────────
     #
@@ -161,6 +171,7 @@ class AuthService:
 
         if hasta is not None and hasta > ahora:
             logger.error(f"LOGIN FAILED: Usuario '{quien}' bloqueado hasta {hasta}.")
+            self.intento.update(motivo="cuenta_bloqueada", bloqueado_hasta=hasta.isoformat())
             raise self._cuenta_bloqueada(hasta, ahora)
         if hasta is not None:
             # Venció: la cuenta arranca de cero (5 intentos nuevos, no 1).
@@ -178,6 +189,7 @@ class AuthService:
         hasta = await self._bloquear(id_usuario, quien, nombre, ahora)
         if hasta is None:
             # Un ingreso bueno la volvió a cero justo en el medio: que pruebe de nuevo.
+            self.intento["motivo"] = "no_verificado"
             raise LoginRechazadoException(
                 "No se pudo verificar el ingreso: probá de nuevo.",
                 estado_http=409,
@@ -185,14 +197,17 @@ class AuthService:
                 minutos_bloqueo=MINUTOS_DE_BLOQUEO,
             )
         logger.error(f"LOGIN FAILED: Usuario '{quien}' sin intentos libres; bloqueado hasta {hasta}.")
+        self.intento.update(motivo="cuenta_bloqueada", bloqueado_hasta=hasta.isoformat())
         raise self._cuenta_bloqueada(hasta, ahora)
 
     async def _intento_fallido(self, numero: int, id_usuario: int, quien: str, nombre: str,
                                ahora: datetime):
         """La contraseña era mala: el intento ya quedó contado al reservarlo. Si era el
         5º, bloquea. Nunca vuelve: siempre levanta."""
+        self.intento["motivo"] = "clave_incorrecta"
         if numero < MAX_INTENTOS_FALLIDOS:
             restantes = MAX_INTENTOS_FALLIDOS - numero
+            self.intento["intentos_restantes"] = restantes
             raise LoginRechazadoException(
                 f"Usuario o contraseña incorrectos. {_te_quedan(restantes)}",
                 estado_http=401,
@@ -207,6 +222,7 @@ class AuthService:
             # este error ya no cierra una racha de 5.
             intentos, _ = await self.usuario_repository.estado_de_bloqueo(id_usuario)
             restantes = max(1, MAX_INTENTOS_FALLIDOS - intentos)
+            self.intento["intentos_restantes"] = restantes
             raise LoginRechazadoException(
                 f"Usuario o contraseña incorrectos. {_te_quedan(restantes)}",
                 estado_http=401,
@@ -214,6 +230,8 @@ class AuthService:
                 maximo_intentos=MAX_INTENTOS_FALLIDOS,
                 minutos_bloqueo=MINUTOS_DE_BLOQUEO,
             )
+        self.intento.update(motivo="se_bloqueo", intentos_restantes=0,
+                            bloqueado_hasta=hasta.isoformat())
         raise LoginRechazadoException(
             f"Usuario o contraseña incorrectos. Por {MAX_INTENTOS_FALLIDOS} intentos "
             f"fallidos seguidos, la cuenta quedó bloqueada hasta {_cuando(hasta, ahora)}. "
@@ -311,6 +329,9 @@ class AuthService:
         Raises:
             BusinessException: Si las credenciales son inválidas
         """
+        # RF-25: desde acá se anota qué pasó, para la auditoría. "error" hasta que se
+        # sepa otra cosa: si algo explota en el medio, eso es lo que pasó.
+        self.intento = {"tipeado": username, "motivo": "error"}
         try:
             # Validar credenciales
             start_db = time.time()
@@ -326,10 +347,16 @@ class AuthService:
 
             if not usuario:
                 logger.error(f"LOGIN FAILED: Usuario '{username}' no encontrado en BD.")
+                self.intento["motivo"] = "usuario_inexistente"
                 raise BusinessException("Usuario o contraseña incorrectos")
-            
+
+            self._anotar_cuenta(
+                usuario.id_usuario, usuario.username,
+                " ".join(p for p in (usuario.nombre, usuario.apellido) if p).strip(),
+            )
             if not usuario.activo:
                 logger.error(f"LOGIN FAILED: Usuario '{username}' inactivo.")
+                self.intento["motivo"] = "usuario_inactivo"
                 raise BusinessException("Usuario inactivo. Contacta al administrador")
 
             # Todo lo que hace falta del usuario, leído AHORA: si la base no tiene las
@@ -365,6 +392,7 @@ class AuthService:
             if not is_valid_password:
                 logger.error(f"LOGIN FAILED: Password incorrecto para usuario '{username}'.")
                 if numero is None:
+                    self.intento["motivo"] = "clave_incorrecta"
                     raise BusinessException("Usuario o contraseña incorrectos")
                 await self._intento_fallido(numero, id_usuario, quien, nombre, ahora)
 
@@ -374,6 +402,8 @@ class AuthService:
             if numero is not None and not await self.usuario_repository.confirmar_ingreso(id_usuario, ahora):
                 _, hasta = await self.usuario_repository.estado_de_bloqueo(id_usuario)
                 logger.error(f"LOGIN FAILED: Usuario '{quien}' se bloqueó mientras entraba.")
+                self.intento.update(motivo="cuenta_bloqueada",
+                                    bloqueado_hasta=(hasta or ahora).isoformat())
                 raise self._cuenta_bloqueada(hasta or ahora, ahora)
 
             # Actualizar último login
@@ -387,6 +417,7 @@ class AuthService:
             )
 
             logger.info(f"Login exitoso: {quien}")
+            self.intento["motivo"] = "ok"
 
             # Devolver token y datos del usuario
             usuario_data['access_token'] = access_token
@@ -430,15 +461,22 @@ class AuthService:
         Raises:
             NotFoundException: Si el usuario no existe
         """
+        self.intento = {"tipeado": email, "motivo": "error"}  # RF-25
         try:
             usuario = await self.usuario_repository.obtener_por_email(email)
             
             if not usuario:
                 # Por seguridad, no revelamos si el email existe o no
                 logger.error(f"Solicitud de recuperación para email no existente: {email}")
+                self.intento["motivo"] = "usuario_inexistente"
                 raise NotFoundException("Si el email existe, recibirás instrucciones para recuperar tu contraseña")
-            
+
+            self._anotar_cuenta(
+                usuario.id_usuario, usuario.username,
+                " ".join(p for p in (usuario.nombre, usuario.apellido) if p).strip(),
+            )
             if not usuario.activo:
+                self.intento["motivo"] = "usuario_inactivo"
                 raise BusinessException("Usuario inactivo. Contacta al administrador")
             
             # Generar token único
@@ -456,6 +494,7 @@ class AuthService:
             # Aquí iría la integración con Resend
             # await self._enviar_email_recuperacion(usuario, reset_token)
             
+            self.intento["motivo"] = "ok"
             return True
             
         except (BusinessException, NotFoundException):
@@ -478,6 +517,7 @@ class AuthService:
         Raises:
             BusinessException: Si el token es inválido o expiró
         """
+        self.intento = {"motivo": "error"}  # RF-25
         try:
             # Buscar usuario por token
             usuarios = await self.usuario_repository.obtener_todos(incluir_inactivos=True)
@@ -489,10 +529,16 @@ class AuthService:
                     break
             
             if not usuario:
+                self.intento["motivo"] = "enlace_invalido"
                 raise BusinessException("Token de recuperación inválido")
-            
+
+            self._anotar_cuenta(
+                usuario.id_usuario, usuario.username,
+                " ".join(p for p in (usuario.nombre, usuario.apellido) if p).strip(),
+            )
             # Verificar expiración
             if usuario.reset_token_expiry and usuario.reset_token_expiry < datetime.now():
+                self.intento["motivo"] = "enlace_vencido"
                 raise BusinessException("El token de recuperación ha expirado")
             
             # Hashear nueva contraseña
@@ -505,6 +551,7 @@ class AuthService:
             )
             
             logger.info(f"Contraseña reseteada exitosamente para usuario ID: {usuario.id_usuario}")
+            self.intento["motivo"] = "ok"
             return True
             
         except BusinessException:
@@ -533,6 +580,7 @@ class AuthService:
         Raises:
             BusinessException: Si la contraseña actual es incorrecta
         """
+        self.intento = {"motivo": "error"}  # RF-25
         try:
             usuario = await self.usuario_repository.obtener_por_id(id_usuario)
             
@@ -541,6 +589,7 @@ class AuthService:
             
             # Verificar contraseña actual (bcrypt en un hilo aparte: ver login)
             if not await run_in_threadpool(verify_password, current_password, usuario.password_hash):
+                self.intento["motivo"] = "clave_actual_incorrecta"
                 raise BusinessException("La contraseña actual es incorrecta")
             
             # Hashear nueva contraseña
@@ -554,6 +603,7 @@ class AuthService:
             )
             
             logger.info(f"Contraseña cambiada exitosamente para usuario ID: {id_usuario}")
+            self.intento["motivo"] = "ok"
             return True
             
         except (BusinessException, NotFoundException):

@@ -132,12 +132,21 @@ class UsuarioRepository:
             raise InfrastructureException("Error al actualizar contraseña") from e
     
     async def actualizar_ultimo_login(self, id_usuario: int) -> bool:
-        """Actualiza la fecha de último login"""
+        """Actualiza la fecha de último login.
+
+        En hora local del taller y sin zona, como todas las fechas de la base. Hasta el
+        23/09 se guardaba con `utcnow()`: la lista de usuarios mostraba el «Último acceso»
+        3 horas adelantado, y la Actividad por persona de Auditoría (RF-25) lo mezclaba
+        con las entradas del registro, que van en hora local. Los valores viejos quedan
+        como están (no se reescribe ninguna fila): se corrigen solos en el próximo ingreso
+        de cada uno, y AuditoriaAPI los lee sabiendo que están en UTC."""
+        from backend.infrastructure.auditoria_movimientos import ahora_ar
+
         try:
             await self.db.execute(
                 update(Usuario)
                 .where(Usuario.id_usuario == id_usuario)
-                .values(ultimo_login=datetime.utcnow())
+                .values(ultimo_login=ahora_ar())
             )
             await self.db.commit()
             return True

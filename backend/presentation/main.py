@@ -174,6 +174,7 @@ async def _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo, u
                 cuerpo=cuerpo,
                 parametros=dict(request.query_params) or None,
                 resumen=_resumen_del_endpoint(request),
+                origen=_origen(request, metodo, ruta),
             )
     except Exception as e:
         logging.getLogger("uvicorn").warning(f"Auditoría: no se pudo guardar {metodo} {ruta}: {e}")
@@ -193,6 +194,19 @@ def _resumen_del_endpoint(request) -> dict | None:
     except Exception:
         return None
     return resumen if isinstance(resumen, dict) else None
+
+
+def _origen(request, metodo, ruta) -> dict | None:
+    """IP y navegador, SÓLO para entrar, salir y las claves (RF-25): son las filas
+    donde «desde dónde» contesta algo («¿ese intento fallido fue desde el taller?»).
+    En el resto no suma y agrandaría cada fila."""
+    if not auditoria_mov.tipo_de_acceso(metodo, ruta):
+        return None
+    try:
+        cliente = request.client.host if request.client else None
+        return auditoria_mov.origen_del_pedido(request.headers, cliente)
+    except Exception:
+        return None
 
 
 def _quien_es(request) -> dict | None:

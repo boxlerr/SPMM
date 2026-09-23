@@ -3,16 +3,34 @@
 El historial de planificación vive en PlanificacionAPI (`/auditoria/planificacion`)
 porque lo escribe el propio endpoint de planificar. Esto es lo otro: TODO lo demás
 que alguien creó, editó o eliminó, que lo escribe el middleware de main.py.
+
+RF-25 (23/09): la búsqueda se hace ACÁ, no en el navegador. Hasta ese día la pantalla
+traía los últimos 300 movimientos y filtraba sobre ellos: lo que alguien hizo hace un
+mes no aparecía aunque estuviera guardado, y no había filtro de fechas. Ahora cada
+filtro (persona, acción, qué, texto, fechas) viaja al servidor, la respuesta dice
+cuántos hay en total y se pide de a páginas: se llega a cualquier movimiento guardado.
 """
 import json
+from datetime import date, datetime, timedelta
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.orm import defer
 
 from backend.core.security import get_current_user
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
 from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
+from backend.infrastructure.auditoria_movimientos import (
+    ACCION_FALLIDO,
+    ACCION_INGRESO,
+    ACCIONES_DE_ACCESO,
+    ACCIONES_DE_SESION,
+    ENTIDAD_SESION,
+    ENTIDADES_DE_ACCESO,
+    ahora_ar,
+)
 from backend.infrastructure.db import SessionLocal
 
 router = APIRouter()
@@ -23,7 +41,17 @@ async def get_db():
         yield session
 
 
-def _fila(m: AuditoriaMovimiento) -> dict:
+# Lo máximo que se trae de una vez. Es el tope del Exportar: la pantalla pide de a 100,
+# pero «Exportar» baja TODO lo filtrado, y sin tope un «desde siempre» de un año
+# armaría un archivo de cientos de miles de renglones en el navegador. Con más que esto
+# el Exportar avisa y pide acotar las fechas. El mismo número está en
+# frontend/src/lib/auditoria.ts (TOPE_EXPORTAR).
+TOPE_EXPORTAR = 10_000
+
+M = AuditoriaMovimiento
+
+
+def _fila(m: AuditoriaMovimiento, con_detalle: bool = True) -> dict:
     return {
         "id": m.id,
         "cuando": m.creado_en.isoformat() if m.creado_en else None,
@@ -38,61 +66,347 @@ def _fila(m: AuditoriaMovimiento) -> dict:
         "estado": m.estado,
         "salio_bien": (m.estado or 0) < 400,
         "duracion_ms": m.duracion_ms,
-        "detalle": m.detalle,
+        # Sin detalle en el Exportar: no va al archivo y es lo más pesado de la fila.
+        "detalle": m.detalle if con_detalle else None,
     }
+
+
+def _escapar_like(texto: str) -> str:
+    """Que «%» y «_» se busquen como letras y no como comodines."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _rango_de_fechas(desde: date | None, hasta: date | None) -> list:
+    """Días del taller, las dos puntas incluidas. `creado_en` está en hora local sin
+    zona, así que un día es [00:00, 00:00 del siguiente)."""
+    if desde and hasta and desde > hasta:
+        raise HTTPException(status_code=400,
+                            detail="La fecha «desde» es posterior a la fecha «hasta».")
+    condiciones = []
+    if desde:
+        condiciones.append(M.creado_en >= datetime.combine(desde, datetime.min.time()))
+    if hasta:
+        condiciones.append(
+            M.creado_en < datetime.combine(hasta + timedelta(days=1), datetime.min.time()))
+    return condiciones
+
+
+def _de_la_persona(id_usuario: int):
+    """Lo que hizo esa persona Y lo que le pasó a su cuenta en el ingreso.
+
+    Un intento fallido, un bloqueo o un «restableció clave» no tienen autor (no se sabe
+    quién tipeó: ver auditoria_movimientos, «INGRESOS Y SALIDAS»): la cuenta va en
+    `id_entidad`. Sin la segunda mitad, filtrar por Lucas no mostraría los intentos
+    fallidos contra su cuenta — que es justo lo que se busca cuando dice «no puedo
+    entrar»."""
+    return or_(
+        M.id_usuario == id_usuario,
+        and_(M.accion.in_(ACCIONES_DE_ACCESO), M.entidad.in_(ENTIDADES_DE_ACCESO),
+             M.id_entidad == str(id_usuario)),
+    )
+
+
+def _condiciones(*, entidad, accion, usuario, id_usuario, buscar, solo_fallidos, tipo,
+                 desde, hasta) -> list:
+    condiciones = _rango_de_fechas(desde, hasta)
+    if entidad:
+        condiciones.append(M.entidad.like(f"{_escapar_like(entidad)}%", escape="\\"))
+    if accion:
+        # Varias separadas por coma: la vista Ingresos pide «bloqueó,desbloqueó» juntas.
+        acciones = [a.strip() for a in accion.split(",") if a.strip()]
+        if len(acciones) == 1:
+            condiciones.append(M.accion == acciones[0])
+        elif acciones:
+            condiciones.append(M.accion.in_(acciones))
+    if usuario:
+        condiciones.append(M.usuario == usuario)
+    if id_usuario is not None:
+        condiciones.append(_de_la_persona(id_usuario))
+    if solo_fallidos:
+        condiciones.append(M.estado >= 400)
+    if tipo == "ingresos":
+        condiciones.append(M.accion.in_(ACCIONES_DE_ACCESO))
+    if buscar and buscar.strip():
+        # Por la frase y por quién: quien escribe «Leonardo» busca a una persona, y un
+        # intento fallido no tiene autor pero lo nombra en la frase.
+        termino = buscar.strip()
+        patron = f"%{_escapar_like(termino)}%"
+        opciones = [M.descripcion.ilike(patron, escape="\\"),
+                    M.usuario.ilike(patron, escape="\\")]
+        if termino.isdigit():
+            opciones.append(M.id_entidad == termino)
+        condiciones.append(or_(*opciones))
+    return condiciones
+
+
+async def _personas(db) -> list[dict]:
+    """Para el desplegable «Persona»: cada cuenta (también las que sólo tienen intentos
+    fallidos, o ninguno) y cada autor del registro, con el nombre de hoy.
+
+    Las cuentas salen de la tabla `usuario`, y se leen AL FINAL: si no se pudiera (una
+    base de prueba sin la tabla), el rollback no se lleva nada y quedan las del registro.
+    """
+    ultimo = (
+        select(M.id_usuario, func.max(M.id).label("ultimo"))
+        .where(M.id_usuario.isnot(None), M.usuario.isnot(None))
+        .group_by(M.id_usuario)
+        .subquery()
+    )
+    firmas = (await db.execute(
+        select(M.id_usuario, M.usuario).join(ultimo, M.id == ultimo.c.ultimo)
+    )).all()
+    personas = {i: {"id_usuario": i, "nombre": n, "username": None, "activo": None}
+                for i, n in firmas}
+    for c in await _cuentas(db):
+        personas[c["id_usuario"]] = {k: c[k] for k in ("id_usuario", "nombre", "username", "activo")}
+    return sorted(personas.values(), key=lambda p: (p["nombre"] or "").lower())
+
+
+async def _cuentas(db) -> list[dict]:
+    """Las cuentas de la tabla `usuario`, o [] si no se pueden leer. Columnas nombradas
+    una por una: las diferidas de RF-24/26 pueden no existir todavía en la base."""
+    from backend.domain.Usuario import Usuario
+
+    try:
+        filas = (await db.execute(select(
+            Usuario.id_usuario, Usuario.username, Usuario.nombre, Usuario.apellido,
+            Usuario.activo, Usuario.ultimo_login,
+        ))).all()
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return []
+    return [{
+        "id_usuario": f.id_usuario,
+        "username": f.username,
+        "nombre": " ".join(x for x in (f.nombre, f.apellido) if x).strip() or f.username,
+        "activo": bool(f.activo),
+        "ultimo_login": f.ultimo_login,
+    } for f in filas]
 
 
 @router.get("/auditoria/movimientos")
 async def movimientos(
-    limite: int = Query(300, ge=1, le=2000),
+    limite: int = Query(300, ge=1, le=TOPE_EXPORTAR),
+    desplazamiento: int = Query(0, ge=0),
     entidad: str | None = None,
     accion: str | None = None,
     usuario: str | None = None,
+    id_usuario: int | None = None,
     buscar: str | None = None,
     solo_fallidos: bool = False,
+    tipo: Literal["ingresos"] | None = None,
+    desde: date | None = None,
+    hasta: date | None = None,
+    opciones: bool = True,
+    con_detalle: bool = True,
     db=Depends(get_db),
     _u=Depends(get_current_user),
 ):
-    """Lo último primero, con los filtros que usa la pantalla.
+    """Lo último primero, filtrado EN EL SERVIDOR y de a páginas (RF-25).
 
-    El tope por defecto es 300 y el máximo 2000: la tabla crece con cada guardado y
-    traerla entera al navegador sería el mismo error que ya se pagó con /ordenes.
+    - `desde` / `hasta`: días (AAAA-MM-DD), incluidos. Sin ellos, desde siempre.
+    - `id_usuario`: lo que hizo esa persona y los ingresos de su cuenta (_de_la_persona).
+      `usuario` (el nombre exacto) sigue andando para la pantalla de antes.
+    - `tipo=ingresos`: sólo entradas, salidas, intentos fallidos, bloqueos y claves.
+    - `accion`: una o varias separadas por coma.
+    - `desplazamiento` + `limite`: la página. `total` dice cuántos hay con esos filtros.
+    - `opciones=false`: sin los desplegables (al pasar de página no cambian).
+    - `con_detalle=false`: sin el JSON crudo (el Exportar no lo usa y es lo que más pesa).
+
+    Sin parámetros contesta lo mismo que antes —los últimos 300 y los desplegables—:
+    la pantalla vieja sigue andando contra este backend.
     """
-    q = select(AuditoriaMovimiento).order_by(AuditoriaMovimiento.creado_en.desc())
+    condiciones = _condiciones(
+        entidad=entidad, accion=accion, usuario=usuario, id_usuario=id_usuario,
+        buscar=buscar, solo_fallidos=solo_fallidos, tipo=tipo, desde=desde, hasta=hasta,
+    )
 
-    if entidad:
-        q = q.where(AuditoriaMovimiento.entidad.like(f"{entidad}%"))
-    if accion:
-        q = q.where(AuditoriaMovimiento.accion == accion)
-    if usuario:
-        q = q.where(AuditoriaMovimiento.usuario == usuario)
-    if solo_fallidos:
-        q = q.where(AuditoriaMovimiento.estado >= 400)
-    if buscar:
-        patron = f"%{buscar.strip()}%"
-        q = q.where(AuditoriaMovimiento.descripcion.ilike(patron))
+    q = select(M).where(*condiciones).order_by(M.creado_en.desc(), M.id.desc())
+    if not con_detalle:
+        q = q.options(defer(M.detalle))
+    filas = (await db.execute(q.offset(desplazamiento).limit(limite))).scalars().all()
 
-    filas = (await db.execute(q.limit(limite))).scalars().all()
+    # El total con los mismos filtros. Si la página vino incompleta, ya se sabe sin contar.
+    if desplazamiento == 0 and len(filas) < limite:
+        total = len(filas)
+    else:
+        total = (await db.execute(
+            select(func.count()).select_from(M).where(*condiciones)
+        )).scalar() or 0
 
-    # Para armar los desplegables de filtro sin que el front tenga que adivinar qué
-    # hay. Salen de los datos, así que una entidad nueva aparece sola.
-    entidades = (await db.execute(
-        select(AuditoriaMovimiento.entidad, func.count().label("cuantos"))
-        .group_by(AuditoriaMovimiento.entidad)
-        .order_by(func.count().desc())
-    )).all()
-    usuarios = (await db.execute(
-        select(AuditoriaMovimiento.usuario)
-        .where(AuditoriaMovimiento.usuario.isnot(None))
-        .group_by(AuditoriaMovimiento.usuario)
-        .order_by(AuditoriaMovimiento.usuario)
-    )).scalars().all()
-
-    return {
-        "movimientos": [_fila(m) for m in filas],
-        "entidades": [{"entidad": e, "cuantos": c} for e, c in entidades],
-        "usuarios": list(usuarios),
+    salida = {
+        "movimientos": [_fila(m, con_detalle) for m in filas],
+        "total": total,
+        "desplazamiento": desplazamiento,
+        "limite": limite,
+        "hay_mas": desplazamiento + len(filas) < total,
         "tope": limite,
+        "tope_exportar": TOPE_EXPORTAR,
+        "acciones_de_acceso": list(ACCIONES_DE_ACCESO),
+    }
+
+    if opciones:
+        # Para armar los desplegables de filtro sin que el front tenga que adivinar qué
+        # hay. Salen de los datos, así que una entidad nueva aparece sola.
+        entidades = (await db.execute(
+            select(M.entidad, func.count().label("cuantos"))
+            .group_by(M.entidad)
+            .order_by(func.count().desc())
+        )).all()
+        usuarios = (await db.execute(
+            select(M.usuario)
+            .where(M.usuario.isnot(None))
+            .group_by(M.usuario)
+            .order_by(M.usuario)
+        )).scalars().all()
+        salida["entidades"] = [{"entidad": e, "cuantos": c} for e, c in entidades]
+        salida["usuarios"] = list(usuarios)
+        salida["personas"] = await _personas(db)
+
+    return salida
+
+
+@router.get("/auditoria/actividad")
+async def actividad(
+    desde: date | None = None,
+    hasta: date | None = None,
+    db=Depends(get_db),
+    _u=Depends(get_current_user),
+):
+    """«Actividad por persona» (RF-25): cada usuario con su último ingreso y, en el
+    período, cuántas veces entró, cuántas acciones hizo y cuántos intentos fallidos
+    tuvo su cuenta. Tocar un renglón en la pantalla filtra el registro por esa persona.
+
+    - Acciones = todo lo que firmó menos entrar y salir (crear, editar, borrar, cambiar
+      su clave, desbloquear a alguien). `acciones_fallidas`: las que no se pudieron.
+    - Intentos fallidos = contraseña mala, cuenta bloqueada o desactivada, contra SU
+      cuenta. Los errores del sistema (5xx) no cuentan: no son culpa de nadie.
+    - Último ingreso: el del registro. Si todavía no entró desde que se registran los
+      ingresos, el de la ficha (`usuario.ultimo_login`), marcado: ese dato se guardaba
+      en UTC (utcnow) y acá se pasa a hora del taller (-3 h).
+    - Sin fechas = desde siempre. Los que no tienen acceso (desactivados) aparecen sólo
+      si hicieron algo en el período.
+    """
+    rango = _rango_de_fechas(desde, hasta)
+
+    ingresos = func.sum(case((M.accion == ACCION_INGRESO, 1), else_=0))
+    es_accion = M.accion.notin_(ACCIONES_DE_SESION)
+    acciones = func.sum(case((es_accion, 1), else_=0))
+    fallidas = func.sum(case((and_(es_accion, M.estado >= 400), 1), else_=0))
+    por_autor = (await db.execute(
+        select(M.id_usuario, ingresos, acciones, fallidas)
+        .where(M.id_usuario.isnot(None), *rango)
+        .group_by(M.id_usuario)
+    )).all()
+
+    no_es_del_sistema = or_(M.estado.is_(None), M.estado < 500)
+    fallidos_q = func.sum(case((and_(M.accion == ACCION_FALLIDO, no_es_del_sistema), 1), else_=0))
+    bloqueos_q = func.sum(case((M.accion == "bloqueó", 1), else_=0))
+    por_cuenta = (await db.execute(
+        select(M.id_entidad, fallidos_q, bloqueos_q)
+        .where(M.accion.in_((ACCION_FALLIDO, "bloqueó")),
+               M.entidad.in_((ENTIDAD_SESION, "usuario")),
+               M.id_entidad.isnot(None), *rango)
+        .group_by(M.id_entidad)
+    )).all()
+
+    sin_cuenta = (await db.execute(
+        select(func.count()).select_from(M)
+        .where(M.accion == ACCION_FALLIDO, M.id_entidad.is_(None), no_es_del_sistema, *rango)
+    )).scalar() or 0
+    sin_autor = (await db.execute(
+        select(func.count()).select_from(M)
+        .where(M.id_usuario.is_(None), M.accion.notin_(ACCIONES_DE_ACCESO), *rango)
+    )).scalar() or 0
+
+    # De siempre, no del período: «¿cuándo entró por última vez?» no depende del filtro.
+    ultimos_ingresos = dict((await db.execute(
+        select(M.id_usuario, func.max(M.creado_en))
+        .where(M.accion == ACCION_INGRESO, M.id_usuario.isnot(None))
+        .group_by(M.id_usuario)
+    )).all())
+    ultimas_acciones = dict((await db.execute(
+        select(M.id_usuario, func.max(M.creado_en))
+        .where(M.id_usuario.isnot(None), M.accion.notin_(ACCIONES_DE_SESION))
+        .group_by(M.id_usuario)
+    )).all())
+    # El nombre con que firmó por última vez, para quien ya no está en `usuario`.
+    ultimo = (
+        select(M.id_usuario, func.max(M.id).label("ultimo"))
+        .where(M.id_usuario.isnot(None), M.usuario.isnot(None))
+        .group_by(M.id_usuario).subquery()
+    )
+    firmas = dict((await db.execute(
+        select(M.id_usuario, M.usuario).join(ultimo, M.id == ultimo.c.ultimo)
+    )).all())
+
+    personas: dict[int, dict] = {}
+
+    def persona(id_usuario: int) -> dict:
+        if id_usuario not in personas:
+            personas[id_usuario] = {
+                "id_usuario": id_usuario,
+                "nombre": firmas.get(id_usuario) or f"Usuario #{id_usuario}",
+                "username": None,
+                "activo": None,
+                "ultimo_ingreso": None,
+                "ultimo_ingreso_de_la_ficha": False,
+                "ultima_accion": None,
+                "ingresos": 0,
+                "acciones": 0,
+                "acciones_fallidas": 0,
+                "intentos_fallidos": 0,
+                "bloqueos": 0,
+            }
+        return personas[id_usuario]
+
+    cuentas = await _cuentas(db)  # al final: si falla, hace rollback (ver _cuentas)
+    ultimo_login = {}
+    for c in cuentas:
+        if c["activo"]:
+            persona(c["id_usuario"])
+        ultimo_login[c["id_usuario"]] = c["ultimo_login"]
+    for id_usuario, n_ingresos, n_acciones, n_fallidas in por_autor:
+        p = persona(id_usuario)
+        p["ingresos"] = int(n_ingresos or 0)
+        p["acciones"] = int(n_acciones or 0)
+        p["acciones_fallidas"] = int(n_fallidas or 0)
+    for id_entidad, n_fallidos, n_bloqueos in por_cuenta:
+        try:
+            id_usuario = int(id_entidad)
+        except (TypeError, ValueError):
+            continue
+        if not (n_fallidos or n_bloqueos):
+            continue
+        p = persona(id_usuario)
+        p["intentos_fallidos"] = int(n_fallidos or 0)
+        p["bloqueos"] = int(n_bloqueos or 0)
+
+    por_id = {c["id_usuario"]: c for c in cuentas}
+    for id_usuario, p in personas.items():
+        c = por_id.get(id_usuario)
+        if c:
+            p["nombre"], p["username"], p["activo"] = c["nombre"], c["username"], c["activo"]
+        ingreso = ultimos_ingresos.get(id_usuario)
+        if ingreso is None and ultimo_login.get(id_usuario):
+            ingreso = ultimo_login[id_usuario] - timedelta(hours=3)
+            p["ultimo_ingreso_de_la_ficha"] = True
+        p["ultimo_ingreso"] = ingreso.isoformat() if ingreso else None
+        accion = ultimas_acciones.get(id_usuario)
+        p["ultima_accion"] = accion.isoformat() if accion else None
+
+    lista = sorted(personas.values(),
+                   key=lambda p: (-p["acciones"], -p["intentos_fallidos"], (p["nombre"] or "").lower()))
+    return {
+        "desde": desde.isoformat() if desde else None,
+        "hasta": hasta.isoformat() if hasta else None,
+        "personas": lista,
+        "intentos_sin_cuenta": int(sin_cuenta),
+        "acciones_sin_persona": int(sin_autor),
+        "generado": ahora_ar().isoformat(),
     }
 
 

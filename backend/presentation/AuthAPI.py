@@ -2,7 +2,7 @@
 API de Autenticación
 Endpoints para login, logout, recuperación de contraseña
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from backend.infrastructure.db import SessionLocal
@@ -40,6 +40,7 @@ from backend.commons.exceptions.InfrastructureException import InfrastructureExc
 from backend.commons.exceptions.LoginRechazadoException import LoginRechazadoException
 from backend.commons.loggers.logger import logger
 from backend.dto.ErrorItemDTO import ErrorItemDTO
+from backend.infrastructure import auditoria_movimientos as auditoria
 from backend.infrastructure.auditoria_movimientos import ahora_ar
 from backend.core.permisos import pantalla_de_inicio
 from backend.infrastructure.PermisosRepository import PermisosRepository
@@ -52,9 +53,21 @@ async def get_db():
     async with SessionLocal() as session:
         yield session
 
+def _dejar_para_la_auditoria(pedido: Request, auth_service: "AuthService") -> None:
+    """RF-25: qué cuenta y por qué no entró, para la fila que escribe el middleware
+    (auditoria_movimientos, «INGRESOS Y SALIDAS»). El middleware no lee el cuerpo de
+    estos pedidos —es la contraseña—, así que sin esto la fila no sabría de quién es.
+    Lo tipeado sale recortado de `resumen_de_intento`. Nunca levanta."""
+    try:
+        pedido.state.auditoria = {"acceso": auditoria.resumen_de_intento(auth_service.intento)}
+    except Exception as e:
+        logger.warning(f"Auditoría: no se pudo anotar el intento: {e}")
+
+
 @router.post("/login", response_model=ResponseDTO)
 async def login(
     credentials: LoginRequestDTO,
+    pedido: Request,
     db=Depends(get_db)
 ):
     """
@@ -64,11 +77,19 @@ async def login(
     - **password**: Contraseña
     
     Retorna un JWT token y datos del usuario
+
+    RF-25: el ingreso, y cada intento que no entra, queda en Auditoría (lo escribe el
+    middleware con lo que se deja en `pedido.state`; ver _dejar_para_la_auditoria).
     """
+    auth_service = AuthService(UsuarioRepository(db))
     try:
-        usuario_repository = UsuarioRepository(db)
-        auth_service = AuthService(usuario_repository)
-        
+        return await _login(credentials, auth_service)
+    finally:
+        _dejar_para_la_auditoria(pedido, auth_service)
+
+
+async def _login(credentials: LoginRequestDTO, auth_service: AuthService):
+    try:
         result = await auth_service.login(
             credentials.username,
             credentials.password
@@ -121,6 +142,7 @@ async def login(
 @router.post("/forgot-password", response_model=ResponseDTO)
 async def forgot_password(
     request: ForgotPasswordDTO,
+    pedido: Request,
     db=Depends(get_db)
 ):
     """
@@ -130,10 +152,9 @@ async def forgot_password(
     
     Envía un email con el link de recuperación
     """
+    usuario_repository = UsuarioRepository(db)
+    auth_service = AuthService(usuario_repository)
     try:
-        usuario_repository = UsuarioRepository(db)
-        auth_service = AuthService(usuario_repository)
-        
         await auth_service.solicitar_recuperacion_password(request.email)
         
         # Por seguridad, siempre retornamos el mismo mensaje
@@ -151,11 +172,16 @@ async def forgot_password(
             message="Si el email existe, recibirás instrucciones para recuperar tu contraseña",
             data=None
         )
+    finally:
+        # RF-25: la respuesta es la misma para todos; la auditoría (sólo la ve un admin)
+        # sí dice si el correo era de alguien. Un correo que no es de nadie, recortado.
+        _dejar_para_la_auditoria(pedido, auth_service)
 
 
 @router.post("/reset-password", response_model=ResponseDTO)
 async def reset_password(
     request: ResetPasswordDTO,
+    pedido: Request,
     db=Depends(get_db)
 ):
     """
@@ -165,10 +191,9 @@ async def reset_password(
     - **new_password**: Nueva contraseña
     - **confirm_password**: Confirmación de contraseña
     """
+    usuario_repository = UsuarioRepository(db)
+    auth_service = AuthService(usuario_repository)
     try:
-        usuario_repository = UsuarioRepository(db)
-        auth_service = AuthService(usuario_repository)
-        
         await auth_service.resetear_password(
             request.token,
             request.new_password
@@ -192,11 +217,14 @@ async def reset_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al resetear la contraseña"
         )
+    finally:
+        _dejar_para_la_auditoria(pedido, auth_service)  # RF-25
 
 
 @router.post("/change-password", response_model=ResponseDTO)
 async def change_password(
     request: UsuarioChangePasswordDTO,
+    pedido: Request,
     current_user: dict = Depends(get_current_user),
     db=Depends(get_db)
 ):
@@ -209,10 +237,9 @@ async def change_password(
     
     Requiere autenticación (Bearer Token)
     """
+    usuario_repository = UsuarioRepository(db)
+    auth_service = AuthService(usuario_repository)
     try:
-        usuario_repository = UsuarioRepository(db)
-        auth_service = AuthService(usuario_repository)
-        
         await auth_service.cambiar_password(
             current_user["id_usuario"],
             request.current_password,
@@ -237,6 +264,8 @@ async def change_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al cambiar la contraseña"
         )
+    finally:
+        _dejar_para_la_auditoria(pedido, auth_service)  # RF-25
 
 
 @router.get("/me", response_model=ResponseDTO)
@@ -328,6 +357,10 @@ async def logout(current_user: dict = Depends(get_current_user)):
     
     Nota: Con JWT, el logout se maneja en el cliente eliminando el token.
     Este endpoint es principalmente para logging y auditoría.
+
+    RF-25: la salida queda en Auditoría («salió del sistema»). La fila la escribe el
+    middleware con el usuario del token; una salida con la sesión ya vencida (401) no
+    deja fila. El front la llama al tocar «Salir» (AuthContext.logout).
     """
     logger.info(f"Logout de usuario: {current_user['username']}")
     
@@ -882,6 +915,7 @@ async def eliminar_usuario(
 @router.post("/usuarios/{id_usuario}/desbloquear", response_model=ResponseDTO)
 async def desbloquear_usuario(
     id_usuario: int,
+    pedido: Request,
     db=Depends(get_db),
     current_user: dict = Depends(require_gestion_de_usuarios)
 ):
@@ -897,6 +931,14 @@ async def desbloquear_usuario(
         logger.info(
             f"Usuario {resultado['username']} desbloqueado por {current_user.get('username')}"
         )
+        # RF-25: la frase de Auditoría dice de QUIÉN era la cuenta, no sólo su número
+        # («Julián desbloqueó la cuenta de «lucas»»). El resto lo pone el middleware.
+        pedido.state.auditoria = {
+            "frase": (f"desbloqueó la cuenta de «{resultado['username']}»"
+                      if resultado["estaba_bloqueado"]
+                      else f"puso en cero los intentos de «{resultado['username']}» "
+                           "(no estaba bloqueada)"),
+        }
         return ResponseDTO(
             status=True,
             message=(

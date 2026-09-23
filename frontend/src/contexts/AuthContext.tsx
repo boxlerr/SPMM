@@ -97,8 +97,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Endpoints públicos: aunque devuelvan 401, no significa "sesión expirada".
-// Por ejemplo /auth/login devuelve 401 con credenciales inválidas.
-const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/forgot-password', '/auth/reset-password'];
+// Por ejemplo /auth/login devuelve 401 con credenciales inválidas. /auth/logout se
+// avisa al salir (RF-25) y con la sesión ya vencida contesta 401: tampoco cuenta.
+const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/forgot-password', '/auth/reset-password', '/auth/logout'];
 // Endpoint usado para mantener vivo el backend (Render free tier duerme el server
 // tras ~15 min sin tráfico). Si lo incluyéramos en el interceptor de 401, podría
 // disparar logout por un mal cold-start, así que lo excluimos.
@@ -494,6 +495,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 
   const logout = () => {
+    // RF-25: que la salida quede en Auditoría («Lucas salió del sistema»). Antes el
+    // servidor ni se enteraba: se borraba el token acá y listo. Se avisa sin esperar la
+    // respuesta (`keepalive`: llega aunque la página se vaya a /login) y si falla no
+    // importa — salir no puede depender de la red. Con el backend viejo contesta 200 y
+    // no anota nada, como antes.
+    const tokenActual = tokenRef.current ?? localStorage.getItem('access_token');
+    if (tokenActual) {
+      try {
+        fetch(`${API_URL}/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tokenActual}` },
+          keepalive: true,
+        }).catch(() => { });
+      } catch { /* noop */ }
+    }
+
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
 

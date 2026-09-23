@@ -198,13 +198,20 @@ async def test_leer_no_deja_rastro(app_de_juguete, registro):
 
 
 @pytest.mark.asyncio
-async def test_entrar_y_marcar_leida_no_se_registran(app_de_juguete, registro):
-    """Entrar ya queda en `usuario.ultimo_login` y su cuerpo es una contraseña; marcar
-    una notificación como leída es una fila por campanita que no dice nada."""
+async def test_marcar_leida_no_se_registra_y_entrar_si_pero_sin_leer_el_cuerpo(app_de_juguete, registro):
+    """Marcar una notificación como leída es una fila por campanita que no dice nada.
+
+    Entrar SÍ se registra desde el 23/09 (RF-25), pero del cuerpo del login —la
+    contraseña— no se lee nada: ni siquiera el nombre tipeado. Lo que la fila sabe de
+    la cuenta lo deja el endpoint (acá, el de juguete, no deja nada)."""
     _, leer = registro
-    await app_de_juguete.post("/auth/login", json={"username": "a", "password": "b"})
+    await app_de_juguete.post("/auth/login", json={"username": "unnombre", "password": "laclave123"})
     await app_de_juguete.put("/notificaciones/33/leida")
-    assert await leer() == []
+    filas = await leer()
+    assert [f.accion for f in filas] == ["ingresó"]
+    entero = json.dumps([[str(getattr(f, c.name)) for c in f.__table__.columns] for f in filas],
+                        ensure_ascii=False)
+    assert "laclave123" not in entero and "unnombre" not in entero
 
 
 @pytest.mark.asyncio
@@ -317,7 +324,8 @@ def test_toda_ruta_de_escritura_de_la_app_queda_auditada():
                 sin_auditar.append(f"{metodo} {ruta.path}")
 
     esperadas = {
-        "POST /auth/login", "POST /auth/logout", "POST /auth/refresh",
+        # Entrar y salir SÍ se registran desde el 23/09 (RF-25): ya no están acá.
+        "POST /auth/refresh",
         "PUT /notificaciones/leer-todas", "PUT /notificaciones/{id}/leida",
         # El cron del sync: no lo llama una persona y son 48 por día.
         "POST /internal/sync",

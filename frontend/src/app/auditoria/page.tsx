@@ -20,9 +20,18 @@
  *
  * La primera va primero y es la que abre por defecto: es la pregunta que se hace
  * todos los días.
+ *
+ * RF-25 (23/09) suma dos solapas que leen el mismo registro, y la búsqueda pasa al
+ * servidor (se llega a cualquier movimiento guardado, con filtro de fechas):
+ *
+ *   · Ingresos — quién entró, quién salió y quién se equivocó la contraseña, con los
+ *     intentos fallidos resaltados y desde qué navegador e IP.
+ *   · Actividad por persona — cada usuario con su último ingreso y, en el período,
+ *     cuántas acciones hizo y cuántos intentos fallidos tuvo su cuenta. Tocar a alguien
+ *     lleva a «Todo lo que se hizo» filtrado por esa persona.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ClipboardList, RefreshCw, ChevronDown, ChevronRight,
     CheckCircle2, XCircle, AlertTriangle, Trash2, Clock, User,
@@ -32,6 +41,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RegistroDeMovimientos } from "@/components/auditoria/RegistroDeMovimientos";
 import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
+import { ActividadPorPersona } from "@/components/auditoria/ActividadPorPersona";
+import type { PedidoDeFiltro } from "@/lib/auditoria";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
@@ -174,6 +185,25 @@ export default function AuditoriaPage() {
     const vePlanificaciones = puedeSeccion("auditoria_planificacion");
     const solapaInicial = veTodo ? "todo" : vePasos ? "procesos" : "planificacion";
 
+    // Controladas (RF-25): tocar a alguien en «Actividad por persona» cambia de solapa y
+    // le pasa el filtro. Si los permisos llegan después y la elegida no se ve, a la
+    // primera que sí.
+    const [solapa, setSolapa] = useState(solapaInicial);
+    const [pedido, setPedido] = useState<PedidoDeFiltro | null>(null);
+    const visibles = useMemo(() => [
+        ...(veTodo ? ["todo", "ingresos", "personas"] : []),
+        ...(vePasos ? ["procesos"] : []),
+        ...(vePlanificaciones ? ["planificacion"] : []),
+    ], [veTodo, vePasos, vePlanificaciones]);
+    useEffect(() => {
+        if (visibles.length && !visibles.includes(solapa)) setSolapa(visibles[0]);
+    }, [visibles, solapa]);
+    const verPersona = useCallback((p: Omit<PedidoDeFiltro, "n">) => {
+        setPedido({ ...p, n: Date.now() });
+        setSolapa(p.destino);
+    }, []);
+    const pedidoPara = (destino: "todo" | "ingresos") => (pedido?.destino === destino ? pedido : null);
+
     const cargar = useCallback(async () => {
         if (!vePlanificaciones) {
             setCargando(false);
@@ -215,7 +245,7 @@ export default function AuditoriaPage() {
                     </h1>
                     <p className="text-muted-foreground mt-1 text-sm">
                         Todo lo que se carga, se cambia y se borra queda registrado: quién, cuándo y qué.
-                        Lo que falla también.
+                        Lo que falla también, y quién entra y sale.
                     </p>
                 </div>
                 <Button
@@ -230,20 +260,49 @@ export default function AuditoriaPage() {
                 </Button>
             </div>
 
-            <Tabs defaultValue={solapaInicial}>
+            <Tabs value={solapa} onValueChange={setSolapa}>
                 {/* `flex-wrap h-auto`: «Todo lo que se hizo», «Pasos de las OT» y
                     «Planificaciones» suman ~430px y en un teléfono la tercera quedaba
                     afuera sin forma de llegar. Ahora baja a otra fila; en la computadora
-                    entran en una y miden los mismos 40px de siempre. */}
+                    entran en una. Con Ingresos y Actividad por persona (RF-25) son cinco:
+                    en el teléfono ocupan tres filas, en la computadora siguen en una. */}
                 <TabsList className="mb-4 max-w-full h-auto flex-wrap justify-start">
                     {veTodo && <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>}
+                    {veTodo && <TabsTrigger value="ingresos">Ingresos</TabsTrigger>}
+                    {veTodo && <TabsTrigger value="personas">Actividad por persona</TabsTrigger>}
                     {vePasos && <TabsTrigger value="procesos">Pasos de las OT</TabsTrigger>}
                     {vePlanificaciones && <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>}
                 </TabsList>
 
+                {/* Las tres leen el mismo registro, con la misma sección («Todo lo que se
+                    hizo»): ver core/permisos_rutas.py. La llave vuelve a montarlas con
+                    «Actualizar» o con un pedido nuevo de la Actividad por persona. */}
                 {veTodo && (
                     <TabsContent value="todo">
-                        <RegistroDeMovimientos />
+                        <RegistroDeMovimientos
+                            key={`todo-${refresco}-${pedidoPara("todo")?.n ?? 0}`}
+                            modo="todo"
+                            pedido={pedidoPara("todo")}
+                        />
+                    </TabsContent>
+                )}
+                {veTodo && (
+                    <TabsContent value="ingresos">
+                        <p className="text-sm text-muted-foreground mb-3">
+                            Quién entró, quién salió y cada vez que alguien no pudo entrar (contraseña
+                            mala, cuenta bloqueada o un usuario que no existe), con el navegador y la IP.
+                            Las contraseñas nunca se guardan.
+                        </p>
+                        <RegistroDeMovimientos
+                            key={`ingresos-${refresco}-${pedidoPara("ingresos")?.n ?? 0}`}
+                            modo="ingresos"
+                            pedido={pedidoPara("ingresos")}
+                        />
+                    </TabsContent>
+                )}
+                {veTodo && (
+                    <TabsContent value="personas">
+                        <ActividadPorPersona key={`personas-${refresco}`} onVerPersona={verPersona} />
                     </TabsContent>
                 )}
 

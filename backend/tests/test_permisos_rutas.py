@@ -265,6 +265,10 @@ MATRIZ = [
     ("GET", "/api/dashboard/rendimiento-procesos", OK, NO, NO),
     # auditoría
     ("GET", "/auditoria/movimientos", OK, NO, NO),
+    # RF-25: la vista Ingresos y la Actividad por persona leen la misma tabla, con la
+    # misma sección («Todo lo que se hizo»).
+    ("GET", "/auditoria/movimientos?tipo=ingresos", OK, NO, NO),
+    ("GET", "/auditoria/actividad", OK, NO, NO),
     ("GET", "/auditoria/movimientos/de/orden/1", OK, NO, NO),
     ("GET", "/auditoria/procesos", OK, NO, NO),
     ("GET", "/auditoria/procesos?id_orden=5", OK, OK, OK),  # el historial de UNA OT
@@ -441,7 +445,8 @@ PANTALLAS = {
         "/incidencias", "/incidencias/tipos", "/incidencias/metricas",
         "/incidencias/reporte", "/incidencias/reporte.csv",
     ],
-    "auditoria": ["/auditoria/movimientos", "/auditoria/procesos", "/auditoria/planificacion"],
+    "auditoria": ["/auditoria/movimientos", "/auditoria/movimientos?tipo=ingresos",
+                  "/auditoria/actividad", "/auditoria/procesos", "/auditoria/planificacion"],
     # Configuración: «Mi cuenta» y la campanita. La lista de usuarios es una sección
     # confidencial y se prueba aparte (test_permisos_admin_api).
     "configuracion": ["/notificaciones", "/notificaciones/contador/no-leidas"],
