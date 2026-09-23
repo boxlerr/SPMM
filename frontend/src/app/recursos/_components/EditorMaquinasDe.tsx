@@ -18,7 +18,7 @@
  * trabajo, y eso es demasiado caro para que salga de un click accidental.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { X, Loader2, Plus, Cog, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -55,16 +55,13 @@ const getAuthHeaders = (): HeadersInit => {
         : { "Content-Type": "application/json" };
 };
 
-const mismas = (a: MaquinaRef[], b: MaquinaRef[]) => {
-    if (a.length !== b.length) return false;
-    const sa = a.map((x) => x.id).sort((x, y) => x - y);
-    const sb = b.map((x) => x.id).sort((x, y) => x - y);
-    return sa.every((v, i) => v === sb[i]);
-};
+/** Los ids de una lista, ordenados: dice QUÉ tiene, sin importar en qué array vino. */
+const idsDe = (l: MaquinaRef[]) => l.map((x) => x.id).sort((x, y) => x - y).join(",");
+
+const mismas = (a: MaquinaRef[], b: MaquinaRef[]) => idsDe(a) === idsDe(b);
 
 export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, sugeridas, onGuardado }: Props) {
     const { showToast } = useToast();
-    const [seleccion, setSeleccion] = useState<MaquinaRef[]>(actuales);
     const [guardando, setGuardando] = useState(false);
     const [busqueda, setBusqueda] = useState("");
     const [abriendo, setAbriendo] = useState(false);
@@ -81,7 +78,18 @@ export default function EditorMaquinasDe({ id, nombre, actuales, catalogo, suger
 
     const idsPropuestas = new Set(propuestas.map((m) => m.id));
 
-    useEffect(() => setSeleccion([...actuales, ...propuestas]), [actuales, propuestas]);
+    // Se siembra con lo que tiene más lo propuesto, y se vuelve a sembrar SOLO si eso
+    // cambia de contenido: la pantalla pasa `actuales ?? []`, un array nuevo en cada
+    // dibujo, y con un efecto atado a él cualquier redibujo (el aviso de notificaciones
+    // cada 30 s, un toast) borraba lo que habías tocado. Mismo arreglo que en
+    // EditorRangosDe.
+    const semilla = `${id}|${idsDe(actuales)}|${idsDe(propuestas)}`;
+    const [sembrada, setSembrada] = useState(semilla);
+    const [seleccion, setSeleccion] = useState<MaquinaRef[]>(() => [...actuales, ...propuestas]);
+    if (sembrada !== semilla) {
+        setSembrada(semilla);
+        setSeleccion([...actuales, ...propuestas]);
+    }
 
     const hayCambios = !mismas(seleccion, actuales);
     const elegidas = new Set(seleccion.map((m) => m.id));

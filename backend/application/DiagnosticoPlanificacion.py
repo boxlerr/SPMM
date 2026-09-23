@@ -603,13 +603,20 @@ def _cambio(rangos_finales, rangos_actuales, nombre_rango):
     —"le agrego OFICIAL"—, que es el pedido de Lucas del 28/08: *"te da miedo apretar"*.
 
     Se calcula acá y no en pantalla: los ids de rango no significan nada del otro lado.
+
+    `suma_ids` es lo mismo que `suma` pero en ids, y es lo que viaja en el link «Ir a
+    arreglarlo» para dejar tildado en Recursos lo que el aviso propone. Con el conjunto
+    final, Recursos no puede separar lo que el aviso suma de lo que la máquina ya tenía
+    al calcular: si alguien le sacó uno de esos a propósito después, el link se lo
+    volvía a proponer como si fuera la solución. Va solo si se sabe de dónde se parte.
     """
-    if not nombre_rango:
-        return {}
     actuales = set(rangos_actuales or ())
     finales = set(rangos_finales or ())
-    nombres = lambda ids: [nombre_rango.get(r, f"#{r}") for r in sorted(ids)]
-    return {"suma": nombres(finales - actuales), "tenia": nombres(actuales)}
+    cambio = {"suma_ids": sorted(finales - actuales)} if rangos_actuales is not None else {}
+    if nombre_rango:
+        nombres = lambda ids: [nombre_rango.get(r, f"#{r}") for r in sorted(ids)]
+        cambio.update(suma=nombres(finales - actuales), tenia=nombres(actuales))
+    return cambio
 
 
 def _accion_proceso(proc_id, nombre_proc, rangos_finales, nombre_rango=None, rangos_actuales=None):
@@ -1792,7 +1799,7 @@ def _trabajo_en_puestos_vacantes(resultados, nombre_operario):
             "texto": "Marcalos como no disponibles y salen del plan.",
             "donde": "Recursos › Recurso humano",
             # Con uno solo el link cae en su ficha; con varios queda en la pestaña,
-            # que es lo mismo que hace `enlaceDe` con las acciones de varios
+            # que es lo mismo que hace `enlaceARecursos` con las acciones de varios
             # objetivos: apuntar a uno haría creer que el aviso habla de ese solo.
             **({"objetivo": {"tipo": "operario", "id": next(iter(por_op)),
                              "nombre": next(iter(por_op.values()))["nombre"]}}

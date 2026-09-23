@@ -47,6 +47,12 @@ export type ObjetivoDeAccion = {
     rangos?: number[];
     suma?: string[];
     tenia?: string[];
+    /**
+     * Lo mismo que `suma`, en ids: lo que el aviso le AGREGA a este objetivo. Es lo que
+     * viaja en el link «Ir a arreglarlo» (ver `lib/avisoEnRecursos`). Los avisos
+     * calculados antes del 23/09/2026 no lo traen.
+     */
+    suma_ids?: number[];
 };
 
 /**

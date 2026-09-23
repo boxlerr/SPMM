@@ -457,6 +457,46 @@ def test_sin_ajustes_la_accion_de_proceso_sale_igual_que_siempre():
     assert accion["objetivos"][0]["tenia"] == ["OFICIAL", "OFICIAL CNC"]
 
 
+def test_cada_objetivo_dice_en_ids_lo_que_el_aviso_le_suma():
+    """El link «Ir a arreglarlo» deja tildado en Recursos lo que el aviso propone.
+
+    Viajaba el conjunto FINAL, y Recursos no podía separar lo que el aviso suma de lo
+    que la máquina ya tenía al calcular: si alguien le sacó uno de esos a propósito
+    después, llegaba tildado como si fuera la solución. `suma_ids` es solo lo nuevo, y
+    por máquina: el MEDIO OFICIAL que ya tenía la FRESADORA 2 va en su conjunto final
+    pero no en lo que se le suma.
+    """
+    procesos = [_tupla(10, "FRESADO EN FRESADORA", [OFICIAL, CNC], "FRESADORA", dur=1600)]
+    maquinarias = [(3, {OFICIAL}, "FRESADORA 1", "F1"), (4, {MEDIO}, "FRESADORA 2", "F2"),
+                   (5, set(), "FRESADORA 3", "F3")]
+    diags = construir_diagnosticos(procesos, [(1, CNC)], maquinarias, [], RANGOS, QUIEN)
+    d = next(x for x in diags if x["tipo"] == "cuello_de_maquina")
+    accion = next(s["accion"] for s in d["soluciones"]
+                  if (s.get("accion") or {}).get("tipo") == "maquinaria")
+    por_id = {o["id"]: o for o in accion["objetivos"]}
+    assert set(por_id) == {4, 5}, "el aviso no ofreció sumar las dos fresadoras sin habilitar"
+    assert MEDIO in por_id[4]["rangos"] and MEDIO not in por_id[4]["suma_ids"]
+    for o in por_id.values():
+        tenia = {m[0]: m[1] for m in maquinarias}[o["id"]]
+        # Lo que suma es el final menos lo que tenía, ni más ni menos.
+        assert o["suma_ids"] == sorted(set(o["rangos"]) - tenia)
+        assert not set(o["suma_ids"]) & tenia, "propone un rango que la máquina ya tenía"
+        # Y dice lo mismo que el texto del panel de confirmación.
+        assert [RANGOS[r] for r in o["suma_ids"]] == o["suma"]
+
+
+def test_la_accion_de_proceso_dice_en_ids_lo_que_suma():
+    procesos = [_tupla(10, "FRESADO EN FRESADORA", [OFICIAL, CNC], "FRESADORA")]
+    maquinarias = [(3, {MEDIO}, "FRESADORA 1", "F1")]
+    resultados = [{"orden_id": 1, "secuencia": 1, "usa_maquina": True, "id_maquinaria": None}]
+
+    accion = _accion_de(
+        construir_diagnosticos(procesos, [(1, MEDIO)], maquinarias, resultados, RANGOS, QUIEN,
+                               rangos_reales_por_proceso={10: {OFICIAL}}),
+        "maquina_incompatible", "proceso")
+    assert accion["objetivos"][0]["suma_ids"] == [MEDIO]
+
+
 def test_un_proceso_ajustado_no_se_confunde_con_una_preparacion():
     """El aviso de máquina incompatible detecta las preparaciones comparando los rangos
     que usó el solver contra los que entraron: si esa comparación se hiciera contra los

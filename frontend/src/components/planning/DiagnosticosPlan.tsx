@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { antiguedadTexto } from "@/lib/borradorPlan";
 import { claveDeAjuste, descripcionDeAccion, type AccionDeSolucion, type AjusteDelPlan } from "@/lib/ajustesPlan";
+import { enlaceARecursos, pestaniaDe } from "@/lib/avisoEnRecursos";
 import { usePermisos } from "@/hooks/usePermisos";
 
 /** Cuántas líneas se ven antes de "Ver todas". */
@@ -217,122 +218,9 @@ export interface Diagnostico {
     soluciones: DiagnosticoSolucion[];
 }
 
-/**
- * A dónde manda el "dónde" del aviso.
- *
- * Antes esto era un `<span>` gris que decía "Recursos › Procesos" y no hacía nada:
- * había que salir, encontrar la pantalla, elegir la pestaña, buscar el proceso
- * entre 414 y recién ahí desplegar la fila. Ahora el link deja todo eso hecho.
- *
- * El `foco` va POR ID y nada más. Hasta el 23/09/2026 viajaba también el nombre
- * (`q`) para precargar el buscador de Recursos, y ese nombre es el del aviso, que el
- * backend escribe «bonito» (`_bonito`: «Preparación de pintura», con tilde) mientras
- * el catálogo lo tiene como vino del legacy («PREPARACION DE PINTURA»). El buscador
- * no encontraba nada y Lucas caía en una pantalla que decía «No se encontraron
- * procesos» y nada más. Ahora Recursos filtra por el id, que no se escribe de dos
- * maneras.
- *
- * Con VARIOS objetivos (las tres fresadoras) van todos: Recursos muestra esos y
- * nada más, con un botón para ver el resto. Antes se abría la pestaña entera y
- * había que encontrar las tres entre treinta máquinas.
- *
- * `aviso` y `hacer` son el título del aviso y la solución: Recursos los muestra
- * arriba, para que al llegar se lea qué se vino a hacer. Sin eso, una solución
- * como «dale el rango TERCERIZADO» terminaba en una lista de personas sin ninguna
- * pista de a quién ni para qué.
- */
-function enlaceDe(
-    donde: string,
-    accion?: DiagnosticoAccion | null,
-    objetivo?: DiagnosticoSolucion["objetivo"],
-    contexto?: { titulo?: string; texto?: string },
-): string | null {
-    const pestania = pestaniaDe(donde);
-    if (!pestania) return null;
-
-    const params = new URLSearchParams({ tab: pestania });
-    // Sin los ** del resaltado: allá es texto plano.
-    const limpio = (t?: string) => (t || "").replace(/\*\*/g, "").trim();
-    if (limpio(contexto?.titulo)) params.set("aviso", limpio(contexto?.titulo));
-    if (limpio(contexto?.texto)) params.set("hacer", limpio(contexto?.texto));
-
-    // Sin acción no había a dónde apuntar y el link caía en la lista entera. El
-    // `objetivo` es lo mismo pero sin botón: dice a qué fila ir, no qué cambiar.
-    if (!accion && objetivo) {
-        const clave = objetivo.tipo === "maquinaria" ? "maquina"
-            : objetivo.tipo === "operario" ? "operario"
-                : "proceso";
-        const coincide =
-            (clave === "maquina" && pestania === "maquinas") ||
-            (clave === "proceso" && pestania === "procesos") ||
-            (clave === "operario" && pestania === "operarios");
-        if (coincide) {
-            params.set("foco", String(objetivo.id));
-            // Los rangos propuestos viajan en el link para que el editor de Recursos
-            // se abra con ellos ya tildados: llegar y guardar, sin adivinar cuál era.
-            if (objetivo.rangos?.length) params.set("rangos", objetivo.rangos.join(","));
-        }
-        return `/recursos?${params.toString()}`;
-    }
-
-    // El objetivo de una skill_nativa es el operario; en los otros casos, el
-    // proceso o la máquina que se va a tocar.
-    const objetivos = accion?.objetivos?.length
-        ? accion.objetivos
-        : accion
-            ? [{ id: accion.id, nombre: accion.nombre }]
-            : [];
-
-    if (accion && objetivos.length > 0) {
-        const clave = accion.tipo === "maquinaria" ? "maquina"
-            : accion.tipo === "skill_nativa" ? "operario"
-                : "proceso";
-        // La pestaña del link manda sobre el tipo de la acción: hay soluciones de
-        // tipo "proceso" cuyo "dónde" es Maquinarias, y ahí el id no aplica.
-        const coincide =
-            (clave === "maquina" && pestania === "maquinas") ||
-            (clave === "proceso" && pestania === "procesos") ||
-            (clave === "operario" && pestania === "operarios");
-        if (coincide) {
-            params.set("foco", objetivos.map((o) => o.id).join(","));
-            // `rangos` de la acción es el conjunto FINAL (lo que ya tenía más lo
-            // nuevo), justo lo que el editor necesita para quedar listo para guardar.
-            //
-            // Con varios objetivos cada uno tiene su conjunto final, y al link va lo
-            // que tienen EN COMÚN: el editor de Recursos suma los propuestos a lo que
-            // la máquina ya tiene, así que la intersección nunca le propone a una
-            // máquina un rango que el aviso no le pedía (la unión sí: le pasaría a
-            // una el rango que otra ya tenía). La skill nativa no lleva rangos.
-            if (clave !== "operario") {
-                const conjuntos = objetivos.map((o) => o.rangos ?? accion.rangos ?? []);
-                const comunes = conjuntos.reduce<number[]>(
-                    (acc, c, i) => (i === 0 ? [...c] : acc.filter((r) => c.includes(r))),
-                    [],
-                );
-                if (comunes.length) params.set("rangos", comunes.join(","));
-            }
-        }
-    }
-
-    return `/recursos?${params.toString()}`;
-}
-
-/**
- * A qué solapa de Recursos apunta un "dónde", o null si la solución no se hace en
- * Recursos ("Al elegir las OTs", "Operaciones › abrí la OT…", o vacío).
- *
- * "operario" sigue estando porque el backend se despliega a mano y a destiempo del
- * frontend: hasta que salga el deploy, los avisos llegan con el nombre viejo y el
- * link tiene que andar igual.
- */
-function pestaniaDe(donde: string): "maquinas" | "procesos" | "operarios" | null {
-    const d = (donde || "").toLowerCase();
-    if (!d.startsWith("recursos")) return null;
-    return d.includes("maquinaria") ? "maquinas"
-        : d.includes("proceso") ? "procesos"
-            : (d.includes("humano") || d.includes("operario")) ? "operarios"
-                : null;
-}
+// El link «Ir a arreglarlo» (`enlaceARecursos`) y a qué solapa apunta cada «dónde»
+// (`pestaniaDe`) viven en `@/lib/avisoEnRecursos`, junto con la lectura del otro
+// lado: el formato del link es un contrato entre este panel y Recursos.
 
 /** RF-24: qué sección de Recursos hay que poder ver para que el link sirva. */
 const SECCION_DE_PESTANIA = {
@@ -670,7 +558,7 @@ export function DiagnosticosPlan({
     const enlace = (d: Diagnostico, s: DiagnosticoSolucion) => {
         const pestania = pestaniaDe(s.donde);
         if (!pestania || !puedeSeccion(SECCION_DE_PESTANIA[pestania])) return null;
-        return enlaceDe(s.donde, s.accion, s.objetivo, { titulo: d.titulo, texto: s.texto });
+        return enlaceARecursos(s, d.titulo, nombreDeRango);
     };
     /**
      * Cuál de los botones índigo disparó el recálculo que está corriendo.

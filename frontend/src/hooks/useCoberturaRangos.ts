@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { API_URL } from "@/config";
 
 /**
@@ -100,23 +100,36 @@ export function useCoberturaRangos() {
     // Mientras no haya dato, los mapas quedan vacíos y `listo` en false: la pantalla
     // no muestra ningún aviso en vez de acusar de "sin rango" a todo el taller.
     const listo = cobertura !== null;
-    const rangosPorMaquina = new Map<number, RangoRef[]>(
-        (cobertura?.maquinas ?? []).map((m) => [m.id, m.rangos])
+
+    // Memorizados sobre `cobertura`: cambian cuando llega un dato nuevo y no en cada
+    // dibujo de la pantalla. Armados de nuevo en cada render, el editor de rangos los
+    // veía «cambiados» cada vez que la pantalla se redibujaba (el aviso de
+    // notificaciones cada 30 s, volver a la pestaña, un toast) y volvía a sembrar su
+    // selección: lo que habías destildado reaparecía solo, antes de guardar.
+    const rangosPorMaquina = useMemo(
+        () => new Map<number, RangoRef[]>((cobertura?.maquinas ?? []).map((m) => [m.id, m.rangos])),
+        [cobertura]
     );
-    const porRango = new Map<number, RangoCobertura>(
-        (cobertura?.rangos ?? []).map((r) => [r.id, r])
+    const porRango = useMemo(
+        () => new Map<number, RangoCobertura>((cobertura?.rangos ?? []).map((r) => [r.id, r])),
+        [cobertura]
     );
-    const porProceso = new Map<number, ProcesoCobertura>(
-        (cobertura?.procesos ?? []).map((p) => [p.id, p])
+    const porProceso = useMemo(
+        () => new Map<number, ProcesoCobertura>((cobertura?.procesos ?? []).map((p) => [p.id, p])),
+        [cobertura]
     );
 
     // Catálogo para los selectores: cada rango con cuánta gente lo tiene. Ese número
     // es el que decide si agregarlo sirve de algo.
-    const catalogoRangos = (cobertura?.rangos ?? []).map((r) => ({
-        id: r.id,
-        nombre: r.nombre,
-        operarios: r.operarios,
-    }));
+    const catalogoRangos = useMemo(
+        () =>
+            (cobertura?.rangos ?? []).map((r) => ({
+                id: r.id,
+                nombre: r.nombre,
+                operarios: r.operarios,
+            })),
+        [cobertura]
+    );
 
     return { cobertura, listo, rangosPorMaquina, porRango, porProceso, catalogoRangos, recargar };
 }

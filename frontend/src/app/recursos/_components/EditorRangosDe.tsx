@@ -15,7 +15,7 @@
  * para que salga de un click accidental.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { X, Loader2, Plus, Users, AlertTriangle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,22 +56,19 @@ const getAuthHeaders = (): HeadersInit => {
         : { "Content-Type": "application/json" };
 };
 
-const mismos = (a: RangoRef[], b: RangoRef[]) => {
-    if (a.length !== b.length) return false;
-    const sa = a.map((x) => x.id).sort((x, y) => x - y);
-    const sb = b.map((x) => x.id).sort((x, y) => x - y);
-    return sa.every((v, i) => v === sb[i]);
-};
+/** Los ids de una lista, ordenados: dice QUÉ tiene, sin importar en qué array vino. */
+const idsDe = (l: RangoRef[]) => l.map((x) => x.id).sort((x, y) => x - y).join(",");
+
+const mismos = (a: RangoRef[], b: RangoRef[]) => idsDe(a) === idsDe(b);
 
 export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, sugeridos, onGuardado }: Props) {
     const { showToast } = useToast();
-    const [seleccion, setSeleccion] = useState<RangoRef[]>(actuales);
     const [guardando, setGuardando] = useState(false);
     const [busqueda, setBusqueda] = useState("");
     const [abriendo, setAbriendo] = useState(false);
 
-    /** Los propuestos que todavía no tenía, resueltos contra el catálogo. Se calcula
-     *  acá y no en el efecto para poder pintarlos distinto abajo. */
+    /** Los propuestos que todavía no tenía, resueltos contra el catálogo. Van aparte
+     *  de la selección para poder pintarlos distinto abajo. */
     const propuestos = useMemo(() => {
         if (!sugeridos?.length) return [] as RangoRef[];
         const yaTiene = new Set(actuales.map((r) => r.id));
@@ -86,7 +83,21 @@ export default function EditorRangosDe({ tipo, id, nombre, actuales, catalogo, s
 
     // La selección arranca con lo que ya tenía MÁS lo propuesto: así el botón de
     // guardar aparece solo y alcanza con confirmar.
-    useEffect(() => setSeleccion([...actuales, ...propuestos]), [actuales, propuestos]);
+    //
+    // Y se vuelve a sembrar SOLO si cambia lo que dice (otra fila, lo que tiene
+    // guardado, lo que propone el aviso), nunca porque llegó un array nuevo con lo
+    // mismo adentro. Con un efecto atado a `actuales` y `propuestos`, cada vez que la
+    // pantalla se redibujaba —el aviso de notificaciones cada 30 s, volver a la
+    // pestaña, un toast— la selección volvía a arrancar y lo que habías destildado
+    // reaparecía antes de guardar. Es el patrón de React de ajustar el estado cuando
+    // cambia una prop, sin efecto: la selección vieja no llega a dibujarse.
+    const semilla = `${id}|${idsDe(actuales)}|${idsDe(propuestos)}`;
+    const [sembrada, setSembrada] = useState(semilla);
+    const [seleccion, setSeleccion] = useState<RangoRef[]>(() => [...actuales, ...propuestos]);
+    if (sembrada !== semilla) {
+        setSembrada(semilla);
+        setSeleccion([...actuales, ...propuestos]);
+    }
 
     const hayCambios = !mismos(seleccion, actuales);
     const elegidos = new Set(seleccion.map((r) => r.id));
