@@ -100,6 +100,9 @@ ENTIDAD = {
     "permisos": "permisos",
     # RF-19: bajar, revisar y restaurar una copia. Ídem: la frase la deja el endpoint.
     "backups": "copia de seguridad",
+    # RF-23: guardar, cambiar o borrar un reporte personalizado (/reportes/personalizados/
+    # guardados). Correrlo es una lectura y no se registra.
+    "reportes": "reporte",
 }
 
 # El segundo tramo, cuando dice más que el primero. «/rangos/7/procesos» no es editar
@@ -140,6 +143,8 @@ SUBENTIDAD = {
     "secciones": "confidencialidad",
     # /backups/automaticas/{nombre}/descargar: la que se guardó sola antes de restaurar.
     "automaticas": "automática",
+    # /reportes/personalizados/guardados/{id} (RF-23): «editó reporte › personalizado #3».
+    "personalizados": "personalizado",
 }
 
 # Nombres de campo cuyo VALOR no puede terminar en el registro. Cubre los DTO de hoy

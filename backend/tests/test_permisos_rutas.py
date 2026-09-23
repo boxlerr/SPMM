@@ -282,6 +282,16 @@ MATRIZ = [
     ("GET", "/auditoria/procesos", OK, NO, NO),
     ("GET", "/auditoria/procesos?id_orden=5", OK, OK, OK),  # el historial de UNA OT
     ("GET", "/auditoria/procesos?id_orden=", OK, NO, NO),
+    # RF-23: el armador de reportes del Dashboard. Armar, ver y exportar es leer el
+    # Dashboard (las fuentes piden lo suyo adentro: test_reportes_personalizados); guardar
+    # pide EDITAR el Dashboard, que con la matriz sembrada es sólo del admin.
+    ("GET", "/reportes/personalizados/catalogo", OK, OK, OK),
+    ("GET", "/reportes/personalizados/opciones?fuente=ordenes", OK, OK, OK),
+    ("GET", "/reportes/personalizados/datos?config={}", OK, OK, OK),
+    ("GET", "/reportes/personalizados/guardados", OK, OK, OK),
+    ("POST", "/reportes/personalizados/guardados", OK, NO, NO),
+    ("PUT", "/reportes/personalizados/guardados/1", OK, NO, NO),
+    ("DELETE", "/reportes/personalizados/guardados/1", OK, NO, NO),
     # copias de seguridad (RF-19): sólo admin, también para mirar
     ("GET", "/backups/estado", OK, NO, NO),
     ("GET", "/backups/descargar", OK, NO, NO),
@@ -416,9 +426,15 @@ async def test_sin_token_no_pasa_por_ninguna(espejo):
 PANTALLAS = {
     # Desde RF-28 el Dashboard no pide nada propio: cada tarjeta es de un área y la
     # pantalla sólo pide las de las áreas que la persona puede leer (TARJETAS_DASHBOARD).
-    # Con SOLO el área Dashboard no se ve ninguna tarjeta, así que no se pide nada. Lo que
-    # lee cada tarjeta se prueba aparte (test_cada_tarjeta_del_dashboard_pide_su_area).
-    "dashboard": [],
+    # Con SOLO el área Dashboard no se ve ninguna tarjeta. Lo que lee cada tarjeta se
+    # prueba aparte (test_cada_tarjeta_del_dashboard_pide_su_area). Lo único propio es el
+    # armador de reportes (RF-23).
+    "dashboard": [
+        # RF-23: el armador de reportes (el botón «Armar un reporte» del Dashboard). Lo que
+        # corre cada fuente lo decide el servicio con los permisos de cada uno.
+        "/reportes/personalizados/catalogo", "/reportes/personalizados/opciones",
+        "/reportes/personalizados/datos", "/reportes/personalizados/guardados",
+    ],
     "operaciones": [
         # las OT, su ficha y el alta
         "/ordenes", "/ordenes/1", "/ordenes-resumen", "/ordenes/historial-procesos",

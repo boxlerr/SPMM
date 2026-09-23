@@ -747,6 +747,46 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON CONFLICT (codigo) DO NOTHING",
         ],
     ),
+    (
+        # RF-23. Una tabla nueva y nada más: ninguna columna de las tablas que se leen en
+        # cada pantalla. Si esto no llegara a aplicarse, el armador de reportes anda igual
+        # (armar, ver y exportar no la tocan); lo único que no anda es guardar un reporte.
+        "2026-09-23_reportes_guardados",
+        [
+            "CREATE TABLE IF NOT EXISTS reporte_guardado ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "nombre VARCHAR(120) NOT NULL, "
+            "descripcion VARCHAR(500), "
+            "fuente VARCHAR(40) NOT NULL, "
+            "config TEXT NOT NULL, "
+            "id_usuario INTEGER NOT NULL, "
+            "usuario VARCHAR(120), "
+            "compartido BOOLEAN NOT NULL DEFAULT FALSE, "
+            "creado_en TIMESTAMP NOT NULL, "
+            "modificado_en TIMESTAMP)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE reporte_guardado IS "
+            "'Reportes personalizados guardados con nombre (RF-23). Guarda la receta (fuente, "
+            "columnas, filtros, agrupación y orden), no el resultado: se valida y se corre de nuevo "
+            "cada vez que se abre. La escribe SPMM; el sync no la mira.'",
+            "COMMENT ON COLUMN reporte_guardado.config IS "
+            "'El reporte como lo arma la pantalla: un JSON con códigos del catálogo cerrado "
+            "(backend/application/ReportesCatalogo.py). Nunca SQL ni nombres de tabla o columna.'",
+            "COMMENT ON COLUMN reporte_guardado.fuente IS "
+            "'El código de la fuente de datos (ordenes, pasos, personas...), repetido afuera del "
+            "JSON para listar sin abrirlo. Sin CHECK: las fuentes las dice el catálogo del código.'",
+            "COMMENT ON COLUMN reporte_guardado.id_usuario IS "
+            "'Quién lo guardó (usuario.id_usuario). Sólo esa persona lo cambia o lo borra.'",
+            "COMMENT ON COLUMN reporte_guardado.compartido IS "
+            "'TRUE: lo marcó un admin para que lo vean todos, pero cada uno sólo si puede leer su "
+            "fuente. FALSE: sólo lo ve quien lo guardó.'",
+            "CREATE INDEX IF NOT EXISTS ix_reporte_guardado_usuario "
+            "ON reporte_guardado (id_usuario)",
+            "CREATE INDEX IF NOT EXISTS ix_reporte_guardado_compartido "
+            "ON reporte_guardado (id) "
+            "WHERE compartido",
+        ],
+    ),
 ]
 
 
