@@ -16,6 +16,8 @@ el bloqueo por horario.
     PUT    /permisos/usuarios/{id}/secciones/{seccion}  darle una sección de más
     DELETE /permisos/usuarios/{id}/secciones/{seccion}  sacársela
     PUT    /permisos/usuarios/{id}/rol                  cambiarle el rol
+    PUT    /permisos/usuarios/{id}/pantalla-inicio      RF-28: la pantalla a la que entra
+    PUT    /permisos/roles/{rol}/pantalla-inicio        RF-28: la de todos los de un rol
 
 QUIÉN PUEDE
 
@@ -39,6 +41,10 @@ LAS REGLAS (las de DJ, más las de SPMM)
   misma función, application/reglas_de_roles.py) y el sistema nunca queda sin admin.
 - Sacarle la marca de confidencial a una sección que alguien pasaría a ver avisa
   primero quiénes (409) y se hace igual con ?forzar=true.
+- La pantalla de inicio (RF-28) es una del menú o ninguna. Fijarla NO da permiso para
+  verla: si no la puede abrir, entra al Dashboard (o a la primera que pueda ver). No se
+  rechaza —no se pierde nada—: la respuesta dice `puede_abrirla` y la pantalla avisa. Se
+  le puede fijar también a un admin y a uno mismo: no da ningún permiso.
 
 AUDITORÍA
 
@@ -61,11 +67,15 @@ from backend.core.permisos import (
     AREA_POR_CODIGO,
     AREAS,
     NIVELES,
+    PANTALLA_DE_INICIO_POR_RUTA,
     ROL_ADMIN,
     ROLES,
     SECCION_POR_CODIGO,
     DatosDePermisos,
     nivel_valido,
+    pantalla_de_inicio,
+    permisos_de,
+    puede_abrir_pantalla,
     rango,
     resolver_permisos,
     secciones_de_area,
@@ -84,6 +94,7 @@ from backend.dto.PermisosRequestDTO import (
     ConfidencialDTO,
     NivelDeRolEnAreaDTO,
     NivelDeRolEnSeccionDTO,
+    PantallaInicioDTO,
     PermisoDePersonaDTO,
 )
 from backend.infrastructure.PermisosRepository import PermisosRepository
@@ -274,6 +285,9 @@ async def matriz(db=Depends(get_db)):
     roles = await repo.roles()
     if roles is None:
         raise _sin_tablas()
+    # RF-28. Lo último: si la columna todavía no existe, el rollback no se lleva nada y la
+    # matriz sale igual, sin la pantalla de inicio (`pantalla_inicio_disponible: false`).
+    pantallas = await repo.pantallas_inicio_de_roles()
 
     salida = []
     for codigo, nombre in sorted(roles, key=lambda r: _orden_de_rol(r[0])):
@@ -286,7 +300,7 @@ async def matriz(db=Depends(get_db)):
             areas = {a.codigo: nivel_valido(rol_areas.get(codigo, {}).get(a.codigo)) for a in AREAS}
             secciones = {s: nivel_valido(n) for s, n in rol_secciones.get(codigo, {}).items()}
             efectivas = _efectivas_de_rol(codigo, areas, secciones, confidenciales)
-        salida.append({
+        fila = {
             "codigo": codigo,
             "nombre": nombre,
             "es_admin": es_admin,
@@ -294,11 +308,16 @@ async def matriz(db=Depends(get_db)):
             "areas": areas,
             "secciones": secciones,
             "secciones_efectivas": efectivas,
-        })
+        }
+        if pantallas is not None:
+            # Una que quedó vieja en la base (ya no es del menú) sale como ninguna.
+            fila["pantalla_inicio"] = pantalla_de_inicio(None, pantallas.get(codigo))
+        salida.append(fila)
     return ResponseDTO(
         status=True,
         message=f"{len(salida)} rol(es)",
-        data={"niveles": list(NIVELES), "areas": _catalogo(confidenciales), "roles": salida},
+        data={"niveles": list(NIVELES), "areas": _catalogo(confidenciales), "roles": salida,
+              "pantalla_inicio_disponible": pantallas is not None},
     )
 
 
@@ -678,4 +697,131 @@ async def cambiar_rol(
         message=frase[0].upper() + frase[1:],
         data={"id_usuario": id_usuario, "rol": nuevo, "antes": persona.rol,
               "efectivos": efectivos.como_dict() if efectivos else None},
+    )
+
+
+# ─────────────────────────── la pantalla de inicio (RF-28) ───────────────────────────
+
+
+def _sin_pantalla_de_inicio() -> HTTPException:
+    return _error(
+        503,
+        "Todavía no se puede fijar la pantalla de inicio: si recién se actualizó el "
+        "servidor, falta que corra la migración de la pantalla de inicio.",
+        "pantalla_inicio",
+    )
+
+
+def _nombre_de_pantalla(ruta) -> str:
+    p = PANTALLA_DE_INICIO_POR_RUTA.get(ruta or "")
+    return f"«{p.nombre}»" if p else "ninguna"
+
+
+@router.put("/usuarios/{id_usuario}/pantalla-inicio", response_model=ResponseDTO)
+async def poner_pantalla_de_inicio_de_persona(
+    id_usuario: int,
+    cuerpo: PantallaInicioDTO,
+    request: Request,
+    db=Depends(get_db),
+    actor: UsuarioActual = Depends(_admin),
+):
+    """La pantalla a la que entra esta persona después del login. Pisa la de su rol; null
+    = «como su rol». Vale desde su próximo ingreso (o la próxima vez que abra la app).
+
+    No da permiso para verla: `puede_abrirla` dice si la puede abrir HOY (con su rol y sus
+    permisos de más). Si no, entra al Dashboard o a la primera que pueda ver."""
+    persona = await _persona_o_404(db, id_usuario)
+    repo = PermisosRepository(db)
+    leidas = await repo.pantalla_inicio(id_usuario)
+    if leidas is None:
+        raise _sin_pantalla_de_inicio()
+    antes, del_rol = leidas
+    nuevo = cuerpo.pantalla_inicio
+    if antes != nuevo:
+        await repo.poner_pantalla_inicio_de_usuario(id_usuario, nuevo)
+        await _guardar(db, "la pantalla de inicio")
+    efectiva = pantalla_de_inicio(nuevo, del_rol)
+    try:
+        permisos = await repo.permisos_de_usuario(id_usuario=id_usuario)
+    except Exception as e:
+        # Ya se guardó: no saber si la puede abrir no tiene que decir que falló.
+        await db.rollback()
+        logger.warning(f"Permisos: no se pudieron leer los de #{id_usuario} para avisar: {e}")
+        permisos = None
+    puede = puede_abrir_pantalla(permisos, efectiva) if (efectiva and permisos) else None
+
+    quien = _nombre_persona(persona)
+    la_del_rol = pantalla_de_inicio(None, del_rol)
+    if antes == nuevo:
+        frase = (f"dejó la pantalla de inicio de {quien} como estaba "
+                 f"({_nombre_de_pantalla(nuevo) if nuevo else 'la de su rol'})")
+    elif nuevo is None:
+        frase = (f"hizo que {quien} entre por la pantalla de inicio de su rol "
+                 f"({_nombre_de_pantalla(la_del_rol) if la_del_rol else 'la de siempre'})")
+    else:
+        frase = f"le fijó a {quien} la pantalla de inicio {_nombre_de_pantalla(nuevo)}"
+    _dejar_dicho(request, frase, antes={"pantalla_inicio": antes}, despues={"pantalla_inicio": nuevo})
+    return ResponseDTO(
+        status=True,
+        message=frase[0].upper() + frase[1:],
+        data={"id_usuario": id_usuario, "pantalla_inicio": nuevo, "antes": antes,
+              "pantalla_del_rol": la_del_rol, "efectiva": efectiva,
+              "puede_abrirla": puede},
+    )
+
+
+@router.put("/roles/{rol}/pantalla-inicio", response_model=ResponseDTO)
+async def poner_pantalla_de_inicio_de_rol(
+    rol: str,
+    cuerpo: PantallaInicioDTO,
+    request: Request,
+    db=Depends(get_db),
+    actor: UsuarioActual = Depends(_admin),
+):
+    """La pantalla a la que entran los de este rol que no tienen una propia; null = la de
+    siempre. Vale también para el Administrador (no es un permiso: es por dónde entra).
+
+    `puede_abrirla` dice si el ROL la puede abrir (sin mirar los permisos de más de cada
+    persona, que sólo suman)."""
+    repo = PermisosRepository(db)
+    fila_rol = await _rol_o_404(repo, rol)
+    pantallas = await repo.pantallas_inicio_de_roles()
+    if pantallas is None:
+        raise _sin_pantalla_de_inicio()
+    antes = pantallas.get(rol)
+    nuevo = cuerpo.pantalla_inicio
+    if antes != nuevo:
+        await repo.poner_pantalla_inicio_de_rol(rol, nuevo)
+        await _guardar(db, "la pantalla de inicio del rol")
+
+    puede = None
+    if nuevo is not None:
+        if rol == ROL_ADMIN:
+            puede = True
+        else:
+            try:
+                rol_areas, rol_secciones = await repo.niveles_de_roles()
+                confidenciales = await repo.confidenciales()
+                permisos = permisos_de(DatosDePermisos(
+                    rol=rol, rol_areas=rol_areas.get(rol, {}),
+                    rol_secciones=rol_secciones.get(rol, {}), confidenciales=confidenciales,
+                ))
+                puede = puede_abrir_pantalla(permisos, nuevo)
+            except Exception as e:
+                await db.rollback()
+                logger.warning(f"Permisos: no se pudo ver si el rol {rol} abre {nuevo}: {e}")
+
+    if antes == nuevo:
+        frase = (f"dejó la pantalla de inicio del rol «{fila_rol.nombre}» como estaba "
+                 f"({_nombre_de_pantalla(nuevo) if nuevo else 'la de siempre'})")
+    elif nuevo is None:
+        frase = f"volvió a dejar al rol «{fila_rol.nombre}» con la pantalla de inicio de siempre"
+    else:
+        frase = f"le fijó al rol «{fila_rol.nombre}» la pantalla de inicio {_nombre_de_pantalla(nuevo)}"
+    _dejar_dicho(request, frase, antes={"rol": rol, "pantalla_inicio": antes},
+                 despues={"rol": rol, "pantalla_inicio": nuevo})
+    return ResponseDTO(
+        status=True,
+        message=frase[0].upper() + frase[1:],
+        data={"rol": rol, "pantalla_inicio": nuevo, "antes": antes, "puede_abrirla": puede},
     )

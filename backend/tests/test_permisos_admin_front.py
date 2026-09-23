@@ -17,6 +17,9 @@ test_permisos_front.py. Lo que se exige:
    mismo que el backend después de los mismos cambios.
 3. Lo que se ofrece: cada nivel ofrecido lo acepta el backend, con sus mismos topes.
 4. Vencimientos sin zona, errores y «falta actualizar el servidor».
+5. RF-28: por dónde entra cada rol y cada persona. Los permisos de una persona armados en
+   la pantalla (rol + permisos de más) son los del backend, y lo que la lista dice que
+   pasa al entrar es lo que pasa de verdad con lo que mandan el login y /auth/me.
 """
 import json
 import shutil
@@ -45,7 +48,7 @@ from backend.core.security import get_sesiones_permisos
 from backend.dto.PermisosRequestDTO import PermisoDePersonaDTO
 from backend.presentation import AuthAPI, PermisosAPI
 from backend.presentation.main import app
-from backend.tests.test_permisos_api import JULIAN, MATIAS, SOFIA, _base, _token
+from backend.tests.test_permisos_api import ANA, JULIAN, LUCAS, MATIAS, SOFIA, _base, _token
 
 RAIZ = Path(__file__).resolve().parents[2]
 SRC = RAIZ / "frontend" / "src"
@@ -460,3 +463,171 @@ def test_el_resumen_de_un_rol(correr):
     assert "Puede todo" in res[0]
     assert res[1] == "Ve: Dashboard, Operaciones, Planos, No conformidades, Configuración"
     assert "ninguna pantalla" in res[2]
+
+
+# ═════════════════════ 5. la pantalla de inicio (RF-28) ═════════════════════
+
+
+def _rol_de_la_matriz(codigo, areas, secciones, efectivas=None):
+    return {"codigo": codigo, "nombre": codigo, "es_admin": codigo == "admin", "usuarios_activos": 0,
+            "areas": areas, "secciones": secciones, "secciones_efectivas": efectivas or {}}
+
+
+def test_los_permisos_de_una_persona_son_los_del_backend(correr):
+    """La lista dice si cada uno puede ver la pantalla que se le fija: para eso arma sus
+    permisos con la regla del backend (resolver_permisos). Rol × permisos de más
+    (vigentes y vencidos) × confidenciales: tienen que dar lo mismo, área por área y
+    sección por sección."""
+    extras_posibles = [
+        [],
+        [{"tipo": "area", "codigo": "clientes", "nivel": "read", "vigente": True}],
+        [{"tipo": "area", "codigo": "operaciones", "nivel": "write", "vigente": True},
+         {"tipo": "seccion", "codigo": "dashboard_rendimiento", "nivel": "read", "vigente": True}],
+        # Vencidos: no cuentan.
+        [{"tipo": "area", "codigo": "recursos", "nivel": "write", "vigente": False},
+         {"tipo": "seccion", "codigo": "auditoria_procesos", "nivel": "read", "vigente": False}],
+        # Una sección sin el área (confidencial o no): la da igual.
+        [{"tipo": "seccion", "codigo": "recursos_rangos", "nivel": "read", "vigente": True},
+         {"tipo": "seccion", "codigo": "configuracion_usuarios", "nivel": "read", "vigente": True}],
+        # Un nivel raro vale «none».
+        [{"tipo": "area", "codigo": "planos", "nivel": "raro", "vigente": True}],
+    ]
+    casos = []
+    for (areas, secciones, conf) in _casos_de_rol():
+        for extras in extras_posibles:
+            casos.append(("x", areas, secciones, conf, extras))
+    casos.append(("admin", {}, {}, {}, []))
+    llamadas = [{"m": "admin", "fn": "permisosDePersona",
+                 "args": [_rol_de_la_matriz(rol, a, s), ex, c]} for rol, a, s, c, ex in casos]
+    for (rol, areas, secciones, conf, extras), front in zip(casos, correr(llamadas)):
+        vigentes = [e for e in extras if e["vigente"]]
+        back = resolver_permisos(DatosDePermisos(
+            rol=rol, rol_areas=areas, rol_secciones=secciones, confidenciales=conf,
+            usuario_areas={e["codigo"]: e["nivel"] for e in vigentes if e["tipo"] == "area"},
+            usuario_secciones={e["codigo"]: e["nivel"] for e in vigentes if e["tipo"] == "seccion"},
+        ))
+        assert front["areas"] == back["areas"], (areas, secciones, conf, extras)
+        assert front["secciones"] == back["secciones"], (areas, secciones, conf, extras)
+        assert front["es_admin"] is (rol == "admin")
+
+
+async def _data(cliente, ruta, headers):
+    r = await cliente.get(ruta, headers=headers)
+    assert r.status_code == 200, (ruta, r.text)
+    return r.json()["data"]
+
+
+async def test_lo_que_dice_la_lista_es_por_donde_entra_de_verdad(cliente, correr):
+    """El admin fija pantallas (por rol y por persona) y da un permiso de más. Lo que la
+    pantalla «Usuarios y permisos» calcula para cada persona (inicioDePersona, con la
+    matriz, la lista y los permisos de más que manda el servidor) tiene que ser adonde
+    la manda el login de verdad: rutaInicio con los permisos y la pantalla de /auth/me."""
+    admin = _token(JULIAN)
+    pedidos = [
+        ("/permisos/roles/operario/pantalla-inicio", {"pantalla_inicio": "/clientes"}),   # no la ve
+        ("/permisos/roles/supervisor/pantalla-inicio", {"pantalla_inicio": "/recursos"}),  # la ve
+        ("/permisos/roles/admin/pantalla-inicio", {"pantalla_inicio": "/planos"}),
+        (f"/permisos/usuarios/{SOFIA}/pantalla-inicio", {"pantalla_inicio": "/auditoria"}),  # no la ve
+        (f"/permisos/usuarios/{LUCAS}/pantalla-inicio", {"pantalla_inicio": "/novedades"}),
+    ]
+    puede_por_rol = {}
+    for ruta, cuerpo in pedidos:
+        r = await cliente.put(ruta, headers=admin, json=cuerpo)
+        assert r.status_code == 200, (ruta, r.text)
+        if "/roles/" in ruta:
+            puede_por_rol[ruta.split("/")[3]] = r.json()["data"]["puede_abrirla"]
+    # A Matías (operario) le dan Clientes: su rol entra por Clientes y ahora la ve.
+    r = await cliente.put(f"/permisos/usuarios/{MATIAS}/areas/clientes", headers=admin, json={"nivel": "read"})
+    assert r.status_code == 200, r.text
+
+    matriz_cruda = await _data(cliente, "/permisos/matriz", admin)
+    usuarios = await _data(cliente, "/auth/usuarios", admin)
+    overrides = await _data(cliente, "/permisos/overrides", admin)
+    matriz, extras = correr([
+        {"m": "admin", "fn": "leerMatriz", "args": [matriz_cruda]},
+        {"m": "admin", "fn": "leerPermisosDeMas", "args": [overrides]},
+    ])
+    assert matriz["inicioDisponible"] is True
+
+    # Por rol: lo que avisa la matriz es lo que contestó el servidor al fijarla.
+    por_rol = correr([{"m": "admin", "fn": "inicioDeRol", "args": [r]} for r in matriz["roles"]])
+    for rol, inicio in zip(matriz["roles"], por_rol):
+        assert inicio["fijadaSinAcceso"] is (puede_por_rol[rol["codigo"]] is False), rol["codigo"]
+    assert {r["codigo"]: i["ruta"] for r, i in zip(matriz["roles"], por_rol)} == {
+        "admin": "/planos", "supervisor": "/recursos", "operario": "/dashboard"}
+
+    # Por persona: lo que predice la lista == adonde entra de verdad.
+    tokens = {JULIAN: _token(JULIAN), LUCAS: _token(LUCAS), SOFIA: _token(SOFIA, "supervisor"),
+              MATIAS: _token(MATIAS, "operario")}
+    activos = [u for u in usuarios if u["activo"]]
+    assert {u["id_usuario"] for u in activos} == set(tokens) and ANA not in tokens
+    predichas = correr([{"m": "admin", "fn": "inicioDePersona", "args": [u, matriz, extras]} for u in activos])
+    # Lo que hace el login: rutaInicio con los permisos y la pantalla que manda el servidor.
+    reales = []
+    for u in activos:
+        me = await _data(cliente, "/auth/me", tokens[u["id_usuario"]])
+        reales.append((me["permisos"], me["pantalla_inicio"]))
+    rutas_reales = correr([
+        {"m": "permisos", "cadena": [{"fn": "leerPermisos", "args": [perm]},
+                                     {"fn": "rutaInicio", "args": [pant]}]}
+        for perm, pant in reales
+    ])
+    por_persona = {u["id_usuario"]: (p["ruta"], p["fijadaSinAcceso"]) for u, p in zip(activos, predichas)}
+    assert {u["id_usuario"]: r for u, r in zip(activos, rutas_reales)} == {
+        i: ruta for i, (ruta, _) in por_persona.items()}
+    assert por_persona == {
+        JULIAN: ("/planos", False),     # la de su rol
+        LUCAS: ("/novedades", False),   # la suya pisa la del rol
+        SOFIA: ("/dashboard", True),    # la suya (Auditoría) no la ve: cae al Dashboard
+        MATIAS: ("/clientes", False),   # la del rol, que ve gracias al permiso de más
+    }
+
+
+def test_la_matriz_con_y_sin_pantalla_de_inicio(correr):
+    """Con la migración: cada rol trae la suya (una vieja que ya no es del menú se lee
+    como ninguna) y se ofrece cambiarla. Sin la clave (backend o base viejos): no se sabe
+    y no se ofrece."""
+    def rol(codigo, **extra):
+        return {"codigo": codigo, "nombre": codigo, "es_admin": codigo == "admin",
+                "usuarios_activos": 1, "areas": {}, "secciones": {}, **extra}
+    con = {"pantalla_inicio_disponible": True, "roles": [
+        rol("admin", pantalla_inicio=None), rol("operario", pantalla_inicio="/operaciones"),
+        rol("supervisor", pantalla_inicio="/ya-no-existe")]}
+    sin = {"roles": [rol("admin"), rol("operario")]}
+    a_medias = {"pantalla_inicio_disponible": True, "roles": [rol("admin"), rol("operario", pantalla_inicio=None)]}
+    leida_con, leida_sin, leida_a_medias, cambiada = correr([
+        {"m": "admin", "fn": "leerMatriz", "args": [con]},
+        {"m": "admin", "fn": "leerMatriz", "args": [sin]},
+        {"m": "admin", "fn": "leerMatriz", "args": [a_medias]},
+        {"m": "admin", "cadena": [{"fn": "leerMatriz", "args": [con]},
+                                  {"fn": "conPantallaDeRol", "args": ["admin", "/auditoria"]}]},
+    ])
+    assert leida_con["inicioDisponible"] is True
+    assert [r["pantalla_inicio"] for r in leida_con["roles"]] == [None, "/operaciones", None]
+    assert leida_sin["inicioDisponible"] is False
+    assert all("pantalla_inicio" not in r for r in leida_sin["roles"])
+    # Que lo diga el servidor no alcanza si a un rol le falta: no se ofrece a medias.
+    assert leida_a_medias["inicioDisponible"] is False
+    assert [r["pantalla_inicio"] for r in cambiada["roles"]] == ["/auditoria", "/operaciones", None]
+
+
+def test_inicio_segun_los_permisos(correr):
+    """Sin nada fijado, el Dashboard (o la primera que vea); con una que ve, ésa; con una
+    que no ve, avisa y dice adónde entra en su lugar."""
+    operario = {"rol": "operario", "es_admin": False, "admin_permanente": None,
+                "areas": {"operaciones": "read", "dashboard": "read"},
+                "secciones": {"operaciones_ordenes": "read"}}
+    sin_dashboard = {**operario, "areas": {"operaciones": "read"}}
+    res = correr([
+        {"m": "admin", "fn": "inicioSegun", "args": [operario, None]},
+        {"m": "admin", "fn": "inicioSegun", "args": [operario, "/operaciones"]},
+        {"m": "admin", "fn": "inicioSegun", "args": [operario, "/clientes"]},
+        {"m": "admin", "fn": "inicioSegun", "args": [sin_dashboard, "/clientes"]},
+        {"m": "admin", "fn": "inicioSegun", "args": [operario, "/ordenes"]},
+    ])
+    assert res[0] == {"fijada": None, "ruta": "/dashboard", "fijadaSinAcceso": False}
+    assert res[1] == {"fijada": "/operaciones", "ruta": "/operaciones", "fijadaSinAcceso": False}
+    assert res[2] == {"fijada": "/clientes", "ruta": "/dashboard", "fijadaSinAcceso": True}
+    assert res[3] == {"fijada": "/clientes", "ruta": "/operaciones", "fijadaSinAcceso": True}
+    # Una que no es del menú no cuenta como fijada.
+    assert res[4] == {"fijada": None, "ruta": "/dashboard", "fijadaSinAcceso": False}

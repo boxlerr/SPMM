@@ -4,7 +4,7 @@ Representa un usuario del sistema SPMM usando SQLAlchemy
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, false
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, false, text
 from sqlalchemy.orm import deferred, relationship
 from backend.infrastructure.db import Base
 
@@ -53,6 +53,20 @@ class Usuario(Base):
     #     RETURNING del INSERT, y con la columna ausente el alta revienta.
     # Migración: 2026-09-22_permisos_por_rol_y_area.
     admin_permanente = deferred(Column(Boolean, nullable=False, server_default=false()))
+    # RF-28: la pantalla a la que entra después del login ('/operaciones'). Pisa la de su
+    # rol (rol.pantalla_inicio); NULL = la de su rol, o el inicio de siempre. Los valores
+    # válidos: PANTALLAS_DE_INICIO de core/permisos.py (los valida la API).
+    #
+    # Mismo armado que admin_permanente, por lo mismo: `deferred` (fuera del SELECT del
+    # login) y leída aparte por PermisosRepository, que tolera que la columna todavía no
+    # exista. Así el login y el alta no dependen de que la migración haya corrido.
+    #
+    # El `server_default` NULL no es decorativo: a una columna anulable SIN ningún default,
+    # SQLAlchemy la manda igual en el INSERT con un NULL explícito (_insert_cols_as_none),
+    # y contra una base sin la columna el alta de usuarios reventaría. Con un default de
+    # la base, el INSERT no la nombra (y `eager_defaults: False` no la pide de vuelta).
+    # Migración: 2026-09-22_pantalla_de_inicio.
+    pantalla_inicio = deferred(Column(String(80), nullable=True, server_default=text("NULL")))
     reset_token = Column(String(255), nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
     fecha_creacion = Column(DateTime, nullable=False, default=datetime.utcnow)

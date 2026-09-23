@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { API_URL } from '../config';
 import { isTokenExpired } from '@/lib/jwt';
 import {
+  leerPantallaInicio,
   leerPermisos,
   puede as puedeArea,
   puedeSeccion as puedeLaSeccion,
@@ -34,6 +35,12 @@ interface User {
    * apellido…) queda como vino del login, porque sin `apellido` el Sidebar se cae.
    */
   permisos?: unknown;
+  /**
+   * RF-28: la pantalla por la que entra (la suya o, si no tiene, la de su rol), como la
+   * manda el backend en el login y en /auth/me. Cruda: se lee con `leerPantallaInicio`.
+   * Si no vino —backend de antes de RF-28— no hay campo y entra por donde siempre.
+   */
+  pantalla_inicio?: unknown;
 }
 
 /**
@@ -50,7 +57,10 @@ export interface ResultadoLogin {
   bloqueado?: boolean;
   /** Cuántas contraseñas malas más aguanta antes del bloqueo; null si no se sabe. */
   intentosRestantes?: number | null;
-  /** RF-24: a qué pantalla ir después de entrar (la primera que puede ver). */
+  /**
+   * A qué pantalla ir después de entrar: la que tiene fijada (RF-28) si la puede abrir;
+   * si no, el Dashboard o la primera que pueda ver (RF-24).
+   */
   inicio?: string;
 }
 
@@ -75,7 +85,10 @@ interface AuthContextType {
   puede: (area: AreaCodigo, nivel?: Nivel) => boolean;
   /** ¿Llega a `nivel` (por defecto, leer) en la sección? Sin permisos, sí. */
   puedeSeccion: (seccion: SeccionCodigo, nivel?: Nivel) => boolean;
-  /** La primera pantalla que puede ver: a donde va al entrar o si cae donde no puede. */
+  /**
+   * A dónde va al entrar o si cae donde no puede: su pantalla de inicio (RF-28) si la
+   * puede abrir; si no, el Dashboard o la primera que pueda ver.
+   */
   rutaDeInicio: string;
   /** Vuelve a pedir los permisos a /auth/me (un cambio de rol se ve sin volver a entrar). */
   refrescarPermisos: () => void;
@@ -161,7 +174,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // al volver a la pestaña (como mucho una vez por minuto) y después de un 403, que
   // es la señal más clara de que algo cambió.
   //
-  // Sólo se toman `permisos` y `rol`. Nada más del usuario se pisa: /auth/me de un
+  // Sólo se toman `permisos`, `rol` y `pantalla_inicio` (RF-28: si un admin se la cambió,
+  // «Volver al inicio» ya lleva a la nueva). Nada más del usuario se pisa: /auth/me de un
   // backend viejo devuelve lo que dice el token, y el Sidebar se cae sin `apellido`.
   const ultimoRefrescoRef = useRef(0);
   const refrescarPermisosCon = useCallback(async (esperaMinimaMs: number) => {
@@ -194,6 +208,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           delete siguiente.permisos;
         }
         if (typeof datos.rol === 'string' && datos.rol) siguiente.rol = datos.rol;
+        // RF-28. Sin la clave es un backend de antes: entra por donde siempre.
+        if ('pantalla_inicio' in datos) siguiente.pantalla_inicio = datos.pantalla_inicio;
+        else delete siguiente.pantalla_inicio;
         try { localStorage.setItem('user', JSON.stringify(siguiente)); } catch { /* sin storage: queda en memoria */ }
         return siguiente;
       });
@@ -384,9 +401,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         auth401CountRef.current = 0;
         redirectingRef.current = false;
 
-        // RF-24: la primera pantalla que puede ver. Sin permisos (backend viejo), el
-        // Dashboard de siempre.
-        return { success: true, inicio: rutaInicio(leerPermisos(userData.permisos)) };
+        // RF-28: su pantalla de inicio (la suya o la de su rol), si la puede abrir; si no,
+        // el Dashboard o la primera que pueda ver (RF-24). Backend viejo (no manda ni
+        // permisos ni pantalla): el Dashboard de siempre.
+        return {
+          success: true,
+          inicio: rutaInicio(leerPermisos(userData.permisos), leerPantallaInicio(userData.pantalla_inicio)),
+        };
       } else {
         // El backend devuelve { status:false, errors:[{message, campo}] }.
         // Para 5xx (ej. 503 cuando la BD está caída) usamos un mensaje genérico
@@ -464,7 +485,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (seccion: SeccionCodigo, nivel: Nivel = 'read') => puedeLaSeccion(permisos, seccion, nivel),
     [permisos],
   );
-  const rutaDeInicio = useMemo(() => rutaInicio(permisos), [permisos]);
+  const pantallaFijada = useMemo(() => leerPantallaInicio(user?.pantalla_inicio), [user?.pantalla_inicio]);
+  const rutaDeInicio = useMemo(() => rutaInicio(permisos, pantallaFijada), [permisos, pantallaFijada]);
 
   return (
     <AuthContext.Provider

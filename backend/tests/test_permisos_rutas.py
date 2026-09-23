@@ -238,8 +238,12 @@ MATRIZ = [
     ("GET", "/ordenes/1/incidencias", OK, OK, OK),
     ("POST", "/incidencias", OK, OK, NO),
     ("PUT", "/incidencias/1/cerrar", OK, OK, NO),
-    # dashboard
+    # dashboard: cada tarjeta pide su área (RF-28); el operario no tiene Clientes
     ("GET", "/api/dashboard/estadisticas", OK, OK, OK),
+    ("GET", "/api/dashboard/ordenes-por-estado/pendiente", OK, OK, OK),
+    ("GET", "/api/dashboard/clientes-mayor-volumen", OK, OK, NO),
+    ("GET", "/api/dashboard/tiempo-promedio", OK, OK, OK),
+    ("GET", "/incidencias/metricas", OK, OK, OK),
     ("GET", "/api/dashboard/rendimiento-operarios", OK, NO, NO),
     ("GET", "/api/dashboard/rendimiento-procesos", OK, NO, NO),
     # auditoría
@@ -366,15 +370,11 @@ async def test_sin_token_no_pasa_por_ninguna(espejo):
 # nuevo, va acá: si el test se pone rojo, es que esa persona iba a ver la pantalla rota.
 
 PANTALLAS = {
-    "dashboard": [
-        "/api/dashboard/estadisticas", "/api/dashboard/ordenes-criticas",
-        "/api/dashboard/timeline-entregas", "/api/dashboard/clientes-mayor-volumen",
-        "/api/dashboard/distribucion-prioridades", "/api/dashboard/top-articulos",
-        "/api/dashboard/tiempo-promedio", "/api/dashboard/ordenes-por-prioridad/1",
-        "/api/dashboard/ordenes-por-estado/pendiente", "/api/dashboard/ordenes-por-fecha/2026-09-22",
-        "/incidencias/metricas",
-        # (el rendimiento por persona es una sección confidencial: se ve sólo si se da)
-    ],
+    # Desde RF-28 el Dashboard no pide nada propio: cada tarjeta es de un área y la
+    # pantalla sólo pide las de las áreas que la persona puede leer (TARJETAS_DASHBOARD).
+    # Con SOLO el área Dashboard no se ve ninguna tarjeta, así que no se pide nada. Lo que
+    # lee cada tarjeta se prueba aparte (test_cada_tarjeta_del_dashboard_pide_su_area).
+    "dashboard": [],
     "operaciones": [
         # las OT, su ficha y el alta
         "/ordenes", "/ordenes/1", "/ordenes-resumen", "/ordenes/historial-procesos",
@@ -434,6 +434,70 @@ async def test_quien_ve_una_pantalla_puede_leer_todo_lo_que_esa_pantalla_pide(es
                 rotas.append(f"{area}: GET {ruta} -> {r.status_code}")
         id_ += 1
     assert not rotas, "pantallas que se verían rotas:\n" + "\n".join(rotas)
+
+
+async def test_cada_tarjeta_del_dashboard_pide_su_area(espejo):
+    """RF-28: cada tarjeta del Dashboard es de un área. Con el Dashboard y el área de la
+    tarjeta se lee todo lo que la tarjeta pide (también lo que abre al tocarla); con el
+    Dashboard y SIN esa área, nada de eso: la pantalla la esconde y la API no la da."""
+    from backend.core.permisos_rutas import TARJETAS_DASHBOARD
+
+    async with espejo.sesiones() as s:
+        s.add(Rol(codigo="solo_tablero", nombre="Sólo el tablero"))
+        await s.flush()
+        s.add(RolArea(rol_codigo="solo_tablero", area_codigo="dashboard", nivel="read"))
+        s.add(Usuario(id_usuario=300, username="tablero", email="tablero@x.com",
+                      password_hash="x", nombre="Sólo", apellido="Tablero",
+                      rol="solo_tablero", activo=True))
+        await s.commit()
+    from backend.core.security import create_access_token
+    tok = {"Authorization": "Bearer " + create_access_token({"sub": "tablero", "id_usuario": 300})}
+
+    mal = []
+    for t in TARJETAS_DASHBOARD:
+        rutas = [_concreta(r) for _, r in t.rutas]
+        # Sin el área de la tarjeta: 403 en todas.
+        for ruta in rutas:
+            r = await espejo.get(ruta, headers=tok)
+            if r.status_code != NO:
+                mal.append(f"sin {t.codigo}: GET {ruta} -> {r.status_code}")
+        # Con ella (por rol o por sección): 200 en todas.
+        req = t.requisito
+        if req.area:
+            await _ejecutar(espejo, insert(RolArea).values(
+                rol_codigo="solo_tablero", area_codigo=req.area, nivel="read"))
+        else:
+            await _ejecutar(espejo, insert(RolSeccion).values(
+                rol_codigo="solo_tablero", seccion_codigo=req.seccion, nivel="read"))
+        for ruta in rutas:
+            r = await espejo.get(ruta, headers=tok)
+            if r.status_code != OK:
+                mal.append(f"con {t.codigo}: GET {ruta} -> {r.status_code}")
+        await _ejecutar(
+            espejo,
+            delete(RolArea).where(RolArea.rol_codigo == "solo_tablero",
+                                  RolArea.area_codigo != "dashboard"),
+            delete(RolSeccion).where(RolSeccion.rol_codigo == "solo_tablero"),
+        )
+    assert not mal, "\n".join(mal)
+
+
+def test_toda_ruta_del_dashboard_es_de_una_tarjeta_o_dice_por_que_no():
+    """Una ruta nueva del Dashboard sin su tarjeta caería en el área Dashboard sola, y la
+    vería alguien que no puede leer lo que resume."""
+    from backend.core.permisos_rutas import TARJETAS_DASHBOARD
+
+    de_tarjetas = {r for t in TARJETAS_DASHBOARD for _, r in t.rutas}
+    excepciones = {e.ruta for e in POLITICAS["dashboard"].excepciones}
+    for r in _rutas_de_la_app():
+        if _politica_de(r) == "dashboard":
+            assert r.path in excepciones, f"{r.path}: ¿de qué tarjeta es?"
+    # Y toda ruta de una tarjeta existe y es del router que dice.
+    for t in TARJETAS_DASHBOARD:
+        for router, ruta in t.rutas:
+            dueñas = [x for x in _rutas_de_la_app() if x.path == ruta and "GET" in x.methods]
+            assert dueñas and all(_politica_de(x) == router for x in dueñas), (t.codigo, ruta)
+    assert de_tarjetas <= excepciones | {e.ruta for e in POLITICAS["incidencias"].excepciones}
 
 
 async def test_sin_ninguna_area_solo_se_leen_catalogos_y_la_campanita(espejo):

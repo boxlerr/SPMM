@@ -38,6 +38,8 @@ from backend.commons.exceptions.LoginRechazadoException import LoginRechazadoExc
 from backend.commons.loggers.logger import logger
 from backend.dto.ErrorItemDTO import ErrorItemDTO
 from backend.infrastructure.auditoria_movimientos import ahora_ar
+from backend.core.permisos import pantalla_de_inicio
+from backend.infrastructure.PermisosRepository import PermisosRepository
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 security = HTTPBearer()
@@ -262,8 +264,39 @@ async def get_current_user_info(
             **current_user,
             "rol": usuario.rol,
             "permisos": {**permisos.como_dict(), "admin_permanente": admin_permanente},
+            # RF-28: la pantalla fijada (la suya pisa la de su rol), o None. La pantalla la
+            # usa sólo si la puede abrir (lib/permisos.ts, rutaInicio).
+            "pantalla_inicio": await _pantalla_de_inicio(sesiones, usuario.id_usuario),
         },
     )
+
+
+# ==================== PANTALLA DE INICIO (RF-28) ====================
+#
+# usuario.pantalla_inicio y rol.pantalla_inicio pueden no existir todavía (migración sin
+# correr). Se leen con una sesión PROPIA, antes que nada, y si no se pueden leer valen
+# None —el inicio de siempre—: nunca tumban /auth/me ni la lista de usuarios.
+
+
+async def _pantalla_de_inicio(sesiones, id_usuario: int):
+    """La fijada para esa persona (la suya o la de su rol), o None."""
+    try:
+        async with sesiones() as s:
+            leidas = await PermisosRepository(s).pantalla_inicio(id_usuario)
+    except Exception as e:
+        logger.warning(f"No se pudo leer la pantalla de inicio de #{id_usuario}: {e}")
+        return None
+    return None if leidas is None else pantalla_de_inicio(*leidas)
+
+
+async def _pantallas_de_inicio_de_usuarios(sesiones):
+    """{id_usuario: la suya}, o None si no se sabe (la columna todavía no existe)."""
+    try:
+        async with sesiones() as s:
+            return await PermisosRepository(s).pantallas_inicio_de_usuarios()
+    except Exception as e:
+        logger.warning(f"No se pudieron leer las pantallas de inicio: {e}")
+        return None
 
 
 # ==================== REGLAS DE ROLES (RF-24) ====================
@@ -362,9 +395,13 @@ async def listar_usuarios(
     (DJ admins-permanentes.ts): True/False, o None si la columna todavía no existe en
     esa base (migración sin correr). Se lee ANTES y con su propia sesión: si la columna
     falta, esa consulta no se lleva puesta la de la lista.
+
+    `pantalla_inicio` (RF-28), igual: la de cada persona, leída antes y aparte; si la
+    columna falta, la clave no viene.
     """
     try:
         permanentes = await admins_permanentes(sesiones)
+        pantallas = await _pantallas_de_inicio_de_usuarios(sesiones)
         usuario_repository = UsuarioRepository(db)
         
         # Obtener todos los usuarios
@@ -385,6 +422,12 @@ async def listar_usuarios(
                 "ultimo_login": u.ultimo_login.isoformat() if u.ultimo_login else None,
                 **_estado_de_bloqueo(u, ahora),
                 "admin_permanente": None if permanentes is None else u.id_usuario in permanentes,
+                # RF-28: la suya (None = como su rol). La clave NO viene si no se pudo
+                # leer (migración sin correr): así la pantalla sabe que no la puede
+                # ofrecer, en vez de confundirlo con «no tiene».
+                **({} if pantallas is None else {
+                    "pantalla_inicio": pantalla_de_inicio(pantallas.get(u.id_usuario), None)
+                }),
             }
             for u in usuarios
         ]

@@ -64,9 +64,28 @@ PERSONAS = [
 # ─────────────────────────── armado ───────────────────────────
 
 
-async def _base(con_permisos: bool = True, con_admin_permanente: bool = True):
+async def _base(con_permisos: bool = True, con_admin_permanente: bool = True,
+                con_pantalla_inicio: bool | None = None):
     """Una base en memoria. `con_permisos=False` y `con_admin_permanente=False` es la
-    base de producción ANTES de la migración: sin tablas de permisos y sin la columna."""
+    base de producción ANTES de la migración: sin tablas de permisos y sin la columna.
+
+    `con_pantalla_inicio=False` es la base sin la migración de la pantalla de inicio
+    (RF-28): usuario y rol sin `pantalla_inicio`. Por defecto sigue a
+    `con_admin_permanente`: la base de antes de las migraciones no tiene ninguna de las
+    dos columnas."""
+    if con_pantalla_inicio is None:
+        con_pantalla_inicio = con_admin_permanente
+    sin = set()
+    if not con_admin_permanente:
+        sin.add("admin_permanente")
+    if not con_pantalla_inicio:
+        sin.add("pantalla_inicio")
+
+    def _sin_columnas(tabla):
+        md = MetaData()
+        Table(tabla.name, md, *[col._copy() for col in tabla.columns if col.name not in sin])
+        return md
+
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:", poolclass=StaticPool,
         connect_args={"check_same_thread": False},
@@ -75,16 +94,18 @@ async def _base(con_permisos: bool = True, con_admin_permanente: bool = True):
         # El ABM de usuarios deja una notificación; sin la tabla, su rollback expira el
         # usuario recién guardado y el endpoint revienta por otra cosa.
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Notificacion.__table__]))
-        if con_admin_permanente:
+        if not sin:
             await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Usuario.__table__]))
         else:
-            md = MetaData()
-            Table("usuario", md, *[
-                col._copy() for col in Usuario.__table__.columns if col.name != "admin_permanente"
-            ])
-            await conn.run_sync(md.create_all)
+            await conn.run_sync(_sin_columnas(Usuario.__table__).create_all)
         if con_permisos:
-            await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=TABLAS_DE_PERMISOS))
+            if con_pantalla_inicio:
+                await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=TABLAS_DE_PERMISOS))
+            else:
+                from backend.domain.Permisos import Rol
+                await conn.run_sync(_sin_columnas(Rol.__table__).create_all)
+                await conn.run_sync(lambda c: Base.metadata.create_all(
+                    c, tables=[t for t in TABLAS_DE_PERMISOS if t.name != "rol"]))
     Sesion = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with Sesion() as s:
         for id_, username, rol, activo in PERSONAS:

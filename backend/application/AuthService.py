@@ -185,6 +185,20 @@ class AuthService:
                 pass
             return None
 
+    async def _pantalla_inicio_para_el_login(self, id_usuario: int) -> Optional[str]:
+        """RF-28: la pantalla fijada (la suya pisa la de su rol), o None si no tiene o no
+        se pudo leer (migración sin correr). Nunca tumba el login: el repositorio hace
+        rollback si la columna falta, y esto es de lo último que se hace."""
+        from backend.core.permisos import pantalla_de_inicio
+        from backend.infrastructure.PermisosRepository import PermisosRepository
+
+        try:
+            leidas = await PermisosRepository(self.usuario_repository.db).pantalla_inicio(id_usuario)
+        except Exception as e:
+            logger.warning(f"LOGIN: no se pudo leer la pantalla de inicio de #{id_usuario}: {e}")
+            return None
+        return None if leidas is None else pantalla_de_inicio(*leidas)
+
     async def login(self, username: str, password: str) -> dict:
         """
         Autentica un usuario y genera un token JWT
@@ -284,9 +298,18 @@ class AuthService:
             # otra vuelta. Va AL FINAL y a prueba de fallas: el login ya salió bien y no
             # se cae por esto. Si no se pueden leer, la clave no viene, y el front hace lo
             # de siempre (todo a la vista) mientras la API sigue cuidando cada pedido.
-            permisos = await self._permisos_para_el_login(usuario.id_usuario)
+            # El id sale del dict y no del objeto: si leer los permisos hizo rollback (una
+            # columna que falta), el objeto del ORM quedó expirado y releerlo en async
+            # revienta.
+            id_usuario = usuario_data['id_usuario']
+            permisos = await self._permisos_para_el_login(id_usuario)
             if permisos is not None:
                 usuario_data['permisos'] = permisos
+
+            # RF-28: a qué pantalla entra (la suya o la de su rol). La pantalla la usa sólo
+            # si la puede abrir; si no, al Dashboard o a la primera que pueda ver. None =
+            # el inicio de siempre, que es también lo que hace un front que no la conoce.
+            usuario_data['pantalla_inicio'] = await self._pantalla_inicio_para_el_login(id_usuario)
 
             return usuario_data
 

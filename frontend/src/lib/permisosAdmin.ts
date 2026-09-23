@@ -18,7 +18,10 @@
  *     qué termina viendo un rol en cada sección (espejo de _nivel_de_seccion de
  *         backend/core/permisos.py, sin lo de las personas);
  *     leer lo que manda /permisos/* sin romperse si viene otra cosa;
- *     los vencimientos, que viajan en hora del taller y SIN zona.
+ *     los vencimientos, que viajan en hora del taller y SIN zona;
+ *     a qué pantalla entra cada rol y cada persona (RF-28), y si la puede abrir: los
+ *         permisos de una persona se arman con la regla de resolver_permisos (backend),
+ *         rol + permisos de más vigentes.
  *
  * El que manda sigue siendo el backend. Un test (backend/tests/test_permisos_admin_front.py)
  * compila este archivo y exige que conteste lo mismo que el backend en cada combinación.
@@ -31,8 +34,12 @@ import {
   AREAS,
   NIVEL_RANK,
   SECCIONES,
+  leerPantallaInicio,
+  puedeAbrirRuta,
+  rutaInicio,
   type AreaCodigo,
   type Nivel,
+  type Permisos,
   type SeccionCodigo,
 } from "./permisos";
 
@@ -173,11 +180,19 @@ export interface RolDeLaMatriz {
   secciones: Partial<Record<SeccionCodigo, Nivel>>;
   /** Lo que termina viendo en cada sección. */
   secciones_efectivas: Partial<Record<SeccionCodigo, Nivel>>;
+  /**
+   * RF-28: la pantalla por la que entran los de este rol que no tienen una propia; null =
+   * la de siempre. `undefined` = el servidor no la sabe (no la manda: backend o base
+   * viejos), y entonces no se ofrece cambiarla.
+   */
+  pantalla_inicio?: string | null;
 }
 
 export interface Matriz {
   areas: AreaDelCatalogo[];
   roles: RolDeLaMatriz[];
+  /** RF-28: el servidor sabe guardar la pantalla de inicio (la migración ya corrió). */
+  inicioDisponible: boolean;
 }
 
 function objeto(x: unknown): Record<string, unknown> | null {
@@ -240,7 +255,7 @@ export function leerMatriz(crudo: unknown): Matriz | null {
     const areas = mapaDeNiveles(ro.areas) as RolDeLaMatriz["areas"];
     const secciones = mapaDeNiveles(ro.secciones) as RolDeLaMatriz["secciones"];
     const efectivasCrudas = mapaDeNiveles(ro.secciones_efectivas) as RolDeLaMatriz["secciones_efectivas"];
-    roles.push({
+    const rol: RolDeLaMatriz = {
       codigo: ro.codigo,
       nombre: typeof ro.nombre === "string" && ro.nombre ? ro.nombre : ro.codigo,
       es_admin,
@@ -253,9 +268,18 @@ export function leerMatriz(crudo: unknown): Matriz | null {
         : es_admin
           ? (Object.fromEntries(SECCIONES.map((s) => [s.codigo, "admin"])) as RolDeLaMatriz["secciones_efectivas"])
           : efectivasDeRol(areas, secciones, confidenciales),
-    });
+    };
+    // RF-28: sólo si vino la clave (null incluido); si no, queda sin saberse.
+    if ("pantalla_inicio" in ro) rol.pantalla_inicio = leerPantallaInicio(ro.pantalla_inicio);
+    roles.push(rol);
   }
-  return { areas: catalogoLocal(confidenciales), roles };
+  return {
+    areas: catalogoLocal(confidenciales),
+    roles,
+    // Hace falta que lo diga el servidor Y que haya venido la de cada rol: nunca se ofrece
+    // guardar algo que el servidor no sabe guardar.
+    inicioDisponible: o.pantalla_inicio_disponible === true && roles.every((r) => r.pantalla_inicio !== undefined),
+  };
 }
 
 /** {sección: confidencial} como la tiene la matriz (o el catálogo, si no hay matriz). */
@@ -315,6 +339,14 @@ export function conConfidencial(matriz: Matriz, seccion: SeccionCodigo, confiden
   const siguiente = { ...matriz, areas };
   const conf = confidencialesDe(siguiente);
   return { ...siguiente, roles: siguiente.roles.map((r) => recalcular(r, conf)) };
+}
+
+/** La matriz con la pantalla de inicio de `rol` cambiada (RF-28). null = la de siempre. */
+export function conPantallaDeRol(matriz: Matriz, rol: string, ruta: string | null): Matriz {
+  return {
+    ...matriz,
+    roles: matriz.roles.map((r) => (r.codigo === rol ? { ...r, pantalla_inicio: ruta } : r)),
+  };
 }
 
 /** Cambia cuántas personas activas tiene cada rol (al cambiarle el rol a alguien). */
@@ -439,6 +471,145 @@ export function nombreDePermiso(tipo: "area" | "seccion", codigo: string): strin
     }
   }
   return codigo;
+}
+
+// ─────────────────────────── la pantalla de inicio (RF-28) ───────────────────────────
+//
+// A qué pantalla entra cada rol y cada persona, y si la puede abrir. Para eso hacen falta
+// SUS permisos, con la misma regla del backend (resolver_permisos): los del rol, y encima
+// lo que se le dio a la persona y está vigente (sólo suma). Un test los compara con los
+// que resuelve el backend (backend/tests/test_permisos_admin_front.py).
+//
+// Fijar una pantalla NO da permiso para verla: si no la puede abrir, entra al Dashboard o
+// a la primera que pueda ver (rutaInicio, la misma que usa el login). La pantalla lo avisa
+// al lado del selector; el servidor no lo rechaza (no se pierde nada).
+
+/** Todo en «admin»: lo que tiene el Administrador por regla. */
+function permisosDeAdmin(rol: string): Permisos {
+  return {
+    rol,
+    es_admin: true,
+    admin_permanente: null,
+    areas: Object.fromEntries(AREAS.map((a) => [a.codigo, "admin"])) as Permisos["areas"],
+    secciones: Object.fromEntries(SECCIONES.map((s) => [s.codigo, "admin"])) as Permisos["secciones"],
+  };
+}
+
+/**
+ * Lo que puede un ROL (sin lo de ninguna persona), en la forma de lib/permisos.ts: sus
+ * áreas y lo que termina viendo en cada sección (`secciones_efectivas`, que ya tiene en
+ * cuenta lo confidencial tal como está en la matriz).
+ */
+export function permisosDeRol(rol: RolDeLaMatriz): Permisos {
+  if (rol.es_admin) return permisosDeAdmin(rol.codigo);
+  const areas = {} as Record<AreaCodigo, Nivel>;
+  for (const a of AREAS) areas[a.codigo] = nivelValido(rol.areas[a.codigo]);
+  const secciones = {} as Record<SeccionCodigo, Nivel>;
+  for (const s of SECCIONES) secciones[s.codigo] = nivelValido(rol.secciones_efectivas[s.codigo]);
+  return { rol: rol.codigo, es_admin: false, admin_permanente: null, areas, secciones };
+}
+
+/**
+ * Lo que puede una persona de `rol` con estos permisos de más (sólo cuentan los vigentes),
+ * en la forma de lib/permisos.ts. Espejo de resolver_permisos (backend/core/permisos.py):
+ *   - área = lo del rol o lo que se le dio, lo que sea más;
+ *   - sección = la regla de siempre (confidencial: lo del rol o nada; común: el área, o lo
+ *     que el rol la restrinja) con el área YA sumada, y encima lo que se le dio.
+ */
+export function permisosDePersona(
+  rol: RolDeLaMatriz,
+  extras: Pick<PermisoDeMas, "tipo" | "codigo" | "nivel" | "vigente">[],
+  confidenciales: Partial<Record<string, boolean>>,
+): Permisos {
+  if (rol.es_admin) return permisosDeAdmin(rol.codigo);
+  const extra = (tipo: "area" | "seccion", codigo: string): Nivel | null => {
+    let mejor: Nivel | null = null;
+    for (const p of extras) {
+      if (!p.vigente || p.tipo !== tipo || p.codigo !== codigo) continue;
+      if (mejor === null || rango(p.nivel) > rango(mejor)) mejor = nivelValido(p.nivel);
+    }
+    return mejor;
+  };
+  const areas = {} as Record<AreaCodigo, Nivel>;
+  for (const a of AREAS) {
+    const delRol = nivelValido(rol.areas[a.codigo]);
+    const suma = extra("area", a.codigo);
+    areas[a.codigo] = suma !== null && rango(suma) > rango(delRol) ? suma : delRol;
+  }
+  const secciones = {} as Record<SeccionCodigo, Nivel>;
+  for (const s of SECCIONES) {
+    const conf = !!(confidenciales[s.codigo] ?? s.confidencial);
+    let nivel = efectivaDeRolEnSeccion(areas[s.area], rol.secciones[s.codigo], conf);
+    const suma = extra("seccion", s.codigo);
+    if (suma !== null && rango(suma) > rango(nivel)) nivel = suma;
+    secciones[s.codigo] = nivel;
+  }
+  return { rol: rol.codigo, es_admin: false, admin_permanente: null, areas, secciones };
+}
+
+export interface Inicio {
+  /** La que se le fijó (la de la persona, o si no tiene, la de su rol); null = ninguna. */
+  fijada: string | null;
+  /** Por dónde entra de verdad: la fijada si la puede abrir; si no, rutaInicio. */
+  ruta: string;
+  /** Tiene una fijada que no puede abrir (entra a `ruta` en su lugar). */
+  fijadaSinAcceso: boolean;
+}
+
+/**
+ * Por dónde entra alguien con estos permisos y esta pantalla fijada. Es rutaInicio de
+ * lib/permisos.ts, la MISMA que usa el login.
+ */
+export function inicioSegun(permisos: Permisos, fijada: string | null | undefined): Inicio {
+  const f = leerPantallaInicio(fijada);
+  return {
+    fijada: f,
+    ruta: rutaInicio(permisos, f),
+    fijadaSinAcceso: f !== null && !puedeAbrirRuta(permisos, f),
+  };
+}
+
+/** Por dónde entran los de un rol que no tienen una propia. */
+export function inicioDeRol(rol: RolDeLaMatriz): Inicio {
+  return inicioSegun(permisosDeRol(rol), rol.pantalla_inicio);
+}
+
+/**
+ * Por dónde entra una persona: la suya pisa la de su rol (backend: pantalla_de_inicio).
+ * Sus permisos: los de su rol en la matriz más los permisos de más que tenga vigentes. Un
+ * rol que la matriz no tiene no ve nada (como en el backend: sin fila en la matriz, nada).
+ */
+export function inicioDePersona(
+  persona: { id_usuario: number; rol: string; pantalla_inicio?: string | null },
+  matriz: Matriz,
+  permisosDeMas: PermisoDeMas[] | null,
+): Inicio {
+  return inicioSegun(
+    permisosDeLaPersona(persona, matriz, permisosDeMas),
+    leerPantallaInicio(persona.pantalla_inicio) ?? rolDeLaPersona(persona, matriz).pantalla_inicio,
+  );
+}
+
+function rolDeLaPersona(persona: { rol: string }, matriz: Matriz): RolDeLaMatriz {
+  return matriz.roles.find((r) => r.codigo === persona.rol) ?? {
+    codigo: persona.rol,
+    nombre: persona.rol,
+    es_admin: persona.rol === "admin",
+    usuarios_activos: 0,
+    areas: {},
+    secciones: {},
+    secciones_efectivas: {},
+  };
+}
+
+/** Los permisos de una persona de la lista: su rol en la matriz + sus permisos de más. */
+export function permisosDeLaPersona(
+  persona: { id_usuario: number; rol: string },
+  matriz: Matriz,
+  permisosDeMas: PermisoDeMas[] | null,
+): Permisos {
+  const extras = (permisosDeMas ?? []).filter((p) => p.id_usuario === persona.id_usuario);
+  return permisosDePersona(rolDeLaPersona(persona, matriz), extras, confidencialesDe(matriz));
 }
 
 // ─────────────────────────── vencimientos ───────────────────────────

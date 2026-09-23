@@ -23,6 +23,7 @@ import { capitalizeName } from '@/lib/utils';
 import { nombreDePersona } from '@/lib/permisosAdmin';
 import { claseDeRol } from './area-meta';
 import type { RolElegible, UsuarioFila } from './api';
+import SelectorDePantalla from './SelectorDePantalla';
 
 /**
  * El listado de usuarios de «Usuarios y permisos» (RF-24 y RF-26).
@@ -33,6 +34,9 @@ import type { RolElegible, UsuarioFila } from './api';
  *   ni el de un administrador permanente (candado), igual que en DJ; el backend lo
  *   exige igual (application/reglas_de_roles.py).
  * - «Bloqueado hasta HH:MM» y el botón Desbloquear del RF-26 (5 contraseñas malas).
+ * - «Entra por» (RF-28): la pantalla a la que entra cada uno después del login. La suya
+ *   pisa la de su rol; «Como su rol» dice adónde lleva eso hoy. Si la elegida no la puede
+ *   ver, avisa adónde va a entrar en su lugar.
  * - En la computadora es una tabla; en el teléfono, una tarjeta por persona (seis
  *   columnas no entran en 375px). Los controles son los mismos componentes.
  *
@@ -65,6 +69,21 @@ function nombreDeRol(codigo: string, roles: RolElegible[] | null): string {
   return codigo === 'admin' ? 'Administrador' : capitalizeName(codigo);
 }
 
+/** RF-28: lo que la lista necesita para mostrar y cambiar la pantalla de inicio. */
+export interface InicioDeLaLista {
+  /** Cómo se ve la de cada uno (lo arma UsuariosYPermisos con la matriz y sus permisos). */
+  describir: (u: UsuarioFila) => {
+    /** La opción «ninguna»: «Como su rol (Operaciones)». */
+    textoNinguna: string;
+    /** Si la suya no la puede ver: adónde entra en su lugar. */
+    entraEnSuLugar: string | null;
+    puedeAbrir?: (ruta: string) => boolean;
+  };
+  /** Filas con un cambio esperando al servidor. */
+  guardando: ReadonlySet<number>;
+  onCambiar: (u: UsuarioFila, ruta: string | null) => void;
+}
+
 interface Props {
   usuarios: UsuarioFila[];
   cargando: boolean;
@@ -81,6 +100,8 @@ interface Props {
   onEditar: (u: UsuarioFila) => void;
   onEliminar: (u: UsuarioFila) => void;
   onDesbloquear: (u: UsuarioFila) => void;
+  /** RF-28. null = no se muestra: el servidor (o la base) todavía no la tiene. */
+  inicio: InicioDeLaLista | null;
 }
 
 export default function UsuariosTable({
@@ -96,6 +117,7 @@ export default function UsuariosTable({
   onEditar,
   onEliminar,
   onDesbloquear,
+  inicio,
 }: Props) {
   const [busqueda, setBusqueda] = useState('');
   const [rolFiltro, setRolFiltro] = useState('');
@@ -179,6 +201,30 @@ export default function UsuariosTable({
       </span>
     );
   };
+
+  const inicioControl = (u: UsuarioFila) => {
+    // Una fila sin la clave (no debería pasar si la lista la trae): no se sabe.
+    if (!inicio || u.pantalla_inicio === undefined) return <span className="text-sm text-gray-400">—</span>;
+    const d = inicio.describir(u);
+    return (
+      <SelectorDePantalla
+        valor={u.pantalla_inicio}
+        textoNinguna={d.textoNinguna}
+        puedeAbrir={d.puedeAbrir}
+        entraEnSuLugar={d.entraEnSuLugar}
+        editable={puedeEditar}
+        guardando={inicio.guardando.has(u.id_usuario)}
+        etiqueta={`Pantalla de inicio de ${nombreDePersona(u)}`}
+        onCambiar={(ruta) => inicio.onCambiar(u, ruta)}
+        className="w-full sm:w-56"
+      />
+    );
+  };
+
+  const columnas = ['Usuario', 'Nombre', 'Rol', ...(inicio ? ['Entra por'] : []), 'Estado', 'Último acceso', ''];
+  // Con la columna de más, un poco menos de aire: así la tabla entra en una notebook de
+  // 1366 px con el menú abierto, sin barra de desplazamiento.
+  const px = inicio ? 'px-3 xl:px-4' : 'px-4 xl:px-6';
 
   const estadoControl = (u: UsuarioFila) => (
     <div>
@@ -329,10 +375,10 @@ export default function UsuariosTable({
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Usuario', 'Nombre', 'Rol', 'Estado', 'Último acceso', ''].map((col, i) => (
+                  {columnas.map((col, i) => (
                     <th
                       key={i}
-                      className="px-4 xl:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      className={`${px} py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider`}
                     >
                       {col}
                     </th>
@@ -342,28 +388,33 @@ export default function UsuariosTable({
               <tbody className="divide-y divide-gray-200">
                 {filtrados.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>{vacio}</td>
+                    <td colSpan={columnas.length}>{vacio}</td>
                   </tr>
                 ) : (
                   filtrados.map((u) => (
                     <tr key={u.id_usuario} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 xl:px-6 py-4">
+                      <td className={`${px} py-4`}>
                         <div className="font-medium text-gray-900">{u.username}</div>
                         <div className="max-w-[16rem] truncate text-sm text-gray-500" title={u.email}>{u.email}</div>
                       </td>
-                      <td className="px-4 xl:px-6 py-4 text-gray-900">
+                      <td className={`${px} py-4 text-gray-900`}>
                         {capitalizeName(u.nombre)} {capitalizeName(u.apellido)}
                       </td>
-                      <td className="px-4 xl:px-6 py-4">
+                      <td className={`${px} py-4`}>
                         {rolControl(u)}
                       </td>
-                      <td className="px-4 xl:px-6 py-4">
+                      {inicio && (
+                        <td className={`${px} py-4`}>
+                          {inicioControl(u)}
+                        </td>
+                      )}
+                      <td className={`${px} py-4`}>
                         {estadoControl(u)}
                       </td>
-                      <td className="px-4 xl:px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className={`${px} py-4 whitespace-nowrap text-sm text-gray-500`}>
                         {ultimoAcceso(u.ultimo_login)}
                       </td>
-                      <td className="px-4 xl:px-6 py-4 text-right">
+                      <td className={`${px} py-4 text-right`}>
                         {acciones(u)}
                       </td>
                     </tr>
@@ -396,6 +447,14 @@ export default function UsuariosTable({
                         {rolControl(u)}
                       </div>
                     </div>
+                    {inicio && (
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="text-xs text-gray-500 shrink-0 pt-2.5">Entra por</span>
+                        <div className="min-w-0 flex justify-end flex-1">
+                          {inicioControl(u)}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-start justify-between gap-3">
                       <span className="text-xs text-gray-500 shrink-0 pt-1">Estado</span>
                       <div className="min-w-0 flex justify-end text-right">

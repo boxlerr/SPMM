@@ -15,6 +15,8 @@ verificación va en la API, como dependencias de FastAPI (core/security.py).
                                              mismos casos de test)
     DJ src/lib/auth.ts (getCurrentUser)   -> resolver_permisos
     DJ src/lib/secciones.ts               -> AREAS, SECCIONES
+    DJ usuarios.pantalla_inicio (RF-28)   -> PANTALLAS_DE_INICIO, pantalla_de_inicio
+                                             (acá también una por rol)
 
 Lo que NO se copió, a propósito: el bloqueo por horario (acceso_horario). Julián lo
 descartó.
@@ -181,6 +183,85 @@ SECCION_POR_CODIGO: dict[str, Seccion] = {s.codigo: s for s in SECCIONES}
 
 def secciones_de_area(area: str) -> list[Seccion]:
     return sorted((s for s in SECCIONES if s.area == area), key=lambda s: s.orden)
+
+
+# ─────────────────────────── pantalla de inicio (RF-28) ───────────────────────────
+#
+# El SRS pide «personalizar el dashboard inicial por tipo de usuario». Es la
+# `usuarios.pantalla_inicio` de Don Joaquín (migración 20260826f: «Anabela, que usa
+# compliance, que la lleve a compliance de una»), con una más: allá se fija sólo por
+# persona; acá además hay una por ROL (rol.pantalla_inicio), que es el «tipo de usuario»
+# del SRS. La de la persona pisa la del rol; sin ninguna, el inicio de siempre.
+#
+# Se puede elegir cualquier pantalla del menú, y sólo ésas (DJ ruta-inicio.ts: `puedeAbrir`
+# mira que la ruta esté en el menú). Es ESPEJO de MENU en frontend/src/lib/permisos.ts, con
+# los mismos requisitos para abrirse: un test compara las dos listas.
+#
+# Fijarle una pantalla a alguien NO le da permiso para verla. Si no la puede abrir, entra
+# al Dashboard, y si tampoco, a la primera del menú que sí pueda ver (lo decide la pantalla,
+# rutaInicio, que nunca devuelve una ruta que rebote). `puede_abrir_pantalla` es la misma
+# pregunta del lado del servidor: la API la contesta al fijarla, para avisar.
+
+
+@dataclass(frozen=True)
+class PantallaDeInicio:
+    ruta: str
+    nombre: str
+    # Lo que pide para abrirse (igual que su ítem del menú): el área, y si tiene solapas,
+    # alcanza con poder leer UNA. Sin nada = la ve todo el que entra.
+    area: Optional[str] = None
+    solapas: tuple[str, ...] = ()
+
+
+PANTALLAS_DE_INICIO: tuple[PantallaDeInicio, ...] = (
+    PantallaDeInicio("/dashboard", "Dashboard", "dashboard"),
+    PantallaDeInicio("/operaciones", "Operaciones", "operaciones", (
+        "operaciones_ordenes", "operaciones_planificador",
+        "operaciones_recurso_humano", "operaciones_materia_prima",
+    )),
+    PantallaDeInicio("/planos", "Planos", "planos"),
+    PantallaDeInicio("/recursos", "Recursos", "recursos", (
+        "recursos_humano", "recursos_maquinaria", "recursos_procesos",
+        "recursos_rangos", "recursos_sectores",
+    )),
+    PantallaDeInicio("/clientes", "Clientes", "clientes"),
+    PantallaDeInicio("/configuracion", "Configuración"),
+    PantallaDeInicio("/no-conformidades", "No conformidades", "no_conformidades"),
+    PantallaDeInicio("/auditoria", "Auditoría", "auditoria", (
+        "auditoria_movimientos", "auditoria_procesos", "auditoria_planificacion",
+    )),
+    PantallaDeInicio("/novedades", "Novedades"),
+)
+
+PANTALLA_DE_INICIO_POR_RUTA: dict[str, PantallaDeInicio] = {p.ruta: p for p in PANTALLAS_DE_INICIO}
+
+# El largo de la columna (usuario.pantalla_inicio y rol.pantalla_inicio, VARCHAR(80)).
+LARGO_PANTALLA_DE_INICIO = 80
+
+
+def validar_pantalla_de_inicio(ruta: Optional[str]) -> Optional[str]:
+    """La ruta limpia, o None (= «la de siempre» / «la de su rol»). Una que no es una
+    pantalla del menú es ValueError: guardarla mandaría a alguien a un 404 cada mañana."""
+    ruta = (ruta or "").strip()
+    if not ruta:
+        return None
+    if ruta not in PANTALLA_DE_INICIO_POR_RUTA:
+        raise ValueError(
+            f"«{ruta}» no es una pantalla del menú. Las que se pueden elegir: "
+            + ", ".join(p.ruta for p in PANTALLAS_DE_INICIO)
+        )
+    return ruta
+
+
+def pantalla_de_inicio(de_la_persona: Optional[str], del_rol: Optional[str]) -> Optional[str]:
+    """La pantalla fijada para alguien: la suya pisa la de su rol. Una que ya no está en
+    el menú (quedó vieja en la base) no cuenta y deja pasar a la siguiente: mejor la de su
+    rol que ninguna. None = el inicio de siempre."""
+    for ruta in (de_la_persona, del_rol):
+        ruta = (ruta or "").strip()
+        if ruta in PANTALLA_DE_INICIO_POR_RUTA:
+            return ruta
+    return None
 
 
 # ─────────────────────────── roles sembrados y matriz inicial ───────────────────────────
@@ -471,6 +552,20 @@ def permisos_de(
         secciones=resueltos["secciones"],
         admin_permanente=admin_permanente,
     )
+
+
+def puede_abrir_pantalla(permisos: Optional[PermisosUsuario], ruta: Optional[str]) -> bool:
+    """¿Puede abrir esa pantalla del menú? Espejo de `cumple` (frontend/src/lib/permisos.ts):
+    con solapas alcanza con leer una; si no, el área; sin requisito, sí. Una ruta que no
+    es del menú, no (rutaInicio no la usaría). Sin permisos (cuenta inactiva), no."""
+    pantalla = PANTALLA_DE_INICIO_POR_RUTA.get((ruta or "").strip())
+    if pantalla is None or permisos is None:
+        return False
+    if pantalla.solapas:
+        return any(permisos.tiene_seccion(s) for s in pantalla.solapas)
+    if pantalla.area:
+        return permisos.tiene_area(pantalla.area)
+    return True
 
 
 # ─────────────────────────── validaciones de código ───────────────────────────

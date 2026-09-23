@@ -5,29 +5,46 @@ import {
     TimelineItem,
     TopCliente,
     DistribucionPrioridad,
-    TiempoPromedio,
     TopArticulo,
     OrdenPrioridad,
     OrdenEstado,
 } from "@/components/dashboard/types"
 import { API_URL } from "@/config"
 import { useAuth } from "@/contexts/AuthContext"
+import type { TarjetaCodigo } from "@/lib/permisos"
 
 const getAuthHeaders = (): HeadersInit => {
     const token = localStorage.getItem('access_token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 };
 
-export function useDashboardData() {
+/**
+ * Los datos del Dashboard, pedidos SÓLO para las tarjetas que se ven (RF-28).
+ *
+ * `visibles` son las tarjetas de las áreas que la persona puede leer (tarjetasVisibles,
+ * lib/permisos.ts). Una tarjeta que no se ve no se pide: el backend la contestaría 403 y
+ * saldría el aviso «No tenés permiso» con sólo abrir el Dashboard. Si una tarjeta aparece
+ * después (le dieron el área y se refrescaron los permisos), se pide en ese momento.
+ *
+ * Ya no se pide /api/dashboard/tiempo-promedio: no lo muestra ninguna tarjeta (se pedía y
+ * se tiraba), y desde RF-28 pide Operaciones.
+ */
+export function useDashboardData(visibles: readonly TarjetaCodigo[]) {
     const apiUrl = API_URL
     const { notifySessionExpired } = useAuth()
+
+    const veEstado = visibles.includes("estado_ordenes")
+    const veCriticas = visibles.includes("ordenes_criticas")
+    const veTimeline = visibles.includes("timeline_entregas")
+    const veClientes = visibles.includes("top_clientes")
+    const vePrioridades = visibles.includes("distribucion_prioridades")
+    const veArticulos = visibles.includes("top_articulos")
 
     const [estadisticas, setEstadisticas] = useState<EstadisticasOrdenes | null>(null)
     const [ordenesCriticas, setOrdenesCriticas] = useState<OrdenCritica[]>([])
     const [timelineEntregas, setTimelineEntregas] = useState<TimelineItem[]>([])
     const [topClientes, setTopClientes] = useState<TopCliente[]>([])
     const [distribucionPrioridades, setDistribucionPrioridades] = useState<DistribucionPrioridad[]>([])
-    const [tiempoPromedio, setTiempoPromedio] = useState<TiempoPromedio | null>(null)
     const [topArticulos, setTopArticulos] = useState<TopArticulo[]>([])
 
     const [loading, setLoading] = useState(true)
@@ -143,17 +160,6 @@ export function useDashboardData() {
         }
     }, [fetchWithAuth])
 
-    const fetchTiempoPromedio = useCallback(async () => {
-        try {
-            const response = await fetchWithAuth("/api/dashboard/tiempo-promedio")
-            if (!response.ok) throw new Error("Error al cargar tiempo promedio")
-            const data = await response.json()
-            setTiempoPromedio(data.data || null)
-        } catch (err) {
-            console.error("Error fetching tiempo promedio:", err)
-        }
-    }, [fetchWithAuth])
-
     const fetchOrdenesPorPrioridad = useCallback(
         async (prioridad: string) => {
             try {
@@ -200,38 +206,52 @@ export function useDashboardData() {
         [fetchWithAuth]
     )
 
+    // Una tarjeta que no se ve no se pide, y su «cargando» se apaga: si no, el botón
+    // Actualizar quedaría girando para siempre esperando algo que nunca se pidió.
     useEffect(() => {
-        fetchEstadisticas()
-        fetchOrdenesCriticas()
-        fetchTimelineEntregas()
-    }, [fetchEstadisticas, fetchOrdenesCriticas, fetchTimelineEntregas])
+        if (veEstado) fetchEstadisticas()
+        else setLoading(false)
+    }, [veEstado, fetchEstadisticas])
+
+    useEffect(() => {
+        if (veCriticas) fetchOrdenesCriticas()
+        else setLoadingCriticas(false)
+    }, [veCriticas, fetchOrdenesCriticas])
+
+    useEffect(() => {
+        if (veTimeline) fetchTimelineEntregas()
+        else setLoadingTimeline(false)
+    }, [veTimeline, fetchTimelineEntregas])
 
     useEffect(() => {
         setLoadingExtras(true)
         Promise.all([
-            fetchTopClientes(),
-            fetchDistribucionPrioridades(),
-            fetchTopArticulos(),
-            fetchTiempoPromedio(),
+            veClientes ? fetchTopClientes() : null,
+            vePrioridades ? fetchDistribucionPrioridades() : null,
+            veArticulos ? fetchTopArticulos() : null,
         ]).finally(() => setLoadingExtras(false))
-    }, [fetchTopClientes, fetchDistribucionPrioridades, fetchTopArticulos, fetchTiempoPromedio])
+    }, [veClientes, vePrioridades, veArticulos, fetchTopClientes, fetchDistribucionPrioridades, fetchTopArticulos])
 
     const refreshAll = useCallback(() => {
-        fetchEstadisticas()
-        fetchOrdenesCriticas()
-        fetchTimelineEntregas()
-        fetchTopClientes()
-        fetchDistribucionPrioridades()
-        fetchTopArticulos()
-        fetchTiempoPromedio()
+        if (veEstado) fetchEstadisticas()
+        if (veCriticas) fetchOrdenesCriticas()
+        if (veTimeline) fetchTimelineEntregas()
+        if (veClientes) fetchTopClientes()
+        if (vePrioridades) fetchDistribucionPrioridades()
+        if (veArticulos) fetchTopArticulos()
     }, [
+        veEstado,
+        veCriticas,
+        veTimeline,
+        veClientes,
+        vePrioridades,
+        veArticulos,
         fetchEstadisticas,
         fetchOrdenesCriticas,
         fetchTimelineEntregas,
         fetchTopClientes,
         fetchDistribucionPrioridades,
         fetchTopArticulos,
-        fetchTiempoPromedio,
     ])
 
     return {
@@ -240,7 +260,6 @@ export function useDashboardData() {
         timelineEntregas,
         topClientes,
         distribucionPrioridades,
-        tiempoPromedio,
         topArticulos,
         loading,
         loadingCriticas,

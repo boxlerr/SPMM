@@ -16,13 +16,14 @@ valen desde el pedido siguiente, sin volver a entrar. Para que eso no pese:
 LO QUE PUEDE FALTAR
 
 `usuario.admin_permanente` es una columna nueva: se lee aparte y, si todavía no existe
-(la migración no corrió), vale None — «no se sabe» — sin romper nada. Las tablas de
+(la migración no corrió), vale None — «no se sabe» — sin romper nada. Lo mismo la
+pantalla de inicio (RF-28: usuario.pantalla_inicio y rol.pantalla_inicio). Las tablas de
 permisos no se toleran: si no se pueden leer para alguien que no es admin, la consulta
 levanta y la dependencia contesta 503. Un permiso que no se pudo leer no abre nada.
 """
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from backend.commons.loggers.logger import logger
 from backend.core.permisos import (
@@ -102,6 +103,68 @@ class PermisosRepository:
             )
             return None
         return {int(f.id_usuario) for f in filas}
+
+    # ─────────────────────────── la pantalla de inicio (RF-28) ───────────────────────────
+    #
+    # usuario.pantalla_inicio y rol.pantalla_inicio son columnas nuevas (migración
+    # 2026-09-22_pantalla_de_inicio): todo lo que las lee tolera que falten y contesta None
+    # —«no se sabe»—, con el mismo cuidado que admin_permanente: si la consulta falla, hace
+    # rollback (en Postgres deja la transacción inservible), así que se llama antes de
+    # cargar objetos del ORM que se vayan a usar después, o con una sesión propia.
+
+    async def _leer_pantallas(self, consulta, que: str):
+        try:
+            return (await self.db.execute(consulta)).all()
+        except Exception as e:
+            await self.db.rollback()
+            logger.warning(
+                "Permisos: no se pudo leer %s (%s). "
+                "¿Falta la migración 2026-09-22_pantalla_de_inicio?", que, e,
+            )
+            return None
+
+    async def pantalla_inicio(self, id_usuario: int) -> Optional[tuple[Optional[str], Optional[str]]]:
+        """(la de la persona, la de su rol), o None si las columnas todavía no existen. Una
+        persona que no existe da (None, None)."""
+        filas = await self._leer_pantallas(
+            select(Usuario.pantalla_inicio, Rol.pantalla_inicio)
+            .select_from(Usuario)
+            .outerjoin(Rol, Rol.codigo == Usuario.rol)
+            .where(Usuario.id_usuario == id_usuario),
+            "la pantalla de inicio",
+        )
+        if filas is None:
+            return None
+        if not filas:
+            return (None, None)
+        return (filas[0][0], filas[0][1])
+
+    async def pantallas_inicio_de_usuarios(self) -> Optional[dict[int, Optional[str]]]:
+        """{id_usuario: la suya (o None)} de todos, o None si la columna no existe."""
+        filas = await self._leer_pantallas(
+            select(Usuario.id_usuario, Usuario.pantalla_inicio), "usuario.pantalla_inicio"
+        )
+        return None if filas is None else {int(f[0]): f[1] for f in filas}
+
+    async def pantallas_inicio_de_roles(self) -> Optional[dict[str, Optional[str]]]:
+        """{rol: la del rol (o None)}, o None si la columna (o la tabla) no existe."""
+        filas = await self._leer_pantallas(
+            select(Rol.codigo, Rol.pantalla_inicio), "rol.pantalla_inicio"
+        )
+        return None if filas is None else {f[0]: f[1] for f in filas}
+
+    async def poner_pantalla_inicio_de_usuario(self, id_usuario: int, ruta: Optional[str]) -> None:
+        # UPDATE directo: el objeto del ORM no la tiene cargada (deferred) y no hace falta.
+        await self.db.execute(
+            update(Usuario).where(Usuario.id_usuario == id_usuario)
+            .values(pantalla_inicio=ruta).execution_options(synchronize_session=False)
+        )
+
+    async def poner_pantalla_inicio_de_rol(self, rol: str, ruta: Optional[str]) -> None:
+        await self.db.execute(
+            update(Rol).where(Rol.codigo == rol)
+            .values(pantalla_inicio=ruta).execution_options(synchronize_session=False)
+        )
 
     # ─────────────────────────── los datos para resolver ───────────────────────────
 

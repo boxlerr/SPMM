@@ -10,6 +10,7 @@
  *     DJ src/lib/auth.ts (hasArea / hasSeccion)    -> puede, puedeSeccion
  *     DJ components/layout/nav-items.ts            -> MENU, puedeVerItem (puedeVerNodo)
  *     DJ src/lib/ruta-inicio.ts                    -> rutaInicio
+ *     DJ usuarios.pantalla_inicio (RF-28)          -> PANTALLAS_DE_INICIO, leerPantallaInicio
  *     DJ usuarios/sidebar-tree.ts (+ su test)      -> ARBOL, seccionesDelArbol
  *
  * Acá igual: los permisos los RESUELVE EL BACKEND (backend/core/permisos.py, contra la
@@ -351,12 +352,45 @@ export function puedeAbrirRuta(permisos: Permisos | null | undefined, pathname: 
 /** El piso: Novedades no pide nada, así que la ve cualquiera con sesión. */
 export const RUTA_ANCLA = "/novedades";
 
+// ─────────────────────────── la pantalla de inicio (RF-28) ───────────────────────────
+//
+// «Personalizar el dashboard inicial por tipo de usuario» (SRS). Es la `pantalla_inicio`
+// de Don Joaquín más una por ROL: el backend manda en el login y en /auth/me la que le
+// toca a cada uno —la suya pisa la de su rol— ya resuelta, en `pantalla_inicio`. Se puede
+// fijar cualquier pantalla del menú y sólo ésas (DJ: `puedeAbrir` mira que esté en el
+// menú). ESPEJO de PANTALLAS_DE_INICIO de backend/core/permisos.py: un test compara las
+// dos, requisitos incluidos.
+
+export interface PantallaDeInicio {
+  ruta: string;
+  nombre: string;
+}
+
+export const PANTALLAS_DE_INICIO: PantallaDeInicio[] = MENU.map((i) => ({ ruta: i.href, nombre: i.nombre }));
+
+export function nombreDePantalla(ruta: string | null | undefined): string | null {
+  return PANTALLAS_DE_INICIO.find((p) => p.ruta === ruta)?.nombre ?? null;
+}
+
+/**
+ * Lo que vino en `pantalla_inicio` (login, /auth/me, la lista de usuarios, la matriz):
+ * una pantalla del menú, o null. Cualquier otra cosa —un backend viejo que no la manda,
+ * una ruta que ya no está en el menú— es null: el inicio de siempre, nunca un 404.
+ */
+export function leerPantallaInicio(crudo: unknown): string | null {
+  if (typeof crudo !== "string") return null;
+  const ruta = crudo.trim();
+  return PANTALLAS_DE_INICIO.some((p) => p.ruta === ruta) ? ruta : null;
+}
+
 /**
  * A qué pantalla va alguien cuando entra o cuando no puede quedarse donde está.
  * Espejo de rutaInicio (DJ ruta-inicio.ts), en orden de preferencia:
  *
- *   1. la que se le haya fijado (`pantallaFijada`, RF-28), si la puede abrir;
- *   2. la primera del menú que pueda ver (el Dashboard va primero);
+ *   1. la que se le haya fijado (`pantallaFijada`, RF-28: la suya o la de su rol), si es
+ *      una pantalla del menú y la puede abrir;
+ *   2. la primera del menú que pueda ver (el Dashboard va primero: si no puede abrir la
+ *      fijada, «cae al Dashboard»);
  *   3. Novedades, que no pide nada.
  *
  * El paso 1 se valida a propósito: una pantalla fijada que quedó vieja —le sacaron el
@@ -364,12 +398,61 @@ export const RUTA_ANCLA = "/novedades";
  * entra. SÓLO devuelve rutas que la persona puede abrir, así no hay rebotes.
  */
 export function rutaInicio(permisos: Permisos | null | undefined, pantallaFijada?: string | null): string {
-  const fijada = pantallaFijada?.trim();
-  if (fijada && fijada.startsWith("/") && puedeAbrirRuta(permisos, fijada)) return fijada;
+  const fijada = leerPantallaInicio(pantallaFijada);
+  if (fijada && puedeAbrirRuta(permisos, fijada)) return fijada;
   for (const item of MENU) {
     if (puedeVerItem(permisos, item)) return item.href;
   }
   return RUTA_ANCLA;
+}
+
+// ─────────────────────────── las tarjetas del Dashboard (RF-28) ───────────────────────────
+//
+// El Dashboard resume las otras pantallas y cada tarjeta es de UN área: cada uno ve sólo
+// las de las áreas que puede leer (el Operario, sin Clientes, no ve el ranking de
+// clientes). Una tarjeta que no se ve TAMPOCO SE PIDE: el backend la contesta 403 y el
+// aviso «No tenés permiso» saldría solo al abrir el Dashboard.
+//
+// ESPEJO de TARJETAS_DASHBOARD de backend/core/permisos_rutas.py, que exige lo mismo en
+// cada ruta de la tarjeta. Un test compara las dos listas y, para cada rol, que la
+// pantalla muestre exactamente las tarjetas cuyas rutas el backend le deja leer.
+// Sin permisos (backend viejo) se ven todas, como siempre.
+
+export type TarjetaCodigo =
+  | "estado_ordenes"
+  | "ordenes_criticas"
+  | "incidencias_planos"
+  | "rendimiento"
+  | "timeline_entregas"
+  | "top_articulos"
+  | "top_clientes"
+  | "distribucion_prioridades";
+
+export interface TarjetaDashboard extends Requisito {
+  codigo: TarjetaCodigo;
+  nombre: string;
+}
+
+export const TARJETAS_DASHBOARD: TarjetaDashboard[] = [
+  { codigo: "estado_ordenes", nombre: "Estado de las órdenes", area: "operaciones" },
+  { codigo: "ordenes_criticas", nombre: "Órdenes críticas", area: "operaciones" },
+  { codigo: "incidencias_planos", nombre: "Interpretación de planos", area: "no_conformidades" },
+  { codigo: "rendimiento", nombre: "Rendimiento estimado vs. real", seccion: "dashboard_rendimiento" },
+  { codigo: "timeline_entregas", nombre: "Próximas entregas", area: "operaciones" },
+  { codigo: "top_articulos", nombre: "Artículos más producidos", area: "operaciones" },
+  { codigo: "top_clientes", nombre: "Clientes con más órdenes", area: "clientes" },
+  { codigo: "distribucion_prioridades", nombre: "Órdenes por prioridad", area: "operaciones" },
+];
+
+/** ¿Ve esa tarjeta del Dashboard? Sin permisos (backend viejo), sí. */
+export function puedeVerTarjeta(permisos: Permisos | null | undefined, codigo: TarjetaCodigo): boolean {
+  const t = TARJETAS_DASHBOARD.find((x) => x.codigo === codigo);
+  return t ? cumple(permisos, t, "read") : false;
+}
+
+/** Las tarjetas que ve, en el orden del Dashboard. */
+export function tarjetasVisibles(permisos: Permisos | null | undefined): TarjetaCodigo[] {
+  return TARJETAS_DASHBOARD.filter((t) => cumple(permisos, t, "read")).map((t) => t.codigo);
 }
 
 // ─────────────────────────── el árbol (la pantalla de permisos) ───────────────────────────

@@ -246,8 +246,24 @@ def test_no_toca_ninguna_fila_existente(fuente):
                            "on conflict (codigo) do nothing")
 
 
+def _agregadas_despues(tabla: str) -> set[str]:
+    """Las columnas que una migración POSTERIOR le agrega a `tabla` (ADD COLUMN IF NOT
+    EXISTS en las que vienen después de ésta en MIGRACIONES). Hoy: rol.pantalla_inicio
+    (RF-28, 2026-09-22_pantalla_de_inicio)."""
+    nombres = [n for n, _ in migraciones.MIGRACIONES]
+    posteriores = migraciones.MIGRACIONES[nombres.index(NOMBRE) + 1:]
+    agregadas = set()
+    for _, sentencias in posteriores:
+        for s in sentencias:
+            m = re.match(rf"(?is)\s*alter table {tabla}\s+(.*)", s)
+            if m:
+                agregadas |= set(re.findall(r"(?i)add column if not exists (\w+)", m.group(1)))
+    return agregadas
+
+
 def test_el_orm_coincide_con_la_migracion():
-    """Las tablas del ORM (con las que corren los tests) tienen las columnas del .sql."""
+    """Las tablas del ORM (con las que corren los tests) tienen las columnas del .sql, más
+    las que les agrega una migración posterior (y ninguna otra)."""
     for tabla in TABLAS_DE_PERMISOS:
         m = re.search(
             rf"(?is)create table if not exists {tabla.name} \((.*?)\);", _sin_notas(SQL)
@@ -259,8 +275,9 @@ def test_el_orm_coincide_con_la_migracion():
             for linea in cuerpo.split(",\n")
             if linea.strip() and not re.match(r"(?i)\s*(primary key|constraint)", linea)
         }
-        assert columnas_sql == {c.name for c in tabla.columns}, tabla.name
+        assert columnas_sql | _agregadas_despues(tabla.name) == {c.name for c in tabla.columns}, tabla.name
     assert "admin_permanente" in {c.name for c in Usuario.__table__.columns}
+    assert _agregadas_despues("rol") == {"pantalla_inicio"}
 
 
 @pytest.mark.asyncio

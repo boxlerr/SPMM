@@ -16,18 +16,21 @@ import { capitalizeName } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePermisos } from '@/hooks/usePermisos';
 import { MarcaSoloLectura } from '@/components/permisos/SinAcceso';
+import { nombreDePantalla, puedeAbrirRuta } from '@/lib/permisos';
 import {
   conPersonaMovida,
   faltaServidor,
+  inicioDePersona,
   leerMatriz,
   leerPermisosDeMas,
   mensajeDeError,
   nombreDePersona,
+  permisosDeLaPersona,
   type Matriz,
   type PermisoDeMas,
 } from '@/lib/permisosAdmin';
 import { datos, pedir, type RolElegible, type UsuarioFila } from './api';
-import UsuariosTable from './UsuariosTable';
+import UsuariosTable, { type InicioDeLaLista } from './UsuariosTable';
 import NuevoUsuarioDialog from './NuevoUsuarioDialog';
 import EditarUsuarioDialog from './EditarUsuarioDialog';
 import RolesPermisosMatrix from './RolesPermisosMatrix';
@@ -59,6 +62,11 @@ import { claseDeRol } from './area-meta';
  * CÓMO SE GUARDA
  * Todo cambio se pinta al toque y va al servidor de fondo; si falla, vuelve atrás y dice
  * por qué. No se recarga la pantalla ni se tapa la lista con un cartel de «cargando».
+ *
+ * PANTALLA DE INICIO (RF-28)
+ * Por dónde entra cada uno después del login: por persona («Entra por», en la lista) y
+ * por rol (en la matriz). La de la persona pisa la de su rol. Se muestra sólo si el
+ * servidor la manda (backend y base al día); si no, la lista queda como siempre.
  */
 
 type EstadoPermisos =
@@ -79,6 +87,7 @@ export default function UsuariosYPermisos() {
   const [cargandoUsuarios, setCargandoUsuarios] = useState(true);
   const [errorUsuarios, setErrorUsuarios] = useState<string | null>(null);
   const [guardandoRol, setGuardandoRol] = useState<ReadonlySet<number>>(new Set());
+  const [guardandoInicio, setGuardandoInicio] = useState<ReadonlySet<number>>(new Set());
 
   const [matriz, setMatriz] = useState<Matriz | null>(null);
   const [permisosDeMas, setPermisosDeMas] = useState<PermisoDeMas[] | null>(null);
@@ -186,6 +195,82 @@ export default function UsuariosYPermisos() {
     showToast(`${capitalizeName(nombreDePersona(u))} ahora es ${nombreRol}. Vale desde lo próximo que haga.`, 'success');
   };
 
+  // ── la pantalla de inicio de una persona (RF-28) ──
+
+  /**
+   * Se ve al toque y, si el servidor dice que no, vuelve a como estaba. Vale desde la
+   * próxima vez que esa persona entre (o abra el sistema). No da ningún permiso: si no
+   * puede ver la pantalla elegida, entra al Dashboard o a la primera que pueda ver, y la
+   * lista lo avisa al lado del selector.
+   */
+  const cambiarInicio = async (u: UsuarioFila, ruta: string | null) => {
+    const antes = u.pantalla_inicio ?? null;
+    if (antes === ruta) return;
+    const aplicar = (valor: string | null) =>
+      setUsuarios((prev) => prev.map((x) => (x.id_usuario === u.id_usuario ? { ...x, pantalla_inicio: valor } : x)));
+    const marcar = (prendido: boolean) =>
+      setGuardandoInicio((s) => {
+        const n = new Set(s);
+        if (prendido) n.add(u.id_usuario);
+        else n.delete(u.id_usuario);
+        return n;
+      });
+    aplicar(ruta);
+    marcar(true);
+    const r = await pedir(`/permisos/usuarios/${u.id_usuario}/pantalla-inicio`, {
+      method: 'PUT',
+      body: { pantalla_inicio: ruta },
+    });
+    marcar(false);
+    if (!r.ok) {
+      aplicar(antes);
+      showToast(
+        r.red
+          ? 'No se pudo cambiar la pantalla de inicio: revisá la conexión.'
+          : faltaServidor(r.status, r.cuerpo)
+            ? 'No se pudo cambiar la pantalla de inicio: falta actualizar el servidor.'
+            : mensajeDeError(r.cuerpo, 'No se pudo cambiar la pantalla de inicio.'),
+        'error',
+      );
+      return;
+    }
+    const quien = capitalizeName(nombreDePersona(u));
+    const respuesta = datos(r) as { puede_abrirla?: unknown } | undefined;
+    if (ruta === null) {
+      showToast(`${quien} va a entrar por la pantalla de su rol.`, 'success');
+    } else if (respuesta?.puede_abrirla === false) {
+      showToast(
+        `Guardado, pero ${quien} no puede ver ${nombreDePantalla(ruta) ?? ruta}: va a entrar por otra hasta que le den acceso.`,
+        'info',
+      );
+    } else {
+      showToast(`${quien} va a entrar por ${nombreDePantalla(ruta) ?? ruta} la próxima vez que abra el sistema.`, 'success');
+    }
+  };
+
+  // Se ofrece sólo si la lista la trae: el servidor y la base ya la tienen.
+  const inicioEnLaLista = usuarios.some((u) => u.pantalla_inicio !== undefined);
+
+  const inicio: InicioDeLaLista | null = inicioEnLaLista
+    ? {
+        describir: (u: UsuarioFila) => {
+          // Sin la matriz o sin los permisos de más no se sabe qué puede ver cada uno:
+          // se ofrece igual, sin avisos (mejor callar que avisar algo que no es).
+          if (!matriz || !permisosDeMas) return { textoNinguna: 'Como su rol', entraEnSuLugar: null };
+          const permisos = permisosDeLaPersona(u, matriz, permisosDeMas);
+          const comoSuRol = inicioDePersona({ ...u, pantalla_inicio: null }, matriz, permisosDeMas);
+          const actual = inicioDePersona(u, matriz, permisosDeMas);
+          return {
+            textoNinguna: `Como su rol (${nombreDePantalla(comoSuRol.ruta) ?? comoSuRol.ruta})`,
+            entraEnSuLugar: actual.fijadaSinAcceso ? actual.ruta : null,
+            puedeAbrir: (ruta: string) => puedeAbrirRuta(permisos, ruta),
+          };
+        },
+        guardando: guardandoInicio,
+        onCambiar: (u: UsuarioFila, ruta: string | null) => void cambiarInicio(u, ruta),
+      }
+    : null;
+
   // ── desbloquear (RF-26) ──
 
   /**
@@ -216,7 +301,11 @@ export default function UsuariosYPermisos() {
 
   // ── alta, edición y baja ──
 
-  const alCrear = (nuevo: UsuarioFila) => {
+  const alCrear = (creado: UsuarioFila) => {
+    // RF-28: recién creado no tiene pantalla de inicio propia (entra como su rol). El alta
+    // no la devuelve; si la lista la conoce, va null y no «no se sabe».
+    const nuevo: UsuarioFila =
+      creado.pantalla_inicio === undefined && inicioEnLaLista ? { ...creado, pantalla_inicio: null } : creado;
     setUsuarios((prev) => [nuevo, ...prev.filter((x) => x.id_usuario !== nuevo.id_usuario)]);
     if (nuevo.activo) setMatriz((m) => (m ? conPersonaMovida(m, '', nuevo.rol) : m));
     // La campanita: el backend deja una notificación del alta.
@@ -339,6 +428,7 @@ export default function UsuariosYPermisos() {
           setEliminando(u);
         }}
         onDesbloquear={desbloquear}
+        inicio={inicio}
       />
 
       {estado.tipo === 'cargando' && (

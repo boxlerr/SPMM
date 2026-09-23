@@ -560,6 +560,30 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON CONFLICT (codigo) DO NOTHING",
         ],
     ),
+    (
+        # RF-28. Dos columnas NULL y nada más: nadie cambia de pantalla por la migración.
+        # Va DESPUÉS de la de permisos, que crea `rol`; si aquélla no se aplicó, ésta
+        # tampoco (misma transacción) y se reintenta en el arranque siguiente. El login no
+        # depende de estas columnas (están `deferred` en el ORM y se leen aparte). No se
+        # siembra ninguna pantalla por rol: es decisión del taller (ver el .sql).
+        "2026-09-22_pantalla_de_inicio",
+        [
+            "ALTER TABLE usuario "
+            "ADD COLUMN IF NOT EXISTS pantalla_inicio VARCHAR(80)",
+            "ALTER TABLE rol "
+            "ADD COLUMN IF NOT EXISTS pantalla_inicio VARCHAR(80)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN usuario.pantalla_inicio IS "
+            "'Pantalla a la que entra esta persona después del login (RF-28), por ejemplo "
+            "/operaciones. Pisa la de su rol. NULL = la de su rol, y si su rol tampoco tiene, el "
+            "inicio de siempre. Si no la puede abrir, entra al Dashboard (o a la primera que pueda "
+            "ver). Los valores válidos los dice PANTALLAS_DE_INICIO de backend/core/permisos.py.'",
+            "COMMENT ON COLUMN rol.pantalla_inicio IS "
+            "'Pantalla a la que entran después del login los de este rol que no tienen una propia "
+            "(RF-28). NULL = el inicio de siempre: el Dashboard, o la primera pantalla del menú que "
+            "puedan ver.'",
+        ],
+    ),
 ]
 
 

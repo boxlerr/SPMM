@@ -34,7 +34,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    text,
 )
+from sqlalchemy.orm import deferred
 
 from backend.infrastructure.db import Base
 from backend.infrastructure.auditoria_movimientos import ahora_ar
@@ -71,10 +73,18 @@ class SeccionPermiso(Base):
 
 class Rol(Base):
     __tablename__ = "rol"
+    # Que un INSERT no pida de vuelta `pantalla_inicio` (ver abajo): puede no existir.
+    __mapper_args__ = {"eager_defaults": False}
 
     # El mismo código que se guarda en usuario.rol (String(20)).
     codigo = Column(String(20), primary_key=True)
     nombre = Column(String(80), nullable=False)
+    # RF-28: la pantalla de inicio de los de este rol que no tienen una propia. NULL = el
+    # inicio de siempre. `deferred`, leída aparte (PermisosRepository) y con default NULL de
+    # la base para que un INSERT no la nombre, igual que usuario.pantalla_inicio (ver el
+    # porqué en domain/Usuario.py): la agrega una migración posterior
+    # (2026-09-22_pantalla_de_inicio) y nada de lo que lee o crea roles puede depender de ella.
+    pantalla_inicio = deferred(Column(String(80), nullable=True, server_default=text("NULL")))
 
 
 class RolArea(Base):

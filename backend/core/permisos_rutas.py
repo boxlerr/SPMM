@@ -53,7 +53,8 @@ detalle de la persona, en Recursos y en Operaciones; la biblioteca de planos, en
 y como solapa de Recursos):
 
   pantalla (área)    lee
-  Dashboard          /api/dashboard/*, /incidencias/metricas
+  Dashboard          /api/dashboard/*, /incidencias/metricas: desde RF-28 cada tarjeta
+                     pide el área de la que muestra datos (TARJETAS_DASHBOARD)
   Operaciones        /ordenes*, /ordenes-resumen, /planificacion*, /planificar,
                      /config/availability, /ordenes-trabajo-piezas, /consumos-material,
                      /planos/orden/*, /planos/{id}/archivo, /ordenes/{id}/incidencias,
@@ -186,6 +187,95 @@ def rechazo(requisitos: tuple[Requisito, ...]) -> str:
     return f"No tenés permiso para {verbo} {primero.que()}."
 
 
+# ─────────────────────────── las tarjetas del dashboard (RF-28) ───────────────────────────
+#
+# El SRS pide (RF-28) «personalizar el dashboard inicial por tipo de usuario». El Dashboard
+# es un resumen de las otras pantallas, y cada tarjeta muestra datos de UNA de ellas: el
+# estado de las OT es de Operaciones, el ranking de clientes es de Clientes, las
+# incidencias de planos son de No conformidades. Cada uno ve sólo las tarjetas de las
+# áreas que puede leer: el Operario (sin Clientes) no ve el ranking de clientes.
+#
+# La pantalla (frontend/src/lib/permisos.ts, TARJETAS_DASHBOARD, espejo de esto: un test
+# compara las dos) esconde la tarjeta y NO la pide. Acá se exige lo mismo, para que
+# esconderla no sea sólo comodidad: cada ruta de una tarjeta pide el requisito de la
+# tarjeta (las excepciones se arman solas con esta lista, más abajo).
+#
+# Pide SÓLO eso y no además el área Dashboard: el mapa dice «alcanza con uno», no «esto y
+# aquello», y la pantalla ya pide el Dashboard para abrirse. Del lado de la API eso deja
+# que alguien con el área de la tarjeta y sin el Dashboard lea el resumen de su área
+# llamando a la dirección a mano: el Operario que lee todas las OT puede leer cuántas hay
+# por estado. Lo único que un resumen suma a su área es el ranking de clientes (cuántas OT
+# tiene cada uno de los 5 primeros), y se aceptó así.
+
+@dataclass(frozen=True)
+class TarjetaDashboard:
+    codigo: str
+    nombre: str
+    requisito: Requisito
+    # (router del mapa, plantilla de la ruta) de todo lo que la tarjeta lee, incluido lo
+    # que abre al tocarla (la lista de OT de un estado, de una prioridad, de un día).
+    rutas: tuple[tuple[str, str], ...]
+    porque: str
+
+
+TARJETAS_DASHBOARD: tuple[TarjetaDashboard, ...] = (
+    TarjetaDashboard(
+        "estado_ordenes", "Estado de las órdenes", area("operaciones"),
+        (("dashboard", "/api/dashboard/estadisticas"),
+         ("dashboard", "/api/dashboard/ordenes-por-estado/{estado}")),
+        "cuántas OT hay en cada estado y cuáles son: datos de las OT.",
+    ),
+    TarjetaDashboard(
+        "ordenes_criticas", "Órdenes críticas", area("operaciones"),
+        (("dashboard", "/api/dashboard/ordenes-criticas"),),
+        "las OT atrasadas o por vencer: datos de las OT.",
+    ),
+    TarjetaDashboard(
+        "incidencias_planos", "Interpretación de planos", area("no_conformidades"),
+        (("incidencias", "/incidencias/metricas"),),
+        "las incidencias y el tiempo perdido: es lo de No conformidades.",
+    ),
+    TarjetaDashboard(
+        "rendimiento", "Rendimiento estimado vs. real", seccion("dashboard_rendimiento"),
+        (("dashboard", "/api/dashboard/rendimiento-operarios"),
+         ("dashboard", "/api/dashboard/rendimiento-procesos")),
+        "compara a la gente con nombre y apellido: sección confidencial (por proceso es "
+        "el mismo cuadro).",
+    ),
+    TarjetaDashboard(
+        "timeline_entregas", "Próximas entregas", area("operaciones"),
+        (("dashboard", "/api/dashboard/timeline-entregas"),
+         ("dashboard", "/api/dashboard/ordenes-por-fecha/{fecha}")),
+        "las entregas de las OT por día.",
+    ),
+    TarjetaDashboard(
+        "top_articulos", "Artículos más producidos", area("operaciones"),
+        (("dashboard", "/api/dashboard/top-articulos"),),
+        "unidades terminadas por artículo: sale de las OT.",
+    ),
+    TarjetaDashboard(
+        "top_clientes", "Clientes con más órdenes", area("clientes"),
+        (("dashboard", "/api/dashboard/clientes-mayor-volumen"),),
+        "la cartera de clientes no es de todos (ver «clientes» en el mapa).",
+    ),
+    TarjetaDashboard(
+        "distribucion_prioridades", "Órdenes por prioridad", area("operaciones"),
+        (("dashboard", "/api/dashboard/distribucion-prioridades"),
+         ("dashboard", "/api/dashboard/ordenes-por-prioridad/{prioridad}")),
+        "cuántas OT hay de cada prioridad y cuáles son: datos de las OT.",
+    ),
+)
+
+
+def _excepciones_de_tarjetas(router: str) -> tuple[Excepcion, ...]:
+    return tuple(
+        Excepcion("GET", ruta, (t.requisito,), f"Tarjeta «{t.nombre}» del Dashboard: {t.porque}")
+        for t in TARJETAS_DASHBOARD
+        for (de, ruta) in t.rutas
+        if de == router
+    )
+
+
 # ─────────────────────────── EL MAPA ───────────────────────────
 #
 # La clave es el nombre con el que main.py pide la política de cada router.
@@ -260,24 +350,26 @@ POLITICAS: dict[str, Politica] = {
     ),
 
     # ── No conformidades ──
-    # Las lee su pantalla, la ficha de la OT (las de esa orden) y el dashboard (las
-    # métricas). Registrar una, cerrarla o editarla pide el área.
+    # Las lee su pantalla y la ficha de la OT (las de esa orden). Registrar una, cerrarla
+    # o editarla pide el área. Las métricas son la tarjeta «Interpretación de planos» del
+    # Dashboard y piden lo de la tarjeta (RF-28, TARJETAS_DASHBOARD): No conformidades.
+    # Hasta el 22/09 el área Dashboard leía TODO este router por esas métricas.
     "incidencias": Politica(
-        leer=(area("no_conformidades"), area("operaciones"), area("dashboard")),
+        leer=(area("no_conformidades"), area("operaciones")),
         escribir=(area("no_conformidades", "write"),),
+        excepciones=_excepciones_de_tarjetas("incidencias"),
     ),
 
     # ── Dashboard: sólo lectura ──
+    # Cada ruta es de una tarjeta y pide el área de esa tarjeta (RF-28, ver
+    # TARJETAS_DASHBOARD arriba). El área Dashboard queda para lo que no sea de ninguna.
     "dashboard": Politica(
         leer=(area("dashboard"),),
         escribir=(area("dashboard", "write"),),
-        excepciones=(
-            Excepcion("GET", "/api/dashboard/rendimiento-operarios",
-                      (seccion("dashboard_rendimiento"),),
-                      "Compara a la gente con nombre y apellido: sección confidencial."),
-            Excepcion("GET", "/api/dashboard/rendimiento-procesos",
-                      (seccion("dashboard_rendimiento"),),
-                      "Es el mismo cuadro (estimado vs. real), por proceso."),
+        excepciones=_excepciones_de_tarjetas("dashboard") + (
+            Excepcion("GET", "/api/dashboard/tiempo-promedio", (area("operaciones"),),
+                      "Hoy no la muestra ninguna tarjeta; son tiempos de las OT "
+                      "terminadas, como las tarjetas de Operaciones."),
         ),
     ),
 

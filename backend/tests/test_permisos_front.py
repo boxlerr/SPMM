@@ -19,6 +19,9 @@ Tres partes:
 3. Las preguntas (`puede`, `puedeSeccion`, el menú visible, la ruta de inicio) con los
    permisos que RESUELVE EL BACKEND para cada rol sembrado: front y back tienen que
    decir lo mismo para cada área, sección y nivel.
+4. RF-28: la pantalla de inicio (qué se puede fijar y adónde entra cada uno) y las
+   tarjetas del Dashboard (cada uno ve las de las áreas que puede leer): la misma lista
+   y la misma respuesta que el backend.
 """
 import json
 import re
@@ -35,10 +38,13 @@ from backend.core.permisos import (
     MATRIZ_ROL_AREA,
     MATRIZ_ROL_SECCION,
     NIVELES,
+    PANTALLAS_DE_INICIO,
     SECCIONES,
     DatosDePermisos,
     permisos_de,
+    puede_abrir_pantalla,
 )
+from backend.core.permisos_rutas import TARJETAS_DASHBOARD, permite
 
 RAIZ = Path(__file__).resolve().parents[2]
 FRONT = RAIZ / "frontend" / "src"
@@ -83,6 +89,8 @@ function responder(crudo) {
     inicio: p.rutaInicio(leido),
     rutas,
     fijadas,
+    tarjetas: p.tarjetasVisibles(leido),
+    ve_tarjeta: Object.fromEntries(p.TARJETAS_DASHBOARD.map((t) => [t.codigo, p.puedeVerTarjeta(leido, t.codigo)])),
   };
 }
 
@@ -107,6 +115,10 @@ console.log(JSON.stringify({
   RUTA_ANCLA: p.RUTA_ANCLA,
   requisitos,
   casos,
+  PANTALLAS_DE_INICIO: p.PANTALLAS_DE_INICIO,
+  TARJETAS_DASHBOARD: p.TARJETAS_DASHBOARD,
+  leidas: entrada.crudas.map((x) => p.leerPantallaInicio(x)),
+  nombres: entrada.crudas.map((x) => p.nombreDePantalla(x)),
 }));
 """
 
@@ -148,7 +160,13 @@ CASOS = {
     "nivel_raro": {"rol": "x", "es_admin": False, "areas": {"dashboard": "superadmin", "planos": "read"}},
 }
 
-FIJADAS = ["/planos", "/clientes", "/auditoria", "   ", "no-empieza-con-barra", "/novedades"]
+FIJADAS = ["/planos", "/clientes", "/auditoria", "   ", "no-empieza-con-barra", "/novedades",
+           # RF-28: sólo una pantalla del menú; una suelta o una subruta no se usa.
+           "/ordenes", "/planos/3", "/recursos", " /operaciones "]
+
+# Lo que puede venir en `pantalla_inicio` (login, /auth/me, la lista, la matriz).
+CRUDAS = ["/planos", " /operaciones ", None, "", "   ", 3, ["/planos"], {"ruta": "/planos"},
+          "/ordenes", "/planos/3", "planos", "/Planos", "https://otro.sitio", "/novedades"]
 
 
 def _hay_node() -> bool:
@@ -172,7 +190,7 @@ def front():
             f"{compilado.stdout}\n{compilado.stderr}")
         (Path(tmp) / "driver.js").write_text(DRIVER)
         (Path(tmp) / "entrada.json").write_text(json.dumps(
-            {"casos": CASOS, "rutas": RUTAS, "fijadas": FIJADAS}))
+            {"casos": CASOS, "rutas": RUTAS, "fijadas": FIJADAS, "crudas": CRUDAS}))
         salida = subprocess.run(
             ["node", "driver.js", "entrada.json"],
             cwd=tmp, capture_output=True, text=True, timeout=120, check=True,
@@ -438,3 +456,129 @@ def test_la_pantalla_fijada_solo_si_se_puede_abrir(front):
     for caso in front["casos"].values():
         for destino in caso["fijadas"].values():
             assert caso["rutas"].get(destino, True) is not False
+
+
+# ═════════════════════ 4. pantalla de inicio y tarjetas del Dashboard (RF-28) ═════════════════════
+
+# Los casos con permisos que resolvió el backend, y cómo resolverlos de nuevo acá.
+CASOS_DEL_BACKEND = {
+    "admin": ("admin", {}),
+    "supervisor": ("supervisor", {}),
+    "operario": ("operario", {}),
+    "operario_con_extras": ("operario", {
+        "usuario_areas": {"recursos": "read"},
+        "usuario_secciones": {"dashboard_rendimiento": "read"},
+    }),
+    "rol_vacio": ("sin_matriz", {}),
+}
+
+
+def _back(caso):
+    rol, extra = CASOS_DEL_BACKEND[caso]
+    return permisos_de(DatosDePermisos(
+        rol=rol, rol_areas=MATRIZ_ROL_AREA.get(rol, {}),
+        rol_secciones=MATRIZ_ROL_SECCION.get(rol, {}), **extra))
+
+
+def test_las_pantallas_que_se_pueden_fijar_son_las_del_backend(front):
+    """Lo que ofrece el selector (PANTALLAS_DE_INICIO de la pantalla, que sale del menú)
+    es exactamente lo que el backend acepta guardar, con el mismo nombre."""
+    assert front["PANTALLAS_DE_INICIO"] == [{"ruta": p.ruta, "nombre": p.nombre} for p in PANTALLAS_DE_INICIO]
+
+
+def test_cada_pantalla_pide_lo_mismo_de_los_dos_lados(front):
+    """«¿La puede abrir?» del backend (lo que contesta al fijarla) mira lo mismo que el
+    menú de la pantalla: el área, o al menos una de las solapas."""
+    menu = {i["href"]: i for i in front["MENU"]}
+    for p in PANTALLAS_DE_INICIO:
+        item = menu[p.ruta]
+        assert item.get("area") == p.area, p.ruta
+        assert tuple(item.get("solapas") or ()) == p.solapas, p.ruta
+
+
+@pytest.mark.parametrize("caso", list(CASOS_DEL_BACKEND))
+def test_puede_abrir_la_pantalla_es_lo_mismo_de_los_dos_lados(front, caso):
+    back = _back(caso)
+    r = front["casos"][caso]
+    for p in PANTALLAS_DE_INICIO:
+        assert r["rutas"][p.ruta] == puede_abrir_pantalla(back, p.ruta), (caso, p.ruta)
+
+
+@pytest.mark.parametrize("caso", list(CASOS_DEL_BACKEND))
+def test_entra_por_la_fijada_si_la_puede_abrir_y_si_no_por_la_primera(front, caso):
+    """DJ ruta-inicio.ts: la fijada si es del menú y la puede abrir; si no, la primera del
+    menú que pueda ver (el Dashboard va primero: «cae al Dashboard»)."""
+    back = _back(caso)
+    r = front["casos"][caso]
+    primera = r["inicio"]
+    for f in FIJADAS:
+        limpia = f.strip()
+        del_menu = limpia in {p.ruta for p in PANTALLAS_DE_INICIO}
+        esperada = limpia if del_menu and puede_abrir_pantalla(back, limpia) else primera
+        assert r["fijadas"][f] == esperada, (caso, f)
+    # El Operario no ve Clientes: cae al Dashboard.
+    if caso == "operario":
+        assert r["fijadas"]["/clientes"] == "/dashboard"
+        assert r["fijadas"][" /operaciones "] == "/operaciones"
+        assert r["fijadas"]["/ordenes"] == "/dashboard"
+
+
+def test_sin_permisos_la_fijada_vale_tal_cual(front):
+    """Backend viejo (acceso total): una pantalla fijada se abre siempre. Y un backend que
+    no la manda da None: el Dashboard de siempre."""
+    for caso in ("null", "__undefined__", "vacio"):
+        r = front["casos"][caso]
+        assert r["fijadas"]["/recursos"] == "/recursos"
+        assert r["fijadas"]["/ordenes"] == "/dashboard"
+        assert r["inicio"] == "/dashboard"
+
+
+def test_lo_que_viene_en_pantalla_inicio_se_lee_con_cuidado(front):
+    """Sólo una pantalla del menú; cualquier otra cosa (un backend viejo que no la manda,
+    una ruta que quedó vieja, basura) es null: el inicio de siempre, nunca un 404."""
+    esperadas = ["/planos", "/operaciones", None, None, None, None, None, None,
+                 None, None, None, None, None, "/novedades"]
+    assert front["leidas"] == esperadas
+    assert front["nombres"][0] == "Planos" and front["nombres"][-1] == "Novedades"
+    assert front["nombres"][2] is None
+
+
+def test_las_tarjetas_del_dashboard_son_las_del_backend(front):
+    """Mismo código, nombre y requisito, en el mismo orden (el del Dashboard)."""
+    def req(r):
+        return {"area": r.area} if r.area else {"seccion": r.seccion}
+    assert front["TARJETAS_DASHBOARD"] == [
+        {"codigo": t.codigo, "nombre": t.nombre, **req(t.requisito)} for t in TARJETAS_DASHBOARD
+    ]
+    assert all(t.requisito.nivel == "read" for t in TARJETAS_DASHBOARD)
+
+
+@pytest.mark.parametrize("caso", list(CASOS_DEL_BACKEND))
+def test_cada_uno_ve_las_tarjetas_que_el_backend_le_deja_leer(front, caso):
+    """La pantalla muestra (y pide) exactamente las tarjetas cuyas rutas el backend le
+    contesta: ni una que vuelva 403, ni una escondida que podría ver."""
+    back = _back(caso)
+    esperadas = [t.codigo for t in TARJETAS_DASHBOARD if permite((t.requisito,), back, {})]
+    r = front["casos"][caso]
+    assert r["tarjetas"] == esperadas, caso
+    assert [c for c, ve in r["ve_tarjeta"].items() if ve] == esperadas
+
+
+def test_las_tarjetas_de_cada_rol(front):
+    todas = [t.codigo for t in TARJETAS_DASHBOARD]
+    assert front["casos"]["admin"]["tarjetas"] == todas
+    # El Supervisor ve todo menos el rendimiento por persona (confidencial).
+    assert front["casos"]["supervisor"]["tarjetas"] == [c for c in todas if c != "rendimiento"]
+    # El Operario, además, no ve el ranking de clientes (no tiene Clientes).
+    assert front["casos"]["operario"]["tarjetas"] == [
+        c for c in todas if c not in ("rendimiento", "top_clientes")]
+    # Con el rendimiento otorgado a mano, lo ve.
+    assert "rendimiento" in front["casos"]["operario_con_extras"]["tarjetas"]
+    assert front["casos"]["rol_vacio"]["tarjetas"] == []
+
+
+@pytest.mark.parametrize("caso", ["null", "vacio", "sin_areas", "areas_lista", "__undefined__"])
+def test_sin_permisos_se_ven_todas_las_tarjetas(front, caso):
+    """Backend viejo (producción hasta el deploy a mano): el Dashboard de siempre, entero.
+    Nunca se esconde todo porque falte un campo."""
+    assert front["casos"][caso]["tarjetas"] == [t.codigo for t in TARJETAS_DASHBOARD]

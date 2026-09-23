@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, type Dispatch, type SetStateAction } from 'react';
-import { AlertCircle, ChevronDown, Lock, ShieldCheck } from 'lucide-react';
+import { AlertCircle, ChevronDown, DoorOpen, Lock, ShieldCheck } from 'lucide-react';
 import {
   ARBOL,
   AREAS,
+  nombreDePantalla,
+  puedeAbrirRuta,
+  rutaInicio,
   type AreaCodigo,
   type Nivel,
   type SeccionCodigo,
@@ -13,10 +16,13 @@ import {
   confidencialesDe,
   conNivelDeArea,
   conNivelDeSeccion,
+  conPantallaDeRol,
   faltaServidor,
+  inicioDeRol,
   mensajeDeError,
   nivelesDeRolEnArea,
   opcionesDeRolEnSeccion,
+  permisosDeRol,
   type Matriz,
   type NivelDeSeccion,
   type RolDeLaMatriz,
@@ -24,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { AREA_META, NIVEL_INFO } from './area-meta';
 import { pedir } from './api';
+import SelectorDePantalla from './SelectorDePantalla';
 
 /**
  * La matriz rol × área (RolesPermisosMatrix de Don Joaquín) y, debajo, el detalle por
@@ -42,6 +49,11 @@ import { pedir } from './api';
  * permisos se leen de la base en cada pedido, nadie tiene que volver a entrar.
  *
  * En el teléfono la tabla de 8 columnas no entra: va una tarjeta por rol.
+ *
+ * Debajo, «Por dónde entra cada rol» (RF-28): la pantalla a la que va cada uno después del
+ * login si no tiene una propia (la de la persona se elige en la lista de usuarios y pisa
+ * ésta). No da permisos: si el rol no la puede ver, se avisa adónde entra en su lugar.
+ * Sólo aparece si el servidor la sabe guardar (`matriz.inicioDisponible`).
  */
 
 interface Props {
@@ -126,6 +138,46 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
       });
       setError(textoDeError(r, 'No se pudo guardar el permiso de la solapa.'));
     }
+  };
+
+  const cambiarInicio = async (rol: RolDeLaMatriz, ruta: string | null) => {
+    const previo = rol.pantalla_inicio ?? null;
+    if (previo === ruta) return;
+    const clave = `${rol.codigo}:inicio`;
+    setError(null);
+    setMatriz((m) => (m ? conPantallaDeRol(m, rol.codigo, ruta) : m));
+    marcar(clave, true);
+    const r = await pedir(
+      `/permisos/roles/${encodeURIComponent(rol.codigo)}/pantalla-inicio`,
+      { method: 'PUT', body: { pantalla_inicio: ruta } },
+    );
+    marcar(clave, false);
+    if (!r.ok) {
+      setMatriz((m) => {
+        const actual = m?.roles.find((x) => x.codigo === rol.codigo)?.pantalla_inicio ?? null;
+        return m && actual === ruta ? conPantallaDeRol(m, rol.codigo, previo) : m;
+      });
+      setError(textoDeError(r, 'No se pudo guardar la pantalla de inicio del rol.'));
+    }
+  };
+
+  const selectorDeInicio = (rol: RolDeLaMatriz) => {
+    const permisos = permisosDeRol(rol);
+    const siempre = rutaInicio(permisos, null);
+    const actual = inicioDeRol(rol);
+    return (
+      <SelectorDePantalla
+        valor={rol.pantalla_inicio ?? null}
+        textoNinguna={`La de siempre (${nombreDePantalla(siempre) ?? siempre})`}
+        puedeAbrir={(ruta) => puedeAbrirRuta(permisos, ruta)}
+        entraEnSuLugar={actual.fijadaSinAcceso ? actual.ruta : null}
+        editable={puedeEditar}
+        guardando={guardando.has(`${rol.codigo}:inicio`)}
+        etiqueta={`Pantalla de inicio de ${rol.nombre}`}
+        onCambiar={(ruta) => void cambiarInicio(rol, ruta)}
+        className="w-full"
+      />
+    );
   };
 
   const selectorDeArea = (rol: RolDeLaMatriz, area: AreaCodigo) => {
@@ -282,6 +334,36 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
           </div>
         ))}
       </div>
+
+      {/* RF-28: por dónde entra cada rol. */}
+      {matriz.inicioDisponible && (
+        <div className="border-t border-gray-200 px-4 sm:px-5 py-4 space-y-3">
+          <div>
+            <h5 className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">
+              <DoorOpen className="h-4 w-4 shrink-0 text-[#DC143C]" />
+              Por dónde entra cada rol
+            </h5>
+            <p className="text-xs text-gray-600 mt-1">
+              La pantalla que ve cada uno apenas entra al sistema. Si a una persona le elegís otra en la lista de
+              usuarios, vale la suya. No da permisos: si el rol no puede ver esa pantalla, entra al Dashboard (o a
+              la primera que pueda ver). Vale desde la próxima vez que cada uno abra el sistema.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {matriz.roles.map((rol) => (
+              <label key={rol.codigo} className="block min-w-0 rounded-lg border border-gray-200 px-3 py-2.5">
+                <span className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-gray-800">{rol.nombre}</span>
+                  <span className="text-[11px] text-gray-500">
+                    {rol.usuarios_activos} persona{rol.usuarios_activos === 1 ? '' : 's'}
+                  </span>
+                </span>
+                {selectorDeInicio(rol)}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* El detalle por solapa, de a un rol. */}
       {detalle && (

@@ -1,6 +1,7 @@
 "use client"
 
-import { BarChart3, RefreshCw } from "lucide-react"
+import { useMemo } from "react"
+import { BarChart3, LayoutGrid, RefreshCw } from "lucide-react"
 import { useDashboardData } from "@/hooks/useDashboardData"
 import StatsCards from "@/components/dashboard/StatsCards"
 import OrdenesCriticas from "@/components/dashboard/OrdenesCriticas"
@@ -13,11 +14,33 @@ import RendimientoEstimadoReal from "@/components/dashboard/RendimientoEstimadoR
 
 
 import { usePermisos } from "@/hooks/usePermisos"
+import { tarjetasVisibles, type TarjetaCodigo } from "@/lib/permisos"
 
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
 import StatusOrdersModal from "@/components/dashboard/StatusOrdersModal"
 
+// Las tres tarjetas chicas van en una grilla de 4 columnas en pantallas grandes (Artículos
+// ocupa 2). Sin el ranking de clientes quedan 3 columnas; con sólo el ranking, 2 (así no
+// queda una tarjeta angosta y un hueco al lado). Clases escritas enteras: Tailwind no ve
+// las que se arman pegando pedazos.
+const GRILLA_XL: Record<number, string> = {
+  4: "xl:grid-cols-4",
+  3: "xl:grid-cols-3",
+  2: "xl:grid-cols-2",
+  1: "xl:grid-cols-2",
+}
+
 export default function DashboardPage() {
+  // RF-28: cada tarjeta es de un área (lib/permisos.ts, TARJETAS_DASHBOARD) y cada uno ve
+  // sólo las de las áreas que puede leer: el Operario, sin Clientes, no ve el ranking de
+  // clientes. Las que no se ven tampoco se piden (el backend las contesta 403). Sin
+  // permisos (backend viejo) se ven todas, como siempre.
+  //
+  // El rendimiento POR PERSONA compara a la gente con nombre y apellido: es una sección
+  // confidencial (RF-24) y es una tarjeta más, con la sección como requisito.
+  const { permisos } = usePermisos()
+  const visibles = useMemo(() => tarjetasVisibles(permisos), [permisos])
+  const ve = (codigo: TarjetaCodigo) => visibles.includes(codigo)
   const {
     estadisticas,
     ordenesCriticas,
@@ -44,13 +67,9 @@ export default function DashboardPage() {
     setStatusOrders,
     fetchOrdenesPorEstado,
     refreshAll,
-    apiUrl,
-  } = useDashboardData()
-  // RF-24: el rendimiento POR PERSONA compara a la gente con nombre y apellido; es una
-  // sección confidencial y el backend la contesta 403 a quien no la tiene otorgada.
-  // No se pide ni se dibuja: un cuadro vacío con un error no le dice nada a nadie.
-  const { puedeSeccion } = usePermisos()
-  const veRendimiento = puedeSeccion("dashboard_rendimiento")
+  } = useDashboardData(visibles)
+  const columnasChicas = (ve("top_articulos") ? 2 : 0) + (ve("top_clientes") ? 1 : 0)
+    + (ve("distribucion_prioridades") ? 1 : 0)
 
   const handlePriorityClick = (prioridad: string) => {
     fetchOrdenesPorPrioridad(prioridad)
@@ -94,52 +113,73 @@ export default function DashboardPage() {
                 Panel de control y estadísticas del sistema SPMM
               </p>
             </div>
-            <button
-              onClick={refreshAll}
-              disabled={isRefreshing}
-              className="shrink-0 flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-[#DC143C] to-[#B8112E] text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-            >
-              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-              {/* Con rótulo también en el teléfono: ahí va solo en su renglón, y un
-                  botón rojo con dos flechitas y nada más no dice qué hace. */}
-              <span>Actualizar</span>
-            </button>
+            {visibles.length > 0 && (
+              <button
+                onClick={refreshAll}
+                disabled={isRefreshing}
+                className="shrink-0 flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-[#DC143C] to-[#B8112E] text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                {/* Con rótulo también en el teléfono: ahí va solo en su renglón, y un
+                    botón rojo con dos flechitas y nada más no dice qué hace. */}
+                <span>Actualizar</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Contenedor principal */}
       <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
+        {visibles.length === 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white px-5 py-10 text-center shadow-sm">
+            <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gray-100">
+              <LayoutGrid className="h-5 w-5 text-gray-500" />
+            </div>
+            <p className="font-semibold text-gray-900">No hay nada para mostrarte acá todavía</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-gray-600">
+              El Dashboard resume las órdenes, los clientes y las no conformidades, y tu usuario no
+              ve ninguna de esas pantallas. Si las necesitás, pedíselas a un administrador.
+            </p>
+          </div>
+        )}
+
         {/* 1. Estado de Ordenes (Stats) */}
-        <StatsCards estadisticas={estadisticas} loading={loading} error={error} onStatusClick={handleStatusClick} />
+        {ve("estado_ordenes") && (
+          <StatsCards estadisticas={estadisticas} loading={loading} error={error} onStatusClick={handleStatusClick} />
+        )}
 
         {/* 2. Ordenes Críticas */}
-        <OrdenesCriticas ordenes={ordenesCriticas} loading={loadingCriticas} />
+        {ve("ordenes_criticas") && <OrdenesCriticas ordenes={ordenesCriticas} loading={loadingCriticas} />}
 
         {/* Interpretación de planos: incidencias y tiempo perdido */}
-        <IncidenciasPlanos />
+        {ve("incidencias_planos") && <IncidenciasPlanos />}
 
         {/* Rendimiento: tiempo estimado vs. real por proceso y por operario */}
-        {veRendimiento && <RendimientoEstimadoReal />}
+        {ve("rendimiento") && <RendimientoEstimadoReal />}
 
         {/* 3. Timeline de entregas */}
-        <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />
+        {ve("timeline_entregas") && <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />}
 
         {/* 4. Top Artículos y Top Clientes (y Distribución) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 md:gap-8">
-          {/* Top Artículos */}
-          <TopArticles articulos={topArticulos} loading={loadingExtras} />
+        {columnasChicas > 0 && (
+          <div className={`grid grid-cols-1 md:grid-cols-2 ${GRILLA_XL[columnasChicas]} gap-6 md:gap-8`}>
+            {/* Top Artículos */}
+            {ve("top_articulos") && <TopArticles articulos={topArticulos} loading={loadingExtras} />}
 
-          {/* Top Clientes */}
-          <TopClients clientes={topClientes} loading={loadingExtras} />
+            {/* Top Clientes */}
+            {ve("top_clientes") && <TopClients clientes={topClientes} loading={loadingExtras} />}
 
-          {/* Distribución de Prioridades (Manteniendo para no perder funcionalidad) */}
-          <DistribucionPrioridades
-            prioridades={distribucionPrioridades}
-            loading={loadingExtras}
-            onPriorityClick={handlePriorityClick}
-          />
-        </div>
+            {/* Distribución de Prioridades (Manteniendo para no perder funcionalidad) */}
+            {ve("distribucion_prioridades") && (
+              <DistribucionPrioridades
+                prioridades={distribucionPrioridades}
+                loading={loadingExtras}
+                onPriorityClick={handlePriorityClick}
+              />
+            )}
+          </div>
+        )}
 
       </div>
 

@@ -144,6 +144,22 @@ const SOLAPAS: Solapa[] = [
         ),
       },
       {
+        titulo: 'Por dónde entra cada uno',
+        texto: (
+          <>
+            Debajo de la matriz, en <b>Por dónde entra cada rol</b>, elegís la pantalla que ve cada rol apenas
+            entra (por ejemplo, que el Operario vaya directo a Operaciones). A una persona le podés poner otra en
+            la lista de usuarios, en <b>Entra por</b>: vale la suya.
+          </>
+        ),
+        consejo: (
+          <>
+            No da permisos: si no puede ver esa pantalla, entra al Dashboard. Y el Dashboard le muestra a cada uno
+            sólo lo de las pantallas que puede ver.
+          </>
+        ),
+      },
+      {
         titulo: 'Lo que es de todos',
         texto: (
           <>

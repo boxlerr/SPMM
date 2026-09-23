@@ -9,6 +9,7 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
+from backend.core.permisos import LARGO_PANTALLA_DE_INICIO, validar_pantalla_de_inicio
 from backend.dto.UsuarioRequestDTO import _normalizar_rol
 
 # Hora del taller. Las fechas de la base son hora local sin zona (ver fechas.py).
@@ -85,3 +86,17 @@ class CambiarRolDTO(BaseModel):
     @classmethod
     def _rol(cls, v):
         return _normalizar_rol(v)
+
+
+class PantallaInicioDTO(BaseModel):
+    """PUT /permisos/usuarios/{id}/pantalla-inicio y /permisos/roles/{rol}/pantalla-inicio
+
+    RF-28. La pantalla a la que entra después del login: una del menú ('/operaciones'), o
+    null —para una persona, «como su rol»; para un rol, «la de siempre»—. Va obligatoria
+    (aunque sea null): un cuerpo vacío no puede borrar nada por descuido."""
+    pantalla_inicio: Optional[str] = Field(..., max_length=LARGO_PANTALLA_DE_INICIO)
+
+    @field_validator("pantalla_inicio")
+    @classmethod
+    def _pantalla(cls, v):
+        return validar_pantalla_de_inicio(v)

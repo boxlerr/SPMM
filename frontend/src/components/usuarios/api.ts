@@ -75,6 +75,11 @@ export interface UsuarioFila {
   intentos_fallidos?: number;
   // RF-24. True/False, o null/ausente si no se sabe (backend o base viejos): sin candado.
   admin_permanente?: boolean | null;
+  /**
+   * RF-28. La pantalla por la que entra ('/operaciones'); null = como su rol. Ausente = el
+   * servidor no la sabe (backend o base viejos): no se muestra ni se ofrece cambiarla.
+   */
+  pantalla_inicio?: string | null;
 }
 
 /** Un rol para elegir (de la matriz). */
