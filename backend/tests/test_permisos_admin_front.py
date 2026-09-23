@@ -280,6 +280,37 @@ async def test_lo_que_pinta_la_pantalla_es_lo_que_contesta_el_backend_despues(cl
             == {s["codigo"]: s["confidencial"] for a in despues["areas"] for s in a["secciones"]})
 
 
+async def test_crear_renombrar_y_borrar_un_rol_pintan_lo_que_guarda_el_backend(cliente, correr):
+    """El ABM de roles (revisión del 23/09): la pantalla agrega, renombra y saca el rol
+    sin volver a pedir la matriz. Lo que pinta tiene que ser lo que el backend contesta
+    después: un rol nuevo sin ningún permiso, en todas las áreas y secciones."""
+    admin = _token(JULIAN)
+    antes = (await cliente.get("/permisos/matriz", headers=admin)).json()["data"]
+    r = await cliente.post("/permisos/roles", headers=admin, json={"nombre": "Pañol"})
+    assert r.status_code == 200, r.text
+    codigo = r.json()["data"]["codigo"]
+    r = await cliente.put(f"/permisos/roles/{codigo}", headers=admin, json={"nombre": "Pañol y depósito"})
+    assert r.status_code == 200, r.text
+    despues = (await cliente.get("/permisos/matriz", headers=admin)).json()["data"]
+
+    cadena = [{"fn": "leerMatriz", "args": [antes]},
+              {"fn": "conRolNuevo", "args": [codigo, "Pañol"]},
+              {"fn": "conRolRenombrado", "args": [codigo, "Pañol y depósito"]}]
+    pintada = correr([{"m": "admin", "cadena": cadena}])[0]
+    assert pintada["abmDeRoles"] is True
+    assert _roles(pintada) == _roles(despues)
+    assert [(x["codigo"], x["nombre"]) for x in pintada["roles"]] == \
+        [(x["codigo"], x["nombre"]) for x in despues["roles"]]
+    nuevo = next(x for x in pintada["roles"] if x["codigo"] == codigo)
+    assert nuevo["pantalla_inicio"] is None  # «la de siempre», como lo deja el backend
+
+    r = await cliente.delete(f"/permisos/roles/{codigo}", headers=admin)
+    assert r.status_code == 200, r.text
+    sin = (await cliente.get("/permisos/matriz", headers=admin)).json()["data"]
+    pintada = correr([{"m": "admin", "cadena": cadena + [{"fn": "sinRol", "args": [codigo]}]}])[0]
+    assert _roles(pintada) == _roles(sin)
+
+
 @pytest.mark.parametrize("crudo", [None, [], {}, {"roles": "x"}, "texto", {"roles": [{"nombre": "sin código"}]}])
 def test_una_matriz_que_no_se_entiende(correr, crudo):
     r = _uno(correr, "admin", "leerMatriz", crudo)

@@ -293,6 +293,45 @@ ROLES: tuple[tuple[str, str], ...] = (
     ("operario", "Operario"),
 )
 
+# ─────────────────────────── roles nuevos ───────────────────────────
+#
+# Los tres de arriba son los sembrados; desde la pantalla se crean, se renombran y se
+# borran otros (el ABM de roles de DJ: crearRolAction, renombrarRolAction,
+# eliminarRolAction). El código sale del nombre y NO cambia al renombrar: es lo que queda
+# guardado en usuario.rol y en las filas de permisos.
+
+LARGO_CODIGO_DE_ROL = 20  # usuario.rol y rol.codigo son VARCHAR(20)
+LARGO_NOMBRE_DE_ROL = 80  # rol.nombre
+
+
+def codigo_para_rol(nombre: str, usados: Iterable[str]) -> str:
+    """El código de un rol nuevo, sacado de su nombre (slugRol de DJ): «Pañol» -> «panol»,
+    «Jefe de planta» -> «jefe_de_planta». Sin tildes, en minúsculas y con _; empieza con
+    letra y tiene de 2 a 20 caracteres (la forma que acepta el alta de usuarios). Nunca
+    «admin» (sería admin por regla). Único: si ya está, «panol_2», «panol_3»...
+
+    `usados` son los códigos que no se pueden repetir: los de la tabla rol y también los
+    que tenga algún usuario aunque no estén en la tabla (un rol viejo que se borró a
+    mano): si no, crear un rol con ese nombre le daría sus permisos a esa persona sin que
+    nadie lo decida."""
+    import re
+    import unicodedata
+
+    base = unicodedata.normalize("NFD", nombre or "").encode("ascii", "ignore").decode().lower()
+    base = re.sub(r"[^a-z0-9]+", "_", base).strip("_")
+    if len(base) < 2 or not base[0].isalpha():
+        base = f"rol_{base}".strip("_")
+    base = base[:LARGO_CODIGO_DE_ROL].rstrip("_")
+    if base == ROL_ADMIN:
+        base = "rol_admin"
+    usados = set(usados) | {ROL_ADMIN}
+    codigo, n = base, 2
+    while codigo in usados:
+        sufijo = f"_{n}"
+        codigo = base[:LARGO_CODIGO_DE_ROL - len(sufijo)].rstrip("_") + sufijo
+        n += 1
+    return codigo
+
 MATRIZ_ROL_AREA: dict[str, dict[str, str]] = {
     "admin": {a.codigo: "admin" for a in AREAS},
     "supervisor": {

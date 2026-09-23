@@ -9,7 +9,11 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
-from backend.core.permisos import LARGO_PANTALLA_DE_INICIO, validar_pantalla_de_inicio
+from backend.core.permisos import (
+    LARGO_NOMBRE_DE_ROL,
+    LARGO_PANTALLA_DE_INICIO,
+    validar_pantalla_de_inicio,
+)
 from backend.dto.UsuarioRequestDTO import _normalizar_rol
 
 # Hora del taller. Las fechas de la base son hora local sin zona (ver fechas.py).
@@ -100,3 +104,19 @@ class PantallaInicioDTO(BaseModel):
     @classmethod
     def _pantalla(cls, v):
         return validar_pantalla_de_inicio(v)
+
+
+class NombreDeRolDTO(BaseModel):
+    """POST /permisos/roles (crear) y PUT /permisos/roles/{rol} (renombrar). El código lo
+    arma el servidor con el nombre al crear, y no cambia al renombrar."""
+    nombre: str
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre(cls, v):
+        v = " ".join((v or "").split())
+        if len(v) < 2:
+            raise ValueError("Poné un nombre de al menos 2 caracteres.")
+        if len(v) > LARGO_NOMBRE_DE_ROL:
+            raise ValueError(f"El nombre puede tener hasta {LARGO_NOMBRE_DE_ROL} caracteres.")
+        return v

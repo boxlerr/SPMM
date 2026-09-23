@@ -297,6 +297,51 @@ class PermisosRepository:
             secciones.setdefault(f.rol_codigo, {})[f.seccion_codigo] = f.nivel
         return areas, secciones
 
+    async def usuarios_por_rol(self) -> dict[str, int]:
+        """{rol: cuántos lo tienen}, contando a los que no tienen acceso: un rol con
+        gente, aunque sea inactiva, no se borra (ver borrar_rol)."""
+        filas = (await self.db.execute(
+            select(Usuario.rol, func.count()).group_by(Usuario.rol)
+        )).all()
+        return {rol: int(n) for rol, n in filas}
+
+    async def codigos_de_rol_usados(self) -> set[str]:
+        """Los códigos que un rol nuevo no puede repetir: los de la tabla y los que tenga
+        algún usuario aunque no estén en ella."""
+        de_la_tabla = {c for (c,) in (await self.db.execute(select(Rol.codigo))).all()}
+        de_la_gente = {r for (r,) in (await self.db.execute(select(Usuario.rol).distinct())).all() if r}
+        return de_la_tabla | de_la_gente
+
+    async def nombres_de_roles(self) -> dict[str, str]:
+        """{nombre en minúsculas: código}, para no tener dos roles que se llamen igual."""
+        return {n.strip().lower(): c for c, n in (await self.db.execute(select(Rol.codigo, Rol.nombre))).all()}
+
+    async def crear_rol(self, codigo: str, nombre: str) -> None:
+        # Arranca sin ninguna fila de permisos: «sin acceso» en todo (mínimo privilegio, DJ).
+        self.db.add(Rol(codigo=codigo, nombre=nombre))
+
+    async def renombrar_rol(self, codigo: str, nombre: str) -> None:
+        await self.db.execute(
+            update(Rol).where(Rol.codigo == codigo).values(nombre=nombre)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def usuarios_del_rol(self, codigo: str) -> tuple[int, int]:
+        """(activos, sin acceso) con ese rol."""
+        filas = (await self.db.execute(
+            select(Usuario.activo, func.count()).where(Usuario.rol == codigo).group_by(Usuario.activo)
+        )).all()
+        activos = sum(int(n) for a, n in filas if a)
+        return activos, sum(int(n) for a, n in filas if not a)
+
+    async def borrar_rol(self, codigo: str) -> None:
+        """Sus permisos y el rol. Las FK tienen ON DELETE CASCADE, pero se borran a mano
+        igual (como DJ): no depende de que la base las tenga."""
+        from sqlalchemy import delete
+        await self.db.execute(delete(RolSeccion).where(RolSeccion.rol_codigo == codigo))
+        await self.db.execute(delete(RolArea).where(RolArea.rol_codigo == codigo))
+        await self.db.execute(delete(Rol).where(Rol.codigo == codigo))
+
     async def usuarios_activos_por_rol(self) -> dict[str, int]:
         filas = (await self.db.execute(
             select(Usuario.rol, func.count()).where(Usuario.activo == True)  # noqa: E712

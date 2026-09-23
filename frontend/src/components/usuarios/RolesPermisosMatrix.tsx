@@ -1,7 +1,16 @@
 'use client';
 
 import { useState, type Dispatch, type SetStateAction } from 'react';
-import { AlertCircle, ChevronDown, DoorOpen, Lock, ShieldCheck } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, DoorOpen, Lock, Pencil, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   ARBOL,
   AREAS,
@@ -17,19 +26,22 @@ import {
   conNivelDeArea,
   conNivelDeSeccion,
   conPantallaDeRol,
+  conRolNuevo,
+  conRolRenombrado,
   faltaServidor,
   inicioDeRol,
   mensajeDeError,
   nivelesDeRolEnArea,
   opcionesDeRolEnSeccion,
   permisosDeRol,
+  sinRol,
   type Matriz,
   type NivelDeSeccion,
   type RolDeLaMatriz,
 } from '@/lib/permisosAdmin';
 import { cn } from '@/lib/utils';
 import { AREA_META, NIVEL_INFO } from './area-meta';
-import { pedir } from './api';
+import { datos, pedir } from './api';
 import SelectorDePantalla from './SelectorDePantalla';
 
 /**
@@ -54,6 +66,11 @@ import SelectorDePantalla from './SelectorDePantalla';
  * login si no tiene una propia (la de la persona se elige en la lista de usuarios y pisa
  * ésta). No da permisos: si el rol no la puede ver, se avisa adónde entra en su lugar.
  * Sólo aparece si el servidor la sabe guardar (`matriz.inicioDisponible`).
+ *
+ * Los roles se crean, se renombran y se borran acá mismo, en línea (el ABM de roles de DJ,
+ * que faltaba hasta el 23/09): «Crear rol» al final de la lista (arranca sin ningún
+ * permiso), el lápiz para renombrar y el tacho para borrar uno que nadie tiene. El
+ * Administrador no se toca. Sólo si el servidor lo sabe hacer (`matriz.abmDeRoles`).
  */
 
 interface Props {
@@ -61,6 +78,11 @@ interface Props {
   setMatriz: Dispatch<SetStateAction<Matriz | null>>;
   /** Sólo el rol Administrador cambia permisos. El resto (si ve esto) lo ve en lectura. */
   puedeEditar: boolean;
+  /**
+   * Cuántas personas tiene cada rol, contando a las que no tienen acceso (sale de la lista
+   * de usuarios). Un rol con gente no se borra. null = no se sabe: se usan las activas.
+   */
+  personasPorRol?: ReadonlyMap<string, number> | null;
 }
 
 function Pastilla({ nivel, className = '' }: { nivel: Nivel; className?: string }) {
@@ -81,9 +103,18 @@ function textoDeError(r: { red: boolean; status: number; cuerpo: unknown }, porD
   return mensajeDeError(r.cuerpo, porDefecto);
 }
 
-export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: Props) {
+export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar, personasPorRol }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState<ReadonlySet<string>>(new Set());
+  // El ABM de roles.
+  const abm = puedeEditar && matriz.abmDeRoles;
+  const [editandoRol, setEditandoRol] = useState<string | null>(null);
+  const [nombreEditado, setNombreEditado] = useState('');
+  const [creandoRol, setCreandoRol] = useState(false);
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [ocupadoRol, setOcupadoRol] = useState(false);
+  const [borrando, setBorrando] = useState<RolDeLaMatriz | null>(null);
+  const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
   const noAdmins = matriz.roles.filter((r) => !r.es_admin);
   const [rolDetalle, setRolDetalle] = useState<string | null>(noAdmins[0]?.codigo ?? null);
   const conf = confidencialesDe(matriz);
@@ -160,6 +191,215 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
       setError(textoDeError(r, 'No se pudo guardar la pantalla de inicio del rol.'));
     }
   };
+
+  // ── crear, renombrar y borrar roles ──
+
+  const personas = (rol: RolDeLaMatriz) => personasPorRol?.get(rol.codigo) ?? rol.usuarios_activos;
+
+  const crearRol = async () => {
+    const nombre = nombreNuevo.trim().replace(/\s+/g, ' ');
+    if (nombre.length < 2 || ocupadoRol) return;
+    setError(null);
+    setOcupadoRol(true);
+    const r = await pedir('/permisos/roles', { method: 'POST', body: { nombre } });
+    setOcupadoRol(false);
+    const creado = datos(r) as { codigo?: unknown; nombre?: unknown } | undefined;
+    if (!r.ok || typeof creado?.codigo !== 'string') {
+      setError(textoDeError(r, 'No se pudo crear el rol.'));
+      return;
+    }
+    const codigo = creado.codigo;
+    setMatriz((m) => (m ? conRolNuevo(m, codigo, typeof creado.nombre === 'string' ? creado.nombre : nombre) : m));
+    setNombreNuevo('');
+    setCreandoRol(false);
+    setRolDetalle(codigo);
+  };
+
+  const empezarARenombrar = (rol: RolDeLaMatriz) => {
+    setError(null);
+    setEditandoRol(rol.codigo);
+    setNombreEditado(rol.nombre);
+  };
+
+  /** Se ve al toque y, si el servidor dice que no, vuelve al nombre de antes. */
+  const renombrarRol = async (rol: RolDeLaMatriz) => {
+    const nombre = nombreEditado.trim().replace(/\s+/g, ' ');
+    setEditandoRol(null);
+    if (nombre.length < 2 || nombre === rol.nombre) return;
+    const antes = rol.nombre;
+    setError(null);
+    setMatriz((m) => (m ? conRolRenombrado(m, rol.codigo, nombre) : m));
+    const r = await pedir(`/permisos/roles/${encodeURIComponent(rol.codigo)}`, { method: 'PUT', body: { nombre } });
+    if (!r.ok) {
+      setMatriz((m) => {
+        const actual = m?.roles.find((x) => x.codigo === rol.codigo)?.nombre;
+        return m && actual === nombre ? conRolRenombrado(m, rol.codigo, antes) : m;
+      });
+      setError(textoDeError(r, 'No se pudo renombrar el rol.'));
+    }
+  };
+
+  const borrarRol = async () => {
+    const rol = borrando;
+    if (!rol || ocupadoRol) return;
+    setErrorBorrar(null);
+    setOcupadoRol(true);
+    const r = await pedir(`/permisos/roles/${encodeURIComponent(rol.codigo)}`, { method: 'DELETE' });
+    setOcupadoRol(false);
+    if (!r.ok) {
+      setErrorBorrar(textoDeError(r, 'No se pudo borrar el rol.'));
+      return;
+    }
+    setMatriz((m) => (m ? sinRol(m, rol.codigo) : m));
+    setBorrando(null);
+  };
+
+  /** El nombre del rol en la fila (o en la tarjeta), con el lápiz y el tacho del ABM. */
+  const nombreDelRol = (rol: RolDeLaMatriz, cuantas: 'fila' | 'tarjeta') => {
+    if (editandoRol === rol.codigo) {
+      return (
+        <div className="flex items-center gap-1">
+          <input
+            autoFocus
+            aria-label={`Nuevo nombre de ${rol.nombre}`}
+            value={nombreEditado}
+            maxLength={80}
+            onChange={(e) => setNombreEditado(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void renombrarRol(rol);
+              if (e.key === 'Escape') setEditandoRol(null);
+            }}
+            className="h-8 max-md:h-10 w-32 sm:w-40 rounded-md border border-gray-300 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#DC143C]/30"
+          />
+          <button
+            type="button"
+            title="Guardar"
+            aria-label="Guardar el nombre"
+            onClick={() => void renombrarRol(rol)}
+            className="flex size-7 max-md:size-10 shrink-0 items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50"
+          >
+            <Check className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title="Cancelar"
+            aria-label="Cancelar"
+            onClick={() => setEditandoRol(null)}
+            className="flex size-7 max-md:size-10 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      );
+    }
+    const n = personas(rol);
+    return (
+      <div className="flex items-center gap-1.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-medium text-gray-900 whitespace-nowrap">
+            {rol.nombre}
+            {rol.es_admin && (
+              <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                <Lock className="h-2.5 w-2.5" /> Protegido
+              </span>
+            )}
+          </div>
+          {cuantas === 'fila' && (
+            <span className="text-[11px] text-gray-500">
+              {rol.usuarios_activos} persona{rol.usuarios_activos === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+        {/* En la computadora aparecen al pasar el mouse por la fila (como DJ); en el
+            teléfono no hay mouse: se ven siempre. */}
+        {abm && !rol.es_admin && (
+          <div className="flex items-center gap-0.5 transition-opacity lg:opacity-0 lg:group-hover/rol:opacity-100 lg:focus-within:opacity-100">
+            <button
+              type="button"
+              title="Renombrar"
+              aria-label={`Renombrar ${rol.nombre}`}
+              onClick={() => empezarARenombrar(rol)}
+              className="flex size-7 max-md:size-10 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-[#DC143C]"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              title={n > 0 ? `No se puede borrar: lo tiene${n > 1 ? 'n' : ''} ${n} persona${n > 1 ? 's' : ''}` : 'Borrar el rol'}
+              aria-label={`Borrar ${rol.nombre}`}
+              disabled={n > 0}
+              onClick={() => {
+                setErrorBorrar(null);
+                setBorrando(rol);
+              }}
+              className="flex size-7 max-md:size-10 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-500"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const crearRolControl = creandoRol ? (
+    <div className="flex flex-wrap items-center gap-1">
+      <input
+        autoFocus
+        aria-label="Nombre del rol nuevo"
+        placeholder="Nombre del rol nuevo"
+        value={nombreNuevo}
+        maxLength={80}
+        disabled={ocupadoRol}
+        onChange={(e) => setNombreNuevo(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void crearRol();
+          if (e.key === 'Escape') {
+            setCreandoRol(false);
+            setNombreNuevo('');
+          }
+        }}
+        className="h-8 max-md:h-10 w-40 sm:w-48 rounded-md border border-gray-300 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#DC143C]/30"
+      />
+      <button
+        type="button"
+        title="Crear"
+        aria-label="Crear el rol"
+        onClick={() => void crearRol()}
+        disabled={ocupadoRol || nombreNuevo.trim().length < 2}
+        className="flex size-7 max-md:size-10 shrink-0 items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-50 disabled:opacity-40"
+      >
+        <Check className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        title="Cancelar"
+        aria-label="Cancelar"
+        onClick={() => {
+          setCreandoRol(false);
+          setNombreNuevo('');
+        }}
+        disabled={ocupadoRol}
+        className="flex size-7 max-md:size-10 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100"
+      >
+        <X className="h-4 w-4" />
+      </button>
+      <span className="w-full text-[11px] text-gray-500">
+        {ocupadoRol ? 'Creando…' : 'Arranca sin ningún permiso: se los das en la matriz una vez creado.'}
+      </span>
+    </div>
+  ) : (
+    <button
+      type="button"
+      onClick={() => {
+        setError(null);
+        setCreandoRol(true);
+      }}
+      className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium text-[#DC143C] hover:underline max-md:min-h-10"
+    >
+      <Plus className="h-4 w-4" /> Crear rol
+    </button>
+  );
 
   const selectorDeInicio = (rol: RolDeLaMatriz) => {
     const permisos = permisosDeRol(rol);
@@ -277,19 +517,12 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
           </thead>
           <tbody>
             {matriz.roles.map((rol) => (
-              <tr key={rol.codigo} className="hover:bg-gray-50/60">
-                <td className="sticky left-0 z-10 bg-white px-4 py-2 border-b border-gray-100 align-middle">
-                  <div className="flex items-center gap-1.5 font-medium text-gray-900 whitespace-nowrap">
-                    {rol.nombre}
-                    {rol.es_admin && (
-                      <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                        <Lock className="h-2.5 w-2.5" /> Protegido
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-gray-500">
-                    {rol.usuarios_activos} persona{rol.usuarios_activos === 1 ? '' : 's'}
-                  </span>
+              <tr key={rol.codigo} className="group/rol hover:bg-gray-50/60">
+                <td
+                  className="sticky left-0 z-10 bg-white px-4 py-2 border-b border-gray-100 align-middle"
+                  title={`Código interno: ${rol.codigo}`}
+                >
+                  {nombreDelRol(rol, 'fila')}
                 </td>
                 {AREAS.map((a) => (
                   <td key={a.codigo} className="px-1 py-2 text-center border-b border-gray-100">
@@ -298,6 +531,13 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
                 ))}
               </tr>
             ))}
+            {abm && (
+              <tr className="bg-gray-50/40">
+                <td colSpan={AREAS.length + 1} className="px-4 py-2.5 border-b border-gray-100">
+                  {crearRolControl}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -307,15 +547,8 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
         {matriz.roles.map((rol) => (
           <div key={rol.codigo} className="px-4 py-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 font-medium text-gray-900">
-                {rol.nombre}
-                {rol.es_admin && (
-                  <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                    <Lock className="h-2.5 w-2.5" /> Protegido
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] text-gray-500">
+              {nombreDelRol(rol, 'tarjeta')}
+              <span className="shrink-0 text-[11px] text-gray-500">
                 {rol.usuarios_activos} persona{rol.usuarios_activos === 1 ? '' : 's'}
               </span>
             </div>
@@ -334,6 +567,8 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
           </div>
         ))}
       </div>
+
+      {abm && <div className="lg:hidden border-t border-gray-200 px-4 py-3">{crearRolControl}</div>}
 
       {/* RF-28: por dónde entra cada rol. */}
       {matriz.inicioDisponible && (
@@ -465,6 +700,34 @@ export default function RolesPermisosMatrix({ matriz, setMatriz, puedeEditar }: 
           </div>
         </div>
       )}
+
+      <Dialog open={!!borrando} onOpenChange={(v) => !v && !ocupadoRol && setBorrando(null)}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Borrar rol</DialogTitle>
+            <DialogDescription>
+              {borrando ? (
+                <>
+                  Vas a borrar el rol <b className="text-gray-900">{borrando.nombre}</b> con sus permisos. Nadie lo
+                  tiene, así que no le cambia nada a nadie. No se puede deshacer: si hace falta de nuevo, se crea otra
+                  vez.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          {errorBorrar && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorBorrar}</div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBorrando(null)} disabled={ocupadoRol}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void borrarRol()} disabled={ocupadoRol} className="bg-red-600 hover:bg-red-700 text-white">
+              {ocupadoRol ? 'Borrando…' : 'Borrar rol'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

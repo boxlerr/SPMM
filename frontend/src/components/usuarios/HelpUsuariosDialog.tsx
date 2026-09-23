@@ -122,6 +122,17 @@ const SOLAPAS: Solapa[] = [
         ),
       },
       {
+        titulo: 'Crear, renombrar y borrar roles',
+        texto: (
+          <>
+            <b>Crear rol</b>, al final de la matriz: arranca sin ningún permiso y se los das en su fila. El lápiz le
+            cambia el nombre (a la gente que lo tiene no le cambia nada). El tacho lo borra, pero sólo si nadie lo
+            tiene: primero pasá a esas personas a otro rol, incluidas las que no tienen acceso.
+          </>
+        ),
+        consejo: 'El Administrador no se renombra ni se borra.',
+      },
+      {
         titulo: 'Tres niveles, nada más',
         texto: (
           <span className="grid gap-1.5">

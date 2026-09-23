@@ -562,44 +562,47 @@ async def crear_usuario(
     RF-24: el rol tiene que existir en la tabla `rol` (admin, supervisor, operario...).
     """
     try:
-        # Antes de tocar la sesión del endpoint (ver _validar_rol).
-        await _validar_rol(sesiones, usuario_dto.rol)
+        # De a uno con los cambios y los borrados de roles (reglas_de_roles.de_a_uno): si
+        # no, se podría dar de alta a alguien con un rol que se está borrando.
+        async with de_a_uno(db):
+            # Antes de tocar la sesión del endpoint (ver _validar_rol).
+            await _validar_rol(sesiones, usuario_dto.rol)
 
-        usuario_repository = UsuarioRepository(db)
-        auth_service = AuthService(usuario_repository)
+            usuario_repository = UsuarioRepository(db)
+            auth_service = AuthService(usuario_repository)
         
-        # Verificar si ya existe el username
-        usuario_existente = await usuario_repository.obtener_por_username(usuario_dto.username)
-        if usuario_existente:
-            raise BusinessException(f"El username '{usuario_dto.username}' ya está en uso")
+            # Verificar si ya existe el username
+            usuario_existente = await usuario_repository.obtener_por_username(usuario_dto.username)
+            if usuario_existente:
+                raise BusinessException(f"El username '{usuario_dto.username}' ya está en uso")
         
-        # Verificar si ya existe el email
-        usuario_existente_email = await usuario_repository.obtener_por_email(usuario_dto.email)
-        if usuario_existente_email:
-            raise BusinessException(f"El email '{usuario_dto.email}' ya está en uso")
+            # Verificar si ya existe el email
+            usuario_existente_email = await usuario_repository.obtener_por_email(usuario_dto.email)
+            if usuario_existente_email:
+                raise BusinessException(f"El email '{usuario_dto.email}' ya está en uso")
         
-        # Crear hash de contraseña
-        from backend.core.security import get_password_hash
-        password_hash = get_password_hash(usuario_dto.password)
+            # Crear hash de contraseña
+            from backend.core.security import get_password_hash
+            password_hash = get_password_hash(usuario_dto.password)
         
-        # Crear usuario
-        from backend.domain.Usuario import Usuario
-        nuevo_usuario = Usuario(
-            username=usuario_dto.username,
-            email=usuario_dto.email,
-            password_hash=password_hash,
-            nombre=usuario_dto.nombre,
-            apellido=usuario_dto.apellido,
-            rol=usuario_dto.rol,
-            activo=usuario_dto.activo,
-            # La contraseña inicial la elige quien da de alta y se la pasa por chat, así
-            # que hasta que el dueño de la cuenta ponga una suya está escrita en algún
-            # lado. La primera vez que entre, el sistema no lo deja seguir sin cambiarla.
-            debe_cambiar_password=True,
-            creado_por=current_user['id_usuario']
-        )
+            # Crear usuario
+            from backend.domain.Usuario import Usuario
+            nuevo_usuario = Usuario(
+                username=usuario_dto.username,
+                email=usuario_dto.email,
+                password_hash=password_hash,
+                nombre=usuario_dto.nombre,
+                apellido=usuario_dto.apellido,
+                rol=usuario_dto.rol,
+                activo=usuario_dto.activo,
+                # La contraseña inicial la elige quien da de alta y se la pasa por chat, así
+                # que hasta que el dueño de la cuenta ponga una suya está escrita en algún
+                # lado. La primera vez que entre, el sistema no lo deja seguir sin cambiarla.
+                debe_cambiar_password=True,
+                creado_por=current_user['id_usuario']
+            )
         
-        usuario_creado = await usuario_repository.crear(nuevo_usuario)
+            usuario_creado = await usuario_repository.crear(nuevo_usuario)
         
         # Lo que se contesta, leído ANTES de la notificación: si guardarla falla, su
         # rollback expira el objeto del ORM, y releerlo en async revienta (500 con el

@@ -384,6 +384,14 @@ export default function UsuariosYPermisos() {
     );
   }, [usuarios, roles]);
 
+  // Cuántas personas tiene cada rol, contando a las que no tienen acceso: un rol con gente
+  // no se borra (RolesPermisosMatrix). Sale de la lista, que ya las trae.
+  const personasPorRol = useMemo(() => {
+    const porRol = new Map<string, number>();
+    for (const u of usuarios) porRol.set(u.rol, (porRol.get(u.rol) ?? 0) + 1);
+    return porRol;
+  }, [usuarios]);
+
   const nombreDeRol = (codigo: string) =>
     roles?.find((r) => r.codigo === codigo)?.nombre ?? (codigo === 'admin' ? 'Administrador' : capitalizeName(codigo));
 
@@ -470,7 +478,12 @@ export default function UsuariosYPermisos() {
 
       {matriz && (
         <>
-          <RolesPermisosMatrix matriz={matriz} setMatriz={setMatriz} puedeEditar={esAdmin} />
+          <RolesPermisosMatrix
+            matriz={matriz}
+            setMatriz={setMatriz}
+            puedeEditar={esAdmin}
+            personasPorRol={cargandoUsuarios || errorUsuarios ? null : personasPorRol}
+          />
           <SeccionesConfidencialEditor matriz={matriz} setMatriz={setMatriz} puedeEditar={esAdmin} />
           {permisosDeMas ? (
             <UsuarioPermisosOverrides

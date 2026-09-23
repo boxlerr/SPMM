@@ -193,6 +193,8 @@ export interface Matriz {
   roles: RolDeLaMatriz[];
   /** RF-28: el servidor sabe guardar la pantalla de inicio (la migración ya corrió). */
   inicioDisponible: boolean;
+  /** El servidor sabe crear, renombrar y borrar roles (el ABM de roles de DJ). */
+  abmDeRoles: boolean;
 }
 
 function objeto(x: unknown): Record<string, unknown> | null {
@@ -279,6 +281,7 @@ export function leerMatriz(crudo: unknown): Matriz | null {
     // Hace falta que lo diga el servidor Y que haya venido la de cada rol: nunca se ofrece
     // guardar algo que el servidor no sabe guardar.
     inicioDisponible: o.pantalla_inicio_disponible === true && roles.every((r) => r.pantalla_inicio !== undefined),
+    abmDeRoles: o.abm_de_roles === true,
   };
 }
 
@@ -347,6 +350,39 @@ export function conPantallaDeRol(matriz: Matriz, rol: string, ruta: string | nul
     ...matriz,
     roles: matriz.roles.map((r) => (r.codigo === rol ? { ...r, pantalla_inicio: ruta } : r)),
   };
+}
+
+// ── el ABM de roles (crearRolAction, renombrarRolAction, eliminarRolAction de DJ) ──
+
+/**
+ * Un rol recién creado, como lo deja el backend: sin ningún permiso («sin acceso» en todo,
+ * sin overrides) y, si la pantalla de inicio existe, con «la de siempre». El código lo da
+ * el servidor (sale del nombre).
+ */
+export function conRolNuevo(matriz: Matriz, codigo: string, nombre: string): Matriz {
+  if (matriz.roles.some((r) => r.codigo === codigo)) return matriz;
+  const areas = Object.fromEntries(AREAS.map((a) => [a.codigo, "none"])) as RolDeLaMatriz["areas"];
+  const rol: RolDeLaMatriz = {
+    codigo,
+    nombre,
+    es_admin: false,
+    usuarios_activos: 0,
+    areas,
+    secciones: {},
+    secciones_efectivas: efectivasDeRol(areas, {}, confidencialesDe(matriz)),
+  };
+  if (matriz.inicioDisponible) rol.pantalla_inicio = null;
+  return { ...matriz, roles: [...matriz.roles, rol] };
+}
+
+/** Otro nombre; el código no cambia (es lo que tiene guardado cada persona). */
+export function conRolRenombrado(matriz: Matriz, codigo: string, nombre: string): Matriz {
+  return { ...matriz, roles: matriz.roles.map((r) => (r.codigo === codigo ? { ...r, nombre } : r)) };
+}
+
+/** Sin ese rol (ya borrado en el servidor). */
+export function sinRol(matriz: Matriz, codigo: string): Matriz {
+  return { ...matriz, roles: matriz.roles.filter((r) => r.codigo !== codigo) };
 }
 
 /** Cambia cuántas personas activas tiene cada rol (al cambiarle el rol a alguien). */

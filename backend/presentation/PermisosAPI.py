@@ -5,6 +5,9 @@ el bloqueo por horario.
 
     GET    /permisos/catalogo                           áreas, secciones y niveles
     GET    /permisos/matriz                             roles × áreas y roles × secciones
+    POST   /permisos/roles                              crear un rol (arranca sin nada)
+    PUT    /permisos/roles/{rol}                        renombrarlo
+    DELETE /permisos/roles/{rol}                        borrarlo (sólo si nadie lo tiene)
     PUT    /permisos/roles/{rol}/areas/{area}           nivel de un rol en un área
     PUT    /permisos/roles/{rol}/secciones/{seccion}    restringir (o abrir, si es
                                                         confidencial) una sección a un rol
@@ -31,7 +34,11 @@ QUIÉN PUEDE
 
 LAS REGLAS (las de DJ, más las de SPMM)
 
-- El rol admin es admin en todo por regla: su fila no se edita (409).
+- El rol admin es admin en todo por regla: su fila no se edita, no se renombra y no se
+  borra (409).
+- Los roles (el ABM de DJ): uno nuevo arranca sin ningún permiso; el código sale del
+  nombre y no cambia al renombrar; no puede haber dos con el mismo nombre; un rol que
+  tiene gente —aunque sea sin acceso— no se borra (409, que dice cuántos).
 - En una sección NO confidencial, lo del rol sólo puede RESTRINGIR lo que da el área;
   igualarlo es «hereda» (409 si se intenta igualar o superar, como DJ).
 - Un permiso de más SUMA, tiene que dar algo (no «none») y su vencimiento no puede
@@ -72,6 +79,7 @@ from backend.core.permisos import (
     ROLES,
     SECCION_POR_CODIGO,
     DatosDePermisos,
+    codigo_para_rol,
     nivel_valido,
     pantalla_de_inicio,
     permisos_de,
@@ -92,6 +100,7 @@ from backend.domain.Usuario import Usuario
 from backend.dto.PermisosRequestDTO import (
     CambiarRolDTO,
     ConfidencialDTO,
+    NombreDeRolDTO,
     NivelDeRolEnAreaDTO,
     NivelDeRolEnSeccionDTO,
     PantallaInicioDTO,
@@ -278,6 +287,7 @@ async def matriz(db=Depends(get_db)):
         confidenciales = await repo.confidenciales()
         rol_areas, rol_secciones = await repo.niveles_de_roles()
         activos = await repo.usuarios_activos_por_rol()
+        todos = await repo.usuarios_por_rol()
     except Exception as e:
         await db.rollback()
         logger.error(f"Permisos: no se pudo leer la matriz: {e}")
@@ -305,6 +315,8 @@ async def matriz(db=Depends(get_db)):
             "nombre": nombre,
             "es_admin": es_admin,
             "usuarios_activos": activos.get(codigo, 0),
+            # Con los que no tienen acceso: es lo que frena borrar el rol.
+            "usuarios": todos.get(codigo, 0),
             "areas": areas,
             "secciones": secciones,
             "secciones_efectivas": efectivas,
@@ -317,8 +329,118 @@ async def matriz(db=Depends(get_db)):
         status=True,
         message=f"{len(salida)} rol(es)",
         data={"niveles": list(NIVELES), "areas": _catalogo(confidenciales), "roles": salida,
-              "pantalla_inicio_disponible": pantallas is not None},
+              "pantalla_inicio_disponible": pantallas is not None,
+              # Este servidor sabe crear, renombrar y borrar roles (la pantalla lo ofrece
+              # sólo si lo dice).
+              "abm_de_roles": True},
     )
+
+
+# ─────────────────────────── los roles: crear, renombrar, borrar ───────────────────────────
+#
+# El ABM de roles de Don Joaquín (crearRolAction, renombrarRolAction, eliminarRolAction).
+# Hasta el 23/09 SPMM tenía fijos los tres sembrados, aunque la ayuda hablaba de «los que
+# se creen».
+
+
+def _nombre_repetido(nombres: dict, nombre: str, salvo: Optional[str] = None) -> Optional[str]:
+    codigo = nombres.get(nombre.strip().lower())
+    return codigo if codigo is not None and codigo != salvo else None
+
+
+@router.post("/roles", response_model=ResponseDTO)
+async def crear_rol(
+    cuerpo: NombreDeRolDTO,
+    request: Request,
+    db=Depends(get_db),
+    actor: UsuarioActual = Depends(_admin),
+):
+    """Un rol nuevo, SIN NINGÚN PERMISO (todo en «sin acceso»): se le da lo que haga falta
+    en la matriz, una vez creado. El código sale del nombre («Pañol» -> panol), único, y
+    no cambia si después se lo renombra."""
+    repo = PermisosRepository(db)
+    try:
+        usados = await repo.codigos_de_rol_usados()
+        nombres = await repo.nombres_de_roles()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Permisos: no se pudo leer la tabla rol: {e}")
+        raise _sin_tablas()
+    if _nombre_repetido(nombres, cuerpo.nombre):
+        raise _error(409, f"Ya hay un rol que se llama «{cuerpo.nombre}».", "nombre")
+    codigo = codigo_para_rol(cuerpo.nombre, usados)
+    await repo.crear_rol(codigo, cuerpo.nombre)
+    await _guardar(db, "el rol")
+    frase = f"creó el rol «{cuerpo.nombre}» ({codigo}), sin ningún permiso"
+    _dejar_dicho(request, frase, antes=None, despues={"codigo": codigo, "nombre": cuerpo.nombre})
+    return ResponseDTO(
+        status=True,
+        message=frase[0].upper() + frase[1:],
+        data={"codigo": codigo, "nombre": cuerpo.nombre, "es_admin": False,
+              "usuarios_activos": 0, "usuarios": 0},
+    )
+
+
+@router.put("/roles/{rol}", response_model=ResponseDTO)
+async def renombrar_rol(
+    rol: str,
+    cuerpo: NombreDeRolDTO,
+    request: Request,
+    db=Depends(get_db),
+    actor: UsuarioActual = Depends(_admin),
+):
+    """Cambiarle el nombre a un rol. El código queda: es lo que tiene guardado cada
+    persona y cada permiso. El Administrador no se renombra."""
+    repo = PermisosRepository(db)
+    fila = await _rol_o_404(repo, rol)
+    if rol == ROL_ADMIN:
+        raise _error(409, "El rol Administrador no se renombra.", "rol")
+    if fila.nombre == cuerpo.nombre:
+        return ResponseDTO(status=True, message="Sin cambios",
+                           data={"codigo": rol, "nombre": cuerpo.nombre})
+    if _nombre_repetido(await repo.nombres_de_roles(), cuerpo.nombre, salvo=rol):
+        raise _error(409, f"Ya hay un rol que se llama «{cuerpo.nombre}».", "nombre")
+    await repo.renombrar_rol(rol, cuerpo.nombre)
+    await _guardar(db, "el nombre del rol")
+    frase = f"renombró el rol «{fila.nombre}» a «{cuerpo.nombre}»"
+    _dejar_dicho(request, frase, antes={"nombre": fila.nombre}, despues={"nombre": cuerpo.nombre})
+    return ResponseDTO(status=True, message=frase[0].upper() + frase[1:],
+                       data={"codigo": rol, "nombre": cuerpo.nombre})
+
+
+@router.delete("/roles/{rol}", response_model=ResponseDTO)
+async def borrar_rol(
+    rol: str,
+    request: Request,
+    db=Depends(get_db),
+    actor: UsuarioActual = Depends(_admin),
+):
+    """Borrar un rol que nadie tiene. Con gente —aunque sea sin acceso: si se le devuelve
+    el acceso, tiene que tener un rol que exista— es 409 y dice cuántos: primero se los
+    pasa a otro rol. El Administrador no se borra.
+
+    Va de a uno con los cambios de rol (reglas_de_roles.de_a_uno): si no, alguien podría
+    quedar con un rol recién borrado, que no abre nada."""
+    async with de_a_uno(db):
+        repo = PermisosRepository(db)
+        fila = await _rol_o_404(repo, rol)
+        if rol == ROL_ADMIN:
+            raise _error(409, "El rol Administrador no se puede borrar.", "rol")
+        activos, sin_acceso = await repo.usuarios_del_rol(rol)
+        if activos + sin_acceso:
+            total = activos + sin_acceso
+            detalle = f" ({sin_acceso} sin acceso)" if sin_acceso else ""
+            raise _error(
+                409,
+                f"No se puede borrar «{fila.nombre}»: lo tiene{'n' if total > 1 else ''} "
+                f"{total} persona{'s' if total > 1 else ''}{detalle}. Pasalas a otro rol primero.",
+                "rol",
+            )
+        await repo.borrar_rol(rol)
+        await _guardar(db, "el borrado del rol")
+    frase = f"borró el rol «{fila.nombre}» ({rol})"
+    _dejar_dicho(request, frase, antes={"codigo": rol, "nombre": fila.nombre}, despues=None)
+    return ResponseDTO(status=True, message=frase[0].upper() + frase[1:], data={"codigo": rol})
 
 
 @router.put("/roles/{rol}/areas/{area}", response_model=ResponseDTO)
@@ -443,6 +565,7 @@ async def marcar_confidencial(
     if antes and not nuevo and not forzar:
         rol_areas, rol_secciones = await repo.niveles_de_roles()
         activos = await repo.usuarios_activos_por_rol()
+        todos = await repo.usuarios_por_rol()
         ganan = []
         for codigo, nombre in sorted(await repo.roles() or [], key=lambda r: _orden_de_rol(r[0])):
             if codigo == ROL_ADMIN:
