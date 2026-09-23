@@ -379,6 +379,187 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "sin zona.'",
         ],
     ),
+    (
+        # RF-24. Tablas nuevas, una columna nueva y la siembra del catálogo. Nada de esto
+        # toca filas existentes: los usuarios de hoy son todos admin, y admin tiene todo
+        # por regla sin mirar ninguna fila. Si no llega a aplicarse, el login y el alta
+        # de usuarios siguen andando (admin_permanente está armada para eso en
+        # domain/Usuario.py); lo único que no anda es asignar un rol que no sea admin.
+        #
+        # Esto corre en cada arranque y no puede pisar lo que se cambie desde la pantalla
+        # de permisos: el catálogo va con ON CONFLICT DO NOTHING y los roles con su
+        # matriz se siembran una sola vez. Un test (test_permisos_migracion) compara la
+        # siembra con el .sql y con el catálogo de core/permisos.py.
+        "2026-09-22_permisos_por_rol_y_area",
+        [
+            "CREATE TABLE IF NOT EXISTS area ("
+            "codigo VARCHAR(40) PRIMARY KEY, "
+            "nombre VARCHAR(80) NOT NULL, "
+            "orden INTEGER NOT NULL DEFAULT 0)",
+            "CREATE TABLE IF NOT EXISTS seccion ("
+            "codigo VARCHAR(40) PRIMARY KEY, "
+            "area_codigo VARCHAR(40) NOT NULL REFERENCES area (codigo) ON DELETE CASCADE, "
+            "nombre VARCHAR(80) NOT NULL, "
+            "orden INTEGER NOT NULL DEFAULT 0, "
+            "confidencial BOOLEAN NOT NULL DEFAULT FALSE)",
+            "CREATE TABLE IF NOT EXISTS rol ("
+            "codigo VARCHAR(20) PRIMARY KEY, "
+            "nombre VARCHAR(80) NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS rol_area ("
+            "rol_codigo VARCHAR(20) NOT NULL REFERENCES rol (codigo) ON DELETE CASCADE, "
+            "area_codigo VARCHAR(40) NOT NULL REFERENCES area (codigo) ON DELETE CASCADE, "
+            "nivel VARCHAR(10) NOT NULL, "
+            "PRIMARY KEY (rol_codigo, area_codigo), "
+            "CONSTRAINT ck_rol_area_nivel CHECK (nivel IN ('none', 'read', 'write', 'admin')))",
+            "CREATE TABLE IF NOT EXISTS rol_seccion ("
+            "rol_codigo VARCHAR(20) NOT NULL REFERENCES rol (codigo) ON DELETE CASCADE, "
+            "seccion_codigo VARCHAR(40) NOT NULL REFERENCES seccion (codigo) ON DELETE CASCADE, "
+            "nivel VARCHAR(10) NOT NULL, "
+            "PRIMARY KEY (rol_codigo, seccion_codigo), "
+            "CONSTRAINT ck_rol_seccion_nivel CHECK (nivel IN ('none', 'read', 'write', 'admin')))",
+            "CREATE TABLE IF NOT EXISTS usuario_area ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "id_usuario INTEGER NOT NULL REFERENCES usuario (id_usuario) ON DELETE CASCADE, "
+            "area_codigo VARCHAR(40) NOT NULL REFERENCES area (codigo) ON DELETE CASCADE, "
+            "nivel VARCHAR(10) NOT NULL, "
+            "vence_en TIMESTAMP, "
+            "otorgado_por INTEGER REFERENCES usuario (id_usuario) ON DELETE SET NULL, "
+            "motivo TEXT, "
+            "creado_en TIMESTAMP NOT NULL, "
+            "CONSTRAINT ux_usuario_area UNIQUE (id_usuario, area_codigo), "
+            "CONSTRAINT ck_usuario_area_nivel CHECK (nivel IN ('none', 'read', 'write', 'admin')))",
+            "CREATE TABLE IF NOT EXISTS usuario_seccion ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "id_usuario INTEGER NOT NULL REFERENCES usuario (id_usuario) ON DELETE CASCADE, "
+            "seccion_codigo VARCHAR(40) NOT NULL REFERENCES seccion (codigo) ON DELETE CASCADE, "
+            "nivel VARCHAR(10) NOT NULL, "
+            "vence_en TIMESTAMP, "
+            "otorgado_por INTEGER REFERENCES usuario (id_usuario) ON DELETE SET NULL, "
+            "motivo TEXT, "
+            "creado_en TIMESTAMP NOT NULL, "
+            "CONSTRAINT ux_usuario_seccion UNIQUE (id_usuario, seccion_codigo), "
+            "CONSTRAINT ck_usuario_seccion_nivel CHECK (nivel IN ('none', 'read', 'write', 'admin')))",
+            "ALTER TABLE usuario "
+            "ADD COLUMN IF NOT EXISTS admin_permanente BOOLEAN NOT NULL DEFAULT FALSE",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE area IS "
+            "'Áreas del sistema para los permisos (RF-24): una por ítem del menú. Espeja el "
+            "catálogo de backend/core/permisos.py (AREAS), que es el que manda.'",
+            "COMMENT ON TABLE seccion IS "
+            "'Secciones de un área: una solapa o una parte sensible de una pantalla. Heredan el "
+            "nivel del área salvo que sean confidenciales. Espeja SECCIONES de "
+            "backend/core/permisos.py.'",
+            "COMMENT ON COLUMN seccion.confidencial IS "
+            "'TRUE = cerrada para todo el que no sea admin aunque tenga el área, salvo que se le "
+            "otorgue a propósito por rol (rol_seccion) o por persona (usuario_seccion).'",
+            "COMMENT ON TABLE rol IS "
+            "'Roles de usuario. codigo es el mismo string que se guarda en usuario.rol. El rol "
+            "admin es admin en todo por regla, sin mirar sus filas de rol_area.'",
+            "COMMENT ON TABLE rol_area IS "
+            "'Nivel de un rol en un área: none, read, write o admin. Sin fila = none.'",
+            "COMMENT ON TABLE rol_seccion IS "
+            "'Override de un rol en una sección. En una no confidencial sólo restringe (nunca "
+            "sube por encima del área); en una confidencial es lo que la abre.'",
+            "COMMENT ON TABLE usuario_area IS "
+            "'Permiso de más para una persona en un área. Sólo suma sobre lo que le da el rol, "
+            "nunca resta. otorgado_por y motivo dicen quién lo dio y por qué.'",
+            "COMMENT ON COLUMN usuario_area.vence_en IS "
+            "'Hasta cuándo vale. NULL = permanente; si ya pasó, no cuenta. Hora local del "
+            "taller, sin zona.'",
+            "COMMENT ON TABLE usuario_seccion IS "
+            "'Permiso de más para una persona en una sección: abre una confidencial sin "
+            "abrírsela a todo el rol. Sólo suma, nunca resta.'",
+            "COMMENT ON COLUMN usuario_seccion.vence_en IS "
+            "'Hasta cuándo vale. NULL = permanente; si ya pasó, no cuenta. Hora local del "
+            "taller, sin zona.'",
+            "COMMENT ON COLUMN usuario.admin_permanente IS "
+            "'Administrador permanente (los dueños): su rol queda fijo en admin y la API no deja "
+            "cambiárselo, desactivarlo ni eliminarlo. Arranca en FALSE para todos; se marca a "
+            "mano en la base.'",
+            "INSERT INTO area (codigo, nombre, orden) VALUES "
+            "('dashboard', 'Dashboard', 10), "
+            "('operaciones', 'Operaciones', 20), "
+            "('planos', 'Planos', 30), "
+            "('recursos', 'Recursos', 40), "
+            "('clientes', 'Clientes', 50), "
+            "('no_conformidades', 'No conformidades', 60), "
+            "('auditoria', 'Auditoría', 70), "
+            "('configuracion', 'Configuración', 80) "
+            "ON CONFLICT (codigo) DO NOTHING",
+            "INSERT INTO seccion (codigo, area_codigo, nombre, orden, confidencial) VALUES "
+            "('dashboard_rendimiento', 'dashboard', 'Rendimiento por persona', 10, TRUE), "
+            "('operaciones_ordenes', 'operaciones', 'Órdenes de trabajo', 10, FALSE), "
+            "('operaciones_planificador', 'operaciones', 'Planificador', 11, FALSE), "
+            "('operaciones_recurso_humano', 'operaciones', 'Recurso humano', 12, FALSE), "
+            "('operaciones_materia_prima', 'operaciones', 'Materia prima', 13, FALSE), "
+            "('recursos_humano', 'recursos', 'Recurso humano', 10, FALSE), "
+            "('recursos_maquinaria', 'recursos', 'Recurso maquinaria', 11, FALSE), "
+            "('recursos_procesos', 'recursos', 'Procesos', 12, FALSE), "
+            "('recursos_rangos', 'recursos', 'Rangos', 13, FALSE), "
+            "('recursos_sectores', 'recursos', 'Sectores', 14, FALSE), "
+            "('auditoria_movimientos', 'auditoria', 'Todo lo que se hizo', 10, FALSE), "
+            "('auditoria_procesos', 'auditoria', 'Pasos de las OT', 11, FALSE), "
+            "('auditoria_planificacion', 'auditoria', 'Planificaciones', 12, FALSE), "
+            "('configuracion_usuarios', 'configuracion', 'Usuarios y permisos', 10, TRUE) "
+            "ON CONFLICT (codigo) DO NOTHING",
+            # Roles y matriz: UNA sola vez, juntos, cuando la tabla rol está vacía. Con ON
+            # CONFLICT DO NOTHING en cada arranque, un override o un rol que se borre desde
+            # la pantalla volvería solo con el deploy siguiente. Ver el .sql.
+            "WITH roles_sembrados AS ("
+            "INSERT INTO rol (codigo, nombre) "
+            "SELECT v.codigo, v.nombre "
+            "FROM (VALUES "
+            "('admin', 'Administrador'), "
+            "('supervisor', 'Supervisor'), "
+            "('operario', 'Operario') "
+            ") AS v (codigo, nombre) "
+            "WHERE NOT EXISTS (SELECT 1 FROM rol) "
+            "RETURNING codigo"
+            "), "
+            "matriz_por_area AS ("
+            "INSERT INTO rol_area (rol_codigo, area_codigo, nivel) "
+            "SELECT v.rol_codigo, v.area_codigo, v.nivel "
+            "FROM (VALUES "
+            "('admin', 'dashboard', 'admin'), "
+            "('admin', 'operaciones', 'admin'), "
+            "('admin', 'planos', 'admin'), "
+            "('admin', 'recursos', 'admin'), "
+            "('admin', 'clientes', 'admin'), "
+            "('admin', 'no_conformidades', 'admin'), "
+            "('admin', 'auditoria', 'admin'), "
+            "('admin', 'configuracion', 'admin'), "
+            "('supervisor', 'dashboard', 'read'), "
+            "('supervisor', 'operaciones', 'write'), "
+            "('supervisor', 'planos', 'write'), "
+            "('supervisor', 'recursos', 'read'), "
+            "('supervisor', 'clientes', 'read'), "
+            "('supervisor', 'no_conformidades', 'write'), "
+            "('supervisor', 'auditoria', 'none'), "
+            "('supervisor', 'configuracion', 'read'), "
+            "('operario', 'dashboard', 'read'), "
+            "('operario', 'operaciones', 'read'), "
+            "('operario', 'planos', 'read'), "
+            "('operario', 'recursos', 'none'), "
+            "('operario', 'clientes', 'none'), "
+            "('operario', 'no_conformidades', 'read'), "
+            "('operario', 'auditoria', 'none'), "
+            "('operario', 'configuracion', 'read') "
+            ") AS v (rol_codigo, area_codigo, nivel) "
+            "WHERE v.rol_codigo IN (SELECT codigo FROM roles_sembrados) "
+            "RETURNING rol_codigo"
+            ") "
+            "INSERT INTO rol_seccion (rol_codigo, seccion_codigo, nivel) "
+            "SELECT v.rol_codigo, v.seccion_codigo, v.nivel "
+            "FROM (VALUES "
+            "('operario', 'operaciones_planificador', 'none') "
+            ") AS v (rol_codigo, seccion_codigo, nivel) "
+            "WHERE v.rol_codigo IN (SELECT codigo FROM roles_sembrados)",
+            # El rol admin, siempre (y DESPUÉS de la siembra, que si no no corre nunca).
+            "INSERT INTO rol (codigo, nombre) VALUES "
+            "('admin', 'Administrador') "
+            "ON CONFLICT (codigo) DO NOTHING",
+        ],
+    ),
 ]
 
 

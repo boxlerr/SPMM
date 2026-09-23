@@ -4,14 +4,17 @@ Representa un usuario del sistema SPMM usando SQLAlchemy
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, false
+from sqlalchemy.orm import deferred, relationship
 from backend.infrastructure.db import Base
 
 class Usuario(Base):
     """Entidad Usuario del dominio (SQLAlchemy ORM)"""
     
     __tablename__ = "usuario"
+    # Que un INSERT no pida de vuelta las columnas con default de la base: ver
+    # `admin_permanente`, que puede no existir todavía cuando se da de alta a alguien.
+    __mapper_args__ = {"eager_defaults": False}
     # Sin schema explícito: 'dbo' es el default en SQL Server (igual que el resto de
     # los modelos) y en Postgres/Supabase el schema es 'public'. Hardcodear 'dbo'
     # rompía la creación del esquema en Postgres.
@@ -36,6 +39,20 @@ class Usuario(Base):
     # está en AuthService.login; la migración, en 2026-09-22_bloqueo_por_intentos_fallidos.
     intentos_fallidos = Column(Integer, nullable=False, default=0, server_default="0")
     bloqueado_hasta = Column(DateTime, nullable=True)
+    # RF-24: administrador permanente (los dueños). Su rol queda fijo en admin: no se
+    # le puede cambiar, ni desactivar, ni eliminar desde la API. NO lo prende ninguna
+    # migración —no se conocen los ids de producción—: se marca a mano en la base.
+    #
+    # Está armada para que el login y el alta de usuarios NO dependan de que la migración
+    # de permisos haya corrido (probado contra un Postgres sin la columna):
+    #   · `deferred`: no entra en el SELECT de siempre (el del login). Se lee sólo con
+    #     una consulta aparte (PermisosRepository), que tolera que la columna falte.
+    #   · `server_default` y SIN default de Python: el INSERT no la nombra; la base
+    #     pone el FALSE.
+    #   · `eager_defaults: False` (arriba): sin eso, SQLAlchemy la pide de vuelta en el
+    #     RETURNING del INSERT, y con la columna ausente el alta revienta.
+    # Migración: 2026-09-22_permisos_por_rol_y_area.
+    admin_permanente = deferred(Column(Boolean, nullable=False, server_default=false()))
     reset_token = Column(String(255), nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
     fecha_creacion = Column(DateTime, nullable=False, default=datetime.utcnow)

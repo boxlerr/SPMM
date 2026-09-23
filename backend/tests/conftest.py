@@ -112,6 +112,29 @@ def auditoria_no_escribe_en_produccion(monkeypatch):
     monkeypatch.setattr(main, "SessionLocal", lambda: _SesionQueNoGuarda())
 
 
+@pytest.fixture(autouse=True)
+def permisos_no_leen_produccion(monkeypatch):
+    """Ningún test puede leer permisos de Supabase.
+
+    Las dependencias de permisos (core/security.py: require_admin, require_area...)
+    abren su PROPIA sesión con `SESIONES_PERMISOS`, que es el `SessionLocal` de
+    PRODUCCIÓN. Un test que pisa sólo el `get_db` de su router no la ve, y sin esto
+    leería la base del cliente. Se reemplaza por una fábrica que no conecta a nada: la
+    dependencia contesta 503 y el test que la necesite de verdad pisa
+    `get_sesiones_permisos` (o `security.SESIONES_PERMISOS`) con su SQLite.
+    """
+    from backend.core import security
+
+    class _SinBase:
+        def __init__(self):
+            raise RuntimeError(
+                "Este test llegó a leer permisos sin pisar get_sesiones_permisos: "
+                "la fábrica de producción está bloqueada en los tests."
+            )
+
+    monkeypatch.setattr(security, "SESIONES_PERMISOS", _SinBase)
+
+
 @pytest_asyncio.fixture
 async def session():
     engine = create_async_engine(

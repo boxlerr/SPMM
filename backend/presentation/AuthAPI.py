@@ -14,7 +14,16 @@ from backend.dto.UsuarioRequestDTO import (
     ResetPasswordDTO,
     UsuarioChangePasswordDTO
 )
-from backend.core.security import get_current_user, require_admin
+from backend.core.security import (
+    UsuarioActual,
+    get_current_user,
+    get_sesiones_permisos,
+    get_usuario_actual,
+    require_admin,
+    resolver_permisos_actuales,
+)
+from backend.core.permisos import ROL_ADMIN
+from backend.infrastructure.PermisosRepository import PermisosRepository
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -221,18 +230,123 @@ async def change_password(
 
 @router.get("/me", response_model=ResponseDTO)
 async def get_current_user_info(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    usuario: UsuarioActual = Depends(get_usuario_actual),
+    sesiones=Depends(get_sesiones_permisos),
 ):
     """
-    Obtiene información del usuario autenticado
-    
+    Obtiene información del usuario autenticado, con sus permisos YA RESUELTOS.
+
+    RF-24. Todo sale de la base en este momento, no del token: el `rol` es el de hoy y
+    `permisos` trae el nivel efectivo por área y por sección (none/read/write/admin),
+    con las reglas de core/permisos.py. Es lo que la pantalla vuelve a pedir para que
+    un cambio de permisos se vea sin volver a entrar.
+
+    - 401 si la cuenta ya no existe o está inactiva.
+    - 503 si los permisos no se pudieron leer (la pantalla se queda con los que tenía).
+
     Requiere autenticación (Bearer Token)
     """
+    permisos = await resolver_permisos_actuales(usuario, sesiones)
+    admin_permanente = await _admin_permanente(sesiones, usuario.id_usuario)
     return ResponseDTO(
         status=True,
         message="Usuario autenticado",
-        data=current_user
+        data={
+            **current_user,
+            "rol": usuario.rol,
+            "permisos": {**permisos.como_dict(), "admin_permanente": admin_permanente},
+        },
     )
+
+
+# ==================== REGLAS DE ROLES (RF-24) ====================
+#
+# Todo lo que se lee acá va con una sesión PROPIA (la de los permisos) y no con la del
+# endpoint: `admin_permanente` y la tabla `rol` pueden no existir todavía (migración
+# sin correr), y en Postgres una consulta que falla deja inservible la transacción en la
+# que corrió. Así una lectura que falla no se lleva puesto el guardado.
+
+def _conflicto(mensaje: str, campo: str = "rol") -> HTTPException:
+    """409: la operación choca con una regla que no se puede saltear (no hay «igual»)."""
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"message": mensaje, "campo": campo},
+    )
+
+
+async def _admin_permanente(sesiones, id_usuario: int):
+    """True/False, o None si la columna todavía no existe."""
+    async with sesiones() as s:
+        return await PermisosRepository(s).admin_permanente(id_usuario)
+
+
+async def _validar_rol(sesiones, rol: str) -> None:
+    """Que el rol exista en la tabla `rol`.
+
+    `admin` vale siempre, sin mirar la tabla: es admin por regla, no por su fila, y es
+    lo que manda el front de hoy en cada alta.
+
+    Si la tabla todavía no existe (backend nuevo con la migración sin correr), se
+    acepta sólo `admin`, que es lo que se aceptaba antes: asignar otro rol sin las
+    tablas que lo definen dejaría a esa persona sin ningún permiso."""
+    if rol == ROL_ADMIN:
+        return
+    async with sesiones() as s:
+        roles = await PermisosRepository(s).roles()
+    if roles is None:
+        if rol != ROL_ADMIN:
+            raise BusinessException(
+                "Todavía no se pueden asignar roles distintos de admin: falta que se "
+                "actualice la base (migración de permisos)."
+            )
+        return
+    codigos = [c for c, _ in roles]
+    if rol not in codigos:
+        raise BusinessException(f"El rol '{rol}' no existe. Los que hay: {', '.join(codigos)}.")
+
+
+async def _cuidar_administradores(
+    sesiones,
+    *,
+    id_objetivo: int,
+    id_actor: int,
+    rol_actual: str,
+    activo_actual: bool,
+    rol_nuevo: str,
+    activo_nuevo: bool,
+) -> None:
+    """Las reglas duras sobre los administradores. Levanta 409 si alguna se rompe.
+
+    1. Nadie se cambia el rol ni se desactiva a sí mismo (DJ): que lo haga otro admin.
+    2. Un administrador permanente no deja de ser admin ni se desactiva.
+    3. El sistema nunca queda sin ningún admin activo.
+    """
+    cambia_rol = rol_nuevo != rol_actual
+    se_desactiva = bool(activo_actual) and not activo_nuevo
+    if id_objetivo == id_actor:
+        if cambia_rol:
+            raise _conflicto("No podés cambiarte tu propio rol: pedíselo a otro administrador.")
+        if se_desactiva:
+            raise _conflicto("No podés desactivar tu propio usuario.", campo="activo")
+
+    deja_de_ser_admin = rol_actual == ROL_ADMIN and bool(activo_actual) and (
+        rol_nuevo != ROL_ADMIN or not activo_nuevo
+    )
+    if not deja_de_ser_admin:
+        return
+    async with sesiones() as s:
+        repo = PermisosRepository(s)
+        if await repo.admin_permanente(id_objetivo):
+            raise _conflicto(
+                "Es administrador permanente: no se le puede cambiar el rol, ni "
+                "desactivarlo, ni eliminarlo."
+            )
+        if await repo.admins_activos(excepto=id_objetivo) == 0:
+            raise _conflicto(
+                "Es el único administrador activo: el sistema no puede quedar sin nadie "
+                "que lo administre. Hacé admin a otra persona primero."
+            )
 
 
 @router.post("/logout", response_model=ResponseDTO)
@@ -381,15 +495,21 @@ from backend.dto.UsuarioRequestDTO import UsuarioCreateDTO, UsuarioUpdateDTO
 async def crear_usuario(
     usuario_dto: UsuarioCreateDTO,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_admin),
+    sesiones=Depends(get_sesiones_permisos),
 ):
     """
     Crea un nuevo usuario
     
     Requiere autenticación (Bearer Token)
     Solo accesible por administradores
+
+    RF-24: el rol tiene que existir en la tabla `rol` (admin, supervisor, operario...).
     """
     try:
+        # Antes de tocar la sesión del endpoint (ver _validar_rol).
+        await _validar_rol(sesiones, usuario_dto.rol)
+
         usuario_repository = UsuarioRepository(db)
         auth_service = AuthService(usuario_repository)
         
@@ -457,6 +577,8 @@ async def crear_usuario(
             data=usuario_data
         )
         
+    except HTTPException:
+        raise
     except BusinessException as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -475,13 +597,18 @@ async def actualizar_usuario(
     id_usuario: int,
     usuario_dto: UsuarioUpdateDTO,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_admin),
+    sesiones=Depends(get_sesiones_permisos),
 ):
     """
     Actualiza un usuario existente
     
     Requiere autenticación (Bearer Token)
     Solo accesible por administradores
+
+    RF-24, además: el rol tiene que existir; nadie se cambia el rol ni se desactiva a sí
+    mismo; un administrador permanente sigue siendo admin y activo; y el sistema nunca
+    queda sin ningún admin activo (409 si alguna se rompe).
     """
     try:
         usuario_repository = UsuarioRepository(db)
@@ -490,6 +617,22 @@ async def actualizar_usuario(
         usuario = await usuario_repository.obtener_por_id(id_usuario)
         if not usuario:
             raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
+
+        # RF-24. Se mira ANTES de tocar nada del objeto. Las lecturas van con su propia
+        # sesión, así que no pueden dejar inservible la de este guardado.
+        rol_nuevo = usuario_dto.rol or usuario.rol
+        activo_nuevo = usuario.activo if usuario_dto.activo is None else usuario_dto.activo
+        if rol_nuevo != usuario.rol:
+            await _validar_rol(sesiones, rol_nuevo)
+        await _cuidar_administradores(
+            sesiones,
+            id_objetivo=id_usuario,
+            id_actor=current_user['id_usuario'],
+            rol_actual=usuario.rol,
+            activo_actual=usuario.activo,
+            rol_nuevo=rol_nuevo,
+            activo_nuevo=activo_nuevo,
+        )
         
         # Si se actualiza el username, verificar que no esté en uso
         if usuario_dto.username and usuario_dto.username != usuario.username:
@@ -552,6 +695,8 @@ async def actualizar_usuario(
             data=usuario_data
         )
         
+    except HTTPException:
+        raise
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -574,7 +719,8 @@ async def actualizar_usuario(
 async def eliminar_usuario(
     id_usuario: int,
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_admin),
+    sesiones=Depends(get_sesiones_permisos),
 ):
     """
     Elimina un usuario
@@ -582,6 +728,9 @@ async def eliminar_usuario(
     Requiere autenticación (Bearer Token)
     Solo accesible por administradores
     No se puede eliminar a sí mismo
+
+    RF-24, además: un administrador permanente no se elimina, y el sistema nunca queda
+    sin ningún admin activo (409).
     """
     try:
         # Validar que no se elimine a sí mismo
@@ -594,6 +743,17 @@ async def eliminar_usuario(
         usuario = await usuario_repository.obtener_por_id(id_usuario)
         if not usuario:
             raise NotFoundException(f"Usuario con ID {id_usuario} no encontrado")
+
+        # RF-24. Eliminar es desactivar (soft delete): mismas reglas que desactivarlo.
+        await _cuidar_administradores(
+            sesiones,
+            id_objetivo=id_usuario,
+            id_actor=current_user['id_usuario'],
+            rol_actual=usuario.rol,
+            activo_actual=usuario.activo,
+            rol_nuevo=usuario.rol,
+            activo_nuevo=False,
+        )
         
         # Guardar información antes de eliminar para la notificación
         username_eliminado = usuario.username
@@ -623,6 +783,8 @@ async def eliminar_usuario(
             data={"id_usuario": id_usuario}
         )
         
+    except HTTPException:
+        raise
     except NotFoundException as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

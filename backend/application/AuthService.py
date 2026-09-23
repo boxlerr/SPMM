@@ -165,6 +165,26 @@ class AuthService:
             "intentos_fallidos": 0,
         }
 
+    async def _permisos_para_el_login(self, id_usuario: int) -> Optional[dict]:
+        """Los permisos resueltos para la respuesta del login, o None si no se pudieron
+        leer (se loguea y el login sigue). Hace rollback si algo falla: en Postgres una
+        consulta fallida deja la transacción inservible, y esto es lo último del login."""
+        from backend.infrastructure.PermisosRepository import PermisosRepository
+
+        db = self.usuario_repository.db
+        try:
+            permisos = await PermisosRepository(db).permisos_de_usuario(
+                id_usuario=id_usuario, con_admin_permanente=True
+            )
+            return permisos.como_dict() if permisos is not None else None
+        except Exception as e:
+            logger.warning(f"LOGIN: no se pudieron resolver los permisos de #{id_usuario}: {e}")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            return None
+
     async def login(self, username: str, password: str) -> dict:
         """
         Autentica un usuario y genera un token JWT
@@ -259,7 +279,15 @@ class AuthService:
             usuario_data['access_token'] = access_token
             usuario_data['token_type'] = 'bearer'
             usuario_data['expires_in'] = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # En segundos
-            
+
+            # RF-24: los permisos ya resueltos, para que la pantalla sepa qué mostrar sin
+            # otra vuelta. Va AL FINAL y a prueba de fallas: el login ya salió bien y no
+            # se cae por esto. Si no se pueden leer, la clave no viene, y el front hace lo
+            # de siempre (todo a la vista) mientras la API sigue cuidando cada pedido.
+            permisos = await self._permisos_para_el_login(usuario.id_usuario)
+            if permisos is not None:
+                usuario_data['permisos'] = permisos
+
             return usuario_data
 
         except (BusinessException, InfrastructureException):

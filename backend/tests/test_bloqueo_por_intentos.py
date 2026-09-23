@@ -24,7 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.application.AuthService import MAX_INTENTOS_FALLIDOS, MINUTOS_DE_BLOQUEO
-from backend.core.security import get_password_hash
+from backend.core.security import get_password_hash, get_sesiones_permisos
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
 from backend.domain.Usuario import Usuario
 from backend.infrastructure import auditoria_movimientos as auditoria
@@ -69,6 +69,9 @@ async def _armar_cliente(con_auditoria: bool):
             yield s
 
     app.dependency_overrides[AuthAPI.get_db] = _db
+    # RF-24: require_admin mira la BASE (no el token) con su propia sesión corta. Que
+    # lea esta misma SQLite y no la fábrica de producción.
+    app.dependency_overrides[get_sesiones_permisos] = lambda: Sesion
     return engine, Sesion
 
 
@@ -288,7 +291,14 @@ async def test_desbloquear_pide_ser_admin(cliente):
     # Sin token.
     r = await cliente.post("/auth/usuarios/2/desbloquear")
     assert r.status_code in (401, 403)
-    # Con un token que no es de admin.
+    # Con un token que no es de admin. Desde RF-24 require_admin mira la base y no el
+    # token, así que Matías tiene que existir (y ser operario) para que el 403 diga lo
+    # que este test quiere decir; un id que no existe da 401.
+    async with cliente.sesiones() as s:
+        s.add(Usuario(id_usuario=3, username="matias", email="matias@metalurgicalongchamps.com",
+                      password_hash=get_password_hash("otra"), nombre="Matías",
+                      apellido="Gómez", rol="operario", activo=True))
+        await s.commit()
     from backend.core.security import create_access_token
     token = create_access_token({"sub": "matias", "id_usuario": 3, "rol": "operario",
                                  "nombre": "Matías", "apellido": "Gómez"})

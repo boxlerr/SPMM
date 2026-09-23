@@ -1,8 +1,29 @@
 """
 DTOs para requests relacionados con usuarios
 """
+import re
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, validator
+
+
+# RF-24: el rol es el CÓDIGO de una fila de la tabla `rol` (admin, supervisor, operario
+# y los que se creen). Acá sólo se mira la FORMA —minúsculas, sin espacios, hasta 20
+# como la columna usuario.rol—; que exista lo mira el endpoint contra la tabla
+# (AuthAPI._validar_rol), porque un validador de Pydantic no puede consultar la base.
+# Hasta el 22/09 esto aceptaba sólo 'admin'.
+_FORMA_DE_ROL = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
+
+
+def _normalizar_rol(v):
+    if v is None:
+        return v
+    v = str(v).strip().lower()
+    if not _FORMA_DE_ROL.match(v):
+        raise ValueError(
+            "Rol inválido: tiene que ser el código de un rol (por ejemplo admin, "
+            "supervisor u operario)."
+        )
+    return v
 
 class UsuarioCreateDTO(BaseModel):
     """DTO para crear un nuevo usuario"""
@@ -22,9 +43,7 @@ class UsuarioCreateDTO(BaseModel):
     
     @validator('rol')
     def validate_rol(cls, v):
-        if v not in ['admin']:
-            raise ValueError('Rol inválido. Solo se permite: admin')
-        return v
+        return _normalizar_rol(v)
 
 
 class UsuarioUpdateDTO(BaseModel):
@@ -44,9 +63,7 @@ class UsuarioUpdateDTO(BaseModel):
     
     @validator('rol')
     def validate_rol(cls, v):
-        if v and v not in ['admin']:
-            raise ValueError('Rol inválido. Solo se permite: admin')
-        return v
+        return _normalizar_rol(v) if v else v
 
 
 class UsuarioChangePasswordDTO(BaseModel):
