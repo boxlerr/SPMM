@@ -31,6 +31,14 @@ import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { PausasDeLaOT } from "@/components/pausas/PausasDeLaOT";
 import { aNumero } from "@/lib/exportar";
 import { archivoDeOT, seccionesDeOT, type DatosDeOT } from "@/lib/exportes/ot";
+import { EstadoYControl, type ValoresDeEstado } from "@/components/common/EstadoDeControl";
+import {
+    CASILLAS_NUEVAS,
+    conoceEstadosDeControl,
+    marcada,
+    resumenEstadoYControl,
+    cuandoLegible,
+} from "@/lib/estadoControlOT";
 import {
     CeldaConsumido,
     FilaDeConsumo,
@@ -301,6 +309,9 @@ const generalVacio = () => ({
     revisada: false, tercerizado_total: false, tercerizado_parcial: false, suspendida: false, email: false,
     tiene_plano: false, no_lleva_plano: false, no_lleva_materia_prima: false,
     programada: false, en_proceso: false, id_otvieja: "",
+    // RF-11: el resto de «Estado y control» de la ficha vieja.
+    controlado: false, finalizado_para_pintar: false, finalizado_tercerizacion_final: false,
+    finalizado_tercerizacion_intermedia: false, cantidad_finalizada_parcial: "",
 });
 
 const detallesVacios = () => ({ cantidad: "", observaciones: "", nota_1: "", nota_2: "", nota_3: "" });
@@ -390,6 +401,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         no_lleva_materia_prima: false,
         programada: false,
         en_proceso: false,
+        // RF-11: el resto de «Estado y control» de la ficha vieja.
+        controlado: false,
+        finalizado_para_pintar: false,
+        finalizado_tercerizacion_final: false,
+        finalizado_tercerizacion_intermedia: false,
+        cantidad_finalizada_parcial: "",
     });
 
     const [detailsData, setDetailsData] = useState({
@@ -494,7 +511,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     no_lleva_plano: (orderToEdit as any).no_lleva_plano === 1 || (orderToEdit as any).no_lleva_plano === true,
                     no_lleva_materia_prima: (orderToEdit as any).no_lleva_materia_prima === 1 || (orderToEdit as any).no_lleva_materia_prima === true,
                     programada: orderToEdit.programada === 1 || orderToEdit.programada === true,
-                    en_proceso: orderToEdit.en_proceso === 1 || orderToEdit.en_proceso === true
+                    en_proceso: orderToEdit.en_proceso === 1 || orderToEdit.en_proceso === true,
+                    // RF-11. Con el backend de antes (sin estos campos) quedan en blanco y
+                    // bloqueados: ver `conoceControl`.
+                    controlado: marcada(orderToEdit.controlado),
+                    finalizado_para_pintar: marcada(orderToEdit.finalizado_para_pintar),
+                    finalizado_tercerizacion_final: marcada(orderToEdit.finalizado_tercerizacion_final),
+                    finalizado_tercerizacion_intermedia: marcada(orderToEdit.finalizado_tercerizacion_intermedia),
+                    cantidad_finalizada_parcial: orderToEdit.cantidad_finalizada_parcial != null
+                        ? String(orderToEdit.cantidad_finalizada_parcial) : "",
                 };
                 setGeneralData(generalCargado);
 
@@ -810,6 +835,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             return false;
         }
 
+        // RF-11: el «Cant.» de Finalizado parcial es un número entero de unidades, o vacío.
+        const cantParcial = generalData.cantidad_finalizada_parcial.trim();
+        if (cantParcial !== "" && !/^\d+$/.test(cantParcial)) {
+            toast.error("La «Cant.» de Finalizado parcial tiene que ser un número entero de unidades (o quedar vacía).");
+            setActiveTab("general");
+            return false;
+        }
+
         // Una OT puede quedarse sin procesos a propósito.
         //
         // Antes acá se cortaba con "Debes agregar al menos un proceso": el que sacaba
@@ -882,6 +915,14 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
      */
     const soloLectura = !puedeSeccion("operaciones_ordenes", "write");
     const camposBloqueados = isLegacyOT || soloLectura;
+    /**
+     * RF-11: ¿el backend guarda las casillas nuevas de «Estado y control»? El que está en
+     * producción hoy (3422285) no las conoce: se las saltearía en silencio y la persona
+     * creería que quedaron marcadas. Editando, lo dice la OT que llegó (si no trae
+     * `controlado`, no las sabe); en el alta no hay OT para mirar, se deja cargar y se
+     * avisa después si la respuesta no las trae (ver `performSubmission`).
+     */
+    const conoceControl = !orderToEdit || conoceEstadosDeControl(orderToEdit);
 
     /**
      * De dónde salen los planos que muestran la solapa Planos y el panel de Procesos.
@@ -955,6 +996,33 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         }
     };
 
+    /**
+     * RF-11: las casillas nuevas de «Estado y control» y el «Cant.» del parcial, para el
+     * cuerpo del guardado.
+     *
+     * En el alta van todas. Editando, sólo las que la persona CAMBIÓ: el backend deja
+     * como estaba lo que no viene, así que una OT que llegó de una lista que no trae
+     * estos campos (o de un backend que no los conoce) no puede terminar desmarcada por
+     * guardarla. Y si el backend no los conoce, no se mandan (`conoceControl`).
+     */
+    const camposDeControl = (): Record<string, unknown> => {
+        const cant = generalData.cantidad_finalizada_parcial.trim();
+        const valores: Record<string, unknown> = {
+            controlado: generalData.controlado,
+            finalizado_para_pintar: generalData.finalizado_para_pintar,
+            finalizado_tercerizacion_final: generalData.finalizado_tercerizacion_final,
+            finalizado_tercerizacion_intermedia: generalData.finalizado_tercerizacion_intermedia,
+            cantidad_finalizada_parcial: cant === "" ? null : parseInt(cant, 10),
+        };
+        if (!orderToEdit) return valores;
+        if (!conoceControl) return {};
+        const antes: Record<string, unknown> = {
+            ...Object.fromEntries(CASILLAS_NUEVAS.map((c) => [c, marcada(orderToEdit[c])])),
+            cantidad_finalizada_parcial: orderToEdit.cantidad_finalizada_parcial ?? null,
+        };
+        return Object.fromEntries(Object.entries(valores).filter(([k, v]) => antes[k] !== v));
+    };
+
     const performSubmission = async () => {
         setSubmitting(true);
 
@@ -1013,6 +1081,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             no_lleva_materia_prima: generalData.no_lleva_materia_prima,
             programada: generalData.programada,
             en_proceso: generalData.en_proceso,
+
+            ...camposDeControl(),
 
             // Sólo se guardan los procesos tildados ("Va") con proceso elegido.
             // maquinaria_id se manda como string ('' -> null) para respetar el DTO.
@@ -1116,6 +1186,18 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             }
 
             toast.success(orderToEdit ? "Orden de Trabajo actualizada correctamente" : "Orden de Trabajo creada correctamente");
+
+            // RF-11: un alta con Controlado (o las otras casillas nuevas) contra un backend
+            // que todavía no las guarda. La OT se creó bien; lo único que no quedó es eso,
+            // y hay que decirlo en vez de dejar que la persona crea que sí.
+            if (!orderToEdit) {
+                const cargoControl = CASILLAS_NUEVAS.some(c => generalData[c])
+                    || generalData.cantidad_finalizada_parcial.trim() !== "";
+                const guardada = await response.json().then(j => j?.data ?? j).catch(() => null);
+                if (cargoControl && guardada && typeof guardada === "object" && !conoceEstadosDeControl(guardada)) {
+                    toast.warning("La OT se creó, pero el servidor todavía no guarda Controlado, las etapas de pintura y tercerización ni la «Cant.» del parcial. Se van a poder cargar cuando se actualice.");
+                }
+            }
             onSuccess?.();
             onClose();
             resetForm();
@@ -1246,6 +1328,13 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             aprobadoPor: generalData.aprobado_por,
             notaDeTaller: detailsData.observaciones,
             descripcion: generalData.descripcion,
+            // RF-11: lo marcado en «Estado y control» (lo del formulario, como el resto).
+            // Quién la controló sale de la OT guardada, y sólo si sigue marcada.
+            estadoYControl: resumenEstadoYControl(generalData),
+            controladoPor: generalData.controlado && marcada(orderToEdit?.controlado)
+                ? orderToEdit?.controlado_por ?? "" : "",
+            controladoEl: generalData.controlado && marcada(orderToEdit?.controlado)
+                ? orderToEdit?.controlado_en ?? "" : "",
             procesos: processes.filter(p => p.incluido && p.proceso_id).map((p, i) => {
                 const plan = p.id_otp ? planificado[p.id_otp] : undefined;
                 return {
@@ -1285,6 +1374,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         const maqName = (id: string) => maquinarias.find(m => m.id.toString() === id)?.nombre || "Sin recurso maquinaria";
 
         const procs = processes.filter(p => p.incluido && p.proceso_id);
+        // RF-11: las casillas marcadas de «Estado y control», igual que en el PDF.
+        const exportado = datosParaExportar();
+        const quienControlo = [exportado.controladoPor ? `controlada por ${exportado.controladoPor}` : "",
+                               cuandoLegible(exportado.controladoEl)].filter(Boolean).join(" · ");
+        const estadoImpreso = exportado.estadoYControl
+            ? exportado.estadoYControl + (quienControlo ? ` (${quienControlo})` : "") : "";
         // Hoja de procesos (operario): datos planificados + columnas en blanco para
         // la carga real a mano (empleado, horarios, total, obs).
         // Cada proceso lleva TRES renglones de carga, no uno.
@@ -1401,6 +1496,7 @@ ${encabezado("Orden de Trabajo — Procesos", `Impreso ${esc(hoy)}`)}
 <h2>Nota de taller</h2>
 <div class="notas">${esc(detailsData.observaciones || "")}</div>
 ${generalData.descripcion ? `<h2>Descripción</h2><div class="notas">${esc(generalData.descripcion)}</div>` : ""}
+${estadoImpreso ? `<h2>Estado y control</h2><div class="notas">${esc(estadoImpreso)}</div>` : ""}
 <div class="firmas">
   <div class="firma">Firma del recurso humano</div>
   <div class="firma">Control / Calidad</div>
@@ -1791,20 +1887,14 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 <Checkbox id="suspendida" disabled={camposBloqueados} className="border-red-600 data-[state=checked]:bg-red-600" checked={generalData.suspendida} onCheckedChange={(c) => setGeneralData({ ...generalData, suspendida: !!c })} /> 
                                                 <span className="text-xs uppercase">Suspendida</span>
                                             </Label>
-                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100/50 px-2 py-1 rounded border border-transparent transition-colors w-full h-8">
-                                                <Checkbox id="finalizadoparcial" disabled={camposBloqueados} checked={generalData.finalizadoparcial} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadoparcial: !!c })} /> 
-                                                <span className="text-xs text-gray-800 font-bold">Fin. Parcial</span>
-                                            </Label>
-                                            <Label className="md:col-span-2 flex items-center space-x-2 bg-green-50 px-2 py-1 rounded border border-green-200 cursor-pointer hover:bg-green-100 transition-colors w-full h-8">
-                                                <Checkbox id="finalizadototal" disabled={camposBloqueados} checked={generalData.finalizadototal} onCheckedChange={(c) => setGeneralData({ ...generalData, finalizadototal: !!c })} /> 
-                                                <span className="text-xs font-bold text-green-700 uppercase tracking-tighter truncate">Entrega Completa (Total)</span>
-                                            </Label>
+                                            {/* «Fin. Parcial» y «Entrega Completa (Total)» se mudaron al
+                                                recuadro «Estado y control» de abajo (RF-11), junto con las
+                                                otras seis casillas de estado de la ficha vieja. */}
                                         </div>
 
                                         {/* Status block (Row 7).
-                                            RF-27: las cinco casillas en fila piden ~440px; en el teléfono
-                                            «En Proceso» y «Revisada» quedaban afuera y el formulario entero
-                                            scrolleaba de costado. Ahí bajan de renglón; desde `md`, la fila
+                                            RF-27: las casillas en fila no entraban en el teléfono y el
+                                            formulario entero scrolleaba de costado. Ahí bajan de renglón; desde `md`, la fila
                                             repartida de siempre. */}
                                         <div className="md:col-span-4 xl:col-span-6 flex flex-wrap md:flex-nowrap items-center justify-start md:justify-between gap-x-3 gap-y-1 md:gap-4 py-2 border-t border-gray-100 mt-1">
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
@@ -1818,19 +1908,29 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 <Checkbox id="no_lleva_plano" disabled={camposBloqueados} checked={generalData.no_lleva_plano} onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_plano: !!c, tiene_plano: c ? false : generalData.tiene_plano })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">No lleva plano</span>
                                             </Label>
-                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="programada" disabled={camposBloqueados} checked={generalData.programada} onCheckedChange={(c) => setGeneralData({ ...generalData, programada: !!c })} /> 
-                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Programada</span>
-                                            </Label>
-                                            <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
-                                                <Checkbox id="en_proceso" disabled={camposBloqueados} checked={generalData.en_proceso} onCheckedChange={(c) => setGeneralData({ ...generalData, en_proceso: !!c })} /> 
-                                                <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">En Proceso</span>
-                                            </Label>
+                                            {/* Programada y En Proceso se mudaron a «Estado y control» (RF-11). */}
                                             <Label className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-1 rounded transition-colors group">
                                                 <Checkbox id="revisada" disabled={camposBloqueados} checked={generalData.revisada} onCheckedChange={(c) => setGeneralData({ ...generalData, revisada: !!c })} /> 
                                                 <span className="text-xs font-medium text-gray-500 group-hover:text-gray-700">Revisada</span>
                                             </Label>
                                         </div>
+
+                                        {/* RF-11: las ocho casillas de estado de la ficha del sistema
+                                            viejo, en su orden, con el «Cant.» al lado de Finalizado
+                                            parcial. Quién marcó Controlado y cuándo lo pone el backend. */}
+                                        <EstadoYControl
+                                            valores={generalData as ValoresDeEstado}
+                                            onCasilla={(clave, valor) => setGeneralData(g => ({ ...g, [clave]: valor }))}
+                                            onCantidad={(texto) => setGeneralData(g => ({ ...g, cantidad_finalizada_parcial: texto }))}
+                                            bloqueado={camposBloqueados}
+                                            conoceNuevas={conoceControl}
+                                            guardada={orderToEdit ? {
+                                                controlado: marcada(orderToEdit.controlado),
+                                                por: orderToEdit.controlado_por,
+                                                en: orderToEdit.controlado_en,
+                                            } : null}
+                                            unidades={aNumero(detailsData.cantidad)}
+                                        />
 
                                         {/* Textareas (Compact Row 8) */}
                                         <div className="md:col-span-2 space-y-1.5">

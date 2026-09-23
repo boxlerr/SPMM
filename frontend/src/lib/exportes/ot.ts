@@ -50,6 +50,12 @@ export interface DatosDeOT {
     aprobadoPor: string;
     notaDeTaller: string;
     descripcion: string;
+    /** RF-11: las casillas de «Estado y control» marcadas, en el orden de la ficha vieja
+     *  («Programada, Finalizado parcial (3), Controlado»). Vacío = ninguna. */
+    estadoYControl?: string;
+    /** Quién marcó Controlado y cuándo (lo que dice la OT guardada). */
+    controladoPor?: string;
+    controladoEl?: string;
     procesos: ProcesoDeOT[];
     materias: MateriaDeOT[];
 }
@@ -74,6 +80,10 @@ const COLUMNAS_ORDEN: ColumnaExport<DatosDeOT>[] = [
     { titulo: "Aprobado por", valor: (d) => d.aprobadoPor },
     { titulo: "Nota de taller", valor: (d) => d.notaDeTaller },
     { titulo: "Descripción", valor: (d) => d.descripcion },
+    // RF-11: al final, para no correr las columnas de antes.
+    { titulo: "Estado y control", valor: (d) => d.estadoYControl ?? "" },
+    { titulo: "Controlado por", valor: (d) => d.controladoPor ?? "" },
+    { titulo: "Controlado el", tipo: "fechaHora", valor: (d) => d.controladoEl || null },
 ];
 
 export const COLUMNAS_PROCESOS_OT: ColumnaExport<ProcesoDeOT>[] = [

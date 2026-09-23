@@ -46,6 +46,7 @@ import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { ChipsDeControl } from "@/components/common/EstadoDeControl";
 import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { columnasOrdenes, filtroOrden, resumenFiltrosOT } from "@/lib/exportes/ordenes";
 
@@ -399,6 +400,8 @@ export const UnplannedWorkOrdersList = React.memo(function UnplannedWorkOrdersLi
                     <span className="inline-flex flex-wrap items-center gap-1.5">
                         {order.id_otvieja || order.id}
                         <MarcaPausada idOrden={order.id} />
+                        {/* RF-11: Controlada, Para pintar, Terc. intermedia / final. */}
+                        <ChipsDeControl orden={order} />
                     </span>
                 </td>
                 <td className="px-3 py-3 font-medium">
@@ -656,10 +659,11 @@ export const UnplannedWorkOrdersList = React.memo(function UnplannedWorkOrdersLi
         <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
             <div className="p-4" onClick={() => toggleRow(order.id)}>
                 <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
                         <Badge className={cn("text-[9px]", copy.badgeClase)}>{copy.badge}</Badge>
                         <MarcaPausada idOrden={order.id} />
+                        <ChipsDeControl orden={order} />
                     </div>
                     <button className="text-gray-400">
                         {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -783,6 +787,7 @@ export const UnplannedWorkOrdersList = React.memo(function UnplannedWorkOrdersLi
                     filas={sortedOrders}
                     columnas={columnasOrdenes({
                         plano: (o) => estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles),
+                        conControl: true,
                     })}
                     filtros={() => [
                         ...resumenFiltrosOT(filters, searchTerm),
@@ -793,7 +798,7 @@ export const UnplannedWorkOrdersList = React.memo(function UnplannedWorkOrdersLi
                 </div>
             </div>
 
-            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} compacto />
+            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} compacto conControl />
 
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">
