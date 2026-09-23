@@ -27,6 +27,7 @@ def falta_columna(e: Exception) -> bool:
             return True
     return "no such column" in str(orig if orig is not None else e).lower()
 
+
 class UsuarioRepository:
     """Repositorio para gestionar usuarios en la base de datos"""
     
@@ -65,17 +66,6 @@ class UsuarioRepository:
         except Exception as e:
             logger.error(f"Error al obtener usuario por email {email}: {str(e)}")
             raise InfrastructureException("Error al obtener usuario por email") from e
-    
-    async def obtener_todos(self) -> List[Usuario]:
-        """Obtiene todos los usuarios"""
-        try:
-            result = await self.db.execute(
-                select(Usuario).order_by(Usuario.fecha_creacion.desc())
-            )
-            return result.scalars().all()
-        except Exception as e:
-            logger.error(f"Error al obtener todos los usuarios: {str(e)}")
-            raise InfrastructureException("Error al obtener todos los usuarios") from e
     
     async def obtener_todos(self, incluir_inactivos: bool = False) -> List[Usuario]:
         """Obtiene todos los usuarios"""

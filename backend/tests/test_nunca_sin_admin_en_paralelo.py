@@ -60,7 +60,7 @@ async def test_por_los_dos_caminos_a_la_vez_tampoco(cliente):
         cliente.put(f"/permisos/usuarios/{JULIAN}/rol", headers=_token(LUCAS), json={"rol": "operario"}),
     )
     assert await _admins_activos(cliente) == 1
-    assert sorted([a.status_code, b.status_code])[0] == 200
+    assert sorted([a.status_code, b.status_code])[0] == 200, (a.text, b.text)
     assert sorted([a.status_code, b.status_code])[1] in (403, 409), (a.text, b.text)
 
 

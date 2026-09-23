@@ -95,8 +95,13 @@ const SOLAPAS: Solapa[] = [
         texto: (
           <>
             En los tres puntitos de cada fila: <b>Editar datos</b> (nombre, usuario y email) y <b>Eliminar</b>, que
-            le saca el acceso: no puede entrar más y sale de la lista. Lo que cargó queda en el sistema con su
-            nombre.
+            le saca el acceso: no puede entrar más. Lo que cargó queda en el sistema con su nombre.
+          </>
+        ),
+        consejo: (
+          <>
+            ¿Lo eliminaste por error? Abajo de la lista, <b>Ver los que no tienen acceso</b>, y en su fila{' '}
+            <b>Devolver el acceso</b>: vuelve a entrar con el mismo usuario y el mismo rol.
           </>
         ),
       },

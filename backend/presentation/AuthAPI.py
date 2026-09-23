@@ -2,7 +2,7 @@
 API de Autenticación
 Endpoints para login, logout, recuperación de contraseña
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from backend.infrastructure.db import SessionLocal
@@ -412,6 +412,11 @@ async def listar_usuarios(
     db=Depends(get_db),
     current_user: dict = Depends(get_current_user),
     sesiones=Depends(get_sesiones_permisos),
+    incluir_inactivos: bool = Query(
+        False,
+        description="También los que no tienen acceso (eliminados o desactivados), para "
+                    "poder devolvérselo.",
+    ),
 ):
     """
     Lista todos los usuarios del sistema
@@ -426,6 +431,10 @@ async def listar_usuarios(
 
     `pantalla_inicio` (RF-28), igual: la de cada persona, leída antes y aparte; si la
     columna falta, la clave no viene.
+
+    `?incluir_inactivos=true` trae también a los que no tienen acceso («Eliminar» es
+    desactivar): la pantalla los muestra aparte para poder devolvérselo. Sin el parámetro,
+    sólo los activos, como siempre (lo que espera el front de antes).
     """
     try:
         permanentes = await admins_permanentes(sesiones)
@@ -433,8 +442,8 @@ async def listar_usuarios(
         bloqueos = await _bloqueos(sesiones)
         usuario_repository = UsuarioRepository(db)
         
-        # Obtener todos los usuarios
-        usuarios = await usuario_repository.obtener_todos()
+        # Obtener todos los usuarios (con los inactivos, si se piden)
+        usuarios = await usuario_repository.obtener_todos(incluir_inactivos=incluir_inactivos)
         
         # Convertir a diccionarios
         ahora = ahora_ar()
@@ -592,21 +601,9 @@ async def crear_usuario(
         
         usuario_creado = await usuario_repository.crear(nuevo_usuario)
         
-        # Crear notificación
-        try:
-            from backend.application.NotificacionService import NotificacionService
-            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
-            notificacion_service = NotificacionService(db)
-            await notificacion_service.crearNotificacion(
-                NotificacionCreateDTO(
-                    mensaje=f"Usuario '{usuario_creado.username}' ({usuario_creado.nombre} {usuario_creado.apellido}) fue creado exitosamente",
-                    tipo="usuario_created",
-                    id_usuario_creador=current_user['id_usuario']
-                )
-            )
-        except Exception as e:
-            logger.warning(f"No se pudo crear notificación para usuario creado: {str(e)}")
-        
+        # Lo que se contesta, leído ANTES de la notificación: si guardarla falla, su
+        # rollback expira el objeto del ORM, y releerlo en async revienta (500 con el
+        # cambio ya guardado).
         usuario_data = {
             "id_usuario": usuario_creado.id_usuario,
             "username": usuario_creado.username,
@@ -617,9 +614,24 @@ async def crear_usuario(
             "activo": usuario_creado.activo
         }
         
+        # Crear notificación
+        try:
+            from backend.application.NotificacionService import NotificacionService
+            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
+            notificacion_service = NotificacionService(db)
+            await notificacion_service.crearNotificacion(
+                NotificacionCreateDTO(
+                    mensaje=f"Usuario '{usuario_data['username']}' ({usuario_data['nombre']} {usuario_data['apellido']}) fue creado exitosamente",
+                    tipo="usuario_created",
+                    id_usuario_creador=current_user['id_usuario']
+                )
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo crear notificación para usuario creado: {str(e)}")
+        
         return ResponseDTO(
             status=True,
-            message=f"Usuario '{usuario_creado.username}' creado exitosamente",
+            message=f"Usuario '{usuario_data['username']}' creado exitosamente",
             data=usuario_data
         )
         
@@ -714,21 +726,9 @@ async def actualizar_usuario(
         
             usuario_actualizado = await usuario_repository.actualizar(usuario)
         
-        # Crear notificación
-        try:
-            from backend.application.NotificacionService import NotificacionService
-            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
-            notificacion_service = NotificacionService(db)
-            await notificacion_service.crearNotificacion(
-                NotificacionCreateDTO(
-                    mensaje=f"Usuario '{usuario_actualizado.username}' ({usuario_actualizado.nombre} {usuario_actualizado.apellido}) fue modificado",
-                    tipo="usuario_updated",
-                    id_usuario_creador=current_user['id_usuario']
-                )
-            )
-        except Exception as e:
-            logger.warning(f"No se pudo crear notificación para usuario actualizado: {str(e)}")
-        
+        # Lo que se contesta, leído ANTES de la notificación: si guardarla falla, su
+        # rollback expira el objeto del ORM, y releerlo en async revienta (500 con el
+        # cambio ya guardado).
         usuario_data = {
             "id_usuario": usuario_actualizado.id_usuario,
             "username": usuario_actualizado.username,
@@ -739,9 +739,24 @@ async def actualizar_usuario(
             "activo": usuario_actualizado.activo
         }
         
+        # Crear notificación
+        try:
+            from backend.application.NotificacionService import NotificacionService
+            from backend.dto.NotificacionRequestDTO import NotificacionCreateDTO
+            notificacion_service = NotificacionService(db)
+            await notificacion_service.crearNotificacion(
+                NotificacionCreateDTO(
+                    mensaje=f"Usuario '{usuario_data['username']}' ({usuario_data['nombre']} {usuario_data['apellido']}) fue modificado",
+                    tipo="usuario_updated",
+                    id_usuario_creador=current_user['id_usuario']
+                )
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo crear notificación para usuario actualizado: {str(e)}")
+        
         return ResponseDTO(
             status=True,
-            message=f"Usuario '{usuario_actualizado.username}' actualizado exitosamente",
+            message=f"Usuario '{usuario_data['username']}' actualizado exitosamente",
             data=usuario_data
         )
         

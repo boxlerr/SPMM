@@ -104,7 +104,9 @@ export default function UsuariosYPermisos() {
   /** `silencioso`: sin el cartel de «cargando» (después de un alta, por ejemplo). */
   const cargarUsuarios = useCallback(async (silencioso: boolean) => {
     if (!silencioso) setCargandoUsuarios(true);
-    const r = await pedir('/auth/usuarios');
+    // Con los que no tienen acceso («Eliminar» desactiva): la lista los muestra aparte
+    // para poder devolvérselo. Un backend viejo ignora el parámetro y manda los activos.
+    const r = await pedir('/auth/usuarios?incluir_inactivos=true');
     if (!silencioso) setCargandoUsuarios(false);
     const lista = datos(r);
     if (r.ok && Array.isArray(lista)) {
@@ -335,10 +337,40 @@ export default function UsuariosYPermisos() {
       );
       return;
     }
-    setUsuarios((prev) => prev.filter((x) => x.id_usuario !== u.id_usuario));
+    // No sale de la lista: queda entre los que no tienen acceso, por si hay que
+    // devolvérselo (en la base es lo mismo: activo = false).
+    setUsuarios((prev) => prev.map((x) => (x.id_usuario === u.id_usuario ? { ...x, activo: false } : x)));
     if (u.activo) setMatriz((m) => (m ? conPersonaMovida(m, u.rol, '') : m));
     setEliminando(null);
-    showToast(`'${u.username}' ya no puede entrar`, 'success');
+    showToast(`'${u.username}' ya no puede entrar. Si fue un error, devolvele el acceso desde «Sin acceso».`, 'success');
+  };
+
+  // ── devolverle el acceso ──
+
+  /**
+   * A alguien eliminado (o desactivado): vuelve a poder entrar, con su rol y sus datos de
+   * antes. Se ve al toque y, si el servidor dice que no, vuelve a como estaba. No pide
+   * confirmación: no se pierde nada y se deshace con «Eliminar».
+   */
+  const devolverAcceso = async (u: UsuarioFila) => {
+    if (u.activo) return;
+    const aplicar = (activo: boolean) =>
+      setUsuarios((prev) => prev.map((x) => (x.id_usuario === u.id_usuario ? { ...x, activo } : x)));
+    aplicar(true);
+    setMatriz((m) => (m ? conPersonaMovida(m, '', u.rol) : m));
+    const r = await pedir(`/auth/usuarios/${u.id_usuario}`, { method: 'PUT', body: { activo: true } });
+    if (!r.ok) {
+      aplicar(false);
+      setMatriz((m) => (m ? conPersonaMovida(m, u.rol, '') : m));
+      showToast(
+        r.red
+          ? 'No se pudo devolver el acceso: revisá la conexión.'
+          : mensajeDeError(r.cuerpo, `No se pudo devolverle el acceso a '${u.username}'.`),
+        'error',
+      );
+      return;
+    }
+    showToast(`'${u.username}' puede volver a entrar`, 'success');
   };
 
   // ── el resumen de arriba ──
@@ -428,6 +460,7 @@ export default function UsuariosYPermisos() {
           setEliminando(u);
         }}
         onDesbloquear={desbloquear}
+        onDevolverAcceso={devolverAcceso}
         inicio={inicio}
       />
 
@@ -476,8 +509,8 @@ export default function UsuariosYPermisos() {
               {eliminando ? (
                 <>
                   Vas a sacarle el acceso a <b className="text-gray-900">{capitalizeName(nombreDePersona(eliminando))}</b> (
-                  {eliminando.username}): no va a poder entrar más y sale de esta lista. Lo que cargó queda en el
-                  sistema con su nombre.
+                  {eliminando.username}): no va a poder entrar más. Lo que cargó queda en el sistema con su nombre, y
+                  si fue un error le podés devolver el acceso desde «Sin acceso», abajo de la lista.
                 </>
               ) : null}
             </DialogDescription>

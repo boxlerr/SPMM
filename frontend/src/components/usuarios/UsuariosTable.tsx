@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import {
   AlertCircle,
+  ChevronDown,
   Edit,
   Lock,
   LockOpen,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  UserCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,6 +41,9 @@ import SelectorDePantalla from './SelectorDePantalla';
  *   ver, avisa adónde va a entrar en su lugar.
  * - En la computadora es una tabla; en el teléfono, una tarjeta por persona (seis
  *   columnas no entran en 375px). Los controles son los mismos componentes.
+ * - Los que no tienen acceso («Eliminar» desactiva, no borra) van aparte, plegados abajo
+ *   («Sin acceso»), con «Devolver el acceso»: el setUsuarioEstadoAction de DJ. Hasta el
+ *   23/09 salían de la lista y no había forma de devolvérselo sin tocar la base.
  *
  * La lista y los cambios los maneja UsuariosYPermisos; esto sólo los muestra.
  */
@@ -100,6 +105,8 @@ interface Props {
   onEditar: (u: UsuarioFila) => void;
   onEliminar: (u: UsuarioFila) => void;
   onDesbloquear: (u: UsuarioFila) => void;
+  /** A alguien sin acceso (eliminado): que vuelva a poder entrar. */
+  onDevolverAcceso: (u: UsuarioFila) => void;
   /** RF-28. null = no se muestra: el servidor (o la base) todavía no la tiene. */
   inicio: InicioDeLaLista | null;
 }
@@ -117,20 +124,26 @@ export default function UsuariosTable({
   onEditar,
   onEliminar,
   onDesbloquear,
+  onDevolverAcceso,
   inicio,
 }: Props) {
   const [busqueda, setBusqueda] = useState('');
   const [rolFiltro, setRolFiltro] = useState('');
+  const [verSinAcceso, setVerSinAcceso] = useState(false);
 
-  const filtrados = useMemo(() => {
+  const coincide = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    return usuarios.filter((u) => {
+    return (u: UsuarioFila) => {
       if (rolFiltro && u.rol !== rolFiltro) return false;
       if (!q) return true;
       return [u.username, u.email, u.nombre, u.apellido]
         .some((x) => (x || '').toLowerCase().includes(q));
-    });
-  }, [usuarios, busqueda, rolFiltro]);
+    };
+  }, [busqueda, rolFiltro]);
+  const activos = useMemo(() => usuarios.filter((u) => u.activo), [usuarios]);
+  const sinAcceso = useMemo(() => usuarios.filter((u) => !u.activo), [usuarios]);
+  const filtrados = useMemo(() => activos.filter(coincide), [activos, coincide]);
+  const sinAccesoFiltrados = useMemo(() => sinAcceso.filter(coincide), [sinAcceso, coincide]);
 
   // Para el filtro: los roles que hay, o (backend viejo) los que aparecen en la lista.
   const rolesDelFiltro: RolElegible[] = useMemo(() => {
@@ -147,7 +160,8 @@ export default function UsuariosTable({
       permanente,
       rolEditable: puedeEditar && !!roles && !esVos && !permanente,
       // Eliminarse a uno mismo o a un administrador permanente: el backend dice que no.
-      eliminable: puedeEditar && !esVos && !permanente,
+      eliminable: puedeEditar && u.activo && !esVos && !permanente,
+      devolvible: puedeEditar && !u.activo,
     };
   };
 
@@ -233,13 +247,26 @@ export default function UsuariosTable({
           Activo
         </span>
       ) : (
-        <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
-          Inactivo
-        </span>
+        <div className="flex flex-wrap items-center gap-2 max-lg:justify-end">
+          <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
+            Sin acceso
+          </span>
+          {puedeEditar && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 max-md:h-9 px-2 text-xs"
+              onClick={() => onDevolverAcceso(u)}
+            >
+              <UserCheck className="h-3 w-3 mr-1" />
+              Devolver el acceso
+            </Button>
+          )}
+        </div>
       )}
       {/* RF-26: bloqueado por 5 contraseñas malas seguidas. Se levanta solo a esa hora;
           el botón es para no tenerlo esperando. */}
-      {u.bloqueado && u.bloqueado_hasta ? (
+      {u.activo && u.bloqueado && u.bloqueado_hasta ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <span
             className="inline-flex items-center whitespace-nowrap px-2 py-1 text-xs font-medium bg-amber-100 text-amber-900 rounded-full"
@@ -260,7 +287,7 @@ export default function UsuariosTable({
             </Button>
           )}
         </div>
-      ) : u.intentos_fallidos ? (
+      ) : u.activo && u.intentos_fallidos ? (
         <div
           className="mt-1 text-xs text-gray-500"
           title="Contraseñas incorrectas seguidas desde su último ingreso. Al llegar a 5 se bloquea 15 minutos."
@@ -286,10 +313,16 @@ export default function UsuariosTable({
             <Edit className="h-4 w-4 mr-2" />
             Editar datos
           </DropdownMenuItem>
-          {u.bloqueado && (
+          {u.activo && u.bloqueado && (
             <DropdownMenuItem onClick={() => onDesbloquear(u)}>
               <LockOpen className="h-4 w-4 mr-2" />
               Desbloquear
+            </DropdownMenuItem>
+          )}
+          {r.devolvible && (
+            <DropdownMenuItem onClick={() => onDevolverAcceso(u)}>
+              <UserCheck className="h-4 w-4 mr-2" />
+              Devolver el acceso
             </DropdownMenuItem>
           )}
           {r.eliminable && (
@@ -303,14 +336,98 @@ export default function UsuariosTable({
     );
   };
 
+  // Lo que se busca puede estar sólo entre los que no tienen acceso (plegados): se dice.
+  const ocultosQueCoinciden = verSinAcceso ? 0 : sinAccesoFiltrados.length;
   const vacio = (
     <div className="px-4 py-12 text-center">
       <AlertCircle className="h-10 w-10 text-gray-300 mx-auto mb-2" />
       <p className="text-gray-500 text-sm">
         {busqueda || rolFiltro ? 'No hay usuarios que coincidan' : 'No hay usuarios registrados'}
       </p>
+      {ocultosQueCoinciden > 0 && (
+        <p className="mt-1 text-xs text-gray-500">
+          {ocultosQueCoinciden === 1 ? 'Hay 1 que coincide' : `Hay ${ocultosQueCoinciden} que coinciden`} entre los
+          que no tienen acceso: abrilos abajo.
+        </p>
+      )}
     </div>
   );
+
+  // Los que no tienen acceso se ven apagados: siguen ahí para poder devolvérselo.
+  const tono = (u: UsuarioFila) => (u.activo ? '' : 'bg-gray-50/70 [&_.dato]:text-gray-400');
+
+  const fila = (u: UsuarioFila) => (
+    <tr key={u.id_usuario} className={`hover:bg-gray-50 transition-colors ${tono(u)}`}>
+      <td className={`${px} py-4`}>
+        <div className="dato font-medium text-gray-900">{u.username}</div>
+        <div className="dato max-w-[16rem] truncate text-sm text-gray-500" title={u.email}>{u.email}</div>
+      </td>
+      <td className={`dato ${px} py-4 text-gray-900`}>
+        {capitalizeName(u.nombre)} {capitalizeName(u.apellido)}
+      </td>
+      <td className={`${px} py-4`}>
+        {rolControl(u)}
+      </td>
+      {inicio && (
+        <td className={`${px} py-4`}>
+          {inicioControl(u)}
+        </td>
+      )}
+      <td className={`${px} py-4`}>
+        {estadoControl(u)}
+      </td>
+      <td className={`${px} py-4 whitespace-nowrap text-sm text-gray-500`}>
+        {ultimoAcceso(u.ultimo_login)}
+      </td>
+      <td className={`${px} py-4 text-right`}>
+        {acciones(u)}
+      </td>
+    </tr>
+  );
+
+  const tarjeta = (u: UsuarioFila) => (
+    <div key={u.id_usuario} className={`px-4 py-3.5 space-y-3 ${tono(u)}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="dato text-sm font-medium text-gray-900">
+            {capitalizeName(u.nombre)} {capitalizeName(u.apellido)}
+          </p>
+          <p className="dato text-xs text-gray-500 break-all">
+            {u.username} · {u.email}
+          </p>
+        </div>
+        {acciones(u)}
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-gray-500 shrink-0">Rol</span>
+        <div className="min-w-0 flex justify-end flex-1">
+          {rolControl(u)}
+        </div>
+      </div>
+      {inicio && (
+        <div className="flex items-start justify-between gap-3">
+          <span className="text-xs text-gray-500 shrink-0 pt-2.5">Entra por</span>
+          <div className="min-w-0 flex justify-end flex-1">
+            {inicioControl(u)}
+          </div>
+        </div>
+      )}
+      <div className="flex items-start justify-between gap-3">
+        <span className="text-xs text-gray-500 shrink-0 pt-1">Estado</span>
+        <div className="min-w-0 flex justify-end text-right">
+          {estadoControl(u)}
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-gray-500 shrink-0">Último acceso</span>
+        <span className="text-xs text-gray-500">{ultimoAcceso(u.ultimo_login)}</span>
+      </div>
+    </div>
+  );
+
+  // «Sin acceso»: plegado por defecto, se abre con el botón de abajo.
+  const abiertoSinAcceso = verSinAcceso;
+  const sinAccesoVisibles = abiertoSinAcceso ? sinAccesoFiltrados : [];
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
@@ -319,7 +436,7 @@ export default function UsuariosTable({
           <h4 className="text-sm font-semibold text-gray-900">Usuarios</h4>
           {!cargando && (
             <span className="text-xs text-gray-500">
-              {filtrados.length} de {usuarios.length}
+              {filtrados.length} de {activos.length}
             </span>
           )}
         </div>
@@ -386,88 +503,56 @@ export default function UsuariosTable({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filtrados.length === 0 ? (
+                {filtrados.length === 0 && sinAccesoVisibles.length === 0 ? (
                   <tr>
                     <td colSpan={columnas.length}>{vacio}</td>
                   </tr>
                 ) : (
-                  filtrados.map((u) => (
-                    <tr key={u.id_usuario} className="hover:bg-gray-50 transition-colors">
-                      <td className={`${px} py-4`}>
-                        <div className="font-medium text-gray-900">{u.username}</div>
-                        <div className="max-w-[16rem] truncate text-sm text-gray-500" title={u.email}>{u.email}</div>
-                      </td>
-                      <td className={`${px} py-4 text-gray-900`}>
-                        {capitalizeName(u.nombre)} {capitalizeName(u.apellido)}
-                      </td>
-                      <td className={`${px} py-4`}>
-                        {rolControl(u)}
-                      </td>
-                      {inicio && (
-                        <td className={`${px} py-4`}>
-                          {inicioControl(u)}
-                        </td>
-                      )}
-                      <td className={`${px} py-4`}>
-                        {estadoControl(u)}
-                      </td>
-                      <td className={`${px} py-4 whitespace-nowrap text-sm text-gray-500`}>
-                        {ultimoAcceso(u.ultimo_login)}
-                      </td>
-                      <td className={`${px} py-4 text-right`}>
-                        {acciones(u)}
-                      </td>
-                    </tr>
-                  ))
+                  filtrados.map(fila)
                 )}
+                {sinAccesoVisibles.length > 0 && (
+                  <tr className="bg-gray-50">
+                    <td colSpan={columnas.length} className={`${px} py-2 text-xs font-semibold uppercase tracking-wider text-gray-500`}>
+                      Sin acceso
+                    </td>
+                  </tr>
+                )}
+                {sinAccesoVisibles.map(fila)}
               </tbody>
             </table>
           </div>
 
           {/* Teléfono y tableta: una tarjeta por persona. */}
           <div className="lg:hidden divide-y divide-gray-200">
-            {filtrados.length === 0
-              ? vacio
-              : filtrados.map((u) => (
-                  <div key={u.id_usuario} className="px-4 py-3.5 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900">
-                          {capitalizeName(u.nombre)} {capitalizeName(u.apellido)}
-                        </p>
-                        <p className="text-xs text-gray-500 break-all">
-                          {u.username} · {u.email}
-                        </p>
-                      </div>
-                      {acciones(u)}
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-gray-500 shrink-0">Rol</span>
-                      <div className="min-w-0 flex justify-end flex-1">
-                        {rolControl(u)}
-                      </div>
-                    </div>
-                    {inicio && (
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="text-xs text-gray-500 shrink-0 pt-2.5">Entra por</span>
-                        <div className="min-w-0 flex justify-end flex-1">
-                          {inicioControl(u)}
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="text-xs text-gray-500 shrink-0 pt-1">Estado</span>
-                      <div className="min-w-0 flex justify-end text-right">
-                        {estadoControl(u)}
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-xs text-gray-500 shrink-0">Último acceso</span>
-                      <span className="text-xs text-gray-500">{ultimoAcceso(u.ultimo_login)}</span>
-                    </div>
-                  </div>
-                ))}
+            {filtrados.length === 0 && sinAccesoVisibles.length === 0 ? vacio : filtrados.map(tarjeta)}
+            {sinAccesoVisibles.length > 0 && (
+              <div className="bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Sin acceso
+              </div>
+            )}
+            {sinAccesoVisibles.map(tarjeta)}
           </div>
+
+          {sinAcceso.length > 0 && (
+            <div className="border-t border-gray-200 px-4 sm:px-5 py-2.5">
+              <button
+                type="button"
+                onClick={() => setVerSinAcceso((v) => !v)}
+                aria-expanded={abiertoSinAcceso}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-gray-900 max-md:min-h-10"
+              >
+                <ChevronDown className={`h-4 w-4 transition-transform ${abiertoSinAcceso ? 'rotate-180' : ''}`} />
+                {abiertoSinAcceso
+                  ? 'Ocultar los que no tienen acceso'
+                  : `Ver los que no tienen acceso (${sinAcceso.length})`}
+              </button>
+              {!abiertoSinAcceso && (
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Los que se eliminaron: no pueden entrar, pero se les puede devolver el acceso.
+                </p>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
