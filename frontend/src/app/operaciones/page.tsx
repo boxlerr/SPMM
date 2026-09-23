@@ -1847,7 +1847,28 @@ export default function OperacionesPage() {
       const guardado = await response.json().catch(() => null);
       const loteNuevo = guardado?.planificados?.id_planificacion_lote;
 
-      toast.success("Planificación guardada exitosamente");
+      // RF-03: lo que se pausó DESPUÉS de calcular este plan no se guarda (el backend lo
+      // saca al confirmar y lo dice con el mismo aviso que al calcular). Se avisa acá,
+      // porque es lo último que se mira: el plan que quedó no es exactamente el que se
+      // aprobó en pantalla.
+      const pausadasAlGuardar: any[] = (Array.isArray(guardado?.diagnosticos) ? guardado.diagnosticos : [])
+        .filter((d: any) => d?.tipo === "ot_pausada");
+      if (pausadasAlGuardar.length) {
+        const cuales = pausadasAlGuardar.map((d: any) => d.titulo).join(" · ");
+        if (!loteNuevo) {
+          toast.warning("No se guardó nada: todo el plan quedó pausado", {
+            description: `${cuales}. Se pausó después de calcular el plan.`,
+            duration: 15_000,
+          });
+        } else {
+          toast.warning("Planificación guardada, sin lo que se pausó", {
+            description: `${cuales}. Se pausó después de calcular el plan: cuando lo reanuden, planificalo de nuevo.`,
+            duration: 15_000,
+          });
+        }
+      } else {
+        toast.success("Planificación guardada exitosamente");
+      }
       // Dejó de ser un borrador: ahora es el plan. Si no se olvida acá, la próxima
       // vez Planificar Órdenes ofrece "retomar" algo que ya está confirmado.
       olvidar();

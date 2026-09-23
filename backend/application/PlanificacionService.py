@@ -2544,6 +2544,92 @@ def _sacar_lo_pausado(orden, lineas, pausa_ot, pausas_paso):
     return entran, _saltado(pausas_paso[pausado.id], "paso", afuera, despues)
 
 
+async def _plan_armado_sin_lo_pausado(db, plan: list[dict]) -> tuple[list[dict], list[dict]]:
+    """RF-03 al CONFIRMAR: saca de un plan ya armado lo que se pausó después de calcularlo.
+
+    El plan que se confirma sale de una vista previa o de un borrador, calculados antes.
+    Si entre medio alguien pausó una de sus OT (o un paso), guardar las filas tal cual
+    metía en el plan confirmado justo lo que se pidió no programar, sin avisar a nadie.
+    Acá se aplica el MISMO corte que al calcular (_sacar_lo_pausado): la OT pausada no
+    entra entera; el paso pausado no entra, ni los que van después en la OT (van en
+    secuencia); los de antes sí.
+
+    Devuelve (filas que se guardan, saltadas) — `saltadas` con la forma que pide
+    DiagnosticoPlanificacion.diagnosticos_de_pausas, para avisar con el formato de
+    siempre. Sacar filas no rompe nada de lo que queda: sólo libera máquinas y personas.
+
+    Es la única lectura que hace el guardado además de escribir (ver
+    test_guardar_no_recalcula): una consulta chica de las pausas vigentes de esas OT, y
+    otra de sus pasos sólo si hay un paso pausado. Si no se pueden leer (migración sin
+    correr), se guarda todo, como antes de RF-03.
+    """
+    ids = sorted({r.get("orden_id") for r in plan if r.get("orden_id") is not None})
+    repo = PausaRepository(db)
+    abiertas = await repo.abiertas_sin_romper(ids)
+    pausas_ot, pausas_paso = _indexar_pausas(abiertas)
+    if not pausas_ot and not pausas_paso:
+        return plan, []
+    numeros = {p.id_orden_trabajo: nro for p, nro in abiertas or ()}
+
+    # Qué pasos van después del pausado: hace falta el orden de TODOS los de la OT (el
+    # plan puede traer sólo algunos).
+    ots_con_paso = sorted({p.id_orden_trabajo for p in pausas_paso.values()} - set(pausas_ot))
+    pasos_por_ot = await repo.pasos_sin_romper(ots_con_paso) if ots_con_paso else {}
+
+    def _pasada(fila):
+        return fila.get("id_orden_trabajo_proceso")
+
+    def _saltado(ot_id, pausa, alcance, afuera, pasada_pausada=None):
+        pasadas = {(_pasada(f) or ("fila", f.get("proceso_id"), f.get("secuencia"))) for f in afuera}
+        return {
+            "orden_id": ot_id,
+            "numero": numeros.get(ot_id) or ot_id,
+            "pausa": pausa,
+            "alcance": alcance,
+            "procesos": len(pasadas),
+            "minutos": sum(int(f.get("duracion_min") or 0) for f in afuera),
+            "despues": len(pasadas - {pasada_pausada}) if alcance == "paso" else 0,
+        }
+
+    afuera_ids: set[int] = set()   # id() de las filas que no se guardan
+    saltadas = []
+    for ot_id in ids:
+        filas = [f for f in plan if f.get("orden_id") == ot_id]
+        if ot_id in pausas_ot:
+            afuera_ids.update(id(f) for f in filas)
+            saltadas.append(_saltado(ot_id, pausas_ot[ot_id], "ot", filas))
+            continue
+        if ot_id not in ots_con_paso:
+            continue
+        # Mismo orden que el solver y que _sacar_lo_pausado: paso y, a igual paso, id.
+        pasos = sorted(((orden, id_otp), estado)
+                       for orden, id_otp, estado in (pasos_por_ot or {}).get(ot_id, []))
+        clave = {id_otp: (orden, id_otp) for (orden, id_otp), _ in pasos}
+        pausado = next((id_otp for (_, id_otp), estado in pasos
+                        if id_otp in pausas_paso and estado != 3), None)
+        if pausado is None and pasos_por_ot is not None:
+            # El paso pausado ya se terminó, o no es de esta OT: no corta nada.
+            continue
+        if pausado is None:
+            # No se pudieron leer los pasos: no se sabe qué va después. Lo seguro es no
+            # programar nada de esa OT.
+            pausa = next(p for p in pausas_paso.values() if p.id_orden_trabajo == ot_id)
+            afuera_ids.update(id(f) for f in filas)
+            saltadas.append(_saltado(ot_id, pausa, "paso", filas, pausa.id_otp))
+            continue
+        corte = clave[pausado]
+        # Una fila que no dice de qué paso es (o de uno que ya no está) no se puede ubicar
+        # antes o después del pausado: tampoco se programa.
+        afuera = [f for f in filas if _pasada(f) not in clave or clave[_pasada(f)] >= corte]
+        if afuera:
+            afuera_ids.update(id(f) for f in afuera)
+            saltadas.append(_saltado(ot_id, pausas_paso[pausado], "paso", afuera, pausado))
+
+    if not afuera_ids:
+        return plan, []
+    return [f for f in plan if id(f) not in afuera_ids], saltadas
+
+
 def _marcar_lineas(resultados, linea_por_clave):
     """
     Le pega a cada fila del resultado el id de la PASADA que la originó, para que
@@ -2644,9 +2730,35 @@ async def planificar(
         # que cuida test_guardar_no_recalcula— y acá no hace falta, porque la vuelta de
         # minutos a fecha ya saltea los días bloqueados al mostrar el plan.
         base = base_confiable(inicio_base, _ahora_ar(), fecha_desde)
+
+        # RF-03: lo que se pausó DESPUÉS de calcular este plan no entra. Se avisa con el
+        # mismo aviso que al calcular, en la respuesta (la pantalla lo muestra al
+        # guardar).
+        plan, saltadas_por_pausa = await _plan_armado_sin_lo_pausado(db, plan)
+        avisos = []
+        if saltadas_por_pausa:
+            for s_ in saltadas_por_pausa:
+                logger.info(
+                    f"PLANIFICADOR (guardar): OT {s_['numero']} pausada después de calcular "
+                    f"el plan ({s_['pausa'].motivo}): {s_['procesos']} pasos no se guardan.")
+            try:
+                from backend.application.DiagnosticoPlanificacion import diagnosticos_de_pausas
+                avisos = diagnosticos_de_pausas(saltadas_por_pausa)
+            except Exception as e:
+                logger.error(f"Service - No se pudieron armar los avisos de lo pausado: {e}")
+
+        if not plan:
+            # Todo lo que traía el plan se pausó: no hay nada que guardar, y un lote vacío
+            # sería un plan «confirmado» que no programa nada.
+            return {
+                "planificados": {"mensaje": "No se guardó nada: todo el plan quedó pausado.",
+                                 "id_planificacion_lote": None, "registros": 0},
+                "excedentes": [],
+                "diagnosticos": avisos,
+            }
         guardado = await repo_planificacion.insertar_planificacion_lote(
             plan, inicio_base=base)
-        return {"planificados": guardado, "excedentes": [], "diagnosticos": []}
+        return {"planificados": guardado, "excedentes": [], "diagnosticos": avisos}
 
     forzar_set = set(forzar_ordenes_ids or [])
 

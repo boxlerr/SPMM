@@ -10,13 +10,39 @@ plan vigente.
 Y no es sólo velocidad: el solver no devuelve siempre el mismo reparto (medido el
 10/09 sobre 40 OT), así que recalcular al guardar podía escribir un plan distinto
 del que se aprobó, sin que nadie se enterara.
+
+La ÚNICA lectura que se permite al guardar es la de las pausas vigentes (RF-03): una
+OT que se pausó después de calcular el plan no entra (test_confirmar_plan_con_pausas).
+Acá se reemplaza por una que no encuentra ninguna y anota que se le preguntó.
 """
 from datetime import date, datetime, time, timedelta
 
 import pytest
 
+from backend.application import PlanificacionService as ps
 from backend.application.PlanificacionService import planificar
 from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
+
+
+class _PausasNinguna:
+    """Las pausas vigentes: ninguna. Anota cuántas veces se le preguntó."""
+    consultas = 0
+
+    def __init__(self, db):
+        pass
+
+    async def abiertas_sin_romper(self, ids):
+        _PausasNinguna.consultas += 1
+        return []
+
+    async def pasos_sin_romper(self, ids):
+        raise AssertionError("sin pausas no hace falta leer los pasos")
+
+
+@pytest.fixture(autouse=True)
+def _sin_pausas(monkeypatch):
+    _PausasNinguna.consultas = 0
+    monkeypatch.setattr(ps, "PausaRepository", _PausasNinguna)
 
 
 class _RepoPlanificacion:
@@ -71,6 +97,8 @@ async def test_guardar_un_plan_aprobado_no_toca_el_solver():
     assert set(salida) == {"planificados", "excedentes", "diagnosticos"}
     assert salida["planificados"]["id_planificacion_lote"] == "lote-de-prueba"
     assert salida["excedentes"] == [] and salida["diagnosticos"] == []
+    # Lo único que se leyó: las pausas, una vez.
+    assert _PausasNinguna.consultas == 1
 
 
 class _RepoQueAnota:

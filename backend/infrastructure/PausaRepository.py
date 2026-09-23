@@ -108,6 +108,27 @@ class PausaRepository:
             logger.warning(f"Pausas: no se pudieron leer las pausas abiertas: {e}")
             return None
 
+    async def pasos_sin_romper(self, ordenes_ids: list[int]) -> dict[int, list] | None:
+        """{OT: [(paso, id, estado)]} de esas OT, livianos: para cortar un plan ya armado
+        en el paso pausado (ver PlanificacionService._plan_armado_sin_lo_pausado). None
+        si no se pueden leer."""
+        if not ordenes_ids:
+            return {}
+        try:
+            async with self.db.begin_nested():
+                filas = (await self.db.execute(
+                    select(OrdenTrabajoProceso.id_orden_trabajo, OrdenTrabajoProceso.orden,
+                           OrdenTrabajoProceso.id, OrdenTrabajoProceso.id_estado)
+                    .where(OrdenTrabajoProceso.id_orden_trabajo.in_(list(ordenes_ids)))
+                )).all()
+        except Exception as e:
+            logger.warning(f"Pausas: no se pudieron leer los pasos de {ordenes_ids}: {e}")
+            return None
+        salida: dict[int, list] = {}
+        for id_ot, orden, id_otp, id_estado in filas:
+            salida.setdefault(id_ot, []).append((orden or 0, id_otp, id_estado))
+        return salida
+
     async def cerrar_al_cambiar_estado(self, *, id_orden: int, id_otp: int, id_estado: int,
                                        cuando, id_usuario: int | None,
                                        usuario: str | None) -> None:
