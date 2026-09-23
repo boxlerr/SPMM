@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2, AlertTriangle, PackageMinus } from "lucide-react";
+import { Bell, UserPlus, Pencil, UserMinus, CheckCircle2, AlertTriangle, PackageMinus, Wrench } from "lucide-react";
 import { useNotifications, type Notification } from "../contexts/NotificationContext";
 import { usePanelContext } from "../contexts/PanelContext";
 import { useRouter } from "next/navigation";
@@ -67,6 +67,9 @@ export default function Topbar() {
       // algo que ya salió mal, es algo que hay que pedir antes de que salga mal.
       case "STOCK_BAJO":
         return <PackageMinus className="h-4 w-4 text-amber-600" />;
+      // El mantenimiento preventivo de una máquina (RF-10): le toca pronto o se venció.
+      case "MANTENIMIENTO_MAQUINA":
+        return <Wrench className="h-4 w-4 text-amber-600" />;
       default:
         return <Bell className="h-4 w-4 text-gray-600" />;
     }
@@ -87,6 +90,8 @@ export default function Topbar() {
         return <span className="text-xs text-red-600 font-medium">Retrasada</span>;
       case "STOCK_BAJO":
         return <span className="text-xs text-amber-600 font-medium">Stock bajo</span>;
+      case "MANTENIMIENTO_MAQUINA":
+        return <span className="text-xs text-amber-600 font-medium">Mantenimiento</span>;
       default:
         return null;
     }
@@ -117,6 +122,11 @@ export default function Topbar() {
     // mínimo si estaba mal puesto.
     if (notification.id_pieza) {
       router.push(enlaceAPieza(notification.id_pieza));
+      return;
+    }
+    // El de mantenimiento (RF-10) lleva a las máquinas: ahí se registra el hecho.
+    if (notification.type === "MANTENIMIENTO_MAQUINA") {
+      router.push("/recursos?tab=maquinas");
       return;
     }
     router.push("/configuracion?tab=notificaciones");

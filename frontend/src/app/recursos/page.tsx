@@ -88,6 +88,8 @@ interface LlegadaDesdeAviso {
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import { etiquetaTipo } from "./_maquinaOpciones";
+import { rangoDePeriodo } from "@/lib/asistencia";
+import { type ResumenMaquinas, chipDeLaTabla, fmtHorasUso } from "@/lib/usoMaquina";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -153,6 +155,12 @@ export default function RecursosPage() {
    * recurso maquinaria disponible» justo en la solapa a la que te mandó el aviso.
    */
   const [maquinasCargadas, setMaquinasCargadas] = useState(false);
+  /**
+   * RF-10: las horas de uso de este mes y el estado del mantenimiento de cada máquina.
+   * `undefined` = todavía no llegó; `null` = el backend no lo tiene (se deploya a mano y
+   * puede ir atrás del front) o no contestó: la columna no se muestra.
+   */
+  const [usoDelMes, setUsoDelMes] = useState<ResumenMaquinas | null | undefined>(undefined);
 
   const [busquedaProceso, setBusquedaProceso] = useState("");
 
@@ -199,6 +207,7 @@ export default function RecursosPage() {
       fetchOperarios();
     } else if (tabActiva === "maquinas") {
       fetchMaquinas();
+      void pedirUsoDelMes();
     } else if (tabActiva !== "planos") {
       // Planos se arregla solo: la biblioteca sale a buscar su propia lista paginada y
       // no mira `procesos` para nada. Sin esta salida, entrar a la solapa disparaba el
@@ -420,6 +429,21 @@ export default function RecursosPage() {
       }
     } catch {
       // Se queda lo que está en pantalla, que ya es lo guardado.
+    }
+  };
+
+  /**
+   * RF-10: las horas del mes y el mantenimiento de todas las máquinas, en UN pedido y sin
+   * spinner: la tabla ya está a la vista y esto sólo suma una columna.
+   */
+  const pedirUsoDelMes = async () => {
+    const { desde, hasta } = rangoDePeriodo("mes");
+    try {
+      const res = await fetch(`${cleanUrl}/maquinarias-uso?desde=${desde}&hasta=${hasta}`, { headers: getAuthHeaders() });
+      const cuerpo = res.ok ? await res.json().catch(() => null) : null;
+      setUsoDelMes(cuerpo?.status && cuerpo?.data?.horas ? (cuerpo.data as ResumenMaquinas) : null);
+    } catch {
+      setUsoDelMes((previo) => previo ?? null);
     }
   };
 
@@ -712,6 +736,19 @@ export default function RecursosPage() {
           { titulo: "Estado", valor: (m: Maquina) => infoEstado(m.estado_operativo).etiqueta } as ColumnaExport<Maquina>,
           { titulo: "Tipo", valor: (m: Maquina) => etiquetaTipo(m.tipo) ?? "" } as ColumnaExport<Maquina>,
           { titulo: "Mantenimiento cada (días)", tipo: "entero", valor: (m: Maquina) => m.frecuencia_mantenimiento_dias } as ColumnaExport<Maquina>,
+        ]
+      : []),
+    ...(usoDelMes
+      ? [
+          { titulo: "Horas de uso del mes", tipo: "numero", decimales: 1,
+            valor: (m: Maquina) => (usoDelMes.horas[String(m.id)]?.efectivo_min ?? 0) / 60 } as ColumnaExport<Maquina>,
+          ...(usoDelMes.mantenimiento
+            ? [{ titulo: "Mantenimiento", valor: (m: Maquina) => {
+                const e = usoDelMes.mantenimiento?.[String(m.id)];
+                if (!e) return "";
+                return e.proxima_fecha ? `${e.estado_texto} (próximo: ${e.proxima_fecha.split("-").reverse().join("/")})` : e.estado_texto;
+              } } as ColumnaExport<Maquina>]
+            : []),
         ]
       : []),
     {
@@ -1029,6 +1066,14 @@ export default function RecursosPage() {
                           Estado
                         </th>
                       )}
+                      {usoDelMes && (
+                        <th
+                          className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground whitespace-nowrap"
+                          title="Horas de uso efectivas de este mes: las de la jornada del taller, sin pausas. Se registran solas al arrancar y terminar un paso con la máquina. El detalle, en el ojito."
+                        >
+                          Horas del mes
+                        </th>
+                      )}
                       <th
                         className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground"
                         title="Quién puede usar el recurso maquinaria. Sin rango, el planificador no se lo asigna a nadie."
@@ -1060,6 +1105,19 @@ export default function RecursosPage() {
                             ) : (
                               <EstadoBadge valor={maquina.estado_operativo} />
                             )}
+                          </td>
+                        )}
+                        {usoDelMes && (
+                          <td className="px-4 py-2 text-sm text-right">
+                            <span className="tabular-nums">{fmtHorasUso(usoDelMes.horas[String(maquina.id)]?.efectivo_min)}</span>
+                            {(() => {
+                              const chip = chipDeLaTabla(usoDelMes.mantenimiento?.[String(maquina.id)]);
+                              return chip ? (
+                                <span className={`mt-0.5 block w-fit ml-auto rounded-md border px-1.5 py-px text-[10px] font-medium whitespace-nowrap ${chip.clase}`}>
+                                  {chip.texto}
+                                </span>
+                              ) : null;
+                            })()}
                           </td>
                         )}
                         {/* Rangos que habilitan la máquina. Sin ninguno, el planificador
@@ -1150,7 +1208,7 @@ export default function RecursosPage() {
                       </tr>
                       {maquinaAbierta === maquina.id && coberturaListo && editaRangos && (
                         <tr>
-                          <td colSpan={conoceEstado ? 6 : 5} className="p-0">
+                          <td colSpan={(conoceEstado ? 6 : 5) + (usoDelMes ? 1 : 0)} className="p-0">
                             {editorRangosDeMaquina(maquina)}
                           </td>
                         </tr>
@@ -1191,7 +1249,21 @@ export default function RecursosPage() {
                           <span className="text-muted-foreground">Código:</span>
                           <span className="ml-2 font-medium">{maquina.cod_maquina || "-"}</span>
                         </div>
+                        {usoDelMes && (
+                          <div className="text-right">
+                            <span className="text-muted-foreground">Este mes:</span>
+                            <span className="ml-2 font-medium tabular-nums">{fmtHorasUso(usoDelMes.horas[String(maquina.id)]?.efectivo_min)}</span>
+                          </div>
+                        )}
                       </div>
+                      {(() => {
+                        const chip = usoDelMes ? chipDeLaTabla(usoDelMes.mantenimiento?.[String(maquina.id)]) : null;
+                        return chip ? (
+                          <span className={`mt-2 inline-block rounded-md border px-1.5 py-px text-[11px] font-medium ${chip.clase}`}>
+                            {chip.texto}
+                          </span>
+                        ) : null;
+                      })()}
                       <div className="mt-2 text-sm">
                         <span className="text-muted-foreground">Rangos:</span>
                         {!coberturaListo ? (
@@ -1792,6 +1864,16 @@ export default function RecursosPage() {
           setMaquinaSeleccionada(null);
           void handleEditar("maquina", m);
         } : undefined}
+        edita={editaMaquinas}
+        onMantenimiento={(d) => {
+          // La frecuencia es un dato de la máquina (RF-08): la fila y el detalle la
+          // muestran como quedó. Y el estado del mantenimiento de la tabla, en silencio.
+          setMaquinas((prev) => prev.map((m) => (m.id === d.id_maquinaria
+            ? { ...m, frecuencia_mantenimiento_dias: d.config.frecuencia_dias } : m)));
+          setMaquinaSeleccionada((sel) => (sel && sel.id === d.id_maquinaria
+            ? { ...sel, frecuencia_mantenimiento_dias: d.config.frecuencia_dias } : sel));
+          void pedirUsoDelMes();
+        }}
       />
 
       <CambiarEstado

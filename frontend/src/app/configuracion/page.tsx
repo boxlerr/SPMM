@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield, AlertTriangle, PackageMinus, DatabaseBackup } from 'lucide-react';
+import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield, AlertTriangle, PackageMinus, DatabaseBackup, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UsuariosYPermisos from '@/components/usuarios/UsuariosYPermisos';
 import CambiarPassword from '@/components/usuarios/CambiarPassword';
@@ -21,7 +21,7 @@ const TIPO_AVISO: Record<string, string> = {
   operario_created: 'Creado', usuario_created: 'Creado',
   operario_updated: 'Modificado', usuario_updated: 'Modificado',
   operario_deleted: 'Eliminado', usuario_deleted: 'Eliminado',
-  OT_RETRASADA: 'Retrasada', STOCK_BAJO: 'Stock bajo',
+  OT_RETRASADA: 'Retrasada', STOCK_BAJO: 'Stock bajo', MANTENIMIENTO_MAQUINA: 'Mantenimiento',
 };
 
 /** Los «Detalles» en una línea de texto: el JSON de los cambios de estado, leído. */
@@ -179,6 +179,8 @@ export default function ConfiguracionPage() {
               return <AlertTriangle className="h-5 w-5 text-red-600" />;
             case 'STOCK_BAJO':
               return <PackageMinus className="h-5 w-5 text-amber-600" />;
+            case 'MANTENIMIENTO_MAQUINA':
+              return <Wrench className="h-5 w-5 text-amber-600" />;
             default:
               return <Bell className="h-5 w-5 text-gray-600" />;
           }
@@ -199,6 +201,8 @@ export default function ConfiguracionPage() {
               return <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-800 rounded-full">Retrasada</span>;
             case 'STOCK_BAJO':
               return <span className="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Stock bajo</span>;
+            case 'MANTENIMIENTO_MAQUINA':
+              return <span className="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Mantenimiento</span>;
             default:
               return null;
           }
