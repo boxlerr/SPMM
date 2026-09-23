@@ -186,3 +186,41 @@ async def seed_basico(session):
         OperarioRango(id_operario=1, id_rango=7),
     ])
     await session.commit()
+
+
+@pytest.fixture(autouse=True)
+def copias_no_tocan_produccion(monkeypatch):
+    """Ningún test puede leer la base ni subir a Storage por las copias de seguridad.
+
+    CopiaSeguridadAPI lee con `SESIONES_BACKUP` (el `SessionLocal` de PRODUCCIÓN) y guarda
+    la copia de antes de restaurar en Supabase Storage. Mismo agujero que el de los
+    permisos: un test que no pise `get_sesiones_backup` / `get_deposito` llegaría a la
+    base o al bucket del cliente. Se bloquean los dos; el test que los necesita los pisa
+    con su SQLite y su depósito de mentira.
+    """
+    from backend.presentation import CopiaSeguridadAPI
+
+    class _SinBase:
+        def __init__(self, *_, **__):
+            raise RuntimeError(
+                "Este test llegó a la base por las copias de seguridad sin pisar "
+                "get_sesiones_backup: la fábrica de producción está bloqueada en los tests."
+            )
+
+    class _SinStorage:
+        donde = "ningún lado (tests)"
+
+        def disponible(self):
+            return False
+
+        async def guardar(self, *_):
+            raise RuntimeError("Los tests no suben copias a Storage.")
+
+        async def listar(self):
+            raise RuntimeError("Los tests no leen Storage.")
+
+        async def bajar(self, *_):
+            raise RuntimeError("Los tests no leen Storage.")
+
+    monkeypatch.setattr(CopiaSeguridadAPI, "SESIONES_BACKUP", _SinBase)
+    monkeypatch.setattr(CopiaSeguridadAPI, "FABRICA_DEPOSITO", _SinStorage)

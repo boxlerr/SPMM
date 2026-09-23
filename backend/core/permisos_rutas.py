@@ -69,7 +69,8 @@ y como solapa de Recursos):
   Clientes           /clientes
   No conformidades   /incidencias/*
   Auditoría          /auditoria/movimientos, /auditoria/procesos, /auditoria/planificacion
-  Configuración      /auth/usuarios (sección confidencial), /auth/change-password
+  Configuración      /auth/usuarios (sección confidencial), /auth/change-password,
+                     /backups/* (la solapa Copias de seguridad: sólo admin, RF-19)
   todas              /notificaciones (leer y marcar leída; crear, lo de Recursos; borrar,
                      el admin), /auth/me
 
@@ -441,6 +442,15 @@ POLITICAS: dict[str, Politica] = {
             Excepcion("DELETE", "/notificaciones/{id}", (area("configuracion", "admin"),),
                       "Un aviso borrado desaparece para todos: sólo el admin."),
         ),
+    ),
+
+    # ── Copias de seguridad (RF-19): sólo el admin del área de sistema ──
+    # Bajar una copia es llevarse TODOS los datos (clientes, usuarios con sus hashes) y
+    # restaurar es pisarlos: las dos cosas, y también mirar la solapa, piden nivel admin
+    # en Configuración, que es sólo del rol admin (ver «EL ÁREA DE SISTEMA» arriba).
+    "backups": Politica(
+        leer=(area("configuracion", "admin"),),
+        escribir=(area("configuracion", "admin"),),
     ),
 }
 

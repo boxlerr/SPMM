@@ -18,7 +18,7 @@ Del SRS de la v1 (sección 3.2.7, «Respaldo y Recuperación»):
 | RF | Texto | ¿Lo cubre la plataforma? |
 |---|---|---|
 | **RF-18** | «El sistema deberá generar backups automáticos diarios de toda la información crítica del sistema (órdenes, usuarios, inventario, reportes).» | **Sí, en Pro o superior.** En Free, no. |
-| **RF-19** | «El sistema deberá permitir al administrador recuperar un backup desde una interfaz gráfica segura.» | **No.** Ver sección 3. Queda fuera de este documento. |
+| **RF-19** | «El sistema deberá permitir al administrador recuperar un backup desde una interfaz gráfica segura.» | **No, pero lo cubre la app** (desde el 23/09/2026): *Configuración → Copias de seguridad*, solo admin. Ver sección 3, punto 2. |
 | **RF-20** | «El sistema deberá mantener un historial de al menos 7 versiones anteriores de los backups.» | **Sí, en Pro o superior** (Pro: 7 días = 7 versiones, justo el mínimo). En Free, no. |
 
 Con Pro no sobra ninguna versión. Si el cliente lee «7 anteriores» como siete **además** del
@@ -108,10 +108,27 @@ sentido si el cliente pide perder menos de un día de datos.
      una restauración anterior al reemplazo todavía lo encuentra.
    - Los planos que se importaron del Drive del taller tienen el original allá. **Los que se
      suben directo desde la app no tienen otra copia.**
-2. **RF-19, restaurar desde la app.** Desde MetloSys no se restaura nada. Se restaura desde el
-   panel de Supabase, y solo puede hacerlo alguien que sea **miembro de la organización de
-   Supabase** con rol Owner, Administrator o Developer (el rol Read-Only no puede). Un usuario
-   administrador de la app **no tiene** ese acceso.
+2. **RF-19, restaurar desde la app.** El backup **de la plataforma** no se restaura desde
+   MetloSys: se restaura desde el panel de Supabase, y solo puede hacerlo alguien que sea
+   **miembro de la organización de Supabase** con rol Owner, Administrator o Developer (el rol
+   Read-Only no puede). Un usuario administrador de la app **no tiene** ese acceso.
+
+   Para RF-19 la app tiene **su propia copia**, aparte (23/09/2026): *Configuración → Copias de
+   seguridad*, solo para el admin (`backend/infrastructure/copias_de_seguridad.py`, el porqué
+   completo está ahí). El admin baja un `spmm_backup_<fecha>.zip` con todas las tablas y lo puede
+   volver a cargar. Al cargarlo, el archivo se revisa entero antes de tocar nada (versión, hash
+   por tabla, tipos, tamaño, y la **firma** del servidor: un HMAC sobre el manifiesto con una
+   clave que sale de `SECRET_KEY`) y se muestra qué cambia; se confirma escribiendo RESTAURAR;
+   antes de pisar nada se guarda sola una copia de lo que había en el bucket `planos`, carpeta
+   `copias-de-seguridad/` (que la pantalla de planos no sirve ni borra); y se restaura en
+   **una** transacción (si algo falla, no cambia nada).
+   Lo que **no** hace: no trae los archivos de los planos (mismo problema que el punto 1), no
+   trae contraseñas ni tokens de recuperación, y por defecto no toca usuarios, roles, permisos
+   ni la auditoría. Una copia sin firma válida (editada, o de otra instalación o de otra
+   `SECRET_KEY`) se puede restaurar sólo confirmándolo aparte y **nunca** con los usuarios.
+   Cada descarga (anotada antes del primer byte, aunque se corte), cada intento rechazado y
+   cada restauración quedan en la Auditoría. **Si cambia `SECRET_KEY`, las copias anteriores
+   dejan de estar firmadas** para el servidor nuevo.
 3. **Restaurar una sola OT o una sola tabla.** El backup se restaura **entero**: vuelve toda la
    base al momento del backup y se pierde todo lo cargado después. Para recuperar solo unas
    filas está «Restore to a new project» (sección 5.B).
@@ -260,8 +277,8 @@ Por US$25/mes, Pro resuelve todo eso y además saca el riesgo de pausa.
 | Guardar **14 días** | Plan Team | US$599/mes |
 | Guardar **30 días** (RNF 3.3.9) | Enterprise (hasta 30) o PITR de 28 días | Enterprise a medida; PITR ~US$400/mes + compute Small |
 | **Perder menos de un día** de datos | PITR 7 días | ~US$100/mes + compute Small |
-| **Restaurar desde la app** (RF-19) | Ninguna: la plataforma no lo ofrece | Desarrollo aparte, y es el más riesgoso: modo mantenimiento, cortar el pool de conexiones, reaplicar migraciones, backup de seguridad antes de restaurar |
-| **Backups manuales**, **registro en el panel de admin**, **hash** (RNF 3.3.9) | Ninguna desde la app | Desarrollo aparte (backup propio adentro del sistema) |
+| **Restaurar desde la app** (RF-19) | Ninguna: la plataforma no lo ofrece | **Hecho en la app** (23/09/2026, sección 3 punto 2): copia propia, no la de la plataforma |
+| **Backups manuales**, **registro en el panel de admin**, **hash** (RNF 3.3.9) | Ninguna desde la app | Manuales bajo demanda y hash por tabla: **hechos en la app** (RF-19); el registro es la Auditoría (quién bajó o restauró qué). Guardarlos 30 días fuera de Supabase sigue siendo aparte |
 | **Planos incluidos** en el backup | Ninguna: Storage no se respalda y no tiene versionado | Copia periódica del bucket a otro lugar (Supabase expone Storage por S3, sirve `rclone`). Desarrollo o tarea aparte |
 
 Cualquier fila de esta tabla es una decisión del cliente con costo. Este documento no la da

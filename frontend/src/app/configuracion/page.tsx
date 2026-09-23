@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield, AlertTriangle, PackageMinus } from 'lucide-react';
+import { Bell, CheckCircle2, UserPlus, Pencil, UserMinus, Trash2, Info, User, Shield, AlertTriangle, PackageMinus, DatabaseBackup } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import UsuariosYPermisos from '@/components/usuarios/UsuariosYPermisos';
 import CambiarPassword from '@/components/usuarios/CambiarPassword';
 import { formatNotificationMessage } from '@/lib/utils';
 import { API_URL } from '@/config';
 import { usePermisos } from '@/hooks/usePermisos';
+import CopiasDeSeguridad from '@/components/copias/CopiasDeSeguridad';
 import { ExportarMenu } from '@/components/common/ExportarMenu';
 import type { ColumnaExport } from '@/lib/exportar';
 import type { Notification as Aviso } from '@/contexts/NotificationContext';
@@ -70,8 +71,12 @@ export default function ConfiguracionPage() {
   // sólo del admin (el backend lo exige desde el 23/09). Sin permisos (backend viejo),
   // como siempre.
   const puedeVaciarAvisos = puede('configuracion', 'admin');
+  // Copias de seguridad (RF-19): nivel admin en Configuración, que es sólo del rol
+  // admin. Es lo mismo que exige el backend (política «backups»); con un backend viejo
+  // (sin permisos) se ve, y la solapa misma avisa que falta el servidor.
+  const veCopias = puede('configuracion', 'admin');
   const solapaVisible = (id: string) =>
-    (id !== 'usuarios' || veUsuarios) && (id !== 'sistema' || veSistema);
+    (id !== 'usuarios' || veUsuarios) && (id !== 'sistema' || veSistema) && (id !== 'copias' || veCopias);
   const solapaActiva = solapaVisible(activeTab) ? activeTab : 'mi-cuenta';
 
   // Actualizar fecha y hora cada segundo para tiempo real
@@ -90,7 +95,7 @@ export default function ConfiguracionPage() {
   // Leer el parámetro 'tab' de la URL al cargar
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl && ['usuarios', 'mi-cuenta', 'notificaciones', 'sistema'].includes(tabFromUrl)) {
+    if (tabFromUrl && ['usuarios', 'mi-cuenta', 'notificaciones', 'sistema', 'copias'].includes(tabFromUrl)) {
       setActiveTab(tabFromUrl);
     }
   }, [searchParams]);
@@ -134,6 +139,13 @@ export default function ConfiguracionPage() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
+      )
+    },
+    {
+      id: 'copias',
+      label: 'Copias de seguridad',
+      icon: (
+        <DatabaseBackup className="w-5 h-5" />
       )
     },
   ];
@@ -467,6 +479,12 @@ export default function ConfiguracionPage() {
                 </div>
               </div>
             </div>
+          </div>
+        );
+      case 'copias':
+        return (
+          <div className="p-4 sm:p-6">
+            <CopiasDeSeguridad />
           </div>
         );
       default:

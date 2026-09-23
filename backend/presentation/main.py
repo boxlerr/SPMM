@@ -20,6 +20,7 @@ from backend.presentation.IncidenciaProcesoAPI import router as incidencia_route
 from backend.presentation.ClienteAPI import router as cliente_router
 from backend.presentation.AuditoriaAPI import router as auditoria_router
 from backend.presentation.PermisosAPI import router as permisos_router
+from backend.presentation.CopiaSeguridadAPI import router as copia_seguridad_router
 
 
 from backend.presentation.ConfigAPI import router as config_router
@@ -116,7 +117,14 @@ async def auditar_movimientos(request: Request, call_next):
 
 async def _auditar(request, call_next, metodo, ruta, usuario):
     if not auditoria_mov.se_audita(metodo, ruta):
-        return await call_next(request)
+        # Una lectura no se guarda, salvo el intento rechazado de bajar lo que es sólo
+        # del admin (las copias de seguridad, RF-19): ver se_audita_el_rechazo.
+        arranque = time.monotonic()
+        respuesta = await call_next(request)
+        if auditoria_mov.se_audita_el_rechazo(metodo, ruta, respuesta.status_code):
+            await _guardar_movimiento(request, metodo, ruta, respuesta.status_code, arranque,
+                                      None, usuario)
+        return respuesta
 
     # El cuerpo se lee ANTES de que lo lea el endpoint. Starlette lo cachea y se lo
     # reentrega al handler (_CachedRequest), así que leerlo acá no lo consume — pero
@@ -289,6 +297,8 @@ app.include_router(rendimiento_operario_router, tags=["rendimiento_operario"],
                    dependencies=_protegido("rendimiento_operario"))
 app.include_router(rango_router, tags=["rangos"], dependencies=_protegido("rangos"))
 app.include_router(auditoria_router, tags=["auditoria"], dependencies=_protegido("auditoria"))
+# RF-19: bajar una copia completa y restaurarla. Sólo admin (la política «backups»).
+app.include_router(copia_seguridad_router, tags=["copias de seguridad"], dependencies=_protegido("backups"))
 
 # RF-24: la administración de permisos (matriz rol × área y rol × sección, permisos de
 # más por persona, secciones confidenciales, cambio de rol). No va por el mapa: cada

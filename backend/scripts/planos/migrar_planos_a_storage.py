@@ -180,6 +180,11 @@ async def huerfanos(conn) -> None:
         for item in _listar(prefijo):
             ruta = f"{prefijo}{item['name']}"
             if item.get("id") is None:      # es carpeta
+                # Las copias de seguridad (RF-19) viven en el mismo bucket y ninguna
+                # fila de `plano` las usa: no son huérfanos, y borrarlas sería perder
+                # la forma de deshacer una restauración.
+                if f"{ruta}/" == storage_planos.CARPETA_COPIAS:
+                    continue
                 pendientes.append(f"{ruta}/")
             else:
                 encontrados.append(ruta)
