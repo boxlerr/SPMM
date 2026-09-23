@@ -58,6 +58,17 @@ MIN_LABORAL_DIA = TRAMOS_LV_LAB[-1][1]          # 495
 MIN_LABORAL_SABADO = TRAMOS_SAB_LAB[-1][1]      # 300
 MIN_LABORAL_SEMANA = 5 * MIN_LABORAL_DIA + MIN_LABORAL_SABADO
 
+# Horizonte del modelo. Lo fija `_resolver_planificacion` (global H) antes de armar las
+# variables; este valor sólo existe para que armar los dominios SIN resolver —la
+# estimación de días del Paso 1, ver EstimacionPlan.py— no dependa de que alguna vez se
+# haya corrido el solver. La estimación nunca lo escribe: pisarlo mientras otra
+# planificación arma su modelo en otro hilo le achicaría el horizonte.
+H = MIN_LABORAL_DIA
+
+# Peso de cada prioridad para el solver (1 = la más urgente). Compartido con la
+# estimación de días, que ordena el trabajo igual.
+PRIORIDAD_PESOS = {"urgente": 1, "urgente 1": 1, "urgente 2": 2, "normal": 3, "baja": 4}
+
 
 HORA_APERTURA = time(7, 0)
 
@@ -1214,23 +1225,36 @@ def _agregar_compatibilidad_op_maq(
     entonces ninguna máquina CNC le resultaba compatible, así que el proceso se iba
     a la máquina dummy. Para la compatibilidad hay que mirar TODOS sus rangos.
     """
+    pares = _pares_permitidos(procesos_norm, op_domain_vals, maq_domain_vals, op_to_rango,
+                              maq_to_rangos, maq_to_familia, DUMMY_OP_ID, DUMMY_MAQ_ID,
+                              op_to_rangos, skills_manuales)
+    for clave, allowed_pairs in pares.items():
+        model.AddAllowedAssignments([operario_vars[clave], maq_vars[clave]], allowed_pairs)
+
+
+def _pares_permitidos(procesos_norm, op_domain_vals, maq_domain_vals, op_to_rango,
+                      maq_to_rangos, maq_to_familia, DUMMY_OP_ID, DUMMY_MAQ_ID,
+                      op_to_rangos=None, skills_manuales=None):
+    """{(orden_id, secuencia): [[operario, máquina], ...]} que el solver permite.
+
+    Es la regla de `_agregar_compatibilidad_op_maq` (ver su docstring), sacada a una
+    función pura para que la estimación de días del Paso 1 use la MISMA: quién puede
+    hacer qué no puede decidirse en dos lugares.
+    """
     op_to_rangos = op_to_rangos or {}
     skills_manuales = skills_manuales or {}
+    resultado = {}
     for (orden_id, proc_id, secuencia, _fp,
         _pp, _dur, rangos_proc, _nombre_proc, usa_maquina,familia_req, _skills) in procesos_norm:
-
-        op_var = operario_vars[(orden_id, secuencia)]
-        maq_var = maq_vars[(orden_id, secuencia)]
 
         ops_dom  = op_domain_vals[(orden_id, secuencia)]
         maqs_dom = maq_domain_vals[(orden_id, secuencia)]
 
         # ❌ Proceso manual → no usa máquina real
         if not usa_maquina:
-            allowed_pairs = [
+            resultado[(orden_id, secuencia)] = [
                 [op_id, DUMMY_MAQ_ID] for op_id in ops_dom
             ]
-            model.AddAllowedAssignments([op_var, maq_var], allowed_pairs)
             continue
 
         needs = set(rangos_proc)
@@ -1272,7 +1296,8 @@ def _agregar_compatibilidad_op_maq(
                     for m_id in maqs_dom:
                         allowed_pairs.append([op_id, m_id])
 
-        model.AddAllowedAssignments([op_var, maq_var], allowed_pairs)
+        resultado[(orden_id, secuencia)] = allowed_pairs
+    return resultado
 
 
 
@@ -1960,6 +1985,48 @@ def base_confiable(inicio_base: datetime | None, ahora: datetime,
     return inicio_del_plan(ahora, fecha_desde, blocked_dates)
 
 
+def _partir_y_heredar(procesos_norm, cant_op_map=None, preseleccion_maq=None, preseleccion_op=None):
+    """Parte los procesos largos y hace que cada SETUP herede familia y rangos de su
+    PRODUCCIÓN. Lo usan el solver y la estimación de días: si cada uno lo hiciera a su
+    manera, el Paso 1 diría una cosa y el plan otra.
+
+    Devuelve (procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes).
+    """
+    procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes = _partir_procesos_largos(
+        procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op
+    )
+
+    # ---- Coordinación de dominios: SETUP hereda de PRODUCCIÓN ----
+    # Si un SETUP precede a una PRODUCCIÓN de la MISMA familia de máquina, comparten
+    # dominio: preparar la fresadora y fresar son la misma máquina y la misma persona.
+    #
+    # La condición de familia no estaba y alcanzaba con que fueran consecutivos en la
+    # secuencia. Eso emparejaba cosas que no tienen nada que ver: en la OT 7541,
+    # "PREPARACION DE SOLDADORA MIG" (rangos MEDIO OFICIAL / OPERARIO CALIFICADO) estaba
+    # seguida de "TORNO T2", así que heredaba el rango OFICIAL del torno y la preparación
+    # de la soldadora se la terminaba llevando el tornero.
+    #
+    # Usa el MISMO emparejamiento que la coordinación de más abajo. Antes acá había un
+    # bucle propio que solo miraba vecinos, así que los dos lugares decidían distinto: la
+    # coordinación ataba la preparación con su producción aunque hubiera un proceso
+    # manual en el medio, pero la herencia no llegaba y la preparación se quedaba con sus
+    # propios rangos. En la OT 15708 los dominios dejaban de cruzarse y los dos salían
+    # SIN NADIE — peor que el bug que veníamos a arreglar.
+    procesos_norm_list = [list(p) for p in procesos_norm]
+    idx_por_clave = {(p[0], p[2]): i for i, p in enumerate(procesos_norm)}
+    for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
+        prod = procesos_norm[idx_por_clave[claves_prod[0]]]
+        # A TODOS los tramos de la preparación, no solo al que toca la producción: si se
+        # hereda en uno solo, `_agregar_continuidad_partes` termina intersectando dos
+        # dominios distintos y la línea entera se queda sin candidatos.
+        for clave in claves_setup:
+            i = idx_por_clave[clave]
+            procesos_norm_list[i][9] = prod[9]   # familia
+            procesos_norm_list[i][6] = prod[6]   # rangos
+    procesos_norm = [tuple(p) for p in procesos_norm_list]
+    return procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes
+
+
 def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date | None = None, fecha_hasta: date | None = None, nativas_off=None, cant_op_map=None, preseleccion_maq=None, op_planos=None, ots_con_plano=None, skills_manuales=None, calendarios=None, blocked_dates=None, preseleccion_op=None, maquinas_por_proceso=None, cant_ordenes: int | None = None, inicio_base: datetime | None = None):
     model = cp_model.CpModel()
 
@@ -1979,7 +2046,7 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
 
 
     # ---- Parámetros ----
-    prioridad_pesos = {"urgente": 1, "urgente 1": 1, "urgente 2": 2, "normal": 3, "baja": 4}
+    prioridad_pesos = PRIORIDAD_PESOS
     atraso_mult_por_prioridad = {1: 1000, 2: 800, 3: 500, 4: 300, 5: 200}
 
     # IDs de rangos (los que ya usabas)
@@ -2015,40 +2082,13 @@ def _resolver_planificacion(procesos, operarios, maquinarias, fecha_desde: date 
     # Sigue por debajo de W_FUERA: quedar afuera del período es peor que esperar.
     PENAL_DUMMY_MAQ = max(1_000_000, H_local * 10 * max(atraso_mult_por_prioridad.values()) + 1)
 
-    # ---- Partir los que no entran en un tramo laboral ----
-    # H no cambia: la suma total de trabajo es la misma, solo se reparte en más piezas.
-    procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes = _partir_procesos_largos(
+    # ---- Partir los que no entran en un tramo laboral + SETUP hereda de PRODUCCIÓN ----
+    # En una función aparte porque la estimación de días (EstimacionPlan.py) tiene que
+    # ver EXACTAMENTE los mismos trabajos que el solver. H no cambia: la suma total de
+    # trabajo es la misma, solo se reparte en más piezas.
+    procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op, partes = _partir_y_heredar(
         procesos_norm, cant_op_map, preseleccion_maq, preseleccion_op
     )
-
-    # ---- Coordinación de dominios: SETUP hereda de PRODUCCIÓN ----
-    # Si un SETUP precede a una PRODUCCIÓN de la MISMA familia de máquina, comparten
-    # dominio: preparar la fresadora y fresar son la misma máquina y la misma persona.
-    #
-    # La condición de familia no estaba y alcanzaba con que fueran consecutivos en la
-    # secuencia. Eso emparejaba cosas que no tienen nada que ver: en la OT 7541,
-    # "PREPARACION DE SOLDADORA MIG" (rangos MEDIO OFICIAL / OPERARIO CALIFICADO) estaba
-    # seguida de "TORNO T2", así que heredaba el rango OFICIAL del torno y la preparación
-    # de la soldadora se la terminaba llevando el tornero.
-    #
-    # Usa el MISMO emparejamiento que la coordinación de más abajo. Antes acá había un
-    # bucle propio que solo miraba vecinos, así que los dos lugares decidían distinto: la
-    # coordinación ataba la preparación con su producción aunque hubiera un proceso
-    # manual en el medio, pero la herencia no llegaba y la preparación se quedaba con sus
-    # propios rangos. En la OT 15708 los dominios dejaban de cruzarse y los dos salían
-    # SIN NADIE — peor que el bug que veníamos a arreglar.
-    procesos_norm_list = [list(p) for p in procesos_norm]
-    idx_por_clave = {(p[0], p[2]): i for i, p in enumerate(procesos_norm)}
-    for claves_setup, claves_prod in _pares_setup_produccion(procesos_norm, partes):
-        prod = procesos_norm[idx_por_clave[claves_prod[0]]]
-        # A TODOS los tramos de la preparación, no solo al que toca la producción: si se
-        # hereda en uno solo, `_agregar_continuidad_partes` termina intersectando dos
-        # dominios distintos y la línea entera se queda sin candidatos.
-        for clave in claves_setup:
-            i = idx_por_clave[clave]
-            procesos_norm_list[i][9] = prod[9]   # familia
-            procesos_norm_list[i][6] = prod[6]   # rangos
-    procesos_norm = [tuple(p) for p in procesos_norm_list]
 
     # H se usa en helpers (lo hago global dentro de esta función)
     global H
@@ -2662,6 +2702,7 @@ async def planificar(
     lineas_por_orden: dict[int, list[int]] | None = None,
     inicio_base: datetime | None = None,
     ajustes_del_plan: dict | None = None,
+    solo_estimar: bool = False,
 ):
     logger.info(f"Service - planificar() rango: desde={fecha_desde} hasta={fecha_hasta} forzar={forzar_ordenes_ids}")
 
@@ -3027,6 +3068,22 @@ async def planificar(
     # real de forzar (la OT seguía como excedente y el usuario no veía cómo se
     # acomodaba en operarios/horarios).
     effective_fecha_hasta = None if forzar_set else fecha_hasta
+
+    # 🔹 SOLO ESTIMAR (Paso 1): con la MISMA entrada que iría al solver, pero sin
+    #    resolver, sin escribir y sin auditar. Ver EstimacionPlan.py.
+    if solo_estimar:
+        from backend.application.EstimacionPlan import estimar_plan
+        nombres = {o.id: f"{o.nombre} {o.apellido}".strip() for o in await repo_operario.find_all()}
+        estimacion = await asyncio.to_thread(
+            estimar_plan, procesos_para_solver, operarios, maquinarias, fecha_desde, fecha_hasta,
+            nativas_off, cant_op_map, preseleccion_maq, op_planos, ots_con_plano, skills_manuales,
+            calendarios, blocked_dates, preseleccion_op, maquinas_por_proceso, arranque,
+            nombres_operario=nombres,
+            numero_ot={o.id: (o.id_otvieja or o.id) for o in ordenes},
+        )
+        con_pasos = {p[0] for p in procesos_para_solver}
+        estimacion["ots_sin_procesos"] = sum(1 for o in ordenes if o.id not in con_pasos)
+        return estimacion
 
     resultados, rangos_efectivos = await asyncio.to_thread(
         _resolver_planificacion,

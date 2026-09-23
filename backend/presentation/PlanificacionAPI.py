@@ -11,6 +11,7 @@ from backend.infrastructure.ProcesoRepository import ProcesoRepository
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from backend.infrastructure.PlanificacionRepository import PlanificacionRepository
 from backend.dto.PlanificarRequestDTO import PlanificarRequestDTO
+from backend.dto.EstimarPlanDTO import EstimarPlanDTO
 from backend.dto.PlanificacionUpdateDTO import PlanificacionUpdateDTO
 from backend.dto.QuitarOrdenesPlanificacionDTO import QuitarOrdenesPlanificacionDTO
 from backend.dto.PlanificacionBorradorDTO import GuardarBorradorDTO
@@ -139,6 +140,42 @@ async def planificar_endpoint(
 # autosave cada pocos segundos y una caída acá no puede voltear la pantalla en la
 # que el usuario está trabajando. La copia del navegador cubre el hueco.
 # ---------------------------------------------------------------------------
+
+# 🔹 Cuántos días hábiles lleva lo tildado en el Paso 1 (sin resolver el plan).
+#
+# El chip del Paso 1 decía «≈ 4,9 días con 12 operarios» y no se movía: repartía la carga
+# entre todos como si cualquiera hiciera cualquier cosa. Esto usa la misma preparación que
+# el solver (quién puede hacer cada paso, máquinas, horarios, feriados) y devuelve un
+# mínimo y una estimación en días hábiles, quién marca el ritmo y, si viene fecha_hasta,
+# qué entra hasta ese día. No escribe nada ni queda en la auditoría de intentos: es una
+# consulta que la pantalla repite cada vez que se tilda algo.
+@router.post("/planificacion/estimar")
+async def estimar_plan_endpoint(
+    body: EstimarPlanDTO,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    if not body.ordenes_ids:
+        raise HTTPException(status_code=400, detail="Tildá al menos una OT para estimar cuánto tarda.")
+    try:
+        return await planificar(
+            OrdenTrabajoRepository(db),
+            OperarioRepository(db),
+            MaquinariaRepository(db),
+            PlanificacionRepository(db),
+            db,
+            body.ordenes_ids,
+            preview=True,
+            fecha_desde=body.fecha_desde,
+            fecha_hasta=body.fecha_hasta,
+            solo_estimar=True,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API - No se pudo estimar el plan: {e}")
+        raise HTTPException(status_code=500, detail="No se pudo calcular cuánto tarda lo tildado.")
+
 
 @router.get("/planificacion/borradores")
 async def listar_borradores(db = Depends(get_db), _u = Depends(get_current_user)):

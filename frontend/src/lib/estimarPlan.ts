@@ -56,6 +56,21 @@ export interface EstimacionDelPlan {
     ots_sin_procesos: number;
     procesos_sin_tiempo: number;
     calculado_en_ms: number;
+    /** Sólo si se eligió una fecha «hasta»: qué entra en ese rango. */
+    rango: RangoDelPlan | null;
+}
+
+/** Qué entra hasta la fecha «hasta» del rango elegido en el Paso 1. */
+export interface RangoDelPlan {
+    hasta: string;
+    dias_habiles: number;
+    ots_total: number;
+    /** OT que quedan TERMINADAS dentro del rango (lo más urgente primero, como el planificador). */
+    ots_entran: number;
+    /** Trabajo que entra, contando también el de OT que quedan a medias. */
+    carga_entra_min: number;
+    /** Números de OT que no llegan a terminarse. */
+    no_entran: number[];
 }
 
 /** Por qué no hubo cuenta del backend. */
@@ -102,6 +117,23 @@ export function leerEstimacion(crudo: unknown): EstimacionDelPlan | null {
         ots_sin_procesos: numero(r.ots_sin_procesos) ?? 0,
         procesos_sin_tiempo: numero(r.procesos_sin_tiempo) ?? 0,
         calculado_en_ms: numero(r.calculado_en_ms) ?? 0,
+        rango: leerRango(r.rango),
+    };
+}
+
+function leerRango(crudo: unknown): RangoDelPlan | null {
+    if (!crudo || typeof crudo !== "object") return null;
+    const r = crudo as Record<string, unknown>;
+    const total = numero(r.ots_total);
+    const entran = numero(r.ots_entran);
+    if (total === null || entran === null || typeof r.hasta !== "string") return null;
+    return {
+        hasta: r.hasta,
+        dias_habiles: numero(r.dias_habiles) ?? 0,
+        ots_total: total,
+        ots_entran: entran,
+        carga_entra_min: numero(r.carga_entra_min) ?? 0,
+        no_entran: Array.isArray(r.no_entran) ? (r.no_entran as unknown[]).filter((n): n is number => typeof n === "number") : [],
     };
 }
 
@@ -124,13 +156,14 @@ export async function pedirEstimacion(
     ordenesIds: number[],
     fechaDesde: string | null,
     signal: AbortSignal,
+    fechaHasta: string | null = null,
 ): Promise<RespuestaEstimacion> {
     try {
         const res = await fetch(`${API_URL}/planificacion/estimar`, {
             method: "POST",
             headers: cabeceras(),
             signal,
-            body: JSON.stringify({ ordenes_ids: ordenesIds, fecha_desde: fechaDesde }),
+            body: JSON.stringify({ ordenes_ids: ordenesIds, fecha_desde: fechaDesde, fecha_hasta: fechaHasta }),
         });
         // 404/405/422: el backend que está andando todavía no tiene esta cuenta (en el
         // viejo, POST /planificacion/estimar cae en PUT /planificacion/{id} y da 405;
@@ -259,4 +292,42 @@ export function detalleDelPiso(cadenaMin: number, otMasLarga: string | null, mot
         `La OT más larga${otMasLarga ? ` (${otMasLarga})` : ""} son ${numeroEs(cadenaMin / 60)} hs de procesos que van uno atrás del otro: ${jornadas(j)} de ${numeroEs(MIN_LABORAL_DIA / 60, 2)} hs, o sea no menos de ${d} ${d === 1 ? "día" : "días"} aunque sobre gente.`,
         "Con todo lo tildado seguramente tarda más: depende de quién puede hacer cada paso, y eso esta cuenta no lo mira.",
     ].join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Los otros dos números del Paso 1
+// ---------------------------------------------------------------------------
+
+/** «= 43 jornadas»: las horas de trabajo pasadas a días de UNA persona. Sube con cada OT. */
+export function textoDeJornadas(cargaMin: number): string {
+    return `= ${numeroEs(cargaMin / MIN_LABORAL_DIA)} jornadas`;
+}
+
+export function detalleDeJornadas(cargaMin: number): string {
+    return `Las ${numeroEs(cargaMin / 60)} hs de trabajo de lo tildado, contadas en jornadas de ${numeroEs(MIN_LABORAL_DIA / 60, 2)} hs: lo que tardaría una sola persona haciéndolo todo. Sirve para comparar tandas —sube con cada OT que sumás—. Cuántos días lleva de verdad, con la gente que hay y quién sabe hacer cada paso, lo dice el cartel de los días hábiles.`;
+}
+
+const fechaCorta = (iso: string) => {
+    const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+    return y && m && d ? `${d}/${m}` : iso;
+};
+
+/** «Entra todo hasta el 30/9» o «Entran 26 de 39 OT hasta el 30/9». */
+export function textoDelRango(r: RangoDelPlan): string {
+    if (r.ots_total > 0 && r.ots_entran >= r.ots_total) return `Entra todo hasta el ${fechaCorta(r.hasta)}`;
+    return `Entran ${r.ots_entran} de ${r.ots_total} OT hasta el ${fechaCorta(r.hasta)}`;
+}
+
+export function detalleDelRango(r: RangoDelPlan, cargaMin: number): string {
+    const partes = [
+        `En los ${r.dias_habiles} días hábiles del rango quedan terminadas ${r.ots_entran} de las ${r.ots_total} OT tildadas, empezando por las más urgentes (como las ordena el planificador).`,
+    ];
+    if (cargaMin > 0) {
+        partes.push(`Entra el ${Math.round((100 * r.carga_entra_min) / cargaMin)}% del trabajo (${numeroEs(r.carga_entra_min / 60)} de ${numeroEs(cargaMin / 60)} hs), contando lo que queda a medias.`);
+    }
+    if (r.no_entran.length > 0) {
+        const muestra = r.no_entran.slice(0, 12).map(n => `#${n}`).join(", ");
+        partes.push(`No llegan: ${muestra}${r.no_entran.length > 12 ? ` y ${r.no_entran.length - 12} más` : ""}. Al planificar, esas quedan afuera del plan y en la vista previa podés forzarlas o sacarlas.`);
+    }
+    return partes.join(" ");
 }

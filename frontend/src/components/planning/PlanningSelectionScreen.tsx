@@ -29,6 +29,7 @@ import { BorradoresPlan } from "./BorradoresPlan"
 import type { BorradorPlan } from "@/lib/borradorPlan"
 import {
     pedirEstimacion, textoDeDias, detalleDeDias, textoDelPiso, detalleDelPiso,
+    textoDeJornadas, detalleDeJornadas, textoDelRango, detalleDelRango, diaCorto,
     type EstimacionDelPlan, type MotivoSinEstimacion,
 } from "@/lib/estimarPlan"
 import { numeroEs } from "@/lib/diasHabiles"
@@ -350,6 +351,8 @@ export function PlanningSelectionScreen({
 
     const idsParaEstimar = [...selectedIds].sort((a, b) => a - b).join(",")
     const fechaDesdeParaEstimar = dateRange?.from ? format(dateRange.from, "yyyy-MM-dd") : null
+    // Con una fecha «hasta» la cuenta además dice qué entra en ese rango.
+    const fechaHastaParaEstimar = dateRange?.to ? format(dateRange.to, "yyyy-MM-dd") : null
     // Si cambian los minutos de un proceso (se editan desde la lista) la cuenta también
     // cambia, aunque lo tildado sea lo mismo.
     const huellaDeCarga = estimacion?.tipo === "ok" ? `${estimacion.cargaMin}|${estimacion.cadenaMin}` : ""
@@ -371,7 +374,8 @@ export function PlanningSelectionScreen({
             // Si en 20 segundos no contestó, no va a contestar a tiempo para servir.
             tope = setTimeout(() => { porTiempo = true; control.abort() }, 20_000)
             const respuesta = await pedirEstimacion(
-                idsParaEstimar.split(",").map(Number), fechaDesdeParaEstimar, control.signal)
+                idsParaEstimar.split(",").map(Number), fechaDesdeParaEstimar, control.signal,
+                fechaHastaParaEstimar)
             clearTimeout(tope)
             // Cancelado porque cambió la selección: ya hay otro pedido en camino.
             if (control.signal.aborted && !porTiempo) return
@@ -385,7 +389,7 @@ export function PlanningSelectionScreen({
             clearTimeout(tope)
             control.abort()
         }
-    }, [isOpen, idsParaEstimar, fechaDesdeParaEstimar, huellaDeCarga])
+    }, [isOpen, idsParaEstimar, fechaDesdeParaEstimar, fechaHastaParaEstimar, huellaDeCarga])
 
     /** Lo que dice el cartel de los días, ya armado. `null` = no se muestra. */
     const cartelDeDias = ((): { texto: string; detalle: string; esPiso: boolean } | null => {
@@ -466,6 +470,16 @@ export function PlanningSelectionScreen({
                                         cartel de los días se entiende igual. */}
                                     {estimacion.carga}<span className="hidden 2xl:inline"> de trabajo</span>
                                 </Badge>
+                                {/* Los «días totales» que pidió Lucas: las horas pasadas a
+                                    jornadas de una persona. A diferencia de los días hábiles,
+                                    éste sube con CADA OT que se suma. */}
+                                <Badge
+                                    variant="secondary"
+                                    className="bg-sky-50 text-sky-700 border-sky-200 gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help"
+                                    title={detalleDeJornadas(estimacion.cargaMin)}
+                                >
+                                    {textoDeJornadas(estimacion.cargaMin)}
+                                </Badge>
                                 {/* Los días. Mientras recalcula queda el número anterior
                                     atenuado con «calculando…»: nada se tapa y la lista se
                                     sigue usando. Si el backend no contesta, el piso de la
@@ -489,9 +503,30 @@ export function PlanningSelectionScreen({
                                     >
                                         <CalendarDays className="w-3 h-3 shrink-0" />
                                         {cartelDeDias ? cartelDeDias.texto : "calculando días…"}
+                                        {cartelDeDias && !cartelDeDias.esPiso && diasDelPlan?.tipo === "ok" && diasDelPlan.datos.fin_estimado && (
+                                            <span className="hidden xl:inline font-normal">· hasta el {diaCorto(diasDelPlan.datos.fin_estimado)}</span>
+                                        )}
                                         {cartelDeDias && calculandoDias && (
                                             <span className="font-normal">· calculando…</span>
                                         )}
+                                    </Badge>
+                                )}
+                                {/* Con una fecha «hasta» elegida: cuánto de lo tildado entra.
+                                    El planificador deja afuera lo que no entra; esto lo
+                                    avisa antes de apretar Planificar. */}
+                                {fechaHastaParaEstimar && diasDelPlan?.tipo === "ok" && diasDelPlan.datos.rango && (
+                                    <Badge
+                                        variant="secondary"
+                                        className={cn(
+                                            "gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help transition-opacity",
+                                            diasDelPlan.datos.rango.ots_entran >= diasDelPlan.datos.rango.ots_total
+                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                : "bg-amber-50 text-amber-800 border-amber-200",
+                                            calculandoDias && "opacity-60"
+                                        )}
+                                        title={detalleDelRango(diasDelPlan.datos.rango, diasDelPlan.datos.carga_min)}
+                                    >
+                                        {textoDelRango(diasDelPlan.datos.rango)}
                                     </Badge>
                                 )}
                             </>
@@ -692,7 +727,36 @@ export function PlanningSelectionScreen({
 
                     {/* Filter Toolbar Section - Symmetric & Compact */}
                     <div className="px-3 sm:px-6 py-0 border-t bg-slate-50/80">
-                    <WorkOrderFilters filters={filters} setFilters={setFilters} orders={unplannedOrders} compacto>
+                    <WorkOrderFilters
+                        filters={filters}
+                        setFilters={setFilters}
+                        orders={unplannedOrders}
+                        compacto
+                        acciones={
+                            /* Lucas, 23/09: «al lado de limpiar filtros poné un botón de
+                               mostrar seleccionadas». Ya existía —el contador de arriba—,
+                               pero nadie lo encontraba ahí. Es el mismo interruptor. */
+                            <button
+                                type="button"
+                                onClick={alternarSoloTildadas}
+                                disabled={selectedIds.length === 0 && soloTildadas === null}
+                                aria-pressed={soloTildadas !== null}
+                                className={cn(
+                                    "flex items-center gap-1.5 px-2.5 py-1 rounded border transition-colors text-[10px] font-bold tracking-wide uppercase shadow-sm",
+                                    soloTildadas !== null
+                                        ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                                        : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+                                    selectedIds.length === 0 && soloTildadas === null && "opacity-50 cursor-not-allowed"
+                                )}
+                            >
+                                {soloTildadas !== null ? (
+                                    <><X className="w-3 h-3" /> Ver todas</>
+                                ) : (
+                                    <><Check className="w-3 h-3" /> Ver solo las tildadas ({selectedIds.length})</>
+                                )}
+                            </button>
+                        }
+                    >
                         {/* Misma estética que el resto de filtros: "Categoría: valor"
                             con el valor en negrita cuando hay algo aplicado. */}
                         <Select value={dateSort} onValueChange={(val: any) => setDateSort(val)}>

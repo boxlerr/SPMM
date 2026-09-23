@@ -40,12 +40,15 @@ interface WorkOrderFiltersProps {
     setFilters: React.Dispatch<React.SetStateAction<WorkOrderFilterState>>;
     orders: WorkOrder[];
     children?: React.ReactNode;
+    /** Botones que van a la derecha de la primera fila, al lado de «Limpiar filtros».
+     *  El planificador pone ahí «Ver solo las tildadas»: es donde Lucas lo fue a buscar. */
+    acciones?: React.ReactNode;
     /** Modo compacto: menos aire y selects más angostos. Lo usa el planificador, donde
         cada píxel que se come la barra de filtros es una fila menos de la lista. */
     compacto?: boolean;
 }
 
-export function WorkOrderFilters({ filters, setFilters, orders, children, compacto = false }: WorkOrderFiltersProps) {
+export function WorkOrderFilters({ filters, setFilters, orders, children, acciones, compacto = false }: WorkOrderFiltersProps) {
     const [clientSearchTerm, setClientSearchTerm] = useState("");
 
     const uniqueClients = Array.from(new Set(orders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort();
@@ -205,15 +208,21 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, compac
                     </PopoverContent>
                 </Popover>
 
-                {/* Limpiar filtros — pegado al lado derecho, sin hueco grande. */}
+                {/* Limpiar filtros — pegado al lado derecho, sin hueco grande. Las acciones
+                    de quien use el componente van en el mismo grupo, a su izquierda. */}
+                {(acciones || hasFiltersActive) && (
+                <div className="ml-auto flex items-center gap-2">
+                {acciones}
                 {hasFiltersActive && (
                     <button
                         onClick={() => setFilters(initialFilterState)}
-                        className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded border border-orange-200 transition-colors text-[10px] font-bold tracking-wide uppercase animate-in fade-in slide-in-from-right-1 duration-200 shadow-sm"
+                        className="flex items-center gap-1.5 px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded border border-orange-200 transition-colors text-[10px] font-bold tracking-wide uppercase animate-in fade-in slide-in-from-right-1 duration-200 shadow-sm"
                     >
                         <X className="w-3 h-3" />
                         Limpiar Filtros
                     </button>
+                )}
+                </div>
                 )}
             </div>
 
