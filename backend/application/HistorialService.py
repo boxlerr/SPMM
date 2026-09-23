@@ -282,7 +282,8 @@ def lineas_de_cambios(antes: dict, despues: dict) -> list[str]:
 FECHAS_OT = frozenset({"fecha_orden", "fecha_entrada", "fecha_prometida", "fecha_entrega",
                        "f_disp_material"})
 ENTEROS_OT = frozenset({"id_otvieja", "unidades", "cantidad_entregada", "id_cliente",
-                        "id_prioridad", "id_sector", "id_articulo"})
+                        "id_prioridad", "id_sector", "id_articulo",
+                        "cantidad_finalizada_parcial"})
 
 
 def _normalizar_fecha(v) -> str | None:
@@ -1764,6 +1765,14 @@ class HistorialService:
                 titulo = None
                 if bien:
                     titulo = f"editó los datos de la OT {numero}" if lineas else f"guardó la OT {numero}"
+                    # RF-11: marcar (o desmarcar) Controlada es EL hecho del guardado; lo
+                    # demás que cambió sigue en las líneas de abajo. Estamos adentro de
+                    # la línea de tiempo de ESTA OT: sin el número, «marcó la OT como
+                    # Controlada».
+                    det = leer_detalle(m.get("detalle"))
+                    control = hc.cambio_de_control(det.get("antes"), det.get("despues"))
+                    if control:
+                        titulo = hc.frase_de_control(control)
                 eventos.append(evento_de_movimiento(m, tipo, titulo=titulo, lineas=lineas,
                                                     nota=nota, deducido=deducido, igual=igual))
             elif tipo == "entregas":

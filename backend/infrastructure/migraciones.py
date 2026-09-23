@@ -747,6 +747,43 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "ON CONFLICT (codigo) DO NOTHING",
         ],
     ),
+    (
+        # RF-11: las casillas de «Estado y control» de la ficha vieja que faltaban. Las
+        # cuatro marcas van con DEFAULT constante (Postgres 11+ no reescribe la tabla) y
+        # las otras tres NULL sin default: no reescribe ninguna fila del cliente. El
+        # modelo ya las declara, así que sin esto se cae la lectura de todas las OT.
+        "2026-09-23_estados_de_control_ot",
+        [
+            "ALTER TABLE orden_trabajo "
+            "ADD COLUMN IF NOT EXISTS controlado SMALLINT NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS finalizado_para_pintar SMALLINT NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS finalizado_tercerizacion_intermedia SMALLINT NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS finalizado_tercerizacion_final SMALLINT NOT NULL DEFAULT 0, "
+            "ADD COLUMN IF NOT EXISTS cantidad_finalizada_parcial INTEGER, "
+            "ADD COLUMN IF NOT EXISTS controlado_en TIMESTAMP, "
+            "ADD COLUMN IF NOT EXISTS controlado_por VARCHAR(120)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN orden_trabajo.controlado IS "
+            "'RF-11: la casilla CONTROLADO de la ficha del sistema viejo (0/1). La marca una "
+            "persona desde SPMM; quién y cuándo quedan en controlado_por y controlado_en.'",
+            "COMMENT ON COLUMN orden_trabajo.finalizado_para_pintar IS "
+            "'RF-11: la casilla FINALIZADO PARA PINTAR de la ficha del sistema viejo (0/1).'",
+            "COMMENT ON COLUMN orden_trabajo.finalizado_tercerizacion_intermedia IS "
+            "'RF-11: la casilla FINALIZADO TERCERIZACIÓN INTERMEDIA de la ficha del sistema "
+            "viejo (0/1).'",
+            "COMMENT ON COLUMN orden_trabajo.finalizado_tercerizacion_final IS "
+            "'RF-11: la casilla FINALIZADO TERCERIZACIÓN FINAL de la ficha del sistema viejo (0/1).'",
+            "COMMENT ON COLUMN orden_trabajo.cantidad_finalizada_parcial IS "
+            "'RF-11: el «Cant.» al lado de FINALIZADO PARCIAL: cuántas unidades se terminaron. "
+            "No es cantidad_entregada (terminar no es entregar). NULL = no se cargó.'",
+            "COMMENT ON COLUMN orden_trabajo.controlado_en IS "
+            "'RF-11: cuándo se marcó CONTROLADO desde SPMM, hora local de Argentina sin zona. "
+            "Lo pone el backend y lo borra al desmarcarla. NULL con controlado = 1: no se registró.'",
+            "COMMENT ON COLUMN orden_trabajo.controlado_por IS "
+            "'RF-11: quién marcó CONTROLADO (el nombre, no el id). Lo pone el backend y lo borra "
+            "al desmarcarla. NULL = no se sabe quién: nunca un autor inventado.'",
+        ],
+    ),
 ]
 
 

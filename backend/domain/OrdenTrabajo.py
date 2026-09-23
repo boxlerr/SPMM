@@ -3,6 +3,18 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from backend.infrastructure.db import Base
 
+# RF-11: las casillas de «Estado y control» que agregó la migración del 23/09 (las
+# otras cuatro de la ficha vieja —programada, en_proceso, finalizadototal,
+# finalizadoparcial— ya estaban). A diferencia de esas, éstas son NOT NULL: un `null`
+# que llegue en un guardado se ignora (OrdenTrabajoService.modificarOrden).
+CASILLAS_DE_CONTROL = (
+    "controlado",
+    "finalizado_para_pintar",
+    "finalizado_tercerizacion_intermedia",
+    "finalizado_tercerizacion_final",
+)
+
+
 class OrdenTrabajo(Base):
     __tablename__ = "orden_trabajo"
 
@@ -52,6 +64,30 @@ class OrdenTrabajo(Base):
     no_lleva_materia_prima = Column(Integer, nullable=False, default=0)
     programada = Column(Integer, nullable=True, default=0)
     en_proceso = Column(Integer, nullable=True, default=0)
+
+    # RF-11 — «Estado y control», las casillas de la ficha de OT del sistema viejo.
+    # Programada, En proceso, Finalizado total y Finalizado parcial ya existían (arriba);
+    # éstas son las que faltaban. Son marcas 0/1 como sus vecinas y las escribe SPMM: el
+    # sync del legacy está apagado y la migración de OT faltantes no las trae (ver
+    # migrations/2026-09-23_estados_de_control_ot.sql).
+    #
+    # `server_default` además del default de Python: los scripts que insertan OT con SQL
+    # a mano (migrar_ot_faltantes) no nombran estas columnas, y así nacen en 0 y no NULL.
+    controlado = Column(Integer, nullable=False, default=0, server_default="0")
+    finalizado_para_pintar = Column(Integer, nullable=False, default=0, server_default="0")
+    finalizado_tercerizacion_intermedia = Column(Integer, nullable=False, default=0, server_default="0")
+    finalizado_tercerizacion_final = Column(Integer, nullable=False, default=0, server_default="0")
+    # El «Cant.» que va al lado de Finalizado parcial: cuántas unidades se terminaron.
+    # NO es `cantidad_entregada` (Cant Entregada), que es otra casilla de la ficha y mueve
+    # la fecha de entrega al registrar una entrega: terminar piezas no es entregarlas.
+    # NULL = no se cargó, que no es lo mismo que 0.
+    cantidad_finalizada_parcial = Column(Integer, nullable=True)
+    # Quién marcó CONTROLADO y cuándo. Los pone el backend al pasar de 0 a 1 (hora local
+    # AR, sin zona) y los borra al desmarcarla: una OT sin controlar no puede decir
+    # «controlada por Lucas». NULL con controlado=1 = no se registró quién (nunca un autor
+    # inventado). El historial de cada cambio igual queda en Auditoría.
+    controlado_en = Column(DateTime, nullable=True)
+    controlado_por = Column(String(120), nullable=True)
 
     # Columnas que existían en la base pero faltaban en el modelo (por eso no se
     # migraban). `ttt1` y `fc` las escribe el sync y son parte de la regla de

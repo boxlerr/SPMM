@@ -1,4 +1,4 @@
-from backend.domain.OrdenTrabajo import OrdenTrabajo
+from backend.domain.OrdenTrabajo import OrdenTrabajo, CASILLAS_DE_CONTROL
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
 from backend.dto.OrdenTrabajoResponseDTO import OrdenTrabajoResponseDTO
@@ -38,6 +38,8 @@ class OrdenTrabajoService:
         from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
         from backend.domain.Plano import Plano
         from backend.infrastructure.db_retry import run_with_db_retry, motivo_error_db
+        from backend.infrastructure.AuditoriaRepository import nombre_de
+        from backend.infrastructure.estado_ordenes import ahora_ar
 
         data_dict = json.loads(data_json)
         dto = OrdenTrabajoRequestDTO(**data_dict)
@@ -107,7 +109,17 @@ class OrdenTrabajoService:
 
                 finalizadototal=1 if dto.finalizadototal else 0,
                 finalizadoparcial=1 if dto.finalizadoparcial else 0,
-                reclamo=1 if dto.reclamo else 0
+                reclamo=1 if dto.reclamo else 0,
+
+                # RF-11: «Estado y control». Si nace controlada, queda dicho quién la
+                # marcó y cuándo, igual que al marcarla después (ver el repositorio).
+                controlado=1 if dto.controlado else 0,
+                controlado_en=ahora_ar() if dto.controlado else None,
+                controlado_por=nombre_de(user) if dto.controlado else None,
+                finalizado_para_pintar=1 if dto.finalizado_para_pintar else 0,
+                finalizado_tercerizacion_intermedia=1 if dto.finalizado_tercerizacion_intermedia else 0,
+                finalizado_tercerizacion_final=1 if dto.finalizado_tercerizacion_final else 0,
+                cantidad_finalizada_parcial=dto.cantidad_finalizada_parcial,
             )
 
             db.add(orden)
@@ -384,12 +396,25 @@ class OrdenTrabajoService:
             'fabricacion', 'reparacion', 'sin_cargo', 'stock', 'interno', 'revisada',
             'tercerizado_total', 'tercerizado_parcial', 'suspendida', 'email',
             'tiene_plano', 'no_lleva_plano', 'programada', 'en_proceso', 'finalizadototal',
-            'finalizadoparcial', 'reclamo'
+            'finalizadoparcial', 'reclamo',
+            # RF-11: las casillas de «Estado y control» que faltaban. Como sus vecinas, la
+            # base guarda 0/1 y no True/False.
+            *CASILLAS_DE_CONTROL,
         ]
         for field in bool_fields:
             if field in nueva_data and isinstance(nueva_data[field], bool):
                 nueva_data[field] = 1 if nueva_data[field] else 0
-        
+
+        # RF-11: las cuatro casillas nuevas son NOT NULL en la base (a diferencia de sus
+        # vecinas, que vienen del legacy y aceptan NULL). Un `null` explícito —la edición
+        # en línea de una lista que no conoce el campo, por ejemplo— no es «desmarcala»:
+        # es «no sé», y se ignora en vez de tumbar el guardado con un error de la base.
+        # Para desmarcar se manda false. `cantidad_finalizada_parcial` sí acepta null
+        # (vaciar el «Cant.» es válido).
+        for campo in CASILLAS_DE_CONTROL:
+            if campo in nueva_data and nueva_data[campo] is None:
+                nueva_data.pop(campo)
+
         # Extract processes to handle separately.
         #
         # Se distingue "no vino la clave" (None -> no se tocan los procesos) de "vino
@@ -752,6 +777,14 @@ class OrdenTrabajoService:
                             if o["estado_plan"] != "entregada" and not o["tipo_trabajo"]),
             "falta_plano": sum(1 for o in ordenes
                                if o["estado_plan"] != "entregada" and o["estado_plano"] == "falta"),
+            # RF-11: cuántas tienen cada marca de «Estado y control», sobre TODAS (también
+            # las entregadas: «¿cuáles se controlaron?» se pregunta después de entregar).
+            "controladas": sum(1 for o in ordenes if o.get("controlado") == 1),
+            "para_pintar": sum(1 for o in ordenes if o.get("finalizado_para_pintar") == 1),
+            "tercerizacion_intermedia": sum(
+                1 for o in ordenes if o.get("finalizado_tercerizacion_intermedia") == 1),
+            "tercerizacion_final": sum(
+                1 for o in ordenes if o.get("finalizado_tercerizacion_final") == 1),
         }
         logger.info(f"Service - Resumen OK: {resumen}")
         return ResponseDTO(status=True, data={"resumen": resumen,
