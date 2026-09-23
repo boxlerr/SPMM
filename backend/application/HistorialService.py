@@ -1574,7 +1574,7 @@ class HistorialService:
 
     async def de_persona(self, id_operario: int, desde: date | None = None, hasta: date | None = None,
                          *, ve_pasos: bool = True, ve_plan: bool = True,
-                         ve_rendimiento: bool = False) -> dict | None:
+                         ve_rendimiento: bool = False, ve_ausencias: bool = True) -> dict | None:
         from backend.application.TiemposOperarioService import TiemposOperarioService
         from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento as M
         from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT as P
@@ -1620,6 +1620,11 @@ class HistorialService:
         eventos: list[dict] = []
         guardados = [m for m in movs if m["metodo"] == "PUT" and re.match(r"^/operarios/\d+/?$", m["ruta"] or "")]
         deducidos = self._deducir_persona(guardados, nombres_proceso)
+        if not ve_ausencias:
+            # Revisión del 23/09: sin permiso para leer ausencias (política 'asistencia':
+            # Recursos u Operaciones) tampoco van los pedidos que las cargaron, cerraron o
+            # borraron: su frase y su cuerpo dicen el motivo y la observación.
+            movs = [m for m in movs if tipo_de_ruta_persona(m["metodo"], m["ruta"]) != "ausencias"]
         for m in movs + alta_por_nombre:
             tipo = tipo_de_ruta_persona(m["metodo"], m["ruta"])
             bien = m.get("estado") is None or m["estado"] < 400
@@ -1652,10 +1657,14 @@ class HistorialService:
                 eventos.append(evento_de_movimiento(m, tipo))
 
         # 2. Sus ausencias (RF-06): la tabla del hecho, junto con el pedido que la cargó.
-        ausencias = await _sin_romper(db, lambda: self._ausencias(A, id_operario), [], avisos,
-                                      "las ausencias")
-        eventos += eventos_de_ausencias(ausencias, [e for e in eventos if e["id"].startswith("mov-")],
-                                        nombre=nombre_completo or "la persona")
+        if ve_ausencias:
+            ausencias = await _sin_romper(db, lambda: self._ausencias(A, id_operario), [], avisos,
+                                          "las ausencias")
+            eventos += eventos_de_ausencias(ausencias, [e for e in eventos if e["id"].startswith("mov-")],
+                                            nombre=nombre_completo or "la persona")
+        else:
+            ocultos.append({"que": "ausencias", "texto": "Sus ausencias (y el motivo) no se muestran: "
+                            "se ven con «Recursos» u «Operaciones», que no tenés."})
 
         # 3. Lo que trabajó (la misma atribución que su ficha) y las pausas de esos pasos.
         tiempos_svc = TiemposOperarioService(db)
@@ -1846,7 +1855,9 @@ class HistorialService:
                 if campo in cuerpo:
                     valores[campo] = _normalizar_persona(campo, cuerpo[campo], nombres)
             for campo in hc.PRIVADOS_PERSONA:
-                if campo in cuerpo:
+                # Desde el 23/09 el cuerpo guardado los trae tapados (auditoria_movimientos
+                # ._sin_datos_personales): tapado no es un valor, no se compara.
+                if campo in cuerpo and cuerpo[campo] != hc.OCULTO:
                     valores[campo] = hc.texto_de(cuerpo[campo])
             if "skills" in cuerpo:
                 valores.update(_habilidades_del_cuerpo(cuerpo["skills"], nombres))

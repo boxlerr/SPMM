@@ -27,6 +27,7 @@ from backend.infrastructure.auditoria_movimientos import (
     ACCION_INGRESO,
     ACCIONES_DE_ACCESO,
     ACCIONES_DE_SESION,
+    ENTIDAD_CLAVE,
     ENTIDAD_SESION,
     ENTIDADES_DE_ACCESO,
     ahora_ar,
@@ -49,6 +50,41 @@ async def get_db():
 TOPE_EXPORTAR = 10_000
 
 M = AuditoriaMovimiento
+
+
+# ─────────────────────────── lo que cada uno puede ver del registro ───────────────────────────
+#
+# Revisión del 23/09 (ver core/permisos_rutas.py, «Auditoría»):
+#   · Ingresos y Actividad por persona son de la sección CONFIDENCIAL «Ingresos y
+#     actividad por persona» (auditoria_ingresos). Sin ella, ninguna lista de este
+#     archivo manda las filas de entrar, salir y claves (entidad «sesión» o «contraseña»:
+#     IP, navegador, intentos contra cada cuenta). El bloqueo y el desbloqueo de una
+#     cuenta (entidad «usuario», RF-26) ya estaban en «Todo lo que se hizo» y siguen ahí.
+#   · La lista de CUENTAS (usuario, si tiene acceso, último login, y las cuentas que
+#     nunca hicieron nada) es de «Usuarios y permisos» (configuracion_usuarios),
+#     confidencial y del admin. Sin esa sección, cada persona va con el nombre con que
+#     firmó en el registro y nada más: son los nombres que alguien necesita para probar
+#     claves, y la pantalla que los cuida es ésa.
+
+ENTIDADES_DE_INGRESO = (ENTIDAD_SESION, ENTIDAD_CLAVE)
+
+
+def _puede(permisos, seccion: str) -> bool:
+    try:
+        return bool(permisos and permisos.tiene_seccion(seccion, "read"))
+    except Exception:
+        return False
+
+
+def _prohibido(seccion: str) -> HTTPException:
+    from backend.core.permisos_rutas import rechazo, seccion as requisito
+    return HTTPException(status_code=403,
+                         detail={"message": rechazo((requisito(seccion),)), "campo": "permiso"})
+
+
+def _sin_ingresos():
+    """Lo que no es entrar, salir ni una clave (para quien no tiene auditoria_ingresos)."""
+    return M.entidad.notin_(ENTIDADES_DE_INGRESO)
 
 
 def _fila(m: AuditoriaMovimiento, con_detalle: bool = True) -> dict:
@@ -139,16 +175,21 @@ def _condiciones(*, entidad, accion, usuario, id_usuario, buscar, solo_fallidos,
     return condiciones
 
 
-async def _personas(db) -> list[dict]:
-    """Para el desplegable «Persona»: cada cuenta (también las que sólo tienen intentos
-    fallidos, o ninguno) y cada autor del registro, con el nombre de hoy.
+async def _personas(db, *, ve_cuentas: bool, ve_ingresos: bool) -> list[dict]:
+    """Para el desplegable «Persona»: cada autor del registro y, con «Usuarios y
+    permisos», también cada cuenta (las que sólo tienen intentos fallidos, o ninguno),
+    con el nombre de hoy, su usuario y si tiene acceso.
+
+    Sin «Usuarios y permisos» no se lee `usuario`: sólo los que firmaron algo, con el
+    nombre con que firmaron (y sin «Ingresos», sólo los que hicieron algo más que entrar).
 
     Las cuentas salen de la tabla `usuario`, y se leen AL FINAL: si no se pudiera (una
     base de prueba sin la tabla), el rollback no se lleva nada y quedan las del registro.
     """
     ultimo = (
         select(M.id_usuario, func.max(M.id).label("ultimo"))
-        .where(M.id_usuario.isnot(None), M.usuario.isnot(None))
+        .where(M.id_usuario.isnot(None), M.usuario.isnot(None),
+               *([] if ve_ingresos else [_sin_ingresos()]))
         .group_by(M.id_usuario)
         .subquery()
     )
@@ -157,6 +198,8 @@ async def _personas(db) -> list[dict]:
     )).all()
     personas = {i: {"id_usuario": i, "nombre": n, "username": None, "activo": None}
                 for i, n in firmas}
+    if not ve_cuentas:
+        return sorted(personas.values(), key=lambda p: (p["nombre"] or "").lower())
     for c in await _cuentas(db):
         personas[c["id_usuario"]] = {k: c[k] for k in ("id_usuario", "nombre", "username", "activo")}
     return sorted(personas.values(), key=lambda p: (p["nombre"] or "").lower())
@@ -204,6 +247,7 @@ async def movimientos(
     con_detalle: bool = True,
     db=Depends(get_db),
     _u=Depends(get_current_user),
+    permisos=Depends(get_permisos_actuales),
 ):
     """Lo último primero, filtrado EN EL SERVIDOR y de a páginas (RF-25).
 
@@ -218,11 +262,25 @@ async def movimientos(
 
     Sin parámetros contesta lo mismo que antes —los últimos 300 y los desplegables—:
     la pantalla vieja sigue andando contra este backend.
+
+    Permisos (revisión del 23/09): `tipo=ingresos` pide «Ingresos y actividad por
+    persona»; sin tipo, «Todo lo que se hizo», y sin la de Ingresos no van las filas de
+    entrar, salir y claves. `personas` lleva usuario y acceso sólo con «Usuarios y
+    permisos». Ver arriba, «lo que cada uno puede ver del registro».
     """
+    ve_ingresos = _puede(permisos, "auditoria_ingresos")
+    ve_cuentas = _puede(permisos, "configuracion_usuarios")
+    if tipo == "ingresos" and not ve_ingresos:
+        raise _prohibido("auditoria_ingresos")
+    if tipo != "ingresos" and not _puede(permisos, "auditoria_movimientos"):
+        raise _prohibido("auditoria_movimientos")
+
     condiciones = _condiciones(
         entidad=entidad, accion=accion, usuario=usuario, id_usuario=id_usuario,
         buscar=buscar, solo_fallidos=solo_fallidos, tipo=tipo, desde=desde, hasta=hasta,
     )
+    if not ve_ingresos:
+        condiciones.append(_sin_ingresos())
 
     q = select(M).where(*condiciones).order_by(M.creado_en.desc(), M.id.desc())
     if not con_detalle:
@@ -251,20 +309,22 @@ async def movimientos(
     if opciones:
         # Para armar los desplegables de filtro sin que el front tenga que adivinar qué
         # hay. Salen de los datos, así que una entidad nueva aparece sola.
+        visibles = [] if ve_ingresos else [_sin_ingresos()]
         entidades = (await db.execute(
             select(M.entidad, func.count().label("cuantos"))
+            .where(*visibles)
             .group_by(M.entidad)
             .order_by(func.count().desc())
         )).all()
         usuarios = (await db.execute(
             select(M.usuario)
-            .where(M.usuario.isnot(None))
+            .where(M.usuario.isnot(None), *visibles)
             .group_by(M.usuario)
             .order_by(M.usuario)
         )).scalars().all()
         salida["entidades"] = [{"entidad": e, "cuantos": c} for e, c in entidades]
         salida["usuarios"] = list(usuarios)
-        salida["personas"] = await _personas(db)
+        salida["personas"] = await _personas(db, ve_cuentas=ve_cuentas, ve_ingresos=ve_ingresos)
 
     return salida
 
@@ -275,6 +335,7 @@ async def actividad(
     hasta: date | None = None,
     db=Depends(get_db),
     _u=Depends(get_current_user),
+    permisos=Depends(get_permisos_actuales),
 ):
     """«Actividad por persona» (RF-25): cada usuario con su último ingreso y, en el
     período, cuántas veces entró, cuántas acciones hizo y cuántos intentos fallidos
@@ -289,7 +350,16 @@ async def actividad(
       en UTC (utcnow) y acá se pasa a hora del taller (-3 h).
     - Sin fechas = desde siempre. Los que no tienen acceso (desactivados) aparecen sólo
       si hicieron algo en el período.
+
+    Pide «Ingresos y actividad por persona» (confidencial; la política lo exige y acá se
+    vuelve a mirar por si alguien monta el router sin ella). Las CUENTAS —usuario, si
+    tiene acceso, el último login de la ficha y los que no hicieron nada— sólo con
+    «Usuarios y permisos»: sin ella, cada uno con el nombre con que firmó, y aparecen
+    sólo los que tienen algo en el registro.
     """
+    if not _puede(permisos, "auditoria_ingresos"):
+        raise _prohibido("auditoria_ingresos")
+    ve_cuentas = _puede(permisos, "configuracion_usuarios")
     rango = _rango_de_fechas(desde, hasta)
 
     ingresos = func.sum(case((M.accion == ACCION_INGRESO, 1), else_=0))
@@ -363,7 +433,8 @@ async def actividad(
             }
         return personas[id_usuario]
 
-    cuentas = await _cuentas(db)  # al final: si falla, hace rollback (ver _cuentas)
+    # Al final: si falla, hace rollback (ver _cuentas). Sin «Usuarios y permisos», ni se lee.
+    cuentas = await _cuentas(db) if ve_cuentas else []
     ultimo_login = {}
     for c in cuentas:
         if c["activo"]:
@@ -494,11 +565,13 @@ async def movimientos_de(
     id_entidad: str,
     db=Depends(get_db),
     _u=Depends(get_current_user),
+    permisos=Depends(get_permisos_actuales),
 ):
     """Todo lo que le pasó a UNA cosa: «mostrame el historial de la OT 1081».
 
     Es la pregunta que motivó todo esto, así que tiene su propia dirección en vez de
-    depender de que alguien acierte el filtro."""
+    depender de que alguien acierte el filtro. Sin «Ingresos y actividad por persona»
+    no manda las filas de entrar, salir y claves (/de/sesión/5 era otra puerta a eso)."""
     q = (
         select(AuditoriaMovimiento)
         .where(AuditoriaMovimiento.entidad.like(f"{entidad}%"))
@@ -506,6 +579,8 @@ async def movimientos_de(
         .order_by(AuditoriaMovimiento.creado_en.desc())
         .limit(500)
     )
+    if not _puede(permisos, "auditoria_ingresos"):
+        q = q.where(_sin_ingresos())
     filas = (await db.execute(q)).scalars().all()
     return {"movimientos": [_fila(m) for m in filas]}
 
@@ -518,21 +593,30 @@ async def movimientos_de(
 # con el registro central buscado por entidad y número, completado con las tablas que
 # guardan cada hecho (pasos, pausas, consumos, no conformidades, planos, plan, ausencias).
 #
-# Permisos: el router pide la sección «Todo lo que se hizo» (core/permisos_rutas.py). Lo
-# que tiene sección propia se respeta adentro: los pasos («Pasos de las OT»), el plan
-# («Planificaciones») y lo estimado contra lo que llevó cada paso de una persona
-# («Rendimiento por persona», confidencial). Sin la sección, eso no se lee ni se manda.
+# Permisos: el router pide la sección «Todo lo que se hizo» (core/permisos_rutas.py), que
+# NO es confidencial. Lo que tiene sección o política propia se respeta adentro: los
+# pasos («Pasos de las OT»), el plan («Planificaciones»), lo estimado contra lo que llevó
+# cada paso de una persona («Rendimiento por persona», confidencial) y sus ausencias (la
+# política 'asistencia': Recursos u Operaciones). Sin eso, no se lee ni se manda.
 
 def _secciones(permisos) -> dict:
     def tiene(seccion: str) -> bool:
+        return _puede(permisos, seccion)
+
+    def ve_ausencias() -> bool:
+        # Las ausencias (con el motivo: ENFERMEDAD, y la observación) se leen afuera con
+        # la política 'asistencia' (Recursos u Operaciones). Revisión del 23/09: acá
+        # quedaban abiertas a quien sólo tiene Auditoría. Mismo requisito, del mapa.
+        from backend.core.permisos_rutas import POLITICAS, permite
         try:
-            return bool(permisos and permisos.tiene_seccion(seccion, "read"))
+            return bool(permisos) and permite(POLITICAS["asistencia"].leer, permisos, {})
         except Exception:
             return False
     return {
         "ve_pasos": tiene("auditoria_procesos"),
         "ve_plan": tiene("auditoria_planificacion"),
         "ve_rendimiento": tiene("dashboard_rendimiento"),
+        "ve_ausencias": ve_ausencias(),
     }
 
 

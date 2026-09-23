@@ -11,24 +11,42 @@ período, cuántas veces entró, cuántas acciones hizo y cuántos intentos fall
 Las mismas consultas corrieron contra un Postgres 16 descartable con 60.000 filas
 antes del commit (SQLite no reproduce los errores de dialecto): ver el mensaje.
 """
+import os
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from backend.commons.handlers.exception_handlers import registrar_exception_handlers
-from backend.core.security import get_current_user
+from backend.core.permisos import DatosDePermisos, permisos_de
+from backend.core.security import get_current_user, get_permisos_actuales
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
 from backend.domain.Usuario import Usuario
 from backend.infrastructure.db import Base
 from backend.presentation import AuditoriaAPI
 
 HOY = datetime(2026, 9, 23, 10, 0)
+
+# Además de SQLite, contra un Postgres DESCARTABLE local si se lo da (SPMM_PG_PRUEBAS, sólo
+# localhost): SQLite no reproduce los errores de dialecto. Nunca contra otra base.
+PG_URL = os.getenv("SPMM_PG_PRUEBAS")
+
+
+def _pg_seguro(url: str) -> bool:
+    try:
+        return urlparse(url.replace("+asyncpg", "")).hostname in ("localhost", "127.0.0.1", "::1")
+    except Exception:
+        return False
+
+
+MOTORES = ["sqlite"] + (["postgres"] if PG_URL and _pg_seguro(PG_URL) else [])
 
 
 def _mov(cuando, *, id_usuario=None, usuario=None, accion="editó", entidad="orden de trabajo",
@@ -91,14 +109,20 @@ def _registro() -> list[AuditoriaMovimiento]:
     return filas
 
 
-@pytest_asyncio.fixture
-async def cliente():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+@pytest_asyncio.fixture(params=MOTORES)
+async def cliente(request):
+    if request.param == "postgres":
+        engine = create_async_engine(PG_URL, poolclass=NullPool)
+    else:
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
     async with engine.begin() as conn:
+        if request.param == "postgres":
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(lambda c: Base.metadata.create_all(
             c, tables=[Usuario.__table__, AuditoriaMovimiento.__table__]))
     Sesion = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -129,9 +153,28 @@ async def cliente():
     app.include_router(AuditoriaAPI.router)
     app.dependency_overrides[AuditoriaAPI.get_db] = _db
     app.dependency_overrides[get_current_user] = lambda: {"id_usuario": 1, "username": "julian"}
+    # Por defecto, el admin (ve todo). Un test puede cambiarlo con `cliente.permisos`.
+    estado = {"permisos": ADMIN}
+    app.dependency_overrides[get_permisos_actuales] = lambda: estado["permisos"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        c.estado = estado
         yield c
     await engine.dispose()
+
+
+ADMIN = permisos_de(DatosDePermisos(rol="admin"), 1, "julian")
+
+
+def _auditor(*, ingresos=False, usuarios=False):
+    """Un rol con Auditoría en ver: «Todo lo que se hizo» la hereda; las confidenciales
+    (Ingresos, Usuarios y permisos) sólo si se le dan."""
+    extra = {}
+    if ingresos:
+        extra["auditoria_ingresos"] = "read"
+    if usuarios:
+        extra["configuracion_usuarios"] = "read"
+    return permisos_de(DatosDePermisos(rol="auditor", rol_areas={"auditoria": "read"},
+                                       rol_secciones=extra), 7, "auditor")
 
 
 async def _pedir(cliente, **params):
@@ -306,3 +349,86 @@ async def test_actividad_desde_siempre(cliente):
 async def test_actividad_con_fechas_al_reves_se_rechaza(cliente):
     r = await cliente.get("/auditoria/actividad", params={"desde": "2026-09-20", "hasta": "2026-09-01"})
     assert r.status_code == 400
+
+
+# ─────────────────────────── quién ve qué (revisión del 23/09) ───────────────────────────
+#
+# Ingresos y Actividad por persona son de la sección CONFIDENCIAL «Ingresos y actividad
+# por persona»; la lista de cuentas (usuario, si tiene acceso, último login) es de
+# «Usuarios y permisos», también confidencial. Tener Auditoría no abre ninguna de las dos.
+
+ACCESO = ("sesión", "contraseña")
+
+
+async def test_con_solo_auditoria_no_se_ven_los_ingresos_ni_la_actividad(cliente):
+    cliente.estado["permisos"] = _auditor()
+    r = await cliente.get("/auditoria/movimientos", params={"tipo": "ingresos"})
+    assert r.status_code == 403
+    assert "Ingresos y actividad por persona" in r.text
+    r = await cliente.get("/auditoria/actividad")
+    assert r.status_code == 403
+
+    # «Todo lo que se hizo» sigue, sin las filas de entrar, salir y claves.
+    j = await _pedir(cliente, limite=10_000)
+    assert j["movimientos"] and not [m for m in j["movimientos"] if m["entidad"] in ACCESO]
+    # El bloqueo y el desbloqueo (RF-26) ya estaban acá y siguen.
+    assert {"bloqueó", "desbloqueó"} <= {m["accion"] for m in j["movimientos"]}
+    assert j["total"] == TOTAL - 5  # 2 ingresos de Lucas + 3 intentos fallidos
+    # Ni pidiéndolas a mano, ni por la dirección de una cosa.
+    j = await _pedir(cliente, accion="intento fallido,ingresó")
+    assert j["total"] == 0
+    j = await _pedir(cliente, entidad="sesi")
+    assert j["total"] == 0
+    r = await cliente.get("/auditoria/movimientos/de/sesión/2")
+    assert r.status_code == 200 and r.json()["movimientos"] == []
+    # Los desplegables tampoco las nombran.
+    j = await _pedir(cliente, limite=1)
+    assert not [e for e in j["entidades"] if e["entidad"] in ACCESO]
+
+
+async def test_sin_usuarios_y_permisos_no_se_manda_ninguna_cuenta(cliente):
+    """La lista de cuentas es lo que cuida «Usuarios y permisos»: sin esa sección, cada
+    persona va con el nombre con que firmó, y nada de usuario, acceso ni cuentas que no
+    hicieron nada (las que alguien necesita para probar claves)."""
+    cliente.estado["permisos"] = _auditor(ingresos=True)
+    j = await _pedir(cliente, limite=1)
+    personas = {p["id_usuario"]: p for p in j["personas"]}
+    assert set(personas) == {1, 2, 4}  # los que firmaron algo; ni Sofía ni «viejo»
+    assert all(p["username"] is None and p["activo"] is None for p in personas.values())
+    assert personas[2]["nombre"] == "Lucas Longchamps"
+
+    r = await cliente.get("/auditoria/actividad")
+    assert r.status_code == 200, r.text
+    p = {x["id_usuario"]: x for x in r.json()["personas"]}
+    assert 5 not in p and 6 not in p  # Sofía (sólo la ficha) y la cuenta desactivada
+    assert all(x["username"] is None and x["activo"] is None for x in p.values())
+    assert not any(x["ultimo_ingreso_de_la_ficha"] for x in p.values())
+    for username in ('"julian"', '"lucas"', '"sofia"', '"viejo"'):
+        assert username not in r.text
+    # Lo que sí es de la sección confidencial se ve: los intentos contra la cuenta.
+    assert p[2]["intentos_fallidos"] == 1 and p[2]["ingresos"] == 2
+
+    # Con la vista Ingresos sí: tiene la sección.
+    j = await _pedir(cliente, tipo="ingresos")
+    assert j["total"] == 7  # 2 ingresos, 3 intentos, el bloqueo y el desbloqueo
+
+
+async def test_con_usuarios_y_permisos_se_ven_las_cuentas(cliente):
+    cliente.estado["permisos"] = _auditor(ingresos=True, usuarios=True)
+    j = await _pedir(cliente, limite=1)
+    personas = {p["id_usuario"]: p for p in j["personas"]}
+    assert personas[2]["username"] == "lucas" and personas[2]["activo"] is True
+    assert personas[6]["activo"] is False
+    p = {x["id_usuario"]: x for x in (await cliente.get("/auditoria/actividad")).json()["personas"]}
+    assert p[5]["username"] == "sofia" and p[5]["ultimo_ingreso_de_la_ficha"] is True
+
+
+async def test_con_solo_ingresos_se_ve_ingresos_y_no_el_resto(cliente):
+    """La confidencial se puede dar sola (sin el área): ve Ingresos y la Actividad, no
+    «Todo lo que se hizo»."""
+    cliente.estado["permisos"] = permisos_de(DatosDePermisos(
+        rol="solo_ingresos", rol_secciones={"auditoria_ingresos": "read"}), 8, "x")
+    assert (await cliente.get("/auditoria/movimientos", params={"tipo": "ingresos"})).status_code == 200
+    assert (await cliente.get("/auditoria/actividad")).status_code == 200
+    r = await cliente.get("/auditoria/movimientos")
+    assert r.status_code == 403 and "Todo lo que se hizo" in r.text

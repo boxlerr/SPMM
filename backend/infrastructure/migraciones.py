@@ -736,6 +736,17 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "guardar). Los busca el historial de una OT en Auditoría.'",
         ],
     ),
+    (
+        # Revisión de RF-25: Ingresos y Actividad por persona pasan a una sección
+        # CONFIDENCIAL propia (core/permisos.py). Sólo agrega la fila; si ya está, no la
+        # toca (ni su marca de confidencial, que se cambia desde la pantalla).
+        "2026-09-23_seccion_ingresos_confidencial",
+        [
+            "INSERT INTO seccion (codigo, area_codigo, nombre, orden, confidencial) VALUES "
+            "('auditoria_ingresos', 'auditoria', 'Ingresos y actividad por persona', 13, TRUE) "
+            "ON CONFLICT (codigo) DO NOTHING",
+        ],
+    ),
 ]
 
 

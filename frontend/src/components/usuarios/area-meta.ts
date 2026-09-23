@@ -67,7 +67,12 @@ export const AREA_META: Record<AreaCodigo, AreaMeta> = {
   },
   auditoria: {
     titulo: "Auditoría",
-    pantallas: ["Todo lo que se hizo", "Pasos de las OT", "Planificaciones"],
+    pantallas: [
+      "Todo lo que se hizo",
+      "Pasos de las OT",
+      "Planificaciones",
+      "Ingresos y actividad por persona (confidencial: quién entró, desde qué IP y los intentos contra cada cuenta)",
+    ],
   },
   configuracion: {
     titulo: "Configuración",

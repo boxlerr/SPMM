@@ -170,6 +170,15 @@ SECCIONES: tuple[Seccion, ...] = (
     Seccion("auditoria_movimientos", "auditoria", "Todo lo que se hizo", 10),
     Seccion("auditoria_procesos", "auditoria", "Pasos de las OT", 11),
     Seccion("auditoria_planificacion", "auditoria", "Planificaciones", 12),
+    # Ingresos (quién entró y salió, los intentos fallidos contra cada cuenta, con IP y
+    # navegador) y Actividad por persona (RF-25). Confidencial: no se abre por tener
+    # Auditoría, como «Rendimiento por persona» no se abre por tener el Dashboard.
+    # Revisión del 23/09: iba colgada de «Todo lo que se hizo», que NO es confidencial, y
+    # abrirle Auditoría a un supervisor para que vea «Pasos de las OT» le abría también
+    # las IP y los intentos contra cada cuenta sin que nadie lo decidiera. Se agregó
+    # cerrada para no cambiarle nada a lo que ya existía: si Auditoría entera tiene que
+    # ser confidencial, se marca desde la pantalla de permisos (lo decide Lucas).
+    Seccion("auditoria_ingresos", "auditoria", "Ingresos y actividad por persona", 13, True),
     # --- Configuración --------------------------------------------------------
     # Ver la lista de usuarios. Confidencial: cerrada para todo el que no sea admin
     # aunque tenga el área. Y aun abierta, CAMBIAR usuarios o permisos sigue siendo
@@ -229,6 +238,7 @@ PANTALLAS_DE_INICIO: tuple[PantallaDeInicio, ...] = (
     PantallaDeInicio("/no-conformidades", "No conformidades", "no_conformidades"),
     PantallaDeInicio("/auditoria", "Auditoría", "auditoria", (
         "auditoria_movimientos", "auditoria_procesos", "auditoria_planificacion",
+        "auditoria_ingresos",
     )),
     PantallaDeInicio("/novedades", "Novedades"),
 )

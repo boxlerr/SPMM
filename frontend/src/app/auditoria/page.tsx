@@ -205,7 +205,10 @@ export default function AuditoriaPage() {
     const veTodo = puedeSeccion("auditoria_movimientos");
     const vePasos = puedeSeccion("auditoria_procesos");
     const vePlanificaciones = puedeSeccion("auditoria_planificacion");
-    const solapaInicial = veTodo ? "todo" : vePasos ? "procesos" : "planificacion";
+    // Ingresos y Actividad por persona: sección CONFIDENCIAL propia (revisión del 23/09).
+    // Tener Auditoría no la abre: las IP y los intentos contra cada cuenta se dan a propósito.
+    const veIngresos = puedeSeccion("auditoria_ingresos");
+    const solapaInicial = veTodo ? "todo" : veIngresos ? "ingresos" : vePasos ? "procesos" : "planificacion";
 
     // Controladas (RF-25): tocar a alguien en «Actividad por persona» cambia de solapa y
     // le pasa el filtro. Si los permisos llegan después y la elegida no se ve, a la
@@ -213,17 +216,21 @@ export default function AuditoriaPage() {
     const [solapa, setSolapa] = useState(solapaInicial);
     const [pedido, setPedido] = useState<PedidoDeFiltro | null>(null);
     const visibles = useMemo(() => [
-        ...(veTodo ? ["todo", "ingresos", "personas", "orden", "persona"] : []),
+        ...(veTodo ? ["todo"] : []),
+        ...(veIngresos ? ["ingresos", "personas"] : []),
+        ...(veTodo ? ["orden", "persona"] : []),
         ...(vePasos ? ["procesos"] : []),
         ...(vePlanificaciones ? ["planificacion"] : []),
-    ], [veTodo, vePasos, vePlanificaciones]);
+    ], [veTodo, veIngresos, vePasos, vePlanificaciones]);
     useEffect(() => {
         if (visibles.length && !visibles.includes(solapa)) setSolapa(visibles[0]);
     }, [visibles, solapa]);
     const verPersona = useCallback((p: Omit<PedidoDeFiltro, "n">) => {
-        setPedido({ ...p, n: Date.now() });
-        setSolapa(p.destino);
-    }, []);
+        // Sin «Todo lo que se hizo», tocar a alguien en la Actividad lo busca en Ingresos.
+        const pedido = !veTodo && p.destino === "todo" ? { ...p, destino: "ingresos" as const } : p;
+        setPedido({ ...pedido, n: Date.now() });
+        setSolapa(pedido.destino);
+    }, [veTodo]);
     const pedidoPara = (destino: "todo" | "ingresos") => (pedido?.destino === destino ? pedido : null);
     // RF-17: desde «Por persona», tocar una OT la abre en «Por orden».
     const [pedidoOrden, setPedidoOrden] = useState<PedidoDeOrden | null>(null);
@@ -305,17 +312,19 @@ export default function AuditoriaPage() {
                     que hay más. En la computadora entran todas. */}
                 <ScrollableTabsBar className="mb-4 rounded-full bg-gray-100/90 p-1 ring-1 ring-black/[0.03]">
                     {veTodo && <TabsTrigger value="todo" className={SOLAPA}>Todo lo que se hizo</TabsTrigger>}
-                    {veTodo && <TabsTrigger value="ingresos" className={SOLAPA}>Ingresos</TabsTrigger>}
-                    {veTodo && <TabsTrigger value="personas" className={SOLAPA}>Actividad por persona</TabsTrigger>}
+                    {veIngresos && <TabsTrigger value="ingresos" className={SOLAPA}>Ingresos</TabsTrigger>}
+                    {veIngresos && <TabsTrigger value="personas" className={SOLAPA}>Actividad por persona</TabsTrigger>}
                     {veTodo && <TabsTrigger value="orden" className={SOLAPA}>Por orden</TabsTrigger>}
                     {veTodo && <TabsTrigger value="persona" className={SOLAPA}>Por persona</TabsTrigger>}
                     {vePasos && <TabsTrigger value="procesos" className={SOLAPA}>Pasos de las OT</TabsTrigger>}
                     {vePlanificaciones && <TabsTrigger value="planificacion" className={SOLAPA}>Planificaciones</TabsTrigger>}
                 </ScrollableTabsBar>
 
-                {/* Las tres leen el mismo registro, con la misma sección («Todo lo que se
-                    hizo»): ver core/permisos_rutas.py. La llave vuelve a montarlas con
-                    «Actualizar» o con un pedido nuevo de la Actividad por persona. */}
+                {/* Las tres leen el mismo registro. «Todo lo que se hizo» va con su
+                    sección; Ingresos y Actividad por persona, con la confidencial
+                    «Ingresos y actividad por persona» (ver core/permisos_rutas.py). La
+                    llave vuelve a montarlas con «Actualizar» o con un pedido nuevo de la
+                    Actividad por persona. */}
                 {veTodo && (
                     <TabsContent value="todo">
                         <RegistroDeMovimientos
@@ -325,7 +334,7 @@ export default function AuditoriaPage() {
                         />
                     </TabsContent>
                 )}
-                {veTodo && (
+                {veIngresos && (
                     <TabsContent value="ingresos">
                         <p className="text-sm text-muted-foreground mb-3">
                             Quién entró, quién salió y cada vez que alguien no pudo entrar (contraseña
@@ -339,7 +348,7 @@ export default function AuditoriaPage() {
                         />
                     </TabsContent>
                 )}
-                {veTodo && (
+                {veIngresos && (
                     <TabsContent value="personas">
                         <ActividadPorPersona key={`personas-${refresco}`} onVerPersona={verPersona} />
                     </TabsContent>

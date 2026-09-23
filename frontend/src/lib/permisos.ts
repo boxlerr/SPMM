@@ -70,6 +70,7 @@ export type SeccionCodigo =
   | "auditoria_movimientos"
   | "auditoria_procesos"
   | "auditoria_planificacion"
+  | "auditoria_ingresos"
   | "configuracion_usuarios";
 
 export interface Area {
@@ -119,6 +120,9 @@ export const SECCIONES: Seccion[] = [
   { codigo: "auditoria_movimientos", area: "auditoria", nombre: "Todo lo que se hizo", orden: 10, confidencial: false },
   { codigo: "auditoria_procesos", area: "auditoria", nombre: "Pasos de las OT", orden: 11, confidencial: false },
   { codigo: "auditoria_planificacion", area: "auditoria", nombre: "Planificaciones", orden: 12, confidencial: false },
+  // Ingresos (IP, navegador, intentos contra cada cuenta) y Actividad por persona.
+  // Confidencial: no se abre por tener Auditoría (revisión del 23/09).
+  { codigo: "auditoria_ingresos", area: "auditoria", nombre: "Ingresos y actividad por persona", orden: 13, confidencial: true },
   { codigo: "configuracion_usuarios", area: "configuracion", nombre: "Usuarios y permisos", orden: 10, confidencial: true },
 ];
 
@@ -283,7 +287,7 @@ export const MENU: ItemMenu[] = [
     href: "/auditoria",
     nombre: "Auditoría",
     area: "auditoria",
-    solapas: ["auditoria_movimientos", "auditoria_procesos", "auditoria_planificacion"],
+    solapas: ["auditoria_movimientos", "auditoria_procesos", "auditoria_planificacion", "auditoria_ingresos"],
   },
   { href: "/novedades", nombre: "Novedades" },
 ];
@@ -522,6 +526,7 @@ export const ARBOL: ArbolPagina[] = [
       { seccion: "auditoria_movimientos", nombre: "Todo lo que se hizo" },
       { seccion: "auditoria_procesos", nombre: "Pasos de las OT" },
       { seccion: "auditoria_planificacion", nombre: "Planificaciones" },
+      { seccion: "auditoria_ingresos", nombre: "Ingresos y actividad por persona" },
     ],
   },
   {

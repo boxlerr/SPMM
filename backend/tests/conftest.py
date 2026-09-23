@@ -134,6 +134,19 @@ def auditoria_no_escribe_en_produccion(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def tope_de_anonimos_limpio():
+    """El tope de filas sin identificarse (auditoria_movimientos.TOPE_ANONIMOS) cuenta en
+    memoria del proceso, y todos los tests piden desde la misma IP de mentira: sin esto,
+    el test número 31 que se equivoca la contraseña encontraría el tope lleno por los
+    anteriores. Cada test arranca con la cuenta en cero."""
+    from backend.infrastructure import auditoria_movimientos
+
+    auditoria_movimientos.TOPE_ANONIMOS.reiniciar()
+    yield
+    auditoria_movimientos.TOPE_ANONIMOS.reiniciar()
+
+
+@pytest.fixture(autouse=True)
 def permisos_no_leen_produccion(monkeypatch):
     """Ningún test puede leer permisos de Supabase.
 

@@ -641,6 +641,31 @@ def _fila_de_acceso(tipo: str, *, usuario: dict | None, metodo: str, ruta: str,
     )
 
 
+def _sin_datos_personales(ruta: str, cuerpo):
+    """El cuerpo del alta o el guardado de una persona sin su DNI, teléfono, celular, email
+    ni fecha de nacimiento (revisión del 23/09).
+
+    RF-17 prometía que el registro dice QUE cambiaron y no A QUÉ, y eso valía para
+    `antes`/`despues` (historial_cambios.PRIVADOS_PERSONA) pero no para el cuerpo del
+    pedido, que desde el 15/09 se guardaba entero en `datos`: cada PUT/POST /operarios
+    dejaba el DNI en claro, y /auditoria/movimientos lo devolvía a quien tuviera la
+    sección. Se tapan igual que las credenciales: la clave queda (se sabe que se mandó) y
+    el valor no. Sólo en /operarios: el teléfono o el email de un CLIENTE es un dato de
+    contacto de la empresa, y ahí saber a qué cambió sí es lo que se busca.
+
+    Las filas guardadas antes de esto NO se reescriben: son datos del cliente y se
+    decide aparte (ver el mensaje del commit)."""
+    from backend.infrastructure.historial_cambios import OCULTO, PRIVADOS_PERSONA
+
+    if not isinstance(cuerpo, dict):
+        return cuerpo
+    primero = (ruta or "").strip("/").split("/")[0]
+    if primero != "operarios":
+        return cuerpo
+    return {k: (OCULTO if k in PRIVADOS_PERSONA and v not in (None, "") else v)
+            for k, v in cuerpo.items()}
+
+
 def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
                duracion_ms: int, cuerpo=None, parametros: dict | None = None,
                resumen: dict | None = None,
@@ -694,7 +719,7 @@ def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
     if parametros:
         datos["parametros"] = _limpiar(parametros, por_lista=por_lista)
     if cuerpo is not None:
-        datos["datos"] = _limpiar(cuerpo, por_lista=por_lista)
+        datos["datos"] = _limpiar(_sin_datos_personales(ruta, cuerpo), por_lista=por_lista)
     if datos:
         try:
             detalle = json.dumps(datos, ensure_ascii=False, default=str)[:TOPE_DETALLE]
@@ -717,10 +742,144 @@ def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
     )
 
 
+# ─────────────────────────── EL TOPE DE LOS PEDIDOS SIN IDENTIFICARSE ───────────────────────────
+#
+# Revisión del 23/09. Desde RF-25 cualquiera, SIN sesión, escribe una fila por cada
+# POST /auth/login (con un usuario inventado, o con un cuerpo que ni llega al endpoint) y
+# por cada POST /auth/forgot-password. No hay límite de pedidos en el backend ni borrado
+# automático, y cada fila usa una conexión del pooler de Supabase (15 en TODO el
+# proyecto). Un script en bucle llenaba la tabla y la vista Ingresos, tapando los
+# intentos de verdad, y le sumaba presión a esas 15 conexiones.
+#
+# Lo que se hace: por IP, a lo sumo TOPE_SIN_IDENTIFICARSE filas «sin autor» por
+# VENTANA_SIN_IDENTIFICARSE. La última de ésas lo dice en su frase («desde esta IP ya van
+# 30 en la última hora: los que sigan hasta las 15:40 no se registran uno por uno»), y la
+# primera de la hora siguiente dice cuántos se dejaron de registrar. Lo que pasa el tope
+# no abre sesión con la base: se cuenta en memoria y nada más.
+#
+# Qué cuenta: las filas de acceso SIN AUTOR (intento fallido, pedido de recuperación,
+# restablecimiento que no se pudo), con o sin cuenta: quien sabe un usuario también puede
+# martillarlo, y después del bloqueo (RF-26) cada intento seguía dejando su fila. NO
+# cuentan: el que entró bien, el que salió, el que cambió su clave (tienen autor), ni el
+# bloqueo (lo escribe registrar_evento, aparte: «no puedo entrar» se contesta igual).
+#
+# DECISIÓN CONSERVADORA, a confirmar con el taller: 30 por hora y por IP. El taller sale
+# a internet por una sola IP, y 30 contraseñas mal en una hora entre toda la gente es
+# mucho más de lo que pasa; por eso el tope es por IP y no global (uno global dejaría que
+# un ataque de afuera tape los intentos del taller). Los 400 de validación del login
+# cuentan junto con los demás en vez de dejar de guardarse: siguen siendo alguien
+# probando, y así no se pierde ninguno por debajo del tope.
+#
+# Límites de esto, dichos: es por instancia de Cloud Run (cada una lleva su cuenta; con
+# N instancias el tope real es N × 30) y se reinicia con cada deploy. No frena los
+# pedidos —el login contesta igual—: sólo lo que se escribe. Frenar los pedidos es de un
+# limitador delante (Cloud Armor, o uno en el backend), que hoy no hay.
+
+TOPE_SIN_IDENTIFICARSE = 30
+VENTANA_SIN_IDENTIFICARSE = timedelta(hours=1)
+# Más IPs distintas que esto en memoria y se barren las que ya vencieron.
+_MAX_IPS_EN_MEMORIA = 2000
+
+
+def es_fila_sin_identificarse(fila: AuditoriaMovimiento) -> bool:
+    """¿Es de las que cuentan para el tope? Ver arriba."""
+    if fila.id_usuario is not None or fila.entidad not in (ENTIDAD_SESION, ENTIDAD_CLAVE):
+        return False
+    if fila.accion == ACCION_RESTABLECIO and (fila.estado or 0) < 400:
+        return False  # restablecer con un enlace válido no se puede repetir en bucle
+    return fila.accion in (ACCION_FALLIDO, ACCION_PIDIO, ACCION_RESTABLECIO)
+
+
+class TopeSinIdentificarse:
+    """La cuenta en memoria de cada IP. `decidir` devuelve:
+        ("guardar", omitidos_antes)  se guarda; `omitidos_antes` > 0 = los que no se
+                                     guardaron en la ventana anterior de esa IP
+        ("avisar", omitidos_antes)   se guarda y es la última hasta que pase la ventana
+        ("omitir", 0)                no se guarda
+    """
+
+    def __init__(self, tope: int = TOPE_SIN_IDENTIFICARSE,
+                 ventana: timedelta = VENTANA_SIN_IDENTIFICARSE):
+        self.tope = tope
+        self.ventana = ventana
+        self._por_ip: dict[str, dict] = {}
+
+    def reiniciar(self) -> None:
+        self._por_ip.clear()
+
+    def hasta(self, ip: str | None) -> datetime | None:
+        v = self._por_ip.get(ip or "")
+        return v["desde"] + self.ventana if v else None
+
+    def decidir(self, ip: str | None, ahora: datetime) -> tuple[str, int]:
+        clave = ip or ""
+        v = self._por_ip.get(clave)
+        arrastre = 0
+        if v is None or ahora - v["desde"] >= self.ventana:
+            arrastre = v["omitidos"] if v else 0
+            v = {"desde": ahora, "escritos": 0, "omitidos": 0}
+            self._por_ip[clave] = v
+            if len(self._por_ip) > _MAX_IPS_EN_MEMORIA:
+                self._barrer(ahora)
+        if v["escritos"] >= self.tope:
+            v["omitidos"] += 1
+            return "omitir", 0
+        v["escritos"] += 1
+        return ("avisar" if v["escritos"] == self.tope else "guardar"), arrastre
+
+    def _barrer(self, ahora: datetime) -> None:
+        for ip in [ip for ip, v in self._por_ip.items() if ahora - v["desde"] >= self.ventana]:
+            del self._por_ip[ip]
+
+
+TOPE_ANONIMOS = TopeSinIdentificarse()
+
+
+def _anotar_en_la_fila(fila: AuditoriaMovimiento, frase: str, clave: str, valor) -> None:
+    fila.descripcion = f"{fila.descripcion}. {frase}"
+    try:
+        detalle = json.loads(fila.detalle) if fila.detalle else {}
+        if not isinstance(detalle, dict):
+            detalle = {"detalle": detalle}
+        detalle[clave] = valor
+        fila.detalle = json.dumps(detalle, ensure_ascii=False, default=str)[:TOPE_DETALLE]
+    except Exception:
+        pass
+
+
+def aplicar_tope(fila: AuditoriaMovimiento, origen: dict | None,
+                 tope: TopeSinIdentificarse | None = None) -> AuditoriaMovimiento | None:
+    """La fila como se guarda (con la anotación del tope, si toca) o None si pasa el
+    tope. Las filas que no son «sin identificarse» pasan tal cual."""
+    if fila is None or not es_fila_sin_identificarse(fila):
+        return fila
+    tope = tope or TOPE_ANONIMOS
+    ip = (origen or {}).get("ip")
+    ahora = fila.creado_en or ahora_ar()
+    decision, omitidos_antes = tope.decidir(ip, ahora)
+    if decision == "omitir":
+        return None
+    if omitidos_antes:
+        _anotar_en_la_fila(
+            fila,
+            f"(En la hora anterior se dejaron de registrar {omitidos_antes} "
+            f"{'pedido' if omitidos_antes == 1 else 'pedidos'} más sin identificarse desde esta "
+            "IP, por pasar el tope)",
+            "omitidos_antes", omitidos_antes)
+    if decision == "avisar":
+        hasta = tope.hasta(ip)
+        _anotar_en_la_fila(
+            fila,
+            f"Desde esta IP ya van {tope.tope} pedidos sin identificarse en la última hora: los "
+            f"que sigan hasta las {hasta:%H:%M} no se registran uno por uno",
+            "tope", {"cuantos": tope.tope, "hasta": hasta.isoformat() if hasta else None})
+    return fila
+
+
 async def registrar(db, **kwargs) -> None:
     """Guarda una fila. No levanta NUNCA: la auditoría no puede voltear una operación."""
     try:
-        fila = armar_fila(**kwargs)
+        fila = aplicar_tope(armar_fila(**kwargs), kwargs.get("origen"))
         if fila is None:
             return
         db.add(fila)

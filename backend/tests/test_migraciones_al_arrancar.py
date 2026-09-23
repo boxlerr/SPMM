@@ -50,6 +50,11 @@ def _firmas(sql: str) -> set[str]:
     # fallaba pidiendo un ADD COLUMN que esa migración no tiene por qué tener.
     for tabla in re.findall(r"create table if not exists (\w+)", t):
         firmas.add(f"tabla:{tabla}")
+    # Una migración que sólo agrega filas a un catálogo (la sección confidencial de
+    # Ingresos, 23/09): cada fila por su primer valor, el código.
+    for tabla, valores in re.findall(r"insert into (\w+) \([^)]*\) values (.*?) on conflict", t):
+        for codigo in re.findall(r"\(\s*'([^']*)'", valores):
+            firmas.add(f"fila:{tabla}:{codigo}")
     return firmas
 
 

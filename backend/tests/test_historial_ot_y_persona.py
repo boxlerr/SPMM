@@ -432,15 +432,20 @@ async def _sembrar(s):
     await s.commit()
 
 
-def _permisos(*, pasos=True, plan=True, rendimiento=False):
-    """Un rol «auditor» con Auditoría en ver y las solapas que se pidan."""
+def _permisos(*, pasos=True, plan=True, rendimiento=False, ausencias=True):
+    """Un rol «auditor» con Auditoría en ver y las solapas que se pidan. `ausencias`: le
+    da también Recursos en ver, que es lo que pide leer las ausencias afuera (política
+    'asistencia'); sin eso el historial de la persona no las manda (revisión del 23/09)."""
     secciones = {}
     if not pasos:
         secciones["auditoria_procesos"] = "none"
     if not plan:
         secciones["auditoria_planificacion"] = "none"
+    areas = {"auditoria": "read"}
+    if ausencias:
+        areas["recursos"] = "read"
     return permisos_de(DatosDePermisos(
-        rol="auditor", rol_areas={"auditoria": "read"}, rol_secciones=secciones,
+        rol="auditor", rol_areas=areas, rol_secciones=secciones,
         usuario_secciones={"dashboard_rendimiento": "read"} if rendimiento else {},
     ), 5, "auditor")
 
@@ -655,6 +660,31 @@ async def test_lo_estimado_contra_lo_real_pide_rendimiento_por_persona(api):
     assert {o["que"] for o in h["ocultos"]} == {"pasos", "plan", "rendimiento"}
 
 
+async def test_sin_recursos_ni_operaciones_las_ausencias_no_se_mandan(api):
+    """Revisión del 23/09: las ausencias (motivo ENFERMEDAD, la observación) se leen
+    afuera con Recursos u Operaciones. Quien tiene sólo Auditoría no las recibe por acá:
+    ni los renglones de la tabla, ni los pedidos que las cargaron, ni el motivo en
+    ninguna parte de la respuesta. Y la pantalla dice que hay algo que no se muestra."""
+    api.estado["permisos"] = _permisos(ausencias=False)
+    r = await api.get("/auditoria/historial/personas/7")
+    assert r.status_code == 200, r.text
+    h = r.json()
+    assert not [e for e in h["eventos"] if e["tipo"] == "ausencias"]
+    assert "ausencia" not in json.dumps([e for e in h["eventos"]], ensure_ascii=False).lower()
+    assert "enfermedad" not in r.text.lower()
+    assert "ausencias" in {o["que"] for o in h["ocultos"]}
+    # Lo demás de la persona sigue: su ficha, su alta y lo que trabajó.
+    assert [e for e in h["eventos"] if e["tipo"] == "alta"]
+    assert _por_titulo(h, "terminó el paso 1 — TORNO CNC de la OT 15300")
+
+    # Con Operaciones (sin Recursos) también se ven: es la misma regla de afuera.
+    api.estado["permisos"] = permisos_de(DatosDePermisos(
+        rol="auditor", rol_areas={"auditoria": "read", "operaciones": "read"}), 5, "auditor")
+    h = await _historial(api, "personas", 7)
+    assert [e for e in h["eventos"] if e["tipo"] == "ausencias"]
+    assert "ausencias" not in {o["que"] for o in h["ocultos"]}
+
+
 async def test_la_migracion_deja_el_indice_parcial_con_su_comentario(base):
     """Sólo en Postgres (SQLite no tiene COMMENT ni índices parciales iguales): la
     migración corrió dos veces en el fixture sin error, y el índice quedó parcial."""
@@ -725,8 +755,13 @@ async def app_real(base, monkeypatch):
     app.add_middleware(BaseHTTPMiddleware, dispatch=main.auditar_movimientos)
     app.include_router(OrdenTrabajoAPI.router)
     app.include_router(OperarioAPI.router)
+    # Y Auditoría, para ver lo que contesta sobre lo guardado (con los permisos del admin).
+    app.include_router(AuditoriaAPI.router)
     app.dependency_overrides[OrdenTrabajoAPI.get_db] = _db
     app.dependency_overrides[OperarioAPI.get_db] = _db
+    app.dependency_overrides[AuditoriaAPI.get_db] = _db
+    app.dependency_overrides[get_permisos_actuales] = lambda: permisos_de(
+        DatosDePermisos(rol="admin"), 1, "lucas")
     app.dependency_overrides[get_current_user] = lambda: {"id_usuario": 1, "username": "lucas",
                                                           "nombre": "Lucas", "apellido": "Longchamps"}
     token = create_access_token({"sub": "lucas", "id_usuario": 1, "nombre": "Lucas", "apellido": "Longchamps"})
@@ -771,6 +806,44 @@ async def test_guardar_la_persona_no_copia_el_dni_y_dice_los_rangos(app_real):
     assert detalle["antes"]["DNI"] == hc.OCULTO == detalle["despues"]["DNI"]
     assert "30999888" not in fila.descripcion and "30999888" not in json.dumps(detalle["despues"])
     assert fila.descripcion.startswith("Lucas Longchamps editó a Juan Perez: estado: Activo → Ausente")
+
+
+async def test_ningun_dato_personal_queda_en_el_detalle_ni_en_la_respuesta(app_real):
+    """Revisión del 23/09: `antes`/`despues` tapaban el DNI, pero el cuerpo del pedido se
+    guardaba entero en `detalle.datos`, y /auditoria/movimientos lo devolvía. Ahora se
+    busca cada dato en TODA la fila (y en lo que contesta Auditoría), no en una clave."""
+    privados = {"dni": "30999888", "telefono": "11-5555-4444", "celular": "11-4444-3333",
+                "email": "juan.perez@correo.com", "fecha_nacimiento": "1990-05-15"}
+    r = await app_real.put("/operarios/7", json={
+        "nombre": "Juan", "apellido": "Perez", "categoria": "OFICIAL", "disponible": True,
+        "hora_inicio": "07:00", "hora_fin": "16:00", **privados})
+    assert r.status_code == 200, r.text
+    r = await app_real.post("/operarios", json={
+        "nombre": "Rita", "apellido": "Luz", "categoria": "OFICIAL",
+        "dni": "27111222", "celular": "11-3333-2222"})
+    assert r.status_code == 200, r.text
+    nuevo = r.json()["data"]["id"]
+
+    edicion = await _ultima(app_real.sesiones, "/operarios/7", "PUT")
+    alta = await _ultima(app_real.sesiones, "/operarios", "POST")
+    for fila, valores in ((edicion, privados.values()), (alta, ("27111222", "11-3333-2222"))):
+        entera = " ".join(str(v) for v in (fila.descripcion, fila.detalle, fila.usuario, fila.ruta))
+        for valor in valores:
+            assert valor not in entera, (fila.ruta, valor)
+        datos = json.loads(fila.detalle)["datos"]
+        # Se sabe QUE se mandó (la clave queda), no QUÉ.
+        assert datos["dni"] == hc.OCULTO
+        # Lo que no es privado sigue: el registro sirve para saber qué se guardó.
+        assert datos["nombre"] in ("Juan", "Rita") and datos["categoria"] == "OFICIAL"
+    assert json.loads(edicion.detalle)["datos"]["fecha_nacimiento"] == hc.OCULTO
+
+    # Y lo que contesta Auditoría, en las dos puertas.
+    for ruta in ("/auditoria/movimientos", "/auditoria/movimientos/de/persona/7",
+                 f"/auditoria/movimientos/de/persona/{nuevo}"):
+        r = await app_real.get(ruta)
+        assert r.status_code == 200, (ruta, r.text)
+        for valor in (*privados.values(), "27111222", "11-3333-2222"):
+            assert valor not in r.text, (ruta, valor)
 
 
 async def test_el_alta_de_una_persona_queda_atada_a_su_numero(app_real):

@@ -113,6 +113,25 @@ SEMBRADO_SQL = _primera_siembra(INSERTS_SQL)
 SEMBRADO_MODULO = _primera_siembra(INSERTS_MODULO)
 
 
+def _secciones_de_migraciones_posteriores() -> list[tuple]:
+    """Las secciones que agrega una migración POSTERIOR a ésta (un INSERT INTO seccion ...
+    ON CONFLICT DO NOTHING). Hoy: auditoria_ingresos (2026-09-23_seccion_ingresos_
+    confidencial, la revisión de RF-25). La siembra original ya corrió en producción: una
+    sección nueva va en su propia migración, no editando ésa."""
+    nombres = [n for n, _ in migraciones.MIGRACIONES]
+    filas = []
+    for _, sentencias in migraciones.MIGRACIONES[nombres.index(NOMBRE) + 1:]:
+        for tabla, nuevas in _inserts(sentencias):
+            if tabla == "seccion":
+                filas += nuevas
+    return filas
+
+
+SECCIONES_POSTERIORES = _secciones_de_migraciones_posteriores()
+# Todas las secciones que termina teniendo la base: la siembra y las que vinieron después.
+SECCIONES_SEMBRADAS = SEMBRADO_SQL["seccion"] + SECCIONES_POSTERIORES
+
+
 # ─────────────────────────── las tres fuentes dicen lo mismo ───────────────────────────
 
 
@@ -139,9 +158,11 @@ def test_el_modulo_aplica_todas_las_sentencias_del_sql_y_en_el_mismo_orden():
 
 def test_la_siembra_es_el_catalogo():
     assert SEMBRADO_SQL["area"] == [(a.codigo, a.nombre, a.orden) for a in AREAS]
-    assert SEMBRADO_SQL["seccion"] == [
+    # En el orden del catálogo, no en el de las migraciones: la que vino después va al
+    # lado de las de su área.
+    assert sorted(SECCIONES_SEMBRADAS) == sorted(
         (s.codigo, s.area, s.nombre, s.orden, s.confidencial) for s in SECCIONES
-    ]
+    )
     assert SEMBRADO_SQL["rol"] == list(ROLES)
     assert sorted(SEMBRADO_SQL["rol_area"]) == sorted(
         (rol, area, nivel) for rol, fila in MATRIZ_ROL_AREA.items() for area, nivel in fila.items()
@@ -246,6 +267,23 @@ def test_no_toca_ninguna_fila_existente(fuente):
                            "on conflict (codigo) do nothing")
 
 
+def test_las_secciones_que_vienen_despues_no_pisan_nada():
+    """Una sección agregada después (auditoria_ingresos) entra con ON CONFLICT DO NOTHING
+    y sin tocar ninguna fila: si ya estaba, o si se le cambió la marca de confidencial
+    desde la pantalla, queda como está. Y la del 23/09 arranca cerrada."""
+    nombres = [n for n, _ in migraciones.MIGRACIONES]
+    for nombre, sentencias in migraciones.MIGRACIONES[nombres.index(NOMBRE) + 1:]:
+        for s in sentencias:
+            n = _normalizar(s).lower()
+            if n.startswith("insert into seccion "):
+                assert n.endswith("on conflict (codigo) do nothing"), nombre
+            if "seccion" in n:
+                for prohibido in ("update ", "delete from", "drop ", "truncate"):
+                    assert prohibido not in n, (nombre, prohibido)
+    assert ("auditoria_ingresos", "auditoria", "Ingresos y actividad por persona", 13, True) \
+        in SECCIONES_POSTERIORES
+
+
 def _agregadas_despues(tabla: str) -> set[str]:
     """Las columnas que una migración POSTERIOR le agrega a `tabla` (ADD COLUMN IF NOT
     EXISTS en las que vienen después de ésta en MIGRACIONES). Hoy: rol.pantalla_inicio
@@ -318,7 +356,7 @@ async def sembrar_permisos(sesion) -> None:
     for codigo, nombre, orden in SEMBRADO_SQL["area"]:
         sesion.add(AreaPermiso(codigo=codigo, nombre=nombre, orden=orden))
     await sesion.flush()
-    for codigo, area, nombre, orden, conf in SEMBRADO_SQL["seccion"]:
+    for codigo, area, nombre, orden, conf in SECCIONES_SEMBRADAS:
         sesion.add(SeccionPermiso(codigo=codigo, area_codigo=area, nombre=nombre,
                                   orden=orden, confidencial=conf))
     for codigo, nombre in SEMBRADO_SQL["rol"]:

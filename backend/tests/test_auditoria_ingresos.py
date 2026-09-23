@@ -356,3 +356,113 @@ def test_el_login_y_las_claves_no_se_leen_del_cuerpo():
         assert not auditoria.se_lee_el_cuerpo(ruta, "application/json", 50)
         assert auditoria.se_audita("POST", ruta)
     assert auditoria.se_audita("POST", "/auth/logout")
+
+
+# ─────────────────────────── el tope de lo que se escribe sin identificarse ───────────────────────────
+#
+# Revisión del 23/09: cualquiera, sin sesión, escribía una fila por cada login o pedido de
+# recuperación. Un script en bucle llenaba la tabla (y la vista Ingresos) y usaba una
+# conexión del pooler por fila. Ahora hay un tope por IP (auditoria_movimientos,
+# «EL TOPE DE LOS PEDIDOS SIN IDENTIFICARSE»).
+
+DESDE_AFUERA = {"User-Agent": "python-requests/2.31", "X-Forwarded-For": "203.0.113.50"}
+
+
+async def test_un_bucle_desde_una_ip_no_llena_el_registro(cliente, monkeypatch):
+    """Con el tope en 5 (en producción es 30): 12 logins con usuarios inventados, uno con
+    el cuerpo roto y un pedido de recuperación desde la MISMA IP dejan 5 filas, y la
+    quinta avisa. Desde otra IP, el intento sigue quedando; y entrar bien, también."""
+    monkeypatch.setattr(auditoria.TOPE_ANONIMOS, "tope", 5)
+    for i in range(12):
+        r = await _login(cliente, f"bot{i:03d}x", "loquesea", headers=DESDE_AFUERA)
+        assert r.status_code == 401  # la respuesta es la de siempre: el tope no la cambia
+    r = await cliente.post("/auth/login", json={"nada": 1}, headers=DESDE_AFUERA)
+    assert r.status_code in (400, 422)
+    r = await cliente.post("/auth/forgot-password", json={"email": "x@inventado.com"},
+                           headers=DESDE_AFUERA)
+    assert r.status_code == 200
+
+    filas = await _filas(cliente)
+    assert len(filas) == 5
+    assert all(f.accion == "intento fallido" and f.id_usuario is None for f in filas)
+    ultima = filas[-1]
+    assert "Desde esta IP ya van 5 pedidos sin identificarse en la última hora" in ultima.descripcion
+    assert json.loads(ultima.detalle)["tope"]["cuantos"] == 5
+    assert "ya van" not in filas[-2].descripcion
+
+    # Otra IP no paga lo de la primera.
+    r = await _login(cliente, "lucas", "noesesta1", headers=DESDE_EL_TALLER)
+    assert r.status_code == 401
+    # Y quien entra bien tiene autor: no cuenta para el tope aunque venga de esa IP.
+    r = await _login(cliente, "lucas", CLAVE_LUCAS, headers=DESDE_AFUERA)
+    assert r.status_code == 200
+    filas = await _filas(cliente)
+    assert len(filas) == 7
+    assert filas[-2].id_entidad == "2" and filas[-2].accion == "intento fallido"
+    assert filas[-1].accion == "ingresó"
+
+
+def _fila_anonima(cuando, **kw):
+    fila = auditoria.armar_fila(usuario=None, metodo="POST", ruta="/auth/login", estado=401,
+                                duracion_ms=3, resumen={"acceso": {"motivo": "usuario_inexistente",
+                                                                   "tipeado": "adm…"}},
+                                origen={"ip": "203.0.113.50"}, **kw)
+    fila.creado_en = cuando
+    return fila
+
+
+def test_pasada_la_hora_vuelve_a_registrar_y_dice_cuantos_se_omitieron():
+    from datetime import datetime, timedelta
+
+    tope = auditoria.TopeSinIdentificarse(tope=3, ventana=timedelta(hours=1))
+    t0 = datetime(2026, 9, 23, 14, 40)
+    origen = {"ip": "203.0.113.50"}
+    guardadas = [auditoria.aplicar_tope(_fila_anonima(t0 + timedelta(minutes=i)), origen, tope)
+                 for i in range(10)]
+    assert [f is not None for f in guardadas] == [True] * 3 + [False] * 7
+    assert "hasta las 15:40 no se registran uno por uno" in guardadas[2].descripcion
+
+    # 14:40 + 1 h: vuelve a registrar, y la primera cuenta los 7 que no quedaron.
+    otra = auditoria.aplicar_tope(_fila_anonima(t0 + timedelta(hours=1)), origen, tope)
+    assert otra is not None
+    assert "se dejaron de registrar 7 pedidos más sin identificarse" in otra.descripcion
+    assert json.loads(otra.detalle)["omitidos_antes"] == 7
+
+
+def test_lo_que_tiene_autor_o_no_es_de_acceso_no_cuenta_para_el_tope():
+    from datetime import datetime, timedelta
+
+    tope = auditoria.TopeSinIdentificarse(tope=1, ventana=timedelta(hours=1))
+    ahora = datetime(2026, 9, 23, 10, 0)
+    origen = {"ip": "203.0.113.50"}
+    assert auditoria.aplicar_tope(_fila_anonima(ahora), origen, tope) is not None
+    assert auditoria.aplicar_tope(_fila_anonima(ahora), origen, tope) is None
+    # Entrar bien, salir, cambiar la clave: tienen autor.
+    entro = auditoria.armar_fila(usuario=None, metodo="POST", ruta="/auth/login", estado=200,
+                                 duracion_ms=3, resumen={"acceso": {"id_usuario": 2, "cuenta": "lucas",
+                                                                    "nombre": "Lucas"}},
+                                 origen=origen)
+    assert auditoria.aplicar_tope(entro, origen, tope) is entro
+    # Restablecer con un enlace válido no se repite en bucle: no cuenta.
+    restablecio = auditoria.armar_fila(usuario=None, metodo="POST", ruta="/auth/reset-password",
+                                       estado=200, duracion_ms=3,
+                                       resumen={"acceso": {"id_usuario": 2, "cuenta": "lucas"}},
+                                       origen=origen)
+    assert auditoria.aplicar_tope(restablecio, origen, tope) is restablecio
+    # Lo que no es de acceso (editar una OT sin sesión: la rechaza la política) tampoco.
+    ot = auditoria.armar_fila(usuario=None, metodo="PUT", ruta="/ordenes/5", estado=401,
+                              duracion_ms=3)
+    assert auditoria.aplicar_tope(ot, None, tope) is ot
+
+
+def test_la_memoria_del_tope_no_crece_sin_fin(monkeypatch):
+    from datetime import datetime, timedelta
+
+    monkeypatch.setattr(auditoria, "_MAX_IPS_EN_MEMORIA", 50)
+    tope = auditoria.TopeSinIdentificarse(tope=3, ventana=timedelta(hours=1))
+    t0 = datetime(2026, 9, 23, 8, 0)
+    for i in range(200):
+        tope.decidir(f"10.0.{i // 250}.{i % 250}", t0)
+    # Dos horas después, una IP nueva barre las vencidas.
+    tope.decidir("198.51.100.1", t0 + timedelta(hours=2))
+    assert len(tope._por_ip) == 1

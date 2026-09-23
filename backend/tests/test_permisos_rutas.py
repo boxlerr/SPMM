@@ -267,6 +267,8 @@ MATRIZ = [
     ("GET", "/auditoria/movimientos", OK, NO, NO),
     # RF-25: la vista Ingresos y la Actividad por persona leen la misma tabla, con la
     # misma sección («Todo lo que se hizo»).
+    # (Revisión del 23/09: las dos piden además la sección confidencial «Ingresos y
+    # actividad por persona»; ver test_ingresos_y_actividad_piden_su_seccion_confidencial.)
     ("GET", "/auditoria/movimientos?tipo=ingresos", OK, NO, NO),
     ("GET", "/auditoria/actividad", OK, NO, NO),
     ("GET", "/auditoria/movimientos/de/orden/1", OK, NO, NO),
@@ -452,8 +454,10 @@ PANTALLAS = {
         "/incidencias", "/incidencias/tipos", "/incidencias/metricas",
         "/incidencias/reporte", "/incidencias/reporte.csv",
     ],
-    "auditoria": ["/auditoria/movimientos", "/auditoria/movimientos?tipo=ingresos",
-                  "/auditoria/actividad", "/auditoria/procesos", "/auditoria/planificacion",
+    # (Ingresos y Actividad por persona son la sección confidencial «Ingresos y actividad
+    # por persona»: con sólo el área la pantalla no muestra esas solapas ni las pide. Se
+    # prueban aparte, en test_ingresos_y_actividad_piden_su_seccion_confidencial.)
+    "auditoria": ["/auditoria/movimientos", "/auditoria/procesos", "/auditoria/planificacion",
                   # RF-17: el historial de una OT y de una persona
                   "/auditoria/historial/ordenes", "/auditoria/historial/ordenes/1",
                   "/auditoria/historial/personas", "/auditoria/historial/personas/1"],
@@ -488,6 +492,51 @@ async def test_quien_ve_una_pantalla_puede_leer_todo_lo_que_esa_pantalla_pide(es
                 rotas.append(f"{area}: GET {ruta} -> {r.status_code}")
         id_ += 1
     assert not rotas, "pantallas que se verían rotas:\n" + "\n".join(rotas)
+
+
+async def test_ingresos_y_actividad_piden_su_seccion_confidencial(espejo):
+    """Revisión del 23/09: Ingresos (IP, navegador, intentos contra cada cuenta) y la
+    Actividad por persona colgaban de «Todo lo que se hizo», que no es confidencial: darle
+    Auditoría a un rol para que vea los pasos le abría también eso. Ahora:
+      · con el área Auditoría y nada más, /auditoria/actividad es 403 (y «Todo lo que se
+        hizo» sigue abierto);
+      · con la sección confidencial otorgada al rol, pasa;
+      · con SÓLO la confidencial (sin el área), también: se puede dar sin el resto.
+    La separación fina de /auditoria/movimientos (?tipo=ingresos, las filas de acceso) la
+    hace el endpoint: test_auditoria_busqueda."""
+    from backend.core.permisos import SECCION_POR_CODIGO
+    from backend.core.security import create_access_token
+
+    assert SECCION_POR_CODIGO["auditoria_ingresos"].confidencial is True
+    assert SECCION_POR_CODIGO["auditoria_ingresos"].area == "auditoria"
+
+    async with espejo.sesiones() as s:
+        for codigo in ("auditor", "auditor_plus", "solo_ingresos"):
+            s.add(Rol(codigo=codigo, nombre=codigo))
+        await s.flush()
+        s.add(RolArea(rol_codigo="auditor", area_codigo="auditoria", nivel="read"))
+        s.add(RolArea(rol_codigo="auditor_plus", area_codigo="auditoria", nivel="read"))
+        s.add(RolSeccion(rol_codigo="auditor_plus", seccion_codigo="auditoria_ingresos", nivel="read"))
+        s.add(RolSeccion(rol_codigo="solo_ingresos", seccion_codigo="auditoria_ingresos", nivel="read"))
+        for i, rol in enumerate(("auditor", "auditor_plus", "solo_ingresos"), start=300):
+            s.add(Usuario(id_usuario=i, username=rol, email=f"{rol}@x.com", password_hash="x",
+                          nombre=rol, apellido="x", rol=rol, activo=True))
+        await s.commit()
+
+    async def estado(usuario: str, id_: int, ruta: str) -> int:
+        tok = create_access_token({"sub": usuario, "id_usuario": id_})
+        return (await espejo.get(ruta, headers={"Authorization": f"Bearer {tok}"})).status_code
+
+    assert await estado("auditor", 300, "/auditoria/actividad") == NO
+    assert await estado("auditor", 300, "/auditoria/movimientos") == OK
+    assert await estado("auditor", 300, "/auditoria/procesos") == OK
+    assert await estado("auditor_plus", 301, "/auditoria/actividad") == OK
+    assert await estado("auditor_plus", 301, "/auditoria/movimientos?tipo=ingresos") == OK
+    assert await estado("solo_ingresos", 302, "/auditoria/actividad") == OK
+    assert await estado("solo_ingresos", 302, "/auditoria/movimientos?tipo=ingresos") == OK
+    # Sin «Todo lo que se hizo», lo demás de Auditoría no.
+    assert await estado("solo_ingresos", 302, "/auditoria/procesos") == NO
+    assert await estado("solo_ingresos", 302, "/auditoria/historial/personas/1") == NO
 
 
 async def test_cada_tarjeta_del_dashboard_pide_su_area(espejo):

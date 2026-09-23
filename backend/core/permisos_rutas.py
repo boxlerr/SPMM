@@ -68,8 +68,9 @@ y como solapa de Recursos):
                      además la sección confidencial «Rendimiento por persona».
   Clientes           /clientes
   No conformidades   /incidencias/*
-  Auditoría          /auditoria/movimientos (también la vista Ingresos, ?tipo=ingresos),
-                     /auditoria/actividad (Actividad por persona, RF-25),
+  Auditoría          /auditoria/movimientos (también la vista Ingresos, ?tipo=ingresos,
+                     y /auditoria/actividad, Actividad por persona, RF-25: esas dos con
+                     la sección confidencial «Ingresos y actividad por persona»),
                      /auditoria/historial/* (Historial de una OT y de una persona, RF-17),
                      /auditoria/procesos, /auditoria/planificacion
   Configuración      /auth/usuarios (sección confidencial), /auth/change-password,
@@ -412,22 +413,42 @@ POLITICAS: dict[str, Politica] = {
     ),
 
     # ── Auditoría: sólo lectura, una sección por solapa ──
-    # Las solapas Ingresos y Actividad por persona (RF-25) leen la MISMA tabla que «Todo
-    # lo que se hizo» (/auditoria/movimientos?tipo=ingresos y /auditoria/actividad): van
-    # con su sección. Quien puede leer el registro entero ya puede contar quién hizo
-    # qué; una sección aparte sólo serviría para que alguien vea el resumen y no el
-    # detalle, y nadie lo pidió.
-    # El historial de una OT y de una persona (RF-17, /auditoria/historial/*) también:
-    # es el mismo registro buscado por entidad y número. Lo que ahí tiene sección propia
-    # —los pasos («Pasos de las OT»), el plan («Planificaciones») y lo estimado contra lo
-    # que llevó cada paso («Rendimiento por persona», confidencial)— lo mira el endpoint
-    # con los permisos de quien pide, y sin la sección no lo lee ni lo manda
-    # (AuditoriaAPI._secciones). Julián lo pidió acá y no en la ficha de la OT ni en la
-    # de la persona: no se abre por Operaciones ni por Recursos.
+    # «Todo lo que se hizo» (auditoria_movimientos) NO es confidencial: hereda el nivel
+    # del área, así que quien tiene Auditoría la ve. Si Auditoría entera tiene que ser
+    # sólo del admin salvo que se abra a propósito, se marca confidencial desde la
+    # pantalla de permisos (lo decide Lucas; hoy nadie que no sea admin tiene el área).
+    #
+    # Ingresos y Actividad por persona (RF-25) SÍ son confidenciales, con su propia
+    # sección «Ingresos y actividad por persona» (auditoria_ingresos). Revisión del 23/09:
+    # iban con «Todo lo que se hizo», y abrirle Auditoría a un rol para que vea los pasos
+    # le abría también las IP, los navegadores y los intentos fallidos contra cada cuenta.
+    # Como leen la misma tabla, /auditoria/movimientos acepta cualquiera de las dos y el
+    # endpoint separa (AuditoriaAPI.movimientos): ?tipo=ingresos pide la confidencial; sin
+    # tipo pide «Todo lo que se hizo», y a quien no tiene la confidencial no le manda las
+    # filas de entrar, salir y claves (ni en la lista, ni en /movimientos/de/...).
+    # La lista de cuentas (usuario, si tiene acceso, último login) es de «Usuarios y
+    # permisos», confidencial y del admin: sin esa sección no se manda en ningún lado de
+    # Auditoría, sólo el nombre con que cada uno firmó en el registro.
+    #
+    # El historial de una OT y de una persona (RF-17, /auditoria/historial/*) va con
+    # «Todo lo que se hizo»: es el mismo registro buscado por entidad y número. Lo que ahí
+    # tiene sección o política propia —los pasos («Pasos de las OT»), el plan
+    # («Planificaciones»), lo estimado contra lo que llevó cada paso («Rendimiento por
+    # persona», confidencial) y las AUSENCIAS (política 'asistencia': Recursos u
+    # Operaciones)— lo mira el endpoint con los permisos de quien pide, y sin eso no lo lee
+    # ni lo manda (AuditoriaAPI._secciones). Julián lo pidió acá y no en la ficha de la OT
+    # ni en la de la persona: no se abre por Operaciones ni por Recursos.
     "auditoria": Politica(
         leer=(seccion("auditoria_movimientos"),),
         escribir=(area("auditoria", "write"),),
         excepciones=(
+            Excepcion("GET", "/auditoria/movimientos",
+                      (seccion("auditoria_movimientos"), seccion("auditoria_ingresos")),
+                      "Es la lista de «Todo lo que se hizo» y la de Ingresos (?tipo=ingresos): "
+                      "alcanza con una de las dos y el endpoint manda sólo lo de la que se tiene."),
+            Excepcion("GET", "/auditoria/actividad", (seccion("auditoria_ingresos"),),
+                      "Actividad por persona: cuántas veces entró cada cuenta y sus intentos "
+                      "fallidos. Sección confidencial (revisión del 23/09)."),
             Excepcion("GET", "/auditoria/procesos",
                       (seccion("auditoria_procesos"), area("operaciones", con_parametro="id_orden")),
                       "La ficha de la OT muestra el historial de SUS pasos "
