@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import TaskDetailsModal from "./gantt/TaskDetailsModal";
 import { usePanelContext } from "@/contexts/PanelContext";
 import { isOperatorQualified } from "@/lib/gantt-utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 interface PlanificacionGanttWrapperProps {
     tasks: GanttTask[];

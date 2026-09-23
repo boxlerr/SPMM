@@ -27,6 +27,12 @@ export function useApi<T>() {
         return [];
       }
 
+      // RF-24: el aviso «No tenés permiso para esto» ya lo muestra AuthContext para
+      // cualquier 403. Un cartel rojo con «Error HTTP 403» encima no suma nada.
+      if (response.status === 403) {
+        return [];
+      }
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         throw new Error(`Error HTTP ${response.status}: ${response.statusText}. ${errorText}`);
@@ -84,6 +90,11 @@ export function useApi<T>() {
       if (response.status === 401) {
         console.warn("[useApi] 401 Unauthorized detected during operation. Notifying user...");
         notifySessionExpired();
+        return false;
+      }
+
+      // RF-24: ídem. El aviso de permiso ya está a la vista; la operación no se hizo.
+      if (response.status === 403) {
         return false;
       }
 

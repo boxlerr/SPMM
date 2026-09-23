@@ -40,7 +40,7 @@
  */
 
 import React from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 import { parseApiError } from "@/lib/utils";
 

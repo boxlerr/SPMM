@@ -6,6 +6,8 @@ import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { capitalizeName } from '@/lib/utils';
+import { usePermisos } from '@/hooks/usePermisos';
+import { MarcaSoloLectura } from '@/components/permisos/SinAcceso';
 import {
   Search,
   UserPlus,
@@ -86,6 +88,11 @@ interface FormData {
 }
 
 export default function UsuariosTable() {
+  // RF-24: VER la lista es la sección «Usuarios y permisos»; CAMBIAR usuarios (alta,
+  // edición, baja, desbloqueo) es sólo del rol admin, porque quien puede tocar usuarios
+  // se hace admin solo. El backend lo exige igual (require_admin, contra la base); acá
+  // sólo se esconden los botones a quien ve la lista sin ser admin.
+  const { esAdmin } = usePermisos();
   const { showToast } = useToast();
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [filteredUsuarios, setFilteredUsuarios] = useState<Usuario[]>([]);
@@ -444,13 +451,17 @@ export default function UsuariosTable() {
             className="pl-10"
           />
         </div>
-        <Button
-          onClick={handleCreateUser}
-          className="bg-[#DC143C] hover:bg-[#B01030] text-white"
-        >
-          <UserPlus className="h-4 w-4 mr-2" />
-          Nuevo Usuario
-        </Button>
+        {esAdmin ? (
+          <Button
+            onClick={handleCreateUser}
+            className="bg-[#DC143C] hover:bg-[#B01030] text-white"
+          >
+            <UserPlus className="h-4 w-4 mr-2" />
+            Nuevo Usuario
+          </Button>
+        ) : (
+          <MarcaSoloLectura que="los usuarios" />
+        )}
       </div>
 
       {/* Tabla de usuarios */}
@@ -529,15 +540,17 @@ export default function UsuariosTable() {
                             <Lock className="h-3 w-3 mr-1" />
                             Bloqueado hasta {horaDeDesbloqueo(usuario.bloqueado_hasta)}
                           </span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => handleDesbloquear(usuario)}
-                          >
-                            <LockOpen className="h-3 w-3 mr-1" />
-                            Desbloquear
-                          </Button>
+                          {esAdmin && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => handleDesbloquear(usuario)}
+                            >
+                              <LockOpen className="h-3 w-3 mr-1" />
+                              Desbloquear
+                            </Button>
+                          )}
                         </div>
                       ) : usuario.intentos_fallidos ? (
                         <div
@@ -552,6 +565,7 @@ export default function UsuariosTable() {
                       {formatDate(usuario.ultimo_login)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      {esAdmin && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm">
@@ -578,6 +592,7 @@ export default function UsuariosTable() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      )}
                     </td>
                   </tr>
                 ))

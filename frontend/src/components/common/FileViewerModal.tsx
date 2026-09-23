@@ -11,7 +11,7 @@ import {
     Maximize,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { esImagen, esPdf, imprimirPlano, traerArchivoPlano } from "@/lib/planos";
 

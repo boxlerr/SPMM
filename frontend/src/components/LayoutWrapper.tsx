@@ -6,6 +6,7 @@ import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import AuthGuard from "./AuthGuard";
 import AvisoAlEntrar from "./AvisoAlEntrar";
+import { GuardiaDeRuta } from "./permisos/SinAcceso";
 import { PanelProvider } from "@/contexts/PanelContext";
 
 interface LayoutWrapperProps {
@@ -73,7 +74,9 @@ export default function LayoutWrapper({ children }: LayoutWrapperProps) {
                 renglón de cada pantalla. Con ese aire, lo último se puede subir por
                 encima del botón. */}
             <div className="[--pad-app:0.75rem] sm:[--pad-app:1rem] lg:[--pad-app:1.5rem] p-[var(--pad-app)] pb-[calc(var(--pad-app)+4.5rem)] lg:pb-[var(--pad-app)]">
-              {children}
+              {/* RF-24: una pantalla que el rol no puede ver muestra el cartel de «no
+                  tenés acceso» en vez de dibujarse rota (cada pedido volvería 403). */}
+              <GuardiaDeRuta>{children}</GuardiaDeRuta>
             </div>
             {/* El cartel de novedades al entrar. Va acá adentro y no en el layout raíz
                 a propósito: así no puede salir en el login, que es la única pantalla

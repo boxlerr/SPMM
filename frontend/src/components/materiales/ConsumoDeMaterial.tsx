@@ -22,13 +22,14 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronUp, Plus, Undo2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { API_URL } from "@/config";
 import { decodeJwt } from "@/lib/jwt";
 import { capitalizeName, cn, parseApiError } from "@/lib/utils";
+import { usePermisos } from "@/hooks/usePermisos";
 
 export interface ConsumoMaterial {
     id: number;
@@ -431,6 +432,10 @@ export function FilaDeConsumo({ linea, colSpan, consumos, total, onRegistrar, pu
     const [cantidad, setCantidad] = useState("");
     const [obs, setObs] = useState("");
     const [error, setError] = useState<string | null>(null);
+    // RF-24: registrar o anular un consumo es tocar la OT (solapa Órdenes en escritura,
+    // como pide el backend). Con lectura sola se ve lo consumido, sin el formulario.
+    const { puedeSeccion } = usePermisos();
+    const puedeRegistrar = puedeSeccion("operaciones_ordenes", "write");
 
     const enviar = async () => {
         const n = leerCantidad(cantidad);
@@ -474,7 +479,7 @@ export function FilaDeConsumo({ linea, colSpan, consumos, total, onRegistrar, pu
                         {excede && <span className="text-amber-700"> (más de lo pedido)</span>}
                     </p>
 
-                    <div className="flex flex-wrap items-end gap-2">
+                    {puedeRegistrar && <div className="flex flex-wrap items-end gap-2">
                         <label className="w-28 space-y-1">
                             <span className="block text-[11px] font-medium text-gray-500">Cantidad ({linea.unidad || "—"})</span>
                             <Input
@@ -504,12 +509,12 @@ export function FilaDeConsumo({ linea, colSpan, consumos, total, onRegistrar, pu
                             <Plus className="h-4 w-4" aria-hidden />
                             Registrar
                         </Button>
-                    </div>
+                    </div>}
                     {error && <p className="text-xs text-red-600" role="alert">{error}</p>}
 
                     <ListaDeConsumos
                         consumos={consumos}
-                        puedeAnular={puedeAnular}
+                        puedeAnular={(c) => puedeRegistrar && puedeAnular(c)}
                         onAnular={onAnular}
                         vacio="Todavía no se registró consumo de este material."
                     />

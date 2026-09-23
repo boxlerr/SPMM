@@ -1,9 +1,20 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_URL } from '../config';
 import { isTokenExpired } from '@/lib/jwt';
+import {
+  leerPermisos,
+  puede as puedeArea,
+  puedeSeccion as puedeLaSeccion,
+  rutaInicio,
+  type AreaCodigo,
+  type Nivel,
+  type Permisos,
+  type SeccionCodigo,
+} from '@/lib/permisos';
+import { avisarSinPermiso, marcarSinPermiso } from '@/lib/sinPermiso';
 
 interface User {
   id_usuario: number;
@@ -15,6 +26,14 @@ interface User {
   activo: boolean;
   /** Entró con una contraseña que le pasaron: no ve el sistema hasta cambiarla. */
   debe_cambiar_password?: boolean;
+  /**
+   * RF-24: los permisos YA RESUELTOS por el backend, tal cual vinieron (login o
+   * /auth/me). Se guardan crudos y se leen con `leerPermisos`: si no vinieron —backend
+   * de antes de RF-24— no hay campo y la pantalla da acceso total, como siempre.
+   * Es el ÚNICO campo que /auth/me pisa además de `rol`: el resto del usuario (nombre,
+   * apellido…) queda como vino del login, porque sin `apellido` el Sidebar se cae.
+   */
+  permisos?: unknown;
 }
 
 /**
@@ -31,6 +50,8 @@ export interface ResultadoLogin {
   bloqueado?: boolean;
   /** Cuántas contraseñas malas más aguanta antes del bloqueo; null si no se sabe. */
   intentosRestantes?: number | null;
+  /** RF-24: a qué pantalla ir después de entrar (la primera que puede ver). */
+  inicio?: string;
 }
 
 interface AuthContextType {
@@ -44,6 +65,20 @@ interface AuthContextType {
   notifySessionExpired: () => void;
   /** Vuelve a leer el usuario guardado. Se usa al salir del primer ingreso. */
   refreshUser: () => void;
+  /**
+   * RF-24. Los permisos resueltos por el backend, o null = acceso total (el backend
+   * todavía no los manda). Para preguntar, mejor `puede` / `puedeSeccion` (o el hook
+   * usePermisos), que ya saben qué hacer con el null.
+   */
+  permisos: Permisos | null;
+  /** ¿Llega a `nivel` (por defecto, leer) en el área? Sin permisos, sí. */
+  puede: (area: AreaCodigo, nivel?: Nivel) => boolean;
+  /** ¿Llega a `nivel` (por defecto, leer) en la sección? Sin permisos, sí. */
+  puedeSeccion: (seccion: SeccionCodigo, nivel?: Nivel) => boolean;
+  /** La primera pantalla que puede ver: a donde va al entrar o si cae donde no puede. */
+  rutaDeInicio: string;
+  /** Vuelve a pedir los permisos a /auth/me (un cambio de rol se ve sin volver a entrar). */
+  refrescarPermisos: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -118,6 +153,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     performSilentLogout();
   }, [performSilentLogout]);
 
+  // ---- RF-24: los permisos, al día con la base -------------------------------
+  // El backend los resuelve contra la base en CADA pedido, así que un cambio de rol o
+  // un permiso que se da o que vence vale desde el pedido siguiente. La pantalla, en
+  // cambio, los tiene desde el login. Para que el menú y los botones no queden
+  // mintiendo hasta volver a entrar, se vuelven a pedir a /auth/me: al abrir la app,
+  // al volver a la pestaña (como mucho una vez por minuto) y después de un 403, que
+  // es la señal más clara de que algo cambió.
+  //
+  // Sólo se toman `permisos` y `rol`. Nada más del usuario se pisa: /auth/me de un
+  // backend viejo devuelve lo que dice el token, y el Sidebar se cae sin `apellido`.
+  const ultimoRefrescoRef = useRef(0);
+  const refrescarPermisosCon = useCallback(async (esperaMinimaMs: number) => {
+    const tokenDelPedido = tokenRef.current;
+    if (!tokenDelPedido) return;
+    const ahora = Date.now();
+    if (ahora - ultimoRefrescoRef.current < esperaMinimaMs) return;
+    ultimoRefrescoRef.current = ahora;
+    try {
+      const res = await fetch(`${API_URL}/auth/me`, {
+        headers: { Authorization: `Bearer ${tokenDelPedido}` },
+        cache: 'no-store',
+      });
+      // 401 lo maneja el interceptor. 503 (no se pudieron leer), 404 o 500: queda lo
+      // que había. Nunca se cierra nada porque un pedido falló.
+      if (!res.ok) return;
+      const cuerpo = await res.json().catch(() => null);
+      const datos = cuerpo?.status ? cuerpo.data : null;
+      if (!datos || typeof datos !== 'object') return;
+      // Si en el medio cerró la sesión o entró otra persona, esto ya no es de nadie.
+      if (tokenRef.current !== tokenDelPedido) return;
+      setUser((previo) => {
+        if (!previo) return previo;
+        const siguiente: User = { ...previo };
+        if (leerPermisos(datos.permisos)) {
+          siguiente.permisos = datos.permisos;
+        } else {
+          // Contestó bien pero sin permisos: es un backend de antes de RF-24 (o se
+          // volvió a uno). Acceso total, como él.
+          delete siguiente.permisos;
+        }
+        if (typeof datos.rol === 'string' && datos.rol) siguiente.rol = datos.rol;
+        try { localStorage.setItem('user', JSON.stringify(siguiente)); } catch { /* sin storage: queda en memoria */ }
+        return siguiente;
+      });
+    } catch {
+      // Red caída: queda lo que había.
+    }
+  }, []);
+
+  const refrescarPermisos = useCallback(() => {
+    void refrescarPermisosCon(60_000);
+  }, [refrescarPermisosCon]);
+
+  // Al abrir la app con una sesión guardada, y cada vez que se vuelve a la pestaña.
+  useEffect(() => {
+    if (!token) return;
+    void refrescarPermisosCon(0);
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') void refrescarPermisosCon(60_000);
+    };
+    window.addEventListener('focus', alVolver);
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      window.removeEventListener('focus', alVolver);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, [token, refrescarPermisosCon]);
+
   // ---- 1) Carga inicial: validar exp del token guardado ---------------------
   useEffect(() => {
     const initAuth = () => {
@@ -174,6 +277,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           && !isKeepalivePath(url)
           && tokenRef.current;
 
+        // RF-24: cualquier 403 de la API es «no tenés permiso para esto». El backend
+        // bloquea lo que el rol no permite aunque la pantalla haya dejado el botón (un
+        // permiso que cambió recién, un botón que se escapó): en vez del error genérico
+        // de cada pantalla sale un aviso claro, y se vuelven a pedir los permisos para
+        // que lo que ya no se puede deje de ofrecerse.
+        const esRechazo = response.status === 403
+          && isApiUrl(url)
+          && !isPublicAuthPath(url)
+          && !!tokenRef.current;
+        if (esRechazo) {
+          // Antes de devolver la respuesta: así la pantalla ya encuentra el silencio
+          // puesto cuando vaya a mostrar su error (ver lib/sinPermiso.ts).
+          marcarSinPermiso();
+          response.clone().json()
+            .then((cuerpo) => {
+              const detalle = cuerpo?.errors?.[0]?.message
+                ?? cuerpo?.detail?.message
+                ?? (typeof cuerpo?.detail === 'string' ? cuerpo.detail : null);
+              // FastAPI contesta 403 «Not authenticated» a un pedido SIN token: eso es
+              // un pedido mal armado, no un permiso que falta.
+              if (detalle === 'Not authenticated') return;
+              avisarSinPermiso(detalle);
+            })
+            .catch(() => avisarSinPermiso(null));
+          if (!url.includes('/auth/me')) void refrescarPermisosCon(5_000);
+        }
+
         if (isAuthFailure) {
           auth401CountRef.current += 1;
           if (auth401CountRef.current >= 2) {
@@ -194,7 +324,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       window.fetch = originalFetch;
     };
-  }, [performSilentLogout]);
+  }, [performSilentLogout, refrescarPermisosCon]);
 
   // ---- 3) Keep-alive: ping a /health cada 10 minutos ------------------------
   // Render free tier duerme el servicio tras ~15 minutos sin tráfico. Eso causa
@@ -254,7 +384,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         auth401CountRef.current = 0;
         redirectingRef.current = false;
 
-        return { success: true };
+        // RF-24: la primera pantalla que puede ver. Sin permisos (backend viejo), el
+        // Dashboard de siempre.
+        return { success: true, inicio: rutaInicio(leerPermisos(userData.permisos)) };
       } else {
         // El backend devuelve { status:false, errors:[{message, campo}] }.
         // Para 5xx (ej. 503 cuando la BD está caída) usamos un mensaje genérico
@@ -321,6 +453,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/login');
   };
 
+  // RF-24. null = acceso total: el backend no mandó permisos (todavía no tiene RF-24)
+  // o vinieron con una forma que no se entiende. Nunca se cierra todo por un campo.
+  const permisos = useMemo(() => leerPermisos(user?.permisos), [user?.permisos]);
+  const puede = useCallback(
+    (area: AreaCodigo, nivel: Nivel = 'read') => puedeArea(permisos, area, nivel),
+    [permisos],
+  );
+  const puedeSeccion = useCallback(
+    (seccion: SeccionCodigo, nivel: Nivel = 'read') => puedeLaSeccion(permisos, seccion, nivel),
+    [permisos],
+  );
+  const rutaDeInicio = useMemo(() => rutaInicio(permisos), [permisos]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -332,6 +477,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         notifySessionExpired,
         refreshUser,
+        permisos,
+        puede,
+        puedeSeccion,
+        rutaDeInicio,
+        refrescarPermisos,
       }}
     >
       {children}

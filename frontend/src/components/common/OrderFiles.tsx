@@ -1,12 +1,13 @@
 import React from "react";
 import { Trash2, UploadCloud } from "lucide-react";
 import { API_URL } from "@/config";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { PlanoPanel, contarArchivos } from "./PlanoPanel";
 import { FileViewerModal } from "./FileViewerModal";
 import { olvidarPlano, type Plano } from "@/lib/planos";
 import { invalidarOrdenesConPlano } from "@/hooks/useOrdenesConPlano";
+import { usePermisos } from "@/hooks/usePermisos";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -81,6 +82,10 @@ interface OrderFilesProps {
 }
 
 export const OrderFiles = ({ orderId, resumen = false }: OrderFilesProps) => {
+    // RF-24: subir y sacar archivos de la orden va contra /planos, que pide el área
+    // Planos en escritura (así está en el mapa del backend). Ver, con leer alcanza.
+    const { puede } = usePermisos();
+    const puedeEditar = puede("planos", "write");
     const [files, setFiles] = React.useState<Plano[]>([]);
     const [loading, setLoading] = React.useState(true);
     const [isUploading, setIsUploading] = React.useState(false);
@@ -247,6 +252,7 @@ export const OrderFiles = ({ orderId, resumen = false }: OrderFilesProps) => {
                 vacioTexto="Esta orden no tiene planos ni fotos, ni propios ni del producto."
             />
 
+            {puedeEditar && (
             <div className="flex flex-wrap items-center gap-2">
                 <div className="relative group inline-flex">
                     <input
@@ -288,6 +294,7 @@ export const OrderFiles = ({ orderId, resumen = false }: OrderFilesProps) => {
                     </span>
                 ))}
             </div>
+            )}
         </div>
     );
 };

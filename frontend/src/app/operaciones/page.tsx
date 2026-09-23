@@ -28,7 +28,7 @@ import { usePanelContext } from "@/contexts/PanelContext"
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal"
 import { Button } from "@/components/ui/button"
 import TaskDetailsModal from "@/components/gantt/TaskDetailsModal"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { convertPlanificacionToGanttTasks } from "@/lib/gantt-utils"
 import { baseDelPlan, finDeLaFila, inicioDeLaFila, minutosDesdeFecha } from "@/lib/plan-fechas"
 import type { GanttTask, Resource, PlanificacionItem, WorkOrder } from "@/lib/types"
@@ -51,6 +51,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { API_URL } from "@/config"
+import { usePermisos } from "@/hooks/usePermisos"
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso"
+
+type SolapaOperaciones = "gantt" | "work_orders" | "operarios" | "materia_prima" | "carga"
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -133,7 +137,27 @@ function EnlaceEditarOT({ onPedir }: { onPedir: (pedido: OtPedida) => void }) {
 export default function OperacionesPage() {
   // Operaciones abre SIEMPRE en "Órdenes de Trabajo": es la pantalla desde la que se
   // arranca el día (ver qué entró y qué falta planificar), no la planificación ya hecha.
-  const [activeTab, setActiveTab] = useState<"gantt" | "work_orders" | "operarios" | "materia_prima" | "carga">("work_orders")
+  const [solapaElegida, setActiveTab] = useState<SolapaOperaciones>("work_orders")
+
+  // RF-24. Cada solapa es una sección de Operaciones y el rol puede cerrar algunas (al
+  // operario, por ejemplo, el Planificador). Se muestran las que se pueden leer y, si
+  // la elegida no es una de ésas, se abre la primera que sí. Los botones que escriben
+  // piden lo mismo que el backend: crear o editar una OT, la solapa Órdenes; planificar
+  // (borradores, disponibilidad, confirmar, quitar, borrar planes), el Planificador.
+  const { puedeSeccion } = usePermisos()
+  const veOrdenes = puedeSeccion("operaciones_ordenes")
+  const editaOrdenes = puedeSeccion("operaciones_ordenes", "write")
+  const planifica = puedeSeccion("operaciones_planificador", "write")
+  const vePersonas = puedeSeccion("operaciones_recurso_humano")
+  const veMateriaPrima = puedeSeccion("operaciones_materia_prima")
+  const veSolapa = (t: SolapaOperaciones) =>
+    t === "operarios" ? vePersonas : t === "materia_prima" ? veMateriaPrima : veOrdenes
+  const activeTab: SolapaOperaciones = veSolapa(solapaElegida)
+    ? solapaElegida
+    : ((["work_orders", "operarios", "materia_prima"] as SolapaOperaciones[]).find(veSolapa) ?? solapaElegida)
+  // Tildar OTs del plan sólo sirve para las acciones de la barra de selección: sin
+  // ninguna de ellas, las casillas no se muestran.
+  const puedeSeleccionar = editaOrdenes || planifica
   /** La pieza a la que lleva el aviso de stock bajo (RF-14). Se consume una vez: la
    *  solapa la busca, la resalta y avisa que ya la usó. */
   const [piezaEnlazada, setPiezaEnlazada] = useState<number | null>(null)
@@ -2092,14 +2116,14 @@ export default function OperacionesPage() {
                     {/* Limpiar las viejas de una: borrar una son cuatro clicks y hay que
                         ELEGIRLA primero, lo que manda toda la pantalla a ese mes. La
                         vigente —la primera de la lista— nunca entra. */}
-                    {lotesViejos.length > 0 && (
+                    {planifica && lotesViejos.length > 0 && (
                       <SelectItem value={LIMPIAR_VIEJAS} className="text-red-600">
                         Limpiar planificaciones viejas ({lotesViejos.length})
                       </SelectItem>
                     )}
                   </SelectContent>
                 </Select>
-                <div className="ml-auto flex items-center gap-2">
+                {planifica && <div className="ml-auto flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -2150,7 +2174,7 @@ export default function OperacionesPage() {
                       </Button>
                     );
                   })()}
-                </div>
+                </div>}
               </div>
 
               <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
@@ -2294,7 +2318,7 @@ export default function OperacionesPage() {
                   </span>
 
                   <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <Button
+                    {editaOrdenes && <Button
                       size="sm"
                       variant="outline"
                       onClick={() => setEstadoMasivo(3)}
@@ -2304,8 +2328,8 @@ export default function OperacionesPage() {
                     >
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       Marcar como terminadas
-                    </Button>
-                    <Button
+                    </Button>}
+                    {editaOrdenes && <Button
                       size="sm"
                       variant="outline"
                       onClick={() => setEstadoMasivo(1)}
@@ -2315,8 +2339,8 @@ export default function OperacionesPage() {
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                       Volver a pendientes
-                    </Button>
-                    <Button
+                    </Button>}
+                    {planifica && <Button
                       size="sm"
                       variant="outline"
                       onClick={() => setIsQuitarOtsDialogOpen(true)}
@@ -2326,7 +2350,7 @@ export default function OperacionesPage() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       Quitar del plan
-                    </Button>
+                    </Button>}
                     <button
                       onClick={() => setSelectedPlanIds([])}
                       className="px-2 text-xs font-medium text-red-700/70 underline-offset-2 hover:text-red-900 hover:underline"
@@ -2349,7 +2373,7 @@ export default function OperacionesPage() {
                     data={otsPendientes}
                     mensajeVacio="Esta planificación no tiene trabajo pendiente: ya está todo terminado o entregado."
                     selectedIds={selectedPlanIds}
-                    onSelectionChange={setSelectedPlanIds}
+                    onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
                     isLoading={isLoading}
                     onProcessStatusChange={handleProcessStatusChange}
                     onProcessReorder={handleProcessReorder}
@@ -2488,7 +2512,7 @@ export default function OperacionesPage() {
                     data={otsDeLaSemana}
                     mensajeVacio="Esta semana no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
                     selectedIds={selectedPlanIds}
-                    onSelectionChange={setSelectedPlanIds}
+                    onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
                     isLoading={isLoading}
                     onProcessStatusChange={handleProcessStatusChange}
                     onProcessReorder={handleProcessReorder}
@@ -2623,7 +2647,7 @@ export default function OperacionesPage() {
                     mensajeVacio="Este día no hay trabajo de esta planificación. Probá con «Cambiar fecha» o elegí otra planificación arriba."
                     diaResaltado={fechaReferencia}
                     selectedIds={selectedPlanIds}
-                    onSelectionChange={setSelectedPlanIds}
+                    onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
                     isLoading={isLoading}
                     onProcessStatusChange={handleProcessStatusChange}
                     onProcessReorder={handleProcessReorder}
@@ -2657,7 +2681,7 @@ export default function OperacionesPage() {
                     data={completedPlannedOrdenes}
                     mensajeVacio="Todavía no se entregó ninguna OT de esta planificación."
                     selectedIds={selectedPlanIds}
-                    onSelectionChange={setSelectedPlanIds}
+                    onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
                     isLoading={isLoading}
                     onProcessStatusChange={handleProcessStatusChange}
                     onProcessReorder={handleProcessReorder}
@@ -2691,7 +2715,7 @@ export default function OperacionesPage() {
                     data={otsTerminadasSinEntregar}
                     mensajeVacio="No hay nada terminado esperando despacho en esta planificación."
                     selectedIds={selectedPlanIds}
-                    onSelectionChange={setSelectedPlanIds}
+                    onSelectionChange={puedeSeleccionar ? setSelectedPlanIds : undefined}
                     isLoading={isLoading}
                     onProcessStatusChange={handleProcessStatusChange}
                     onProcessReorder={handleProcessReorder}
@@ -2841,8 +2865,9 @@ export default function OperacionesPage() {
                   guardado, pero la única puerta para volver a abrirlo estaba adentro de
                   la pantalla de la que se había ido. Se esconde solo cuando no hay
                   borradores, así que casi todos los días la cabecera queda igual. */}
-              <BorradoresPlan onAbrir={handleAbrirBorrador} />
-              <Button
+              {!editaOrdenes && !planifica && <MarcaSoloLectura que="las órdenes y el plan" />}
+              {planifica && <BorradoresPlan onAbrir={handleAbrirBorrador} />}
+              {planifica && <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setIsAvailabilityModalOpen(true)}
@@ -2851,8 +2876,8 @@ export default function OperacionesPage() {
               >
                 <CalendarClock className="h-4 w-4 md:mr-2" />
                 <span className="hidden md:inline">Disponibilidad</span>
-              </Button>
-              <Button
+              </Button>}
+              {planifica && <Button
                 size="sm"
                 onClick={() => {
                   setIsReplanning(false);
@@ -2862,11 +2887,11 @@ export default function OperacionesPage() {
               >
                 <CalendarClock className="md:mr-2 h-4 w-4" />
                 <span className="hidden md:inline">Planificar</span>
-              </Button>
+              </Button>}
               {/* En «Órdenes de Trabajo» este botón se esconde: esa pantalla tiene el
                   suyo adentro, y dos botones rojos con el mismo ícono y la misma acción
                   a diez centímetros uno del otro se leen como dos cosas distintas. */}
-              {activeTab !== "work_orders" && (
+              {activeTab !== "work_orders" && editaOrdenes && (
                 <Button
                   size="sm"
                   onClick={() => setIsCreateModalOpen(true)}
@@ -2882,13 +2907,13 @@ export default function OperacionesPage() {
           {/* Tabs Navigation. `-mb-px` para que el subrayado rojo de la solapa
               activa pise el borde de la cabecera en vez de dibujar dos líneas. */}
           <div className="flex overflow-x-auto items-center gap-1 px-2 sm:px-3 -mb-px scrollbar-hide">
-            <button
+            {veOrdenes && <button
               onClick={() => setActiveTab("work_orders")}
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "work_orders" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <LayoutList size={18} />
               Órdenes de Trabajo
-            </button>
+            </button>}
             
             {/* <button
               onClick={() => setActiveTab("gantt")}
@@ -2898,21 +2923,21 @@ export default function OperacionesPage() {
               Gantt
             </button> */}
 
-            <button
+            {vePersonas && <button
               onClick={() => setActiveTab("operarios")}
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "operarios" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <User size={18} />
               Recurso humano
-            </button>
+            </button>}
 
-            <button
+            {veMateriaPrima && <button
               onClick={() => setActiveTab("materia_prima")}
               className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "materia_prima" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
             >
               <Box size={18} />
               Materia Prima
-            </button>
+            </button>}
 
           </div>
         </div>

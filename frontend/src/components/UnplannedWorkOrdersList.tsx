@@ -26,7 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import type { WorkOrder } from "@/lib/types";
 import { OrderFiles } from "./common/OrderFiles";
 import { cn, getWorkOrderRowColor, parseApiError } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 
 const getAuthHeaders = (): HeadersInit => {
@@ -41,11 +41,13 @@ import { AddProcessRow } from "./planning/AddProcessRow";
 import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { MaterialChip } from "@/components/common/MaterialChip";
+import { usePermisos } from "@/hooks/usePermisos";
 
 interface UnplannedWorkOrdersListProps {
     orders: WorkOrder[];
     onEdit: (order: WorkOrder) => void;
-    onDelete: (id: number) => void;
+    /** Sin esto no hay botón de borrar (RF-24: quien no puede editar OT). */
+    onDelete?: (id: number) => void;
     onDataChange?: () => void;
     /** Zoom (%) aplicado SOLO a la tabla, no al header ni a los filtros. */
     tableZoom?: number;
@@ -85,6 +87,10 @@ const COPY_VARIANTE = {
 
 export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange, tableZoom = 100, variante = "no_planificadas" }: UnplannedWorkOrdersListProps) {
     const copy = COPY_VARIANTE[variante];
+    // RF-24: mover pasos, cambiar minutos, sacar o agregar pasos es editar la OT
+    // (solapa Órdenes). Sin eso la lista se lee igual y «Editar» abre la OT para mirar.
+    const { puedeSeccion } = usePermisos();
+    const editaOrdenes = puedeSeccion("operaciones_ordenes", "write");
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
@@ -460,11 +466,13 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                         )}
                                         <div className="flex gap-2 justify-end pt-2">
                                             <Button variant="ghost" size="sm" className={cn("h-8 gap-1.5 hover:bg-gray-100", copy.acentoOrden)} onClick={() => onEdit(order)}>
-                                                <Edit2 className="w-3.5 h-3.5" /> Editar
+                                                <Edit2 className="w-3.5 h-3.5" /> {editaOrdenes ? "Editar" : "Ver"}
                                             </Button>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(order.id)}>
-                                                <Trash2 className="w-3.5 h-3.5" />
-                                            </Button>
+                                            {onDelete && (
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => onDelete(order.id)}>
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -630,15 +638,17 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                     </td>
                                                     <td className="px-3 py-3">
                                                         <div className="flex items-center justify-center gap-1">
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-7 w-7 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                                                onClick={(e) => { e.stopPropagation(); onDelete(order.id); }}
-                                                                title="Eliminar Orden"
-                                                            >
-                                                                <Trash2 className="w-3 h-3" />
-                                                            </Button>
+                                                            {onDelete && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-7 w-7 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                                    onClick={(e) => { e.stopPropagation(); onDelete(order.id); }}
+                                                                    title="Eliminar Orden"
+                                                                >
+                                                                    <Trash2 className="w-3 h-3" />
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -742,6 +752,7 @@ export function UnplannedWorkOrdersList({ orders, onEdit, onDelete, onDataChange
                                                                                                 total={order.procesos!.length}
                                                                                                 claseHover="group-hover/proc:opacity-100"
                                                                                                 trabajando={moviendo === order.id}
+                                                                                                bloqueado={!editaOrdenes}
                                                                                                 onMover={(pos) => void moverPaso(order, (proc as any).id, pos)}
                                                                                             />
                                                                                         </div>

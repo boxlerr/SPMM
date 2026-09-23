@@ -12,9 +12,15 @@ import { useToast } from "@/components/ui/toast";
 import { Cliente } from "./_types";
 import ClienteForm from "./_components/ClienteForm";
 import { API_URL } from "@/config";
+import { usePermisos } from "@/hooks/usePermisos";
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 
 export default function ClientesPage() {
     const { showToast } = useToast();
+    // RF-24: leer la cartera es el área Clientes (o Operaciones); darla de alta,
+    // editarla o borrarla pide Clientes en escritura. Sin eso, la lista sin botones.
+    const { puede } = usePermisos();
+    const puedeEditar = puede("clientes", "write");
     const api = useApi<any>();
     const cleanUrl = API_URL.replace(/\/$/, "");
 
@@ -95,14 +101,17 @@ export default function ClientesPage() {
         // (el layout ya pone el suyo) y el título sin meterse debajo de la campana.
         <div className="min-h-screen bg-background p-1 sm:p-4 md:p-6">
             <div className="mb-4 md:mb-6">
-                <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4 pr-12 lg:pr-0">
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground mb-3 md:mb-4 pr-12 lg:pr-0 flex flex-wrap items-center gap-x-3 gap-y-1">
                     Administración de Clientes
+                    {!puedeEditar && <MarcaSoloLectura que="los clientes" />}
                 </h1>
                 <div className="flex flex-col sm:flex-row gap-2">
-                    <Button onClick={handleCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Nuevo Cliente
-                    </Button>
+                    {puedeEditar && (
+                        <Button onClick={handleCrear} size="sm" className="w-full sm:w-auto bg-[#DC143C] hover:bg-[#B01030] text-white">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Nuevo Cliente
+                        </Button>
+                    )}
                     <Button
                         onClick={fetchClientes}
                         disabled={api.loading}
@@ -166,7 +175,9 @@ export default function ClientesPage() {
                                     <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground hidden lg:table-cell">Ubicación</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground hidden xl:table-cell">Contacto</th>
                                     <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground hidden 2xl:table-cell">Observaciones</th>
-                                    <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                                    {puedeEditar && (
+                                        <th className="px-6 py-3 text-right text-sm font-medium text-muted-foreground">Acciones</th>
+                                    )}
                                 </tr>
                             </thead>
 
@@ -246,6 +257,7 @@ export default function ClientesPage() {
                                                 <span className="text-xs text-muted-foreground">-</span>
                                             )}
                                         </td>
+                                        {puedeEditar && (
                                         <td className="px-6 py-4">
                                             <div className="flex justify-end gap-2">
                                                 <Button variant="ghost" size="icon" onClick={() => handleEditar(cliente)} className="h-8 w-8">
@@ -261,6 +273,7 @@ export default function ClientesPage() {
                                                 </Button>
                                             </div>
                                         </td>
+                                        )}
                                     </tr>
                                 ))}
                             </tbody>

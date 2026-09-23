@@ -19,7 +19,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control";
 import type { WorkOrder } from "@/lib/types";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { API_URL } from "@/config";
 import { inicioDelPlan, minutosDesdeFecha } from "@/lib/plan-fechas";
 import { DiagnosticosPlan, type Diagnostico } from "@/components/planning/DiagnosticosPlan";

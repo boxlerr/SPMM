@@ -12,6 +12,8 @@ import IncidenciasPlanos from "@/components/dashboard/IncidenciasPlanos"
 import RendimientoEstimadoReal from "@/components/dashboard/RendimientoEstimadoReal"
 
 
+import { usePermisos } from "@/hooks/usePermisos"
+
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
 import StatusOrdersModal from "@/components/dashboard/StatusOrdersModal"
 
@@ -44,6 +46,11 @@ export default function DashboardPage() {
     refreshAll,
     apiUrl,
   } = useDashboardData()
+  // RF-24: el rendimiento POR PERSONA compara a la gente con nombre y apellido; es una
+  // sección confidencial y el backend la contesta 403 a quien no la tiene otorgada.
+  // No se pide ni se dibuja: un cuadro vacío con un error no le dice nada a nadie.
+  const { puedeSeccion } = usePermisos()
+  const veRendimiento = puedeSeccion("dashboard_rendimiento")
 
   const handlePriorityClick = (prioridad: string) => {
     fetchOrdenesPorPrioridad(prioridad)
@@ -113,7 +120,7 @@ export default function DashboardPage() {
         <IncidenciasPlanos />
 
         {/* Rendimiento: tiempo estimado vs. real por proceso y por operario */}
-        <RendimientoEstimadoReal />
+        {veRendimiento && <RendimientoEstimadoReal />}
 
         {/* 3. Timeline de entregas */}
         <TimelineEntregas timeline={timelineEntregas} loading={loadingTimeline} />

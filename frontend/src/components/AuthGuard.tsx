@@ -10,7 +10,7 @@ interface AuthGuardProps {
 }
 
 export default function AuthGuard({ children }: AuthGuardProps) {
-  const { isAuthenticated, loading, user, refreshUser } = useAuth();
+  const { isAuthenticated, loading, user, refreshUser, rutaDeInicio } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -19,11 +19,12 @@ export default function AuthGuard({ children }: AuthGuardProps) {
     if (!loading && !isAuthenticated && pathname !== '/login') {
       router.push('/login');
     }
-    // Si está en login y ya está autenticado, redirigir al dashboard
+    // Si está en login y ya está autenticado, a su primera pantalla (RF-24: la
+    // primera que puede ver; sin permisos, el Dashboard de siempre).
     if (!loading && isAuthenticated && pathname === '/login') {
-      router.push('/dashboard');
+      router.push(rutaDeInicio);
     }
-  }, [isAuthenticated, loading, pathname, router]);
+  }, [isAuthenticated, loading, pathname, router, rutaDeInicio]);
 
   // Mostrar loading mientras se verifica la autenticación
   if (loading) {

@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { API_URL } from "@/config";
+import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 
 interface Item {
   id: number;
@@ -64,6 +65,12 @@ interface CatalogoSimpleProps {
    * sin obligar a abrir uno por uno para descubrir que alguno está vacío.
    */
   renderBadge?: (item: Item) => React.ReactNode;
+  /**
+   * RF-24: sin permiso de escritura en la solapa, la lista se ve sin «Nuevo», sin
+   * editar y sin borrar. Lo decide la pantalla que lo monta, porque cada catálogo es
+   * una solapa distinta (Rangos, Sectores).
+   */
+  soloLectura?: boolean;
 }
 
 const getAuthHeaders = (): HeadersInit => {
@@ -82,6 +89,7 @@ export default function CatalogoSimple({
   descripcion,
   renderExpanded,
   renderBadge,
+  soloLectura = false,
 }: CatalogoSimpleProps) {
   const cleanUrl = API_URL.replace(/\/$/, "");
   const { showToast } = useToast();
@@ -239,15 +247,19 @@ export default function CatalogoSimple({
             <p className="text-sm text-muted-foreground mt-1">{descripcion}</p>
           )}
         </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={abrirCrear}
-            size="sm"
-            className="bg-[#DC143C] hover:bg-[#B01030] text-white"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Nuevo {singular}
-          </Button>
+        <div className="flex items-center gap-2">
+          {soloLectura ? (
+            <MarcaSoloLectura que={titulo.toLowerCase()} />
+          ) : (
+            <Button
+              onClick={abrirCrear}
+              size="sm"
+              className="bg-[#DC143C] hover:bg-[#B01030] text-white"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Nuevo {singular}
+            </Button>
+          )}
           <Button onClick={fetchItems} disabled={loading} variant="outline" size="sm">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
@@ -270,7 +282,9 @@ export default function CatalogoSimple({
       {!loading && items.length === 0 && !error && (
         <div className="py-12 text-center text-muted-foreground">
           <p className="text-lg">No hay {titulo.toLowerCase()} registrados.</p>
-          <p className="text-sm mt-1">Hacé clic en &quot;Nuevo {singular}&quot; para crear el primero.</p>
+          {!soloLectura && (
+            <p className="text-sm mt-1">Hacé clic en &quot;Nuevo {singular}&quot; para crear el primero.</p>
+          )}
         </div>
       )}
 
@@ -283,9 +297,11 @@ export default function CatalogoSimple({
                 <th className="px-4 py-2.5 text-left text-sm font-medium text-muted-foreground">
                   Nombre
                 </th>
-                <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">
-                  Acciones
-                </th>
+                {!soloLectura && (
+                  <th className="px-4 py-2.5 text-right text-sm font-medium text-muted-foreground">
+                    Acciones
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -320,6 +336,7 @@ export default function CatalogoSimple({
                           {renderBadge?.(item)}
                         </div>
                       </td>
+                      {!soloLectura && (
                       <td className="px-4 py-2">
                         {/* stopPropagation: sin esto, editar o borrar también
                             desplegaría la fila, porque el click sube hasta el <tr>. */}
@@ -348,6 +365,7 @@ export default function CatalogoSimple({
                           </Button>
                         </div>
                       </td>
+                      )}
                     </tr>
                     {/* El panel se monta recién al abrir: cada uno pide su detalle solo
                         cuando alguien lo mira. La altura se anima con framer en vez de
@@ -361,7 +379,7 @@ export default function CatalogoSimple({
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.15 }}
                         >
-                          <td colSpan={3} className="p-0">
+                          <td colSpan={soloLectura ? 2 : 3} className="p-0">
                             <motion.div
                               initial={{ height: 0 }}
                               animate={{ height: "auto" }}

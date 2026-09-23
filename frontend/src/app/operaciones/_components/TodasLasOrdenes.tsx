@@ -26,6 +26,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/components/ui/toast";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { API_URL } from "@/config";
+import { usePermisos } from "@/hooks/usePermisos";
 import { cn } from "@/lib/utils";
 import { TipoTrabajoBadge, type TipoTrabajo } from "@/components/common/TipoTrabajoBadge";
 import {
@@ -105,6 +106,9 @@ const diasPara = (f: string | null): number | null => {
 
 export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void }) {
     const { showToast } = useToast();
+    // RF-24: dar de alta una OT pide la solapa Órdenes en escritura.
+    const { puedeSeccion } = usePermisos();
+    const puedeCrear = puedeSeccion("operaciones_ordenes", "write");
     const cleanUrl = API_URL.replace(/\/$/, "");
 
     const [ordenes, setOrdenes] = useState<OrdenResumen[]>([]);
@@ -193,13 +197,15 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                         <RefreshCw className={cn("h-4 w-4 mr-2", cargando && "animate-spin")} />
                         Actualizar
                     </Button>
-                    <Button
-                        className="bg-red-600 hover:bg-red-700"
-                        onClick={() => { setOtAEditar(null); setModalAbierto(true); }}
-                    >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Nueva orden de trabajo
-                    </Button>
+                    {puedeCrear && (
+                        <Button
+                            className="bg-red-600 hover:bg-red-700"
+                            onClick={() => { setOtAEditar(null); setModalAbierto(true); }}
+                        >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Nueva orden de trabajo
+                        </Button>
+                    )}
                 </div>
             </div>
 

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarDays, AlertTriangle, Loader2 } from "lucide-react";
 import { API_URL } from "@/config";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 

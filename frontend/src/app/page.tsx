@@ -6,18 +6,19 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export default function HomePage() {
   const router = useRouter();
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, rutaDeInicio } = useAuth();
 
   useEffect(() => {
     if (!loading) {
-      // Si está autenticado, ir al dashboard, sino al login
+      // Si está autenticado, a su primera pantalla (RF-24: la primera que puede ver;
+      // sin permisos, el Dashboard de siempre), sino al login
       if (isAuthenticated) {
-        router.push('/dashboard');
+        router.push(rutaDeInicio);
       } else {
         router.push('/login');
       }
     }
-  }, [isAuthenticated, loading, router]);
+  }, [isAuthenticated, loading, router, rutaDeInicio]);
 
 
   return (
