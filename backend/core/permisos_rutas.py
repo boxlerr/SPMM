@@ -54,7 +54,9 @@ y como solapa de Recursos):
 
   pantalla (área)    lee
   Dashboard          /api/dashboard/*, /incidencias/metricas: desde RF-28 cada tarjeta
-                     pide el área de la que muestra datos (TARJETAS_DASHBOARD)
+                     pide el área de la que muestra datos (TARJETAS_DASHBOARD). El reporte
+                     mensual (/api/dashboard/reporte-mensual, RF-21) pide el Dashboard y
+                     adentro cada parte pide lo de su pantalla (ReporteMensualService.alcance_de)
   Operaciones        /ordenes*, /ordenes-resumen, /ordenes-pausadas, /planificacion*, /planificar,
                      /config/availability, /ordenes-trabajo-piezas, /consumos-material,
                      /planos/orden/*, /planos/{id}/archivo, /ordenes/{id}/incidencias,
@@ -409,6 +411,14 @@ POLITICAS: dict[str, Politica] = {
             Excepcion("GET", "/api/dashboard/tiempo-promedio", (area("operaciones"),),
                       "Hoy no la muestra ninguna tarjeta; son tiempos de las OT "
                       "terminadas, como las tarjetas de Operaciones."),
+            Excepcion("GET", "/api/dashboard/reporte-mensual", (area("dashboard"),),
+                      "El reporte mensual (RF-21) no es de UNA tarjeta: junta órdenes, "
+                      "producción, personas, calidad y materiales. Se abre con el Dashboard "
+                      "y ADENTRO cada parte pide lo mismo que la pantalla o la tarjeta que la "
+                      "muestra afuera (ReporteMensualService.alcance_de): sin Operaciones no "
+                      "van las órdenes ni la producción, sin «Rendimiento por persona» "
+                      "(confidencial) no van las personas, sin No conformidades no va la "
+                      "calidad. Lo que no se puede ver no se lee ni se manda."),
         ),
     ),
 
