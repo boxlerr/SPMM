@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 
 from backend.application.ConsumoMaterialService import ConsumoMaterialService
 from backend.commons.loggers.logger import logger
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, get_usuario_verificado
 from backend.dto.ConsumoMaterialRequestDTO import AnularConsumoDTO, ConsumoMaterialRequestDTO
 from backend.infrastructure.db import SessionLocal
 
@@ -46,7 +46,9 @@ async def anular_consumo(
     id_consumo: int,
     dto: AnularConsumoDTO | None = None,
     db=Depends(get_db),
-    usuario=Depends(get_current_user),
+    # El rol de la BASE, no el del token: el servicio deja anular lo de otro sólo a un
+    # admin, y un token dura 30 días (RF-24).
+    usuario=Depends(get_usuario_verificado),
 ):
     logger.info(f"API - Inicio PUT /consumos-material/{id_consumo}/anular")
     return await ConsumoMaterialService(db).anular(id_consumo, dto, usuario)

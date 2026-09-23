@@ -16,10 +16,16 @@ from backend.core.permisos import (
     DatosDePermisos,
     PermisosUsuario,
     permisos_de,
-    nivel_para_metodo,
     validar_area,
     validar_nivel,
     validar_seccion,
+)
+from backend.core.permisos_rutas import (
+    LIBRE,
+    Politica,
+    area as req_area,
+    permite,
+    rechazo,
 )
 from backend.commons.loggers.logger import logger
 from backend.infrastructure.db import SessionLocal
@@ -220,6 +226,20 @@ async def get_usuario_actual(
     return UsuarioActual(id_usuario=fila.id_usuario, username=fila.username, rol=fila.rol)
 
 
+async def get_usuario_verificado(
+    current_user: dict = Depends(get_current_user),
+    usuario: UsuarioActual = Depends(get_usuario_actual),
+) -> dict:
+    """Dependencia: el dict de siempre (el del token), con el id y el ROL DE LA BASE.
+
+    Para los servicios que deciden algo mirando `usuario["rol"]` (anular el consumo de
+    otro, por ejemplo): el `rol` del token es el del día que entró y dura 30 días, y a un
+    admin al que le sacaron el rol no le puede alcanzar con eso. No cuesta una consulta
+    más: get_usuario_actual ya corrió para la política del router y FastAPI la reusa.
+    """
+    return {**current_user, "id_usuario": usuario.id_usuario, "rol": usuario.rol}
+
+
 async def resolver_permisos_actuales(usuario: UsuarioActual, sesiones) -> PermisosUsuario:
     """Los permisos de `usuario`. Al admin no le lee ninguna tabla de permisos (es
     admin en todo por regla). Al resto, las lee con una sesión propia y corta; si no se
@@ -265,6 +285,11 @@ async def require_admin(
     """
     Verifica que el usuario actual sea administrador. CONTRA LA BASE, no contra el
     token: a alguien a quien le sacaron el rol admin no le alcanza con el token viejo.
+
+    Es lo que piden el ABM de usuarios y la administración de permisos: el «admin del
+    área de sistema». Nivel admin en Configuración lo tiene sólo el rol admin (la API de
+    permisos no deja dárselo a otro rol ni a una persona), así que mirar el rol es mirar
+    eso, sin depender de que las tablas de permisos existan.
 
     Devuelve el mismo dict de siempre (el del token) con el `rol` de la base.
     """
@@ -312,38 +337,65 @@ def require_seccion(seccion: str, nivel: str = "read"):
     return _dependencia
 
 
-def require_area_segun_metodo(area: str, *, lectura_libre: bool = False):
-    """Fábrica para colgar en `include_router`: el nivel sale del método HTTP.
+def require_politica(politica: Politica, nombre: str = "router"):
+    """Fábrica para colgar en `include_router`: aplica la política de un router del mapa
+    (core/permisos_rutas.py).
 
         app.include_router(r, dependencies=[Depends(get_current_user),
-                                            Depends(require_area_segun_metodo("clientes"))])
+                                            Depends(require_politica(POLITICAS["clientes"]))])
 
-    GET/HEAD/OPTIONS piden `read`; POST/PUT/PATCH/DELETE (y cualquier otro) piden
-    `write`. Así no hay que tocar los ~150 endpoints de a uno.
+    Lo que pide cada pedido sale de la política: la excepción de esa ruta si la hay, y
+    si no, `leer` para GET/HEAD/OPTIONS y `escribir` para el resto. Con uno de los
+    requisitos alcanza.
 
-    `lectura_libre=True` es la regla pragmática para los CATÁLOGOS que usan varias
-    pantallas (procesos, operarios, máquinas, rangos...): LEER lo puede cualquiera con
-    sesión y cuenta activa; ESCRIBIR pide el área. Sin esto, alguien que puede abrir
-    Operaciones no podría cargar la lista de máquinas que esa pantalla necesita, porque
-    el catálogo es de Recursos. Leer igual pasa por la base: una cuenta desactivada no
-    lee nada.
+    La ruta se mira por su PLANTILLA (`/ordenes/{id}`), la que FastAPI dejó en el scope
+    al elegir el endpoint, no por la dirección pedida: así una excepción no se saltea
+    con un /ordenes/1/ de más ni con mayúsculas.
+
+    Lo LIBRE sólo mira que la cuenta exista y esté activa (una consulta, la que ya hacía
+    get_usuario_actual): no lee las tablas de permisos. El admin tampoco las lee: es
+    admin por regla. Si la base no contesta, 503 (get_usuario_actual): no se abre nada
+    sin verificar.
+
+    Devuelve los PermisosUsuario (o None si no hizo falta resolverlos).
     """
-    info = validar_area(area)
 
     async def _dependencia(
         request: Request,
         usuario: UsuarioActual = Depends(get_usuario_actual),
         sesiones=Depends(get_sesiones_permisos),
     ) -> Optional[PermisosUsuario]:
-        nivel = nivel_para_metodo(request.method)
-        if nivel == "read" and lectura_libre:
-            # Con la cuenta activa alcanza (get_usuario_actual ya lo miró): no hace
-            # falta leer las tablas de permisos.
+        ruta = getattr(request.scope.get("route"), "path", None) or request.url.path
+        requisitos = politica.requisitos(request.method, ruta)
+        if not requisitos:
             return None
         permisos = await resolver_permisos_actuales(usuario, sesiones)
-        if not permisos.tiene_area(area, nivel):
-            raise _prohibido(f"«{info.nombre}»", nivel)
+        if not permite(requisitos, permisos, request.query_params):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"message": rechazo(requisitos), "campo": "permiso"},
+            )
         return permisos
 
-    _dependencia.__name__ = f"require_area_segun_metodo_{area}"
+    _dependencia.__name__ = f"require_politica_{nombre}"
     return _dependencia
+
+
+def require_area_segun_metodo(area: str, *, lectura_libre: bool = False):
+    """Atajo de require_politica para un router de UN área: GET/HEAD/OPTIONS piden
+    `read`; POST/PUT/PATCH/DELETE (y cualquier otro) piden `write`.
+
+    `lectura_libre=True` es la regla pragmática para los CATÁLOGOS que usan varias
+    pantallas (procesos, operarios, máquinas, rangos...): LEER lo puede cualquiera con
+    sesión y cuenta activa; ESCRIBIR pide el área. Leer igual pasa por la base: una
+    cuenta desactivada no lee nada.
+
+    Los routers de la app no usan esto sino el mapa (core/permisos_rutas.py), que dice
+    además qué otras pantallas leen cada cosa y qué rutas piden otra cosa.
+    """
+    validar_area(area)
+    politica = Politica(
+        leer=LIBRE if lectura_libre else (req_area(area),),
+        escribir=(req_area(area, "write"),),
+    )
+    return require_politica(politica, nombre=f"area_segun_metodo_{area}")

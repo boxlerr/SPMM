@@ -31,6 +31,7 @@ from backend.core.permisos import (
     PermisosUsuario,
     mapa_overrides_vigentes,
     permisos_de,
+    vigente,
 )
 from backend.domain.Permisos import (
     Rol,
@@ -177,3 +178,151 @@ class PermisosRepository:
         if excepto is not None:
             consulta = consulta.where(Usuario.id_usuario != excepto)
         return int((await self.db.execute(consulta)).scalar() or 0)
+
+    # ─────────────────────────── administración (PermisosAPI) ───────────────────────────
+    #
+    # Lo que lee y escribe la pantalla de permisos. Nada de esto hace commit: lo hace el
+    # endpoint, una vez, después de mirar todas las reglas.
+
+    async def confidenciales(self) -> dict[str, bool]:
+        """{seccion: confidencial} como está en la base. La que no tiene fila vale lo que
+        dice el catálogo de código."""
+        return {
+            f.codigo: bool(f.confidencial)
+            for f in (await self.db.execute(
+                select(SeccionPermiso.codigo, SeccionPermiso.confidencial)
+            )).all()
+        }
+
+    async def rol(self, codigo: str):
+        return (await self.db.execute(
+            select(Rol.codigo, Rol.nombre).where(Rol.codigo == codigo)
+        )).first()
+
+    async def niveles_de_roles(self) -> tuple[dict, dict]:
+        """({rol: {area: nivel}}, {rol: {seccion: nivel}}) de toda la matriz."""
+        areas: dict = {}
+        for f in (await self.db.execute(select(RolArea.rol_codigo, RolArea.area_codigo, RolArea.nivel))).all():
+            areas.setdefault(f.rol_codigo, {})[f.area_codigo] = f.nivel
+        secciones: dict = {}
+        for f in (await self.db.execute(
+            select(RolSeccion.rol_codigo, RolSeccion.seccion_codigo, RolSeccion.nivel)
+        )).all():
+            secciones.setdefault(f.rol_codigo, {})[f.seccion_codigo] = f.nivel
+        return areas, secciones
+
+    async def usuarios_activos_por_rol(self) -> dict[str, int]:
+        filas = (await self.db.execute(
+            select(Usuario.rol, func.count()).where(Usuario.activo == True)  # noqa: E712
+            .group_by(Usuario.rol)
+        )).all()
+        return {rol: int(n) for rol, n in filas}
+
+    async def nivel_rol_area(self, rol: str, area: str) -> Optional[str]:
+        return (await self.db.execute(
+            select(RolArea.nivel).where(RolArea.rol_codigo == rol, RolArea.area_codigo == area)
+        )).scalar_one_or_none()
+
+    async def poner_rol_area(self, rol: str, area: str, nivel: str) -> None:
+        fila = await self.db.get(RolArea, (rol, area))
+        if fila is None:
+            self.db.add(RolArea(rol_codigo=rol, area_codigo=area, nivel=nivel))
+        else:
+            fila.nivel = nivel
+
+    async def nivel_rol_seccion(self, rol: str, seccion: str) -> Optional[str]:
+        return (await self.db.execute(
+            select(RolSeccion.nivel).where(RolSeccion.rol_codigo == rol,
+                                           RolSeccion.seccion_codigo == seccion)
+        )).scalar_one_or_none()
+
+    async def poner_rol_seccion(self, rol: str, seccion: str, nivel: Optional[str]) -> None:
+        """`nivel=None` saca el override (la sección vuelve a heredar)."""
+        fila = await self.db.get(RolSeccion, (rol, seccion))
+        if nivel is None:
+            if fila is not None:
+                await self.db.delete(fila)
+        elif fila is None:
+            self.db.add(RolSeccion(rol_codigo=rol, seccion_codigo=seccion, nivel=nivel))
+        else:
+            fila.nivel = nivel
+
+    async def poner_confidencial(self, seccion, confidencial: bool) -> None:
+        """Marca o desmarca una sección. `seccion` es la del catálogo de código: si en la
+        base todavía no tiene fila, se crea con sus datos (como DJ)."""
+        fila = await self.db.get(SeccionPermiso, seccion.codigo)
+        if fila is None:
+            self.db.add(SeccionPermiso(codigo=seccion.codigo, area_codigo=seccion.area,
+                                       nombre=seccion.nombre, orden=seccion.orden,
+                                       confidencial=confidencial))
+        else:
+            fila.confidencial = confidencial
+
+    # ── permisos de más de una persona ──
+
+    async def override(self, modelo, id_usuario: int, codigo: str):
+        """La fila de usuario_area / usuario_seccion de esa persona en ese código, o None."""
+        columna = modelo.area_codigo if modelo is UsuarioArea else modelo.seccion_codigo
+        return (await self.db.execute(
+            select(modelo).where(modelo.id_usuario == id_usuario, columna == codigo)
+        )).scalar_one_or_none()
+
+    async def poner_override(self, modelo, *, id_usuario: int, codigo: str, nivel: str,
+                             vence_en, motivo: Optional[str], otorgado_por: int):
+        """Crea o reemplaza el permiso de más. `creado_en` pasa a ser AHORA también al
+        reemplazar: la fila es el otorgamiento vigente, y quién, cuándo y por qué tienen
+        que ser los de este (el anterior queda en la auditoría)."""
+        fila = await self.override(modelo, id_usuario, codigo)
+        if fila is None:
+            campo = "area_codigo" if modelo is UsuarioArea else "seccion_codigo"
+            fila = modelo(id_usuario=id_usuario, **{campo: codigo})
+            self.db.add(fila)
+        fila.nivel = nivel
+        fila.vence_en = vence_en
+        fila.motivo = motivo
+        fila.otorgado_por = otorgado_por
+        fila.creado_en = ahora_ar()
+        return fila
+
+    async def overrides(self, id_usuario: Optional[int] = None) -> dict[str, list[dict]]:
+        """Los permisos de más, de una persona o de todas, VENCIDOS INCLUIDOS (con
+        `vigente` para que la pantalla los muestre tachados: saber que alguien tuvo algo
+        hasta ayer también sirve). Con el nombre de quien lo dio."""
+        from sqlalchemy.orm import aliased
+
+        ahora = ahora_ar()
+        salida: dict[str, list[dict]] = {"areas": [], "secciones": []}
+        Quien = aliased(Usuario)
+        Otorgo = aliased(Usuario)
+        for clave, modelo, columna in (
+            ("areas", UsuarioArea, UsuarioArea.area_codigo),
+            ("secciones", UsuarioSeccion, UsuarioSeccion.seccion_codigo),
+        ):
+            consulta = (
+                select(modelo.id_usuario, columna.label("codigo"), modelo.nivel, modelo.vence_en,
+                       modelo.motivo, modelo.otorgado_por, modelo.creado_en,
+                       Quien.username, Quien.nombre, Quien.apellido,
+                       Otorgo.nombre.label("otorgo_nombre"), Otorgo.apellido.label("otorgo_apellido"))
+                .join(Quien, Quien.id_usuario == modelo.id_usuario)
+                .outerjoin(Otorgo, Otorgo.id_usuario == modelo.otorgado_por)
+                .order_by(modelo.id_usuario, columna)
+            )
+            if id_usuario is not None:
+                consulta = consulta.where(modelo.id_usuario == id_usuario)
+            for f in (await self.db.execute(consulta)).all():
+                otorgo = " ".join(p for p in (f.otorgo_nombre, f.otorgo_apellido) if p) or None
+                salida[clave].append({
+                    "id_usuario": f.id_usuario,
+                    "username": f.username,
+                    "nombre": f.nombre,
+                    "apellido": f.apellido,
+                    "codigo": f.codigo,
+                    "nivel": f.nivel,
+                    "vence_en": f.vence_en.isoformat() if f.vence_en else None,
+                    "vigente": vigente(f.vence_en, ahora),
+                    "motivo": f.motivo,
+                    "otorgado_por": f.otorgado_por,
+                    "otorgado_por_nombre": otorgo,
+                    "creado_en": f.creado_en.isoformat() if f.creado_en else None,
+                })
+        return salida

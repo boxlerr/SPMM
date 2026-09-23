@@ -87,6 +87,9 @@ ENTIDAD = {
     "notificaciones": "notificación",
     "usuarios": "usuario",
     "auth": "usuario",
+    # RF-24: la administración de permisos. La frase buena la deja el endpoint
+    # (armar_fila, `resumen`); esto es para los intentos que no pasaron.
+    "permisos": "permisos",
 }
 
 # El segundo tramo, cuando dice más que el primero. «/rangos/7/procesos» no es editar
@@ -118,6 +121,10 @@ SUBENTIDAD = {
     # «/piezas/5/stock-minimo» (RF-14): cambiarle el mínimo a una materia prima no es
     # editarla —sus datos son del sistema viejo—, es decidir desde cuándo avisar.
     "stock-minimo": "stock mínimo",
+    # /permisos/roles/..., /permisos/usuarios/..., /permisos/secciones/...
+    "roles": "de un rol",
+    "usuarios": "de una persona",
+    "secciones": "confidencialidad",
 }
 
 # Nombres de campo cuyo VALOR no puede terminar en el registro. Cubre los DTO de hoy
@@ -297,9 +304,16 @@ def se_lee_el_cuerpo(ruta: str, content_type: str, largo: int) -> bool:
 
 
 def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
-               duracion_ms: int, cuerpo=None, parametros: dict | None = None
-               ) -> AuditoriaMovimiento:
-    """La fila lista para guardar. Separada de `registrar` para poder probarla sin base."""
+               duracion_ms: int, cuerpo=None, parametros: dict | None = None,
+               resumen: dict | None = None) -> AuditoriaMovimiento:
+    """La fila lista para guardar. Separada de `registrar` para poder probarla sin base.
+
+    `resumen` es lo que dejó dicho el endpoint (request.state.auditoria), para los
+    cambios en los que el pedido solo no cuenta la historia —los de permisos—:
+      · "frase": lo que pasó, sin el autor («le dio a Matías «Clientes» ...»). Reemplaza
+        la frase armada por método y camino, sólo si el pedido salió bien.
+      · "antes" / "despues": cómo estaba y cómo quedó. Van al detalle.
+    """
     nombre = None
     id_usuario = None
     if usuario:
@@ -310,6 +324,9 @@ def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
     accion, entidad, id_entidad, frase = describir(
         metodo, ruta, estado, nombre, _etiqueta(cuerpo)
     )
+    resumen = resumen or {}
+    if resumen.get("frase") and estado < 400:
+        frase = f"{nombre or 'alguien'} {resumen['frase']}"
 
     detalle = None
     datos = {}
@@ -318,6 +335,9 @@ def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
         datos["parametros"] = _limpiar(parametros, por_lista=por_lista)
     if cuerpo is not None:
         datos["datos"] = _limpiar(cuerpo, por_lista=por_lista)
+    for clave in ("antes", "despues"):
+        if clave in resumen:
+            datos[clave] = _limpiar(resumen[clave], por_lista=por_lista)
     if datos:
         try:
             detalle = json.dumps(datos, ensure_ascii=False, default=str)[:TOPE_DETALLE]

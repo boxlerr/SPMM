@@ -31,7 +31,7 @@ from backend.application.ConsumoMaterialService import ConsumoMaterialService
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.handlers.exception_handlers import registrar_exception_handlers
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, get_usuario_verificado
 from backend.domain.Articulo import Articulo
 from backend.domain.Cliente import Cliente
 from backend.domain.ConsumoMaterial import ConsumoMaterial
@@ -396,6 +396,9 @@ def _app(session, usuario) -> FastAPI:
 
     app.dependency_overrides[ConsumoMaterialAPI.get_db] = _db
     app.dependency_overrides[get_current_user] = lambda: usuario
+    # Anular mira el rol de la BASE (RF-24): acá la base del test no tiene usuarios, así
+    # que el verificado es el mismo dict.
+    app.dependency_overrides[get_usuario_verificado] = lambda: usuario
     return app
 
 

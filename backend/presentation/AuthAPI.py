@@ -20,10 +20,15 @@ from backend.core.security import (
     get_sesiones_permisos,
     get_usuario_actual,
     require_admin,
+    require_seccion,
     resolver_permisos_actuales,
 )
-from backend.core.permisos import ROL_ADMIN
-from backend.infrastructure.PermisosRepository import PermisosRepository
+from backend.application.reglas_de_roles import (
+    admin_permanente,
+    conflicto,
+    cuidar_administradores,
+    validar_rol,
+)
 from backend.commons.ResponseDTO import ResponseDTO
 from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
@@ -262,91 +267,14 @@ async def get_current_user_info(
 
 # ==================== REGLAS DE ROLES (RF-24) ====================
 #
-# Todo lo que se lee acá va con una sesión PROPIA (la de los permisos) y no con la del
-# endpoint: `admin_permanente` y la tabla `rol` pueden no existir todavía (migración
-# sin correr), y en Postgres una consulta que falla deja inservible la transacción en la
-# que corrió. Así una lectura que falla no se lleva puesto el guardado.
-
-def _conflicto(mensaje: str, campo: str = "rol") -> HTTPException:
-    """409: la operación choca con una regla que no se puede saltear (no hay «igual»)."""
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={"message": mensaje, "campo": campo},
-    )
-
-
-async def _admin_permanente(sesiones, id_usuario: int):
-    """True/False, o None si la columna todavía no existe."""
-    async with sesiones() as s:
-        return await PermisosRepository(s).admin_permanente(id_usuario)
-
-
-async def _validar_rol(sesiones, rol: str) -> None:
-    """Que el rol exista en la tabla `rol`.
-
-    `admin` vale siempre, sin mirar la tabla: es admin por regla, no por su fila, y es
-    lo que manda el front de hoy en cada alta.
-
-    Si la tabla todavía no existe (backend nuevo con la migración sin correr), se
-    acepta sólo `admin`, que es lo que se aceptaba antes: asignar otro rol sin las
-    tablas que lo definen dejaría a esa persona sin ningún permiso."""
-    if rol == ROL_ADMIN:
-        return
-    async with sesiones() as s:
-        roles = await PermisosRepository(s).roles()
-    if roles is None:
-        if rol != ROL_ADMIN:
-            raise BusinessException(
-                "Todavía no se pueden asignar roles distintos de admin: falta que se "
-                "actualice la base (migración de permisos)."
-            )
-        return
-    codigos = [c for c, _ in roles]
-    if rol not in codigos:
-        raise BusinessException(f"El rol '{rol}' no existe. Los que hay: {', '.join(codigos)}.")
-
-
-async def _cuidar_administradores(
-    sesiones,
-    *,
-    id_objetivo: int,
-    id_actor: int,
-    rol_actual: str,
-    activo_actual: bool,
-    rol_nuevo: str,
-    activo_nuevo: bool,
-) -> None:
-    """Las reglas duras sobre los administradores. Levanta 409 si alguna se rompe.
-
-    1. Nadie se cambia el rol ni se desactiva a sí mismo (DJ): que lo haga otro admin.
-    2. Un administrador permanente no deja de ser admin ni se desactiva.
-    3. El sistema nunca queda sin ningún admin activo.
-    """
-    cambia_rol = rol_nuevo != rol_actual
-    se_desactiva = bool(activo_actual) and not activo_nuevo
-    if id_objetivo == id_actor:
-        if cambia_rol:
-            raise _conflicto("No podés cambiarte tu propio rol: pedíselo a otro administrador.")
-        if se_desactiva:
-            raise _conflicto("No podés desactivar tu propio usuario.", campo="activo")
-
-    deja_de_ser_admin = rol_actual == ROL_ADMIN and bool(activo_actual) and (
-        rol_nuevo != ROL_ADMIN or not activo_nuevo
-    )
-    if not deja_de_ser_admin:
-        return
-    async with sesiones() as s:
-        repo = PermisosRepository(s)
-        if await repo.admin_permanente(id_objetivo):
-            raise _conflicto(
-                "Es administrador permanente: no se le puede cambiar el rol, ni "
-                "desactivarlo, ni eliminarlo."
-            )
-        if await repo.admins_activos(excepto=id_objetivo) == 0:
-            raise _conflicto(
-                "Es el único administrador activo: el sistema no puede quedar sin nadie "
-                "que lo administre. Hacé admin a otra persona primero."
-            )
+# Viven en application/reglas_de_roles.py porque la administración de permisos
+# (PermisosAPI, que también cambia roles) tiene que aplicar LAS MISMAS: una regla que
+# vale por un camino y no por el otro no es una regla. Los nombres de siempre quedan
+# acá como alias.
+_conflicto = conflicto
+_admin_permanente = admin_permanente
+_validar_rol = validar_rol
+_cuidar_administradores = cuidar_administradores
 
 
 @router.post("/logout", response_model=ResponseDTO)
@@ -389,16 +317,44 @@ def _estado_de_bloqueo(u, ahora=None) -> dict:
     }
 
 
-@router.get("/usuarios", response_model=ResponseDTO)
+# RF-24. VER usuarios es la sección «Usuarios y permisos» de Configuración, que es
+# CONFIDENCIAL: cerrada para todo el que no sea admin salvo que se le otorgue a
+# propósito. CAMBIARLOS (alta, edición, baja, desbloqueo) es sólo del admin: es el
+# «admin del área de sistema» —nivel admin en Configuración, que la API de permisos no
+# le deja dar a nadie más que al rol Administrador—, porque quien puede tocar usuarios
+# se hace admin solo. Por eso esos endpoints siguen con require_admin (que mira la
+# base, no el token).
+_ver_usuarios = require_seccion("configuracion_usuarios")
+
+
+async def _ver_un_usuario(
+    id_usuario: int,
+    usuario: UsuarioActual = Depends(get_usuario_actual),
+    sesiones=Depends(get_sesiones_permisos),
+):
+    """Los datos de UNA persona: los ve quien ve la lista, y cada uno los suyos (los
+    mismos que ya le da /auth/me)."""
+    if usuario.id_usuario == id_usuario:
+        return
+    permisos = await resolver_permisos_actuales(usuario, sesiones)
+    if not permisos.tiene_seccion("configuracion_usuarios"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": "No tenés permiso para ver «Usuarios y permisos» (Configuración).",
+                    "campo": "permiso"},
+        )
+
+
+@router.get("/usuarios", response_model=ResponseDTO, dependencies=[Depends(_ver_usuarios)])
 async def listar_usuarios(
     db=Depends(get_db),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Lista todos los usuarios del sistema
     
     Requiere autenticación (Bearer Token)
-    Solo accesible por administradores
+    RF-24: pide ver la sección «Usuarios y permisos» (el admin la tiene siempre).
     """
     try:
         usuario_repository = UsuarioRepository(db)
@@ -438,7 +394,8 @@ async def listar_usuarios(
         )
 
 
-@router.get("/usuarios/{id_usuario}", response_model=ResponseDTO)
+@router.get("/usuarios/{id_usuario}", response_model=ResponseDTO,
+            dependencies=[Depends(_ver_un_usuario)])
 async def obtener_usuario(
     id_usuario: int,
     db=Depends(get_db),
@@ -448,6 +405,8 @@ async def obtener_usuario(
     Obtiene un usuario por ID
     
     Requiere autenticación (Bearer Token)
+    RF-24: el propio, o cualquiera si se ve la sección «Usuarios y permisos». Hasta el
+    22/09 lo podía pedir cualquiera con sesión, de cualquiera.
     """
     try:
         usuario_repository = UsuarioRepository(db)

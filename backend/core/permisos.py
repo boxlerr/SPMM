@@ -53,36 +53,13 @@ Novedades, Mi cuenta (cambiar la contraseña), Notificaciones: son de todo el qu
 entra y no se cuelgan de ningún permiso. Esconderle a alguien «cambiar mi contraseña»
 sería peor que cualquier cosa que el permiso quiera cuidar.
 
-CÓMO SE CUELGA EN LOS ROUTERS (todavía NO está colgado: es la tarea siguiente)
+CÓMO SE CUELGA EN LOS ROUTERS
 
-Una dependencia por router en main.py (require_area_segun_metodo), no endpoint por
-endpoint. Las pantallas COMPARTEN catálogos —el planificador lee operarios, procesos,
-máquinas y rangos; el alta de OT lee clientes, artículos, sectores y prioridades—, y
-quien puede abrir una pantalla tiene que poder leer todo lo que esa pantalla pide. De
-ahí la regla pragmática: LEER un catálogo lo puede cualquiera con sesión (lectura_libre);
-ESCRIBIR pide el área. Relevado el 22/09 con un grep de fetch/API_URL en frontend/src:
-
-    router                      lo leen                               escribir pide
-    /ordenes*, /ordenes-*       Operaciones, planificador, Recursos   operaciones
-                                (ficha de persona), Auditoría, Planos
-    /ordenes-trabajo-piezas,    alta y ficha de la OT, Materia prima  operaciones
-    /piezas, /consumos-material
-    /planificar, /planificacion Operaciones (planificador); Recursos  operaciones
-    /config/availability        (lee el plan)                         (sección planificador)
-    /procesos /operarios        Operaciones, planificador, alta de    recursos
-    /maquinarias /rangos        OT, Recursos
-    /sectores /prioridades
-    /articulos
-    /clientes                   Clientes, alta de OT                  clientes
-    /planos                     Planos, solapa de Recursos, la OT     planos
-    /incidencias                No conformidades, la OT, Dashboard    no_conformidades
-    /api/dashboard/*            Dashboard (rendimiento-*: la sección  (sólo lectura)
-                                dashboard_rendimiento)
-    /auditoria/*                Auditoría; el historial de UNA OT lo  (sólo lectura)
-                                abre la ficha de la OT
-    /notificaciones             todos                                 todos
-    /auth/*                     como está: el ABM es require_admin
-    /internal/*                 su propio token, sin tocar
+Una dependencia por router en main.py (require_politica), no endpoint por endpoint. QUÉ
+pide cada router está en UN solo lugar: core/permisos_rutas.py (POLITICAS), con el
+relevamiento de qué pantalla lee qué y el porqué de cada línea. La regla de fondo: quien
+puede abrir una pantalla tiene que poder leer todo lo que esa pantalla pide, y leer un
+catálogo lo puede cualquiera con sesión; escribir pide el área (o la solapa).
 """
 from __future__ import annotations
 

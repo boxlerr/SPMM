@@ -19,6 +19,7 @@ from backend.presentation.PlanoAPI import router as plano_router
 from backend.presentation.IncidenciaProcesoAPI import router as incidencia_router
 from backend.presentation.ClienteAPI import router as cliente_router
 from backend.presentation.AuditoriaAPI import router as auditoria_router
+from backend.presentation.PermisosAPI import router as permisos_router
 
 
 from backend.presentation.ConfigAPI import router as config_router
@@ -46,7 +47,8 @@ from datetime import datetime
 
 import logging
 
-from backend.core.security import get_current_user, decode_access_token
+from backend.core.security import get_current_user, decode_access_token, require_politica
+from backend.core.permisos_rutas import POLITICAS
 
 
 from backend.commons.handlers.exception_handlers import registrar_exception_handlers
@@ -160,9 +162,26 @@ async def _guardar_movimiento(request, metodo, ruta, estado, arranque, cuerpo, u
                 duracion_ms=int((time.monotonic() - arranque) * 1000),
                 cuerpo=cuerpo,
                 parametros=dict(request.query_params) or None,
+                resumen=_resumen_del_endpoint(request),
             )
     except Exception as e:
         logging.getLogger("uvicorn").warning(f"Auditoría: no se pudo guardar {metodo} {ruta}: {e}")
+
+
+def _resumen_del_endpoint(request) -> dict | None:
+    """Lo que el endpoint quiso dejar dicho en la auditoría, si dijo algo.
+
+    El middleware sólo ve el pedido: «editó permisos» y el cuerpo. Hay cambios en los
+    que eso no alcanza para contestar «¿quién le dio esto a quién, y qué tenía antes?»
+    —los de permisos (RF-24)—, y el único que sabe el antes es el endpoint. Lo deja en
+    `request.state.auditoria` y acá se levanta: el endpoint y el middleware comparten el
+    scope del pedido, así que ven el mismo `state`.
+    """
+    try:
+        resumen = getattr(request.state, "auditoria", None)
+    except Exception:
+        return None
+    return resumen if isinstance(resumen, dict) else None
 
 
 def _quien_es(request) -> dict | None:
@@ -203,21 +222,32 @@ event_bus.subscribe(WorkOrderStateChanged, notification_handlers.on_work_order_s
 # Guardar event_bus en app.state para acceso global/inyección scopeada
 app.state.event_bus = event_bus
 
-# El resto se protege globalmente
-protected_deps = [Depends(get_current_user)]
+# El resto pide sesión y, además, el permiso de su router (RF-24).
+#
+# QUÉ PIDE CADA ROUTER NO SE DECIDE ACÁ: está en core/permisos_rutas.py (POLITICAS),
+# el único mapa, con el porqué de cada línea. Acá sólo se cuelga: una dependencia por
+# router —no por endpoint, son ~150— que mira el método (leer / escribir) y la ruta
+# contra la base en cada pedido. Un router nuevo sin su política no arranca (KeyError)
+# y tests/test_permisos_rutas.py exige que toda ruta tenga la suya.
+#
+# Hoy todos los usuarios son admin, y el admin pasa todo por regla sin leer ninguna
+# tabla de permisos: el deploy no le cambia nada a nadie.
+def _protegido(router: str) -> list:
+    return [Depends(get_current_user), Depends(require_politica(POLITICAS[router], router))]
 
-app.include_router(articulo_router, tags=["articulos"], dependencies=protected_deps)
-app.include_router(proceso_router, tags=["procesos"], dependencies=protected_deps)
-app.include_router(operario_router, tags=["operarios"], dependencies=protected_deps)
-app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"], dependencies=protected_deps)
-app.include_router(sector_router, tags=["sectores"], dependencies=protected_deps)
-app.include_router(plan_router,tags=["planificacion"], dependencies=protected_deps)
-app.include_router(prioridad_router,tags=["prioridades"], dependencies=protected_deps)
-app.include_router(maquinaria_router,tags=["maquinarias"], dependencies=protected_deps)
-app.include_router(notificacion_router, tags=["notificaciones"], dependencies=protected_deps)
-app.include_router(dashboard_router, tags=["dashboard"], dependencies=protected_deps)
-app.include_router(plano_router, tags=["planos"], dependencies=protected_deps)
-app.include_router(incidencia_router, tags=["incidencias"], dependencies=protected_deps)
+
+app.include_router(articulo_router, tags=["articulos"], dependencies=_protegido("articulos"))
+app.include_router(proceso_router, tags=["procesos"], dependencies=_protegido("procesos"))
+app.include_router(operario_router, tags=["operarios"], dependencies=_protegido("operarios"))
+app.include_router(orden_trabajo_router, tags=["ordenes_trabajo"], dependencies=_protegido("ordenes"))
+app.include_router(sector_router, tags=["sectores"], dependencies=_protegido("sectores"))
+app.include_router(plan_router, tags=["planificacion"], dependencies=_protegido("planificacion"))
+app.include_router(prioridad_router, tags=["prioridades"], dependencies=_protegido("prioridades"))
+app.include_router(maquinaria_router, tags=["maquinarias"], dependencies=_protegido("maquinarias"))
+app.include_router(notificacion_router, tags=["notificaciones"], dependencies=_protegido("notificaciones"))
+app.include_router(dashboard_router, tags=["dashboard"], dependencies=_protegido("dashboard"))
+app.include_router(plano_router, tags=["planos"], dependencies=_protegido("planos"))
+app.include_router(incidencia_router, tags=["incidencias"], dependencies=_protegido("incidencias"))
 # WebSocket DESREGISTRADO (ago 2026). El endpoint /ws/notifications era, de lejos,
 # el mayor costo del servicio: Cloud Run factura CPU + RAM mientras la conexión está
 # abierta, y cada una vivía hasta el timeout de 600 s sin transmitir casi nada. Eran
@@ -233,17 +263,23 @@ app.include_router(incidencia_router, tags=["incidencias"], dependencies=protect
 # (Redis pub/sub, o Supabase Realtime, que ya está pago y no cuesta tiempo de Cloud Run).
 # app.include_router(ws_router, tags=["websocket"])
 
-app.include_router(cliente_router, tags=["clientes"], dependencies=protected_deps)
-app.include_router(config_router, tags=["configuracion"], dependencies=protected_deps)
+app.include_router(cliente_router, tags=["clientes"], dependencies=_protegido("clientes"))
+app.include_router(config_router, tags=["configuracion"], dependencies=_protegido("config"))
 
-app.include_router(pieza_router, tags=["piezas"], dependencies=protected_deps)
-app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=protected_deps)
+app.include_router(pieza_router, tags=["piezas"], dependencies=_protegido("piezas"))
+app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencies=_protegido("ordenes_trabajo_piezas"))
 # RF-15: lo que se consumió de cada material de la OT. Tabla propia de SPMM; el sync no
-# la mira. Cualquier usuario con sesión registra; anular es de quien lo cargó o de un
-# admin (lo decide el servicio, que es el que sabe quién lo cargó).
-app.include_router(consumo_material_router, tags=["consumos_material"], dependencies=protected_deps)
-app.include_router(rango_router, tags=["rangos"], dependencies=protected_deps)
-app.include_router(auditoria_router, tags=["auditoria"], dependencies=protected_deps)
+# la mira. Registrar pide poder editar la OT (la política de consumos_material); anular
+# es además de quien lo cargó o de un admin (lo decide el servicio, que es el que sabe
+# quién lo cargó).
+app.include_router(consumo_material_router, tags=["consumos_material"], dependencies=_protegido("consumos_material"))
+app.include_router(rango_router, tags=["rangos"], dependencies=_protegido("rangos"))
+app.include_router(auditoria_router, tags=["auditoria"], dependencies=_protegido("auditoria"))
+
+# RF-24: la administración de permisos (matriz rol × área y rol × sección, permisos de
+# más por persona, secciones confidenciales, cambio de rol). No va por el mapa: cada
+# endpoint pide lo suyo —leer, la sección «Usuarios y permisos»; cambiar, admin—.
+app.include_router(permisos_router, tags=["permisos"], dependencies=[Depends(get_current_user)])
 
 # Agrega los handler de exepciones globales al contexto de la aplicacion.
 # La lista vive en exception_handlers.py, al lado de los handlers: tenerla acá fue lo

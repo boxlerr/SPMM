@@ -139,7 +139,10 @@ async def procesos(
     q = select(AuditoriaProcesoOT).order_by(
         AuditoriaProcesoOT.creado_en.desc(), AuditoriaProcesoOT.id.desc()
     )
-    if id_orden:
+    # `is not None` y no `if id_orden`: con ?id_orden= alcanza con ver Operaciones
+    # (core/permisos_rutas.py), y un ?id_orden=0 que se tomara como «sin filtro» le
+    # daría a cualquiera con Operaciones el historial de todo el taller.
+    if id_orden is not None:
         q = q.where(AuditoriaProcesoOT.id_orden_trabajo == id_orden)
     if usuario:
         q = q.where(AuditoriaProcesoOT.usuario == usuario)
