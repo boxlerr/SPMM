@@ -63,7 +63,8 @@ export interface EstimacionDelPlan {
 /** Qué entra hasta la fecha «hasta» del rango elegido en el Paso 1. */
 export interface RangoDelPlan {
     hasta: string;
-    dias_habiles: number;
+    /** Días hábiles entre el arranque del plan y `hasta`. `null` si el servidor no lo mandó. */
+    dias_habiles: number | null;
     ots_total: number;
     /** OT que quedan TERMINADAS dentro del rango (lo más urgente primero, como el planificador). */
     ots_entran: number;
@@ -71,6 +72,11 @@ export interface RangoDelPlan {
     carga_entra_min: number;
     /** Números de OT que no llegan a terminarse. */
     no_entran: number[];
+    /**
+     * El día en que arranca de verdad el plan, "YYYY-MM-DD". Lo manda el servidor
+     * nuevo; con uno viejo sale del `inicio` de la respuesta, que es lo mismo.
+     */
+    arranca: string | null;
 }
 
 /** Por qué no hubo cuenta del backend. */
@@ -104,24 +110,29 @@ export function leerEstimacion(crudo: unknown): EstimacionDelPlan | null {
             }))
             .filter(c => c.nombre)
         : [];
+    const inicio = typeof r.inicio === "string" ? r.inicio : "";
     return {
         carga_min: numero(r.carga_min) ?? 0,
         jornadas_minimas: numero(r.jornadas_minimas) ?? 0,
         jornadas_estimadas: numero(r.jornadas_estimadas) ?? 0,
         dias_habiles_minimos: Math.round(minimos),
         dias_habiles_estimados: Math.round(estimados),
-        inicio: typeof r.inicio === "string" ? r.inicio : "",
+        inicio,
         fin_estimado: typeof r.fin_estimado === "string" ? r.fin_estimado : null,
         cuellos,
         sin_asignar_min: numero(r.sin_asignar_min) ?? 0,
         ots_sin_procesos: numero(r.ots_sin_procesos) ?? 0,
         procesos_sin_tiempo: numero(r.procesos_sin_tiempo) ?? 0,
         calculado_en_ms: numero(r.calculado_en_ms) ?? 0,
-        rango: leerRango(r.rango),
+        rango: leerRango(r.rango, inicio),
     };
 }
 
-function leerRango(crudo: unknown): RangoDelPlan | null {
+/** "2026-09-28" o "2026-09-28T07:00:00" → "2026-09-28"; cualquier otra cosa → null. */
+const soloElDia = (v: unknown): string | null =>
+    typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+
+function leerRango(crudo: unknown, inicio: string): RangoDelPlan | null {
     if (!crudo || typeof crudo !== "object") return null;
     const r = crudo as Record<string, unknown>;
     const total = numero(r.ots_total);
@@ -129,12 +140,34 @@ function leerRango(crudo: unknown): RangoDelPlan | null {
     if (total === null || entran === null || typeof r.hasta !== "string") return null;
     return {
         hasta: r.hasta,
-        dias_habiles: numero(r.dias_habiles) ?? 0,
+        dias_habiles: numero(r.dias_habiles),
         ots_total: total,
         ots_entran: entran,
         carga_entra_min: numero(r.carga_entra_min) ?? 0,
         no_entran: Array.isArray(r.no_entran) ? (r.no_entran as unknown[]).filter((n): n is number => typeof n === "number") : [],
+        // `arranca` es opcional: los servidores de antes del 23/9 no lo mandan, y el
+        // `inicio` de la respuesta es el mismo arranque con la hora pegada.
+        arranca: soloElDia(r.arranca) ?? soloElDia(inicio),
     };
+}
+
+/**
+ * ¿El rango elegido termina antes de que arranque el plan?
+ *
+ * Pasa más de lo que parece: un viernes a las 10 elegís «sólo el viernes», pero la
+ * jornada de hoy ya empezó y el plan arranca el lunes. El rango no tiene ni un día
+ * hábil y el cartel decía «Entran 0 de 39 OT hasta el 25/9» con un detalle de «en los
+ * 0 días hábiles del rango»: parecía que el taller no daba abasto, cuando lo que
+ * pasaba es que el rango no existe.
+ */
+export function rangoSinDias(r: RangoDelPlan): boolean {
+    return (r.dias_habiles !== null && r.dias_habiles <= 0) || terminaAntesDeArrancar(r);
+}
+
+/** El «hasta» cae antes del día en que arranca el plan. */
+function terminaAntesDeArrancar(r: RangoDelPlan): boolean {
+    const hasta = soloElDia(r.hasta);
+    return !!(hasta && r.arranca && hasta < r.arranca);
 }
 
 const cabeceras = (): Record<string, string> => {
@@ -148,6 +181,21 @@ const cabeceras = (): Record<string, string> => {
 };
 
 /**
+ * El servidor ya dijo una vez que no tiene esta cuenta: no se le vuelve a preguntar.
+ *
+ * Vive a nivel de módulo, o sea lo que dura la pestaña abierta. Sin esto, con el
+ * servidor viejo cada tilde del Paso 1 mandaba un POST que daba 405 —cuarenta tildes,
+ * cuarenta errores en la consola del servidor— para enterarse cada vez de lo mismo.
+ * Si en el medio se actualiza el servidor, alcanza con recargar la página.
+ */
+let sinRutaEnElServidor: { status?: number } | null = null;
+
+/** `true` si ya se sabe que el servidor no tiene la cuenta: no tiene sentido esperarla. */
+export function servidorSinEstimacion(): boolean {
+    return sinRutaEnElServidor !== null;
+}
+
+/**
  * Pide la cuenta. Nunca tira: cualquier cosa que no sea una respuesta buena vuelve
  * como `{ ok: false }` con el motivo. Si el pedido se cancela (porque cambió la
  * selección), vuelve como "red": el que llamó sabe que lo canceló y lo ignora.
@@ -158,6 +206,7 @@ export async function pedirEstimacion(
     signal: AbortSignal,
     fechaHasta: string | null = null,
 ): Promise<RespuestaEstimacion> {
+    if (sinRutaEnElServidor) return { ok: false, motivo: "sin-ruta", status: sinRutaEnElServidor.status };
     try {
         const res = await fetch(`${API_URL}/planificacion/estimar`, {
             method: "POST",
@@ -169,6 +218,7 @@ export async function pedirEstimacion(
         // viejo, POST /planificacion/estimar cae en PUT /planificacion/{id} y da 405;
         // un 422 es un backend que no entiende este pedido, que para acá es lo mismo).
         if (res.status === 404 || res.status === 405 || res.status === 422) {
+            sinRutaEnElServidor = { status: res.status };
             return { ok: false, motivo: "sin-ruta", status: res.status };
         }
         if (!res.ok) return { ok: false, motivo: "error", status: res.status };
@@ -185,10 +235,16 @@ export async function pedirEstimacion(
 
 const DIAS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 
-/** "2026-10-06T10:00:00" → "mar 6/10". Sin zona: se lee hora local, como toda la base. */
+/**
+ * "2026-10-06T10:00:00" → "mar 6/10". Sin zona: se lee hora local, como toda la base.
+ *
+ * Un día pelado ("2026-09-28") se arma a mano: `new Date("2026-09-28")` lo lee como
+ * medianoche UTC, que en Argentina es el 27 a las 21, y el cartel diría «dom 27/9».
+ */
 export function diaCorto(iso?: string | null): string {
     if (!iso) return "";
-    const f = new Date(iso);
+    const pelado = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    const f = pelado ? new Date(Number(pelado[1]), Number(pelado[2]) - 1, Number(pelado[3])) : new Date(iso);
     if (Number.isNaN(f.getTime())) return "";
     return `${DIAS[f.getDay()]} ${f.getDate()}/${f.getMonth() + 1}`;
 }
@@ -285,13 +341,28 @@ const MOTIVOS: Record<MotivoSinEstimacion, string> = {
     "tiempo": "el servidor tardó demasiado",
 };
 
-export function detalleDelPiso(cadenaMin: number, otMasLarga: string | null, motivo: MotivoSinEstimacion): string {
+/**
+ * El detalle del piso. Con una fecha «hasta» elegida, además dice que qué entra en
+ * el rango se ve recién al planificar: sin la cuenta del servidor el Paso 1 no puede
+ * adelantarlo, y callarse dejaba creer que entraba todo.
+ */
+export function detalleDelPiso(
+    cadenaMin: number,
+    otMasLarga: string | null,
+    motivo: MotivoSinEstimacion,
+    hasta: string | null = null,
+): string {
     const { jornadas: j, dias: d } = pisoDeLaOTMasLarga(cadenaMin);
     return [
         `No se pudo calcular el reparto por persona (${MOTIVOS[motivo]}), así que acá va sólo el piso.`,
         `La OT más larga${otMasLarga ? ` (${otMasLarga})` : ""} son ${numeroEs(cadenaMin / 60)} hs de procesos que van uno atrás del otro: ${jornadas(j)} de ${numeroEs(MIN_LABORAL_DIA / 60, 2)} hs, o sea no menos de ${d} ${d === 1 ? "día" : "días"} aunque sobre gente.`,
         "Con todo lo tildado seguramente tarda más: depende de quién puede hacer cada paso, y eso esta cuenta no lo mira.",
-    ].join(" ");
+        hasta
+            ? `Qué entra hasta el ${fechaCorta(hasta)} lo vas a ver al planificar: ${motivo === "sin-ruta"
+                ? "el servidor todavía no tiene esta cuenta"
+                : "sin la cuenta del servidor no se puede adelantar"}.`
+            : "",
+    ].filter(Boolean).join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -312,22 +383,64 @@ const fechaCorta = (iso: string) => {
     return y && m && d ? `${d}/${m}` : iso;
 };
 
-/** «Entra todo hasta el 30/9» o «Entran 26 de 39 OT hasta el 30/9». */
+/**
+ * «Entra todo hasta el 30/9», «Entran 26 de 39 OT hasta el 30/9» o, si el rango
+ * termina antes de que arranque el plan, «El rango no tiene días hábiles: el plan
+ * arranca el lun 28/9».
+ */
 export function textoDelRango(r: RangoDelPlan): string {
+    if (rangoSinDias(r)) {
+        const arranca = terminaAntesDeArrancar(r) ? diaCorto(r.arranca) : "";
+        return arranca
+            ? `El rango no tiene días hábiles: el plan arranca el ${arranca}`
+            : "El rango no tiene días hábiles";
+    }
     if (r.ots_total > 0 && r.ots_entran >= r.ots_total) return `Entra todo hasta el ${fechaCorta(r.hasta)}`;
     return `Entran ${r.ots_entran} de ${r.ots_total} OT hasta el ${fechaCorta(r.hasta)}`;
 }
 
+/**
+ * El detalle del cartel del rango (va en el `title`).
+ *
+ * Es una ESTIMACIÓN y lo dice. Hasta el 23/9 prometía «esas quedan afuera del plan y en
+ * la vista previa podés forzarlas», y no es así: la lista sale de una cuenta rápida,
+ * el planificador puede dejar una OT a medias —los primeros pasos adentro del rango y
+ * el resto afuera— y forzar UNA OT en la vista previa le saca la fecha «hasta» a TODO
+ * el plan (el planificador recalcula sin tope), no sólo a esa.
+ */
 export function detalleDelRango(r: RangoDelPlan, cargaMin: number): string {
+    if (rangoSinDias(r)) {
+        const hasta = diaCorto(soloElDia(r.hasta)) || fechaCorta(r.hasta);
+        const arranca = diaCorto(r.arranca);
+        return [
+            terminaAntesDeArrancar(r) || !arranca
+                ? `El rango termina el ${hasta}${arranca ? ` y el plan recién arranca el ${arranca}` : " y el plan arranca después"}: el plan nunca empieza en el pasado, y si la jornada de hoy ya empezó arranca el próximo día hábil.`
+                // Arranca adentro del rango y aun así no hay días: ninguno de esos días
+                // lo trabaja nadie del taller.
+                : `Entre el ${arranca} y el ${hasta} no trabaja nadie del taller.`,
+            r.ots_total === 1 ? "Así no entra la OT tildada."
+                : r.ots_total > 1 ? `Así no entra ninguna de las ${r.ots_total} OT tildadas.` : "",
+            arranca && terminaAntesDeArrancar(r)
+                ? `Elegí un «hasta» del ${arranca} en adelante, o sacá el rango.`
+                : "Elegí un «hasta» más adelante, o sacá el rango.",
+        ].filter(Boolean).join(" ");
+    }
+    const enElRango = r.dias_habiles !== null
+        ? `en los ${r.dias_habiles} ${r.dias_habiles === 1 ? "día hábil" : "días hábiles"} del rango`
+        : "en el rango";
     const partes = [
-        `En los ${r.dias_habiles} días hábiles del rango quedan terminadas ${r.ots_entran} de las ${r.ots_total} OT tildadas, empezando por las más urgentes (como las ordena el planificador).`,
+        `Según una cuenta rápida, ${enElRango} quedarían terminadas ${r.ots_entran} de ${r.ots_total === 1 ? "1 OT tildada" : `las ${r.ots_total} OT tildadas`}, empezando por las más urgentes (como las ordena el planificador).`,
     ];
     if (cargaMin > 0) {
-        partes.push(`Entra el ${Math.round((100 * r.carga_entra_min) / cargaMin)}% del trabajo (${numeroEs(r.carga_entra_min / 60)} de ${numeroEs(cargaMin / 60)} hs), contando lo que queda a medias.`);
+        partes.push(`Entraría el ${Math.round((100 * r.carga_entra_min) / cargaMin)}% del trabajo (${numeroEs(r.carga_entra_min / 60)} de ${numeroEs(cargaMin / 60)} hs), contando lo que queda a medias.`);
     }
     if (r.no_entran.length > 0) {
         const muestra = r.no_entran.slice(0, 12).map(n => `#${n}`).join(", ");
-        partes.push(`No llegan: ${muestra}${r.no_entran.length > 12 ? ` y ${r.no_entran.length - 12} más` : ""}. Al planificar, esas quedan afuera del plan y en la vista previa podés forzarlas o sacarlas.`);
+        partes.push(`No llegarían: ${muestra}${r.no_entran.length > 12 ? ` y ${r.no_entran.length - 12} más` : ""}.`);
+        partes.push("Es una estimación: el reparto de verdad lo hace el planificador, que puede dejar una OT a medias —los primeros pasos adentro del rango y el resto afuera—.");
+        partes.push("Ojo en la vista previa: forzar aunque sea una OT recalcula TODO el plan sin la fecha «hasta», así que las demás también pueden pasarse del rango.");
+    } else {
+        partes.push("Es una estimación: el reparto de verdad lo hace el planificador.");
     }
     return partes.join(" ");
 }

@@ -3135,6 +3135,12 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                 <div className="text-xs text-amber-700/90 mt-1">
                                                     Decidí qué hacer con cada una. Por defecto se <strong>descartan</strong> (quedan disponibles para la próxima planificación).
                                                     Si la <strong>forzás</strong>, el motor la incluirá aunque eso amplíe el rango o sobrecargue al recurso humano.
+                                                    {/* Forzar no es por OT: el planificador recalcula TODO el plan
+                                                        sin la fecha «hasta» apenas hay una forzada. Callarlo dejaba
+                                                        creer que las demás seguían atadas al rango. */}
+                                                    {planningRange.fecha_hasta && (
+                                                        <> Ojo: forzar aunque sea una recalcula <strong>todo el plan sin la fecha tope</strong>, así que las demás también pueden pasarse del {formatDate(planningRange.fecha_hasta)}.</>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -3201,7 +3207,9 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                                                     className={forzar ? "bg-amber-600 hover:bg-amber-700 text-white h-8" : "border-amber-400 text-amber-800 hover:bg-amber-100 h-8"}
                                                                     onClick={() => { if (!forzar) toggleForzar(oid); }}
                                                                     disabled={isCalculating || isConfirming}
-                                                                    title="Incluir esta OT aunque amplíe el rango. Se recalculará automáticamente."
+                                                                    title={planningRange.fecha_hasta
+                                                                        ? `Incluir esta OT aunque amplíe el rango. Se recalcula todo el plan sin la fecha tope: las demás OT también pueden pasarse del ${formatDate(planningRange.fecha_hasta)}.`
+                                                                        : "Incluir esta OT aunque amplíe el plan. Se recalculará automáticamente."}
                                                                 >
                                                                     Forzar
                                                                 </Button>

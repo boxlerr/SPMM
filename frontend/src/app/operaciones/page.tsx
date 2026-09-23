@@ -65,6 +65,61 @@ const getAuthHeaders = (): HeadersInit => {
 /** Valor especial del desplegable de planificaciones: no es un lote, es una acción. */
 const LIMPIAR_VIEJAS = "__limpiar_viejas__";
 
+/** El primer y el último día que toca un plan, como medianoche local en milisegundos. */
+type PeriodoDelPlan = { primerDia: number; ultimoDia: number };
+
+const medianoche = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/**
+ * Del primer día del plan al último, con las fechas que mandó el backend para cada
+ * fila. `null` si el plan no tiene filas.
+ */
+function periodoDelPlan(filas: any[]): PeriodoDelPlan | null {
+  const puntas = filas.flatMap((r: any) => {
+    const ini = inicioDeLaFila(r) || baseDelPlan(r);
+    return [medianoche(ini), medianoche(finDeLaFila(r) || ini)];
+  });
+  if (puntas.length === 0) return null;
+  return { primerDia: Math.min(...puntas), ultimoDia: Math.max(...puntas) };
+}
+
+/**
+ * Lo que cada persona YA tenía planificado en los días de un plan, en minutos por id
+ * de operario. Es la «carga previa» del panel de carga de la vista previa.
+ *
+ * Del primer día del plan al último, y no por semanas: la vista previa compara la
+ * carga de cada persona contra lo que trabaja en ESE período (sus días hábiles × su
+ * jornada). Antes se contaban las semanas enteras que tocaba el plan y se comparaba
+ * contra 44 h fijas; con un plan del jueves 24/9 al martes 6/10 eso metía en la
+ * cuenta lo del lunes 21 y el miércoles 23, que el plan ni pisa.
+ *
+ * Está afuera y no adentro del cálculo del plan porque la necesitan dos caminos:
+ * planificar y retomar un borrador. Hasta el 23/9 sólo la hacía el primero, así que un
+ * borrador abierto mostraba la carga previa del ÚLTIMO plan calculado —otro período—,
+ * o ninguna con la página recién cargada, bajo una bajada que decía «lo que ya tenía
+ * esos días».
+ */
+function cargaPreviaEnElPeriodo(tareas: GanttTask[], periodo: PeriodoDelPlan | null): Record<number, number> {
+  const cargas: Record<number, number> = {};
+  if (!periodo) return cargas;
+  // Las tareas del Gantt (`tasks`) traen el día en que caen: alcanza con compararlo.
+  tareas.forEach(tarea => {
+    const opId = parseInt(tarea.resourceId);
+    if (isNaN(opId)) return;
+    // `startDate` es "YYYY-MM-DD" pelado y se arma LOCAL: `new Date("2026-09-24")` es
+    // medianoche UTC, o sea el 23 a las 21 en Argentina, y cada tarea caía un día
+    // antes — se perdía lo del primer día del plan y se colaba lo del día siguiente
+    // al último.
+    const [a, m, d] = tarea.startDate.slice(0, 10).split("-").map(Number);
+    if (!a || !m || !d) return;
+    const dia = new Date(a, m - 1, d).getTime();
+    if (dia >= periodo.primerDia && dia <= periodo.ultimoDia) {
+      cargas[opId] = (cargas[opId] || 0) + tarea.duration * 60; // `duration` va en horas
+    }
+  });
+  return cargas;
+}
+
 /**
  * Lee `?tab=materia_prima&pieza=ID` —el enlace del aviso de stock bajo en la
  * campanita (RF-14)— y abre la solapa parada en esa pieza.
@@ -239,7 +294,14 @@ export default function OperacionesPage() {
   const [excedentesResults, setExcedentesResults] = useState<any[]>([])
   // Qué traba el plan y cómo se destraba: lo calcula el backend en cada vista previa.
   const [diagnosticosPlan, setDiagnosticosPlan] = useState<any[]>([])
-  const [operatorLoads, setOperatorLoads] = useState<Record<number, number>>({})
+  // La carga previa de cada persona (lo que ya tenía en los días del plan que se está
+  // mirando). Se guarda el PERÍODO y la carga se deriva de `tasks`: así sale bien
+  // también si el Gantt termina de cargar después de abrir un borrador.
+  const [periodoCargaPrevia, setPeriodoCargaPrevia] = useState<PeriodoDelPlan | null>(null)
+  const operatorLoads = useMemo(
+    () => cargaPreviaEnElPeriodo(tasks, periodoCargaPrevia),
+    [tasks, periodoCargaPrevia]
+  )
   // Overlay de progreso del cálculo. `listo` marca que la respuesta llegó: la
   // barra se completa y el overlay se baja cuando termina de armarse la vista previa.
   const [calculando, setCalculando] = useState<{ activo: boolean; ots: number; listo: boolean; modo?: "calcular" | "guardar" }>(
@@ -1398,36 +1460,9 @@ export default function OperacionesPage() {
         guardadoEn: new Date().toISOString(),
       });
 
-      // Lo que cada uno YA tenía planificado en los días de este plan nuevo.
-      //
-      // Del primer día del plan al último, y no por semanas: la vista previa compara
-      // la carga de cada persona contra lo que trabaja en ESE período (sus días
-      // hábiles × su jornada). Antes se contaban las semanas enteras que tocaba el
-      // plan y se comparaba contra 44 h fijas; con un plan del jueves 24/9 al martes
-      // 6/10 eso metía en la cuenta lo del lunes 21 y el miércoles 23, que el plan
-      // ni pisa.
-      const diaDe = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const puntasDelPlan = enrichedResults.flatMap((r: any) => {
-        const ini = inicioDeLaFila(r) || baseDelPlan(r);
-        return [diaDe(ini), diaDe(finDeLaFila(r) || ini)];
-      });
-      const primerDia = puntasDelPlan.length > 0 ? Math.min(...puntasDelPlan) : null;
-      const ultimoDia = puntasDelPlan.length > 0 ? Math.max(...puntasDelPlan) : null;
-
-      // Better approach using `tasks` (GanttTasks) which have absolute dates
-      const calculatedLoads: Record<number, number> = {};
-
-      tasks.forEach(task => {
-        const opId = parseInt(task.resourceId);
-        if (isNaN(opId)) return;
-
-        const dia = diaDe(new Date(task.startDate));
-        if (primerDia !== null && ultimoDia !== null && dia >= primerDia && dia <= ultimoDia) {
-          calculatedLoads[opId] = (calculatedLoads[opId] || 0) + (task.duration * 60); // Duration in minutes
-        }
-      });
-
-      setOperatorLoads(calculatedLoads);
+      // Lo que cada uno YA tenía planificado en los días de este plan nuevo (ver
+      // `cargaPreviaEnElPeriodo`).
+      setPeriodoCargaPrevia(periodoDelPlan(enrichedResults));
 
       // Close selection modal and open preview
       setIsSelectionModalOpen(false);
@@ -1699,6 +1734,9 @@ export default function OperacionesPage() {
    *  retoques hechos a mano, así que se restauran los dos. */
   const handleAbrirBorrador = (borrador: BorradorPlan) => {
     setPreviewResults(borrador.resultados || []);
+    // La carga previa de cada persona, en los días de ESTE borrador: sin esto quedaba
+    // la del último plan calculado (otro período) o ninguna con la página recién cargada.
+    setPeriodoCargaPrevia(periodoDelPlan(borrador.resultados || []));
     setExcedentesResults(borrador.excedentes || []);
     setDiagnosticosPlan(borrador.diagnosticos || []);
     setSelectedOrderIds(borrador.ordenesIds || []);

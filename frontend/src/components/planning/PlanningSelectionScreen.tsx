@@ -30,9 +30,11 @@ import type { BorradorPlan } from "@/lib/borradorPlan"
 import {
     pedirEstimacion, textoDeDias, detalleDeDias, textoDelPiso, detalleDelPiso,
     textoDeJornadas, detalleDeJornadas, textoDelRango, detalleDelRango, diaCorto,
+    rangoSinDias, servidorSinEstimacion,
     type EstimacionDelPlan, type MotivoSinEstimacion,
 } from "@/lib/estimarPlan"
 import { numeroEs } from "@/lib/diasHabiles"
+import { inicioDelPlan } from "@/lib/plan-fechas"
 
 export interface PlanningRange {
     fecha_desde?: string  // "YYYY-MM-DD"
@@ -141,6 +143,17 @@ export function PlanningSelectionScreen({
             })
             .catch(() => { /* silencioso: si falla, solo no se pintan en rojo */ })
     }, [isOpen])
+
+    /**
+     * El primer día que se puede elegir en el calendario: el día en que arranca de
+     * verdad el plan, con la misma regla que el backend (`inicioDelPlan`): si la
+     * jornada de hoy ya empezó (de las 07:00 en adelante), el plan es para el próximo
+     * día hábil. Antes se podía elegir hoy a cualquier hora, y un viernes a las 10
+     * «sólo el viernes» era un rango sin ningún día: el plan arrancaba el lunes.
+     * Se calcula en cada render a propósito: con la pantalla abierta a las 06:59, a las
+     * 07:00 hoy ya no se puede elegir.
+     */
+    const arranqueReal = inicioDelPlan(new Date(), blockedDates.map(d => format(d, "yyyy-MM-dd")))
 
     // Derived lists
     const uniqueClients = Array.from(new Set(unplannedOrders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort()
@@ -366,6 +379,13 @@ export function PlanningSelectionScreen({
             setCalculandoDias(false)
             return
         }
+        // El servidor ya dijo que no tiene la cuenta: el piso va directo, sin «calculando…»
+        // ni un pedido que se sabe que va a dar 405 (ver `servidorSinEstimacion`).
+        if (servidorSinEstimacion()) {
+            setDiasDelPlan({ tipo: "piso", motivo: "sin-ruta" })
+            setCalculandoDias(false)
+            return
+        }
         setCalculandoDias(true)
         const control = new AbortController()
         let porTiempo = false
@@ -400,7 +420,7 @@ export function PlanningSelectionScreen({
         if (diasDelPlan?.tipo === "piso" && estimacion.cadenaMin > 0) {
             return {
                 texto: textoDelPiso(estimacion.cadenaMin),
-                detalle: detalleDelPiso(estimacion.cadenaMin, estimacion.otMasLarga, diasDelPlan.motivo),
+                detalle: detalleDelPiso(estimacion.cadenaMin, estimacion.otMasLarga, diasDelPlan.motivo, fechaHastaParaEstimar),
                 esPiso: true,
             }
         }
@@ -511,15 +531,17 @@ export function PlanningSelectionScreen({
                                         )}
                                     </Badge>
                                 )}
-                                {/* Con una fecha «hasta» elegida: cuánto de lo tildado entra.
-                                    El planificador deja afuera lo que no entra; esto lo
-                                    avisa antes de apretar Planificar. */}
+                                {/* Con una fecha «hasta» elegida: cuánto de lo tildado entra,
+                                    según una cuenta rápida — el reparto de verdad lo hace el
+                                    planificador. Si el rango termina antes de que arranque el
+                                    plan, dice eso y no «Entran 0 de N». */}
                                 {fechaHastaParaEstimar && diasDelPlan?.tipo === "ok" && diasDelPlan.datos.rango && (
                                     <Badge
                                         variant="secondary"
                                         className={cn(
                                             "gap-1.5 px-2.5 py-0.5 text-xs font-medium cursor-help transition-opacity",
-                                            diasDelPlan.datos.rango.ots_entran >= diasDelPlan.datos.rango.ots_total
+                                            !rangoSinDias(diasDelPlan.datos.rango)
+                                                && diasDelPlan.datos.rango.ots_entran >= diasDelPlan.datos.rango.ots_total
                                                 ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                                 : "bg-amber-50 text-amber-800 border-amber-200",
                                             calculandoDias && "opacity-60"
@@ -631,6 +653,10 @@ export function PlanningSelectionScreen({
                                 <div className="p-3 border-b text-xs text-slate-600 bg-slate-50">
                                     Seleccione el rango de días en los que se distribuirán las órdenes.
                                     Los días <span className="text-red-600 font-medium">no laborables</span> (configurados en Disponibilidad) se omitirán automáticamente.
+                                    <span className="block mt-1">
+                                        Lo más temprano que puede arrancar el plan es el <span className="font-medium text-slate-700">{diaCorto(format(arranqueReal, "yyyy-MM-dd"))}</span>:
+                                        si la jornada de hoy ya empezó, arranca el próximo día hábil.
+                                    </span>
                                 </div>
                                 <CalendarUI
                                     mode="range"
@@ -638,7 +664,9 @@ export function PlanningSelectionScreen({
                                     onSelect={setDateRange}
                                     numberOfMonths={2}
                                     locale={es}
-                                    disabled={{ before: new Date() }}
+                                    // Los días antes de que arranque el plan no se pueden elegir:
+                                    // un rango que termina ahí no tiene ni un día hábil.
+                                    disabled={{ before: arranqueReal }}
                                     modifiers={{ blocked: blockedDates }}
                                     modifiersStyles={{
                                         blocked: {
