@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from backend.infrastructure.db import SessionLocal
-from backend.infrastructure.UsuarioRepository import UsuarioRepository
+from backend.infrastructure.UsuarioRepository import SinColumnasDeBloqueo, UsuarioRepository
 from backend.application.AuthService import AuthService
 from backend.dto.UsuarioRequestDTO import (
     LoginRequestDTO, 
@@ -330,8 +330,29 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 # ==================== ENDPOINTS CRUD DE USUARIOS ====================
 
-def _estado_de_bloqueo(u, ahora=None) -> dict:
+async def _bloqueos(sesiones, id_usuario=None):
+    """RF-26: {id_usuario: (intentos_fallidos, bloqueado_hasta)}, o None si no se pueden
+    leer (la base todavía no tiene las columnas). Con una sesión PROPIA y antes que nada,
+    como la pantalla de inicio: si las columnas faltan, esa consulta no se lleva puesta
+    la de la lista."""
+    try:
+        async with sesiones() as s:
+            return await UsuarioRepository(s).bloqueos_de_usuarios(id_usuario)
+    except SinColumnasDeBloqueo:
+        logger.warning("La lista de usuarios va sin el bloqueo (RF-26): falta la migración "
+                       "2026-09-22_bloqueo_por_intentos_fallidos.")
+        return None
+    except Exception as e:
+        logger.warning(f"No se pudo leer el bloqueo de las cuentas (RF-26): {e}")
+        return None
+
+
+def _estado_de_bloqueo(bloqueo, ahora=None) -> dict:
     """RF-26: lo que la tabla de usuarios necesita para mostrar el bloqueo.
+
+    `bloqueo` es (intentos_fallidos, bloqueado_hasta) como lo lee _bloqueos, o None si no
+    se sabe: entonces las claves NO vienen y la pantalla muestra la fila como siempre
+    (lo mismo que hace con el backend de antes de RF-26).
 
     `bloqueado` lo decide el servidor, con SU reloj: si lo calculara el navegador
     comparando `bloqueado_hasta` con su hora, una PC con la hora corrida mostraría
@@ -339,15 +360,17 @@ def _estado_de_bloqueo(u, ahora=None) -> dict:
     informa como no bloqueado aunque la fila todavía no se haya limpiado: se limpia
     sola en el próximo intento de entrar.
     """
+    if bloqueo is None:
+        return {}
+    intentos, hasta = bloqueo
     ahora = ahora or ahora_ar()
-    hasta = u.bloqueado_hasta
     bloqueado = hasta is not None and hasta > ahora
     # Un bloqueo que ya venció arranca de cero en el próximo intento (AuthService).
     vencido = hasta is not None and not bloqueado
     return {
         "bloqueado": bloqueado,
         "bloqueado_hasta": hasta.isoformat() if bloqueado else None,
-        "intentos_fallidos": 0 if vencido else (u.intentos_fallidos or 0),
+        "intentos_fallidos": 0 if vencido else (intentos or 0),
     }
 
 
@@ -402,6 +425,7 @@ async def listar_usuarios(
     try:
         permanentes = await admins_permanentes(sesiones)
         pantallas = await _pantallas_de_inicio_de_usuarios(sesiones)
+        bloqueos = await _bloqueos(sesiones)
         usuario_repository = UsuarioRepository(db)
         
         # Obtener todos los usuarios
@@ -420,7 +444,9 @@ async def listar_usuarios(
                 "activo": u.activo,
                 "fecha_creacion": u.fecha_creacion.isoformat() if u.fecha_creacion else None,
                 "ultimo_login": u.ultimo_login.isoformat() if u.ultimo_login else None,
-                **_estado_de_bloqueo(u, ahora),
+                **_estado_de_bloqueo(
+                    None if bloqueos is None else bloqueos.get(u.id_usuario, (0, None)), ahora
+                ),
                 "admin_permanente": None if permanentes is None else u.id_usuario in permanentes,
                 # RF-28: la suya (None = como su rol). La clave NO viene si no se pudo
                 # leer (migración sin correr): así la pantalla sabe que no la puede
@@ -451,7 +477,8 @@ async def listar_usuarios(
 async def obtener_usuario(
     id_usuario: int,
     db=Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    sesiones=Depends(get_sesiones_permisos),
 ):
     """
     Obtiene un usuario por ID
@@ -461,6 +488,7 @@ async def obtener_usuario(
     22/09 lo podía pedir cualquiera con sesión, de cualquiera.
     """
     try:
+        bloqueos = await _bloqueos(sesiones, id_usuario)
         usuario_repository = UsuarioRepository(db)
         usuario = await usuario_repository.obtener_por_id(id_usuario)
         
@@ -478,7 +506,9 @@ async def obtener_usuario(
             "fecha_creacion": usuario.fecha_creacion.isoformat() if usuario.fecha_creacion else None,
             "fecha_actualizacion": usuario.fecha_actualizacion.isoformat() if usuario.fecha_actualizacion else None,
             "ultimo_login": usuario.ultimo_login.isoformat() if usuario.ultimo_login else None,
-            **_estado_de_bloqueo(usuario),
+            **_estado_de_bloqueo(
+                None if bloqueos is None else bloqueos.get(usuario.id_usuario, (0, None))
+            ),
         }
         
         return ResponseDTO(
@@ -843,6 +873,12 @@ async def desbloquear_usuario(
         )
     except NotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except SinColumnasDeBloqueo:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Todavía no se puede desbloquear: falta que se actualice la base "
+                   "(migración del bloqueo por intentos). Mientras tanto no se bloquea a nadie.",
+        )
     except Exception as e:
         logger.error(f"Error al desbloquear usuario {id_usuario}: {str(e)}")
         raise HTTPException(

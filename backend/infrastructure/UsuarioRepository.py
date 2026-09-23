@@ -4,10 +4,28 @@ Maneja todas las operaciones de base de datos para usuarios usando SQLAlchemy
 """
 from typing import Optional, List
 from datetime import datetime
-from sqlalchemy import select, update, delete, and_, case, func, or_
+from sqlalchemy import select, update, delete, func, or_
 from backend.domain.Usuario import Usuario
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
+
+
+class SinColumnasDeBloqueo(Exception):
+    """La base todavía no tiene usuario.intentos_fallidos / bloqueado_hasta (RF-26):
+    la migración 2026-09-22_bloqueo_por_intentos_fallidos no corrió."""
+
+
+def falta_columna(e: Exception) -> bool:
+    """¿El error es «esa columna no existe»? Postgres lo dice con el código 42703
+    (undefined_column; asyncpg lo deja en `sqlstate`); SQLite, con «no such column».
+
+    Se mira el código y no el texto en Postgres: el mensaje sale en el idioma del
+    servidor («no existe la columna» en una base en castellano)."""
+    orig = getattr(e, "orig", None)
+    for candidato in (orig, getattr(orig, "__cause__", None), e):
+        if candidato is not None and getattr(candidato, "sqlstate", None) == "42703":
+            return True
+    return "no such column" in str(orig if orig is not None else e).lower()
 
 class UsuarioRepository:
     """Repositorio para gestionar usuarios en la base de datos"""
@@ -140,46 +158,147 @@ class UsuarioRepository:
     
     # ───────────── RF-26: bloqueo por intentos fallidos ─────────────
     #
-    # Las dos escrituras van por UPDATE directo y no tocando el objeto del ORM: la
-    # cuenta tiene que ser atómica. Dos intentos malos que llegan juntos (dos pestañas,
-    # un script) leerían los dos «3» y escribirían los dos «4»; con el `+ 1` adentro
-    # del UPDATE cada uno suma el suyo. `synchronize_session=False` porque el que llama
-    # usa lo que devuelve el RETURNING, no el objeto que tiene en la sesión.
+    # Todo va por UPDATE directo y no tocando el objeto del ORM: la cuenta tiene que ser
+    # atómica. Y cada paso es UNA sentencia condicionada que se confirma al toque, porque
+    # entre un paso y el siguiente puede haber otros intentos de la misma cuenta a mitad
+    # de camino (dos pestañas, un script que manda veinte juntos).
+    #
+    # EL INTENTO SE RESERVA ANTES DE MIRAR LA CONTRASEÑA (AuthService.login). Hasta el
+    # 23/09 se leía la fila, se comparaba la clave y recién después se sumaba el error: N
+    # pedidos que llegaban juntos leían todos «sin bloqueo», comparaban todos su clave y
+    # una buena al final de la ráfaga entraba aunque el bloqueo ya estuviera grabado. Con
+    # la reserva, como mucho `maximo` contraseñas se comparan entre un ingreso bueno y el
+    # siguiente, lleguen como lleguen.
+    #
+    # `synchronize_session=False` porque el que llama usa lo que devuelve el RETURNING,
+    # no el objeto que tiene en la sesión. Las dos columnas están `deferred` en el modelo
+    # (domain/Usuario.py): si la migración no corrió, la primera lectura levanta
+    # SinColumnasDeBloqueo y el login sigue sin RF-26 en vez de no dejar entrar a nadie.
 
-    async def registrar_intento_fallido(
-        self, id_usuario: int, maximo: int, bloquear_hasta: datetime, ahora: datetime
-    ) -> tuple[int, Optional[datetime]]:
-        """Suma una contraseña mala y, si con ésta llega a `maximo`, bloquea hasta
-        `bloquear_hasta`. Un solo UPDATE. Devuelve (intentos, bloqueado_hasta).
+    @staticmethod
+    def _sin_bloqueo_vigente(ahora: datetime):
+        return or_(Usuario.bloqueado_hasta.is_(None), Usuario.bloqueado_hasta <= ahora)
 
-        Si ya hay un bloqueo vigente, lo deja como está: dos intentos que llegan juntos
-        con la cuenta en 4 ven 5 y 6, y el segundo no puede correr el plazo que ya le
-        dijo al primero."""
+    async def _escribir(self, sentencia, que: str, id_usuario: int):
+        """Corre `sentencia`, confirma y devuelve la primera fila del RETURNING (o None)."""
         try:
-            siguiente = func.coalesce(Usuario.intentos_fallidos, 0) + 1
-            sin_bloqueo_vigente = or_(
-                Usuario.bloqueado_hasta.is_(None), Usuario.bloqueado_hasta <= ahora
-            )
-            resultado = await self.db.execute(
-                update(Usuario)
-                .where(Usuario.id_usuario == id_usuario)
-                .values(
-                    intentos_fallidos=siguiente,
-                    bloqueado_hasta=case(
-                        (and_(siguiente >= maximo, sin_bloqueo_vigente), bloquear_hasta),
-                        else_=Usuario.bloqueado_hasta,
-                    ),
-                )
-                .returning(Usuario.intentos_fallidos, Usuario.bloqueado_hasta)
-                .execution_options(synchronize_session=False)
-            )
-            intentos, hasta = resultado.one()
+            fila = (await self.db.execute(sentencia)).first()
             await self.db.commit()
-            return int(intentos or 0), hasta
+            return fila
         except Exception as e:
             await self.db.rollback()
-            logger.error(f"Error al registrar intento fallido del usuario {id_usuario}: {str(e)}")
-            raise InfrastructureException("Error al registrar el intento de ingreso") from e
+            logger.error(f"Error al {que} del usuario {id_usuario}: {str(e)}")
+            raise InfrastructureException(f"Error al {que}") from e
+
+    async def estado_de_bloqueo(self, id_usuario: int) -> tuple[int, Optional[datetime]]:
+        """(intentos_fallidos, bloqueado_hasta) como están AHORA en la base (no lo que
+        tenga el objeto de la sesión, que se leyó antes). Una persona que no existe da
+        (0, None).
+
+        Levanta SinColumnasDeBloqueo si las columnas todavía no existen (con rollback: en
+        Postgres una consulta fallida deja la transacción inservible)."""
+        try:
+            fila = (await self.db.execute(
+                select(Usuario.intentos_fallidos, Usuario.bloqueado_hasta)
+                .where(Usuario.id_usuario == id_usuario)
+            )).first()
+        except Exception as e:
+            await self.db.rollback()
+            if falta_columna(e):
+                logger.warning(
+                    "RF-26: la base no tiene usuario.intentos_fallidos/bloqueado_hasta (%s). "
+                    "¿Falta la migración 2026-09-22_bloqueo_por_intentos_fallidos?", e,
+                )
+                raise SinColumnasDeBloqueo() from e
+            logger.error(f"Error al leer el bloqueo del usuario {id_usuario}: {str(e)}")
+            raise InfrastructureException("Error al leer el estado de la cuenta") from e
+        if fila is None:
+            return 0, None
+        return int(fila[0] or 0), fila[1]
+
+    async def bloqueos_de_usuarios(self, id_usuario: Optional[int] = None) -> dict[int, tuple[int, Optional[datetime]]]:
+        """{id_usuario: (intentos_fallidos, bloqueado_hasta)} de todos (o de uno). Lo lee
+        la lista de usuarios. Mismo cuidado que estado_de_bloqueo: levanta
+        SinColumnasDeBloqueo si la migración no corrió."""
+        consulta = select(Usuario.id_usuario, Usuario.intentos_fallidos, Usuario.bloqueado_hasta)
+        if id_usuario is not None:
+            consulta = consulta.where(Usuario.id_usuario == id_usuario)
+        try:
+            filas = (await self.db.execute(consulta)).all()
+        except Exception as e:
+            await self.db.rollback()
+            if falta_columna(e):
+                raise SinColumnasDeBloqueo() from e
+            raise InfrastructureException("Error al leer el estado de las cuentas") from e
+        return {int(f[0]): (int(f[1] or 0), f[2]) for f in filas}
+
+    async def limpiar_bloqueo_vencido(self, id_usuario: int, ahora: datetime) -> None:
+        """Un bloqueo que ya venció: la cuenta arranca de cero (5 intentos nuevos, no 1).
+
+        Sólo toca un bloqueo VENCIDO: si otro pedido acaba de bloquear la cuenta de nuevo
+        (plazo en el futuro), no lo borra. Y si otro ya lo limpió, no hace nada."""
+        await self._escribir(
+            update(Usuario)
+            .where(Usuario.id_usuario == id_usuario,
+                   Usuario.bloqueado_hasta.is_not(None),
+                   Usuario.bloqueado_hasta <= ahora)
+            .values(intentos_fallidos=0, bloqueado_hasta=None)
+            .returning(Usuario.id_usuario)
+            .execution_options(synchronize_session=False),
+            "limpiar el bloqueo vencido", id_usuario,
+        )
+
+    async def reservar_intento(self, id_usuario: int, maximo: int, ahora: datetime) -> Optional[int]:
+        """Anota un intento ANTES de comparar la contraseña y devuelve su número (1 a
+        `maximo`). None = no hay lugar: la cuenta está bloqueada, o ya hay `maximo`
+        intentos contados sin un ingreso bueno en el medio (en una ráfaga, los que están
+        todavía comparando su clave). Con None la contraseña NO se mira.
+
+        Si la clave resulta buena, confirmar_ingreso vuelve la cuenta a cero; si es mala,
+        el intento ya quedó contado."""
+        fila = await self._escribir(
+            update(Usuario)
+            .where(Usuario.id_usuario == id_usuario,
+                   self._sin_bloqueo_vigente(ahora),
+                   func.coalesce(Usuario.intentos_fallidos, 0) < maximo)
+            .values(intentos_fallidos=func.coalesce(Usuario.intentos_fallidos, 0) + 1)
+            .returning(Usuario.intentos_fallidos)
+            .execution_options(synchronize_session=False),
+            "registrar el intento de ingreso", id_usuario,
+        )
+        return None if fila is None else int(fila[0])
+
+    async def bloquear(self, id_usuario: int, maximo: int, hasta: datetime, ahora: datetime) -> bool:
+        """Bloquea hasta `hasta` si la cuenta llegó a `maximo` intentos y no tiene ya un
+        bloqueo vigente. True = lo puso ESTE pedido (y es el que lo anota en la
+        auditoría); False = no correspondía (un ingreso bueno la volvió a cero en el
+        medio) o ya estaba bloqueada: dos pedidos que llegan juntos no pueden correr el
+        plazo que ya se le dijo al primero."""
+        fila = await self._escribir(
+            update(Usuario)
+            .where(Usuario.id_usuario == id_usuario,
+                   self._sin_bloqueo_vigente(ahora),
+                   func.coalesce(Usuario.intentos_fallidos, 0) >= maximo)
+            .values(bloqueado_hasta=hasta)
+            .returning(Usuario.id_usuario)
+            .execution_options(synchronize_session=False),
+            "bloquear la cuenta", id_usuario,
+        )
+        return fila is not None
+
+    async def confirmar_ingreso(self, id_usuario: int, ahora: datetime) -> bool:
+        """Contraseña buena: la cuenta vuelve a cero, SIEMPRE QUE no se haya bloqueado
+        mientras se comparaba. False = se bloqueó en el medio (otros intentos de la
+        misma ráfaga llegaron a 5): no entra, aunque su clave sea la correcta."""
+        fila = await self._escribir(
+            update(Usuario)
+            .where(Usuario.id_usuario == id_usuario, self._sin_bloqueo_vigente(ahora))
+            .values(intentos_fallidos=0, bloqueado_hasta=None)
+            .returning(Usuario.id_usuario)
+            .execution_options(synchronize_session=False),
+            "confirmar el ingreso", id_usuario,
+        )
+        return fila is not None
 
     async def limpiar_intentos(self, id_usuario: int) -> bool:
         """Cuenta en cero y sin bloqueo. La usan el ingreso bueno, el bloqueo que ya

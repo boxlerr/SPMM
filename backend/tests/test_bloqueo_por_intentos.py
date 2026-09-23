@@ -10,6 +10,7 @@ buena, y tiene que levantarse solo.
 Lo que se decidió (y está explicado en AuthService, arriba de MAX_INTENTOS_FALLIDOS):
 bloqueo TEMPORAL de 15 minutos que se levanta solo, más un «Desbloquear» del admin.
 """
+import asyncio
 import json
 import re
 from datetime import timedelta
@@ -19,6 +20,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, update
+from sqlalchemy.orm import undefer_group
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -26,6 +28,7 @@ from sqlalchemy.pool import StaticPool
 from backend.application.AuthService import MAX_INTENTOS_FALLIDOS, MINUTOS_DE_BLOQUEO
 from backend.core.security import get_password_hash, get_sesiones_permisos
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
+from backend.domain.Notificacion import Notificacion
 from backend.domain.Usuario import Usuario
 from backend.infrastructure import auditoria_movimientos as auditoria
 from backend.infrastructure import migraciones
@@ -101,8 +104,11 @@ async def _login(cliente, password, username="lucas"):
 
 
 async def _usuario(cliente, id_usuario=2) -> Usuario:
+    # Las columnas de RF-26 están `deferred` (domain/Usuario.py): hay que pedirlas.
     async with cliente.sesiones() as s:
-        return await s.get(Usuario, id_usuario)
+        return (await s.execute(
+            select(Usuario).options(undefer_group("bloqueo")).where(Usuario.id_usuario == id_usuario)
+        )).scalar_one()
 
 
 async def _filas_de_auditoria(cliente):
@@ -321,7 +327,7 @@ async def test_un_usuario_que_no_existe_no_filtra_nada(cliente):
         assert "intento" not in r.text and "bloque" not in r.text
 
     async with cliente.sesiones() as s:
-        usuarios = (await s.execute(select(Usuario))).scalars().all()
+        usuarios = (await s.execute(select(Usuario).options(undefer_group("bloqueo")))).scalars().all()
     assert all((u.intentos_fallidos or 0) == 0 and u.bloqueado_hasta is None for u in usuarios)
     assert await _filas_de_auditoria(cliente) == []
 
@@ -425,11 +431,11 @@ async def test_un_intento_que_llega_tarde_no_corre_el_plazo(cliente):
         await s.execute(update(Usuario).where(Usuario.id_usuario == 2)
                         .values(intentos_fallidos=5, bloqueado_hasta=primero))
         await s.commit()
-        intentos, hasta = await UsuarioRepository(s).registrar_intento_fallido(
+        puso = await UsuarioRepository(s).bloquear(
             2, MAX_INTENTOS_FALLIDOS, primero + timedelta(minutes=3), ahora
         )
-    assert intentos == 6
-    assert hasta == primero
+    assert puso is False
+    assert (await _usuario(cliente)).bloqueado_hasta == primero
 
 
 def test_el_plazo_se_redondea_al_minuto_y_dice_el_dia_si_cruza_la_medianoche():
@@ -440,3 +446,180 @@ def test_el_plazo_se_redondea_al_minuto_y_dice_el_dia_si_cruza_la_medianoche():
     ahora = datetime(2026, 9, 22, 23, 50)
     assert _cuando(datetime(2026, 9, 22, 23, 59), ahora) == "las 23:59"
     assert _cuando(datetime(2026, 9, 23, 0, 5), ahora) == "el 23/09 a las 00:05"
+
+
+# ─────────────── la ráfaga (revisión del 23/09) ───────────────
+#
+# El bloqueo se decidía con la fila leída al principio, ANTES de comparar la clave, y
+# nada se volvía a mirar antes de dar el token. Once claves malas y la buena mandadas
+# juntas (asyncio.gather): las doce se comparaban y la buena entraba con el bloqueo ya
+# grabado. Ahora el intento se reserva antes de comparar.
+
+@pytest.fixture
+def comparadas(monkeypatch):
+    """Las contraseñas que el login llegó a comparar, y en qué hilo."""
+    from backend.application import AuthService as modulo
+    anotadas = []
+    original = modulo.verify_password
+
+    def contar(clave, hash_):
+        import threading
+        anotadas.append((clave, threading.current_thread() is threading.main_thread()))
+        return original(clave, hash_)
+
+    monkeypatch.setattr(modulo, "verify_password", contar)
+    return anotadas
+
+
+async def test_una_rafaga_no_compara_mas_de_cinco_claves_ni_deja_entrar_a_la_buena(cliente, comparadas):
+    pedidos = [_login(cliente, f"mala{i}") for i in range(11)] + [_login(cliente, CLAVE_BUENA)]
+    respuestas = await asyncio.gather(*pedidos)
+
+    estados = [r.status_code for r in respuestas]
+    assert 200 not in estados, estados
+    assert "access_token" not in respuestas[-1].text
+    # Como mucho 5 comparaciones entre un ingreso bueno y el siguiente: el resto se
+    # rechaza sin mirar la clave.
+    assert len(comparadas) <= MAX_INTENTOS_FALLIDOS, [c for c, _ in comparadas]
+    assert CLAVE_BUENA not in [c for c, _ in comparadas]
+    assert set(estados) <= {401, 423}
+    assert estados.count(401) == MAX_INTENTOS_FALLIDOS - 1
+
+    u = await _usuario(cliente)
+    assert u.bloqueado_hasta is not None and u.bloqueado_hasta > ahora_ar()
+    assert u.intentos_fallidos == MAX_INTENTOS_FALLIDOS
+    # Y el bloqueo no se anotó una vez por pedido. `<= 1` y no `== 1` por el andamio: acá
+    # todas las sesiones comparten UNA conexión de SQLite, y en paralelo el savepoint de
+    # la auditoría de procesos de una pisa el de otra. En Postgres (una conexión por
+    # sesión) se probó con la misma ráfaga: una fila.
+    assert len(await _filas_de_auditoria(cliente)) <= 1
+
+    # Con la cuenta bloqueada, la buena sola tampoco entra (y no se compara).
+    antes = len(comparadas)
+    assert (await _login(cliente, CLAVE_BUENA)).status_code == 423
+    assert len(comparadas) == antes
+
+
+async def test_una_rafaga_de_una_sola_persona_con_la_buena_entra(cliente, comparadas):
+    """Dos pestañas que mandan la clave buena a la vez: entran las dos, y la cuenta
+    queda en cero."""
+    r1, r2 = await asyncio.gather(_login(cliente, CLAVE_BUENA), _login(cliente, CLAVE_BUENA))
+    assert (r1.status_code, r2.status_code) == (200, 200)
+    u = await _usuario(cliente)
+    assert u.intentos_fallidos == 0 and u.bloqueado_hasta is None
+
+
+async def test_cinco_intentos_colgados_bloquean_y_no_traban_la_cuenta_para_siempre(cliente, comparadas):
+    """Un pedido que se cortó entre reservar el 5º intento y bloquear (se cayó la
+    instancia) deja la cuenta en 5 sin bloqueo. No puede quedar trabada sin que nadie lo
+    vea: el próximo intento la bloquea (se ve en la lista y se levanta sola)."""
+    async with cliente.sesiones() as s:
+        await s.execute(update(Usuario).where(Usuario.id_usuario == 2)
+                        .values(intentos_fallidos=MAX_INTENTOS_FALLIDOS, bloqueado_hasta=None))
+        await s.commit()
+
+    r = await _login(cliente, CLAVE_BUENA)
+    assert r.status_code == 423
+    assert "bloqueada hasta" in _mensaje(r)
+    assert comparadas == []
+    assert (await _usuario(cliente)).bloqueado_hasta is not None
+
+    await _mover_el_bloqueo(cliente, ahora_ar() - timedelta(seconds=1))
+    assert (await _login(cliente, CLAVE_BUENA)).status_code == 200
+
+
+async def test_bcrypt_corre_fuera_del_hilo_del_servidor(cliente, comparadas):
+    """bcrypt tarda ~170 ms a propósito. Corrido en el hilo del servidor, cada login
+    frenaba todos los pedidos de todos."""
+    assert (await _login(cliente, CLAVE_BUENA)).status_code == 200
+    assert (await _login(cliente, "mala")).status_code == 401
+    assert [en_el_principal for _, en_el_principal in comparadas] == [False, False]
+
+
+# ─────────────── la base sin la migración de RF-26 ───────────────
+#
+# Las dos columnas entraban en el SELECT del login. Si la migración no llegaba a correr
+# en el deploy (se rinde a los 3 s de esperar el lock de `usuario`), no entraba NADIE:
+# 503 en cada login, con las sesiones abiertas andando como si nada.
+
+@pytest_asyncio.fixture
+async def cliente_sin_columnas_de_bloqueo():
+    from sqlalchemy import MetaData, Table
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    md = MetaData()
+    Table(Usuario.__table__.name, md,
+          *[c._copy() for c in Usuario.__table__.columns
+            if c.name not in ("intentos_fallidos", "bloqueado_hasta")])
+    async with engine.begin() as conn:
+        await conn.run_sync(md.create_all)
+        # La notificación del alta: sin la tabla, su rollback expira el usuario recién
+        # guardado y el endpoint revienta por otra cosa (ver test_permisos_api).
+        await conn.run_sync(lambda c: Base.metadata.create_all(
+            c, tables=[AuditoriaMovimiento.__table__, Notificacion.__table__]))
+    Sesion = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with Sesion() as s:
+        s.add_all([
+            Usuario(id_usuario=1, username="julian", email="julian@vaxler.com.ar",
+                    password_hash=get_password_hash(CLAVE_ADMIN), nombre="Julián",
+                    apellido="Boxler", rol="admin", activo=True),
+            Usuario(id_usuario=2, username="lucas", email="lucas@metalurgicalongchamps.com",
+                    password_hash=get_password_hash(CLAVE_BUENA), nombre="Lucas",
+                    apellido="Longchamps", rol="admin", activo=True),
+        ])
+        await s.commit()
+
+    async def _db():
+        async with Sesion() as s:
+            yield s
+
+    app.dependency_overrides[AuthAPI.get_db] = _db
+    app.dependency_overrides[get_sesiones_permisos] = lambda: Sesion
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        c.sesiones = Sesion
+        yield c
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+
+async def test_sin_las_columnas_de_rf26_se_entra_igual(cliente_sin_columnas_de_bloqueo):
+    c = cliente_sin_columnas_de_bloqueo
+    r = await _login(c, CLAVE_BUENA)
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["access_token"]
+
+    # La clave mala: el «incorrecto» de siempre, sin cuenta de intentos (no hay dónde
+    # llevarla) y sin tumbar nada.
+    r = await _login(c, "malisima")
+    assert r.status_code == 401
+    assert _mensaje(r) == GENERICO
+    assert (await _login(c, CLAVE_BUENA)).status_code == 200
+
+
+async def test_sin_las_columnas_de_rf26_la_gestion_de_usuarios_anda(cliente_sin_columnas_de_bloqueo):
+    c = cliente_sin_columnas_de_bloqueo
+    token = await _token_admin(c)
+    auth = {"Authorization": f"Bearer {token}"}
+
+    r = await c.get("/auth/usuarios", headers=auth)
+    assert r.status_code == 200, r.text
+    lucas = next(u for u in r.json()["data"] if u["username"] == "lucas")
+    # No se sabe: las claves no vienen y la pantalla muestra la fila como siempre.
+    assert "bloqueado" not in lucas and "intentos_fallidos" not in lucas
+
+    r = await c.get("/auth/usuarios/2", headers=auth)
+    assert r.status_code == 200, r.text
+
+    # El alta no nombra las columnas que faltan.
+    r = await c.post("/auth/usuarios", headers=auth, json={
+        "username": "pedro", "email": "pedro@metlo.com.ar", "password": "123456",
+        "nombre": "Pedro", "apellido": "Prueba", "rol": "admin"})
+    assert r.status_code == 200, r.text
+
+    # Desbloquear no tiene sentido sin las columnas: lo dice, sin 500.
+    r = await c.post("/auth/usuarios/2/desbloquear", headers=auth)
+    assert r.status_code == 503
+    assert "falta que se actualice la base" in r.json()["errors"][0]["message"]

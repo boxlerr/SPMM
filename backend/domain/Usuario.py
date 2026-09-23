@@ -37,8 +37,23 @@ class Usuario(Base):
     # `bloqueado_hasta` dice hasta cuándo no entra, ni con la clave correcta. NULL o ya
     # pasado = no está bloqueado. Hora local del taller, sin zona. La regla completa
     # está en AuthService.login; la migración, en 2026-09-22_bloqueo_por_intentos_fallidos.
-    intentos_fallidos = Column(Integer, nullable=False, default=0, server_default="0")
-    bloqueado_hasta = Column(DateTime, nullable=True)
+    #
+    # Mismo armado que admin_permanente (abajo), y por lo mismo: el login es un SELECT de
+    # usuario, y hasta el 23/09 estas dos columnas entraban en él. Si la migración no
+    # llegaba a correr en el deploy (se rinde a los 3 s de esperar el lock de la tabla),
+    # NO ENTRABA NADIE —503 en cada login— mientras las sesiones abiertas seguían andando,
+    # así que desde adentro no se notaba. Ahora:
+    #   · `deferred` (grupo "bloqueo"): fuera del SELECT de siempre. Se leen con una
+    #     consulta aparte (UsuarioRepository.estado_de_bloqueo) que, si faltan, lo dice y
+    #     el login sigue sin RF-26 hasta que la próxima instancia aplique la migración.
+    #   · `server_default` y SIN default de Python: el INSERT del alta no las nombra.
+    #     El NULL de bloqueado_hasta no es decorativo (ver pantalla_inicio).
+    intentos_fallidos = deferred(
+        Column(Integer, nullable=False, server_default="0"), group="bloqueo"
+    )
+    bloqueado_hasta = deferred(
+        Column(DateTime, nullable=True, server_default=text("NULL")), group="bloqueo"
+    )
     # RF-24: administrador permanente (los dueños). Su rol queda fijo en admin: no se
     # le puede cambiar, ni desactivar, ni eliminar desde la API. NO lo prende ninguna
     # migración —no se conocen los ids de producción—: se marca a mano en la base.
