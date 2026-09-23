@@ -270,6 +270,13 @@ MATRIZ = [
     ("GET", "/auditoria/movimientos?tipo=ingresos", OK, NO, NO),
     ("GET", "/auditoria/actividad", OK, NO, NO),
     ("GET", "/auditoria/movimientos/de/orden/1", OK, NO, NO),
+    # RF-17: el historial de una OT y de una persona cuelga de Auditoría y de nada más.
+    # Julián lo pidió ahí y no en la ficha: el supervisor, que ve Operaciones y Recursos,
+    # no llega por esas pantallas.
+    ("GET", "/auditoria/historial/ordenes", OK, NO, NO),
+    ("GET", "/auditoria/historial/ordenes/1", OK, NO, NO),
+    ("GET", "/auditoria/historial/personas", OK, NO, NO),
+    ("GET", "/auditoria/historial/personas/1", OK, NO, NO),
     ("GET", "/auditoria/procesos", OK, NO, NO),
     ("GET", "/auditoria/procesos?id_orden=5", OK, OK, OK),  # el historial de UNA OT
     ("GET", "/auditoria/procesos?id_orden=", OK, NO, NO),
@@ -446,7 +453,10 @@ PANTALLAS = {
         "/incidencias/reporte", "/incidencias/reporte.csv",
     ],
     "auditoria": ["/auditoria/movimientos", "/auditoria/movimientos?tipo=ingresos",
-                  "/auditoria/actividad", "/auditoria/procesos", "/auditoria/planificacion"],
+                  "/auditoria/actividad", "/auditoria/procesos", "/auditoria/planificacion",
+                  # RF-17: el historial de una OT y de una persona
+                  "/auditoria/historial/ordenes", "/auditoria/historial/ordenes/1",
+                  "/auditoria/historial/personas", "/auditoria/historial/personas/1"],
     # Configuración: «Mi cuenta» y la campanita. La lista de usuarios es una sección
     # confidencial y se prueba aparte (test_permisos_admin_api).
     "configuracion": ["/notificaciones", "/notificaciones/contador/no-leidas"],

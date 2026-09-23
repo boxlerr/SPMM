@@ -2,8 +2,9 @@ from typing import Optional
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Response, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Response, HTTPException, Request
 from backend.infrastructure.db import SessionLocal
+from backend.infrastructure import historial_cambios
 from backend.application.PlanoService import PlanoService
 from backend.dto.PlanoRequestDTO import PlanoRequestDTO, PlanoUpdateDTO
 from backend.commons.loggers.logger import logger
@@ -70,6 +71,7 @@ async def crear_plano(
     drive_md5: Optional[str] = Form(None),
     drive_modificado: Optional[datetime] = Form(None),
     archivo: UploadFile = File(...),
+    request: Request = None,
     db=Depends(get_db)
 ):
     logger.info("API - Inicio POST /planos")
@@ -109,6 +111,13 @@ async def crear_plano(
 
     service = PlanoService(db)
     result = await service.crearPlano(dto)
+    # RF-17: del cuerpo de un plano no se lee nada (es el archivo), así que la fila de
+    # Auditoría decía «creó plano» sin cuál ni de qué OT. Con el número queda atada al
+    # plano, y el historial de la OT dice quién lo subió.
+    historial_cambios.dejar_dicho_alta(
+        request, id_entidad=historial_cambios.id_de_respuesta(result),
+        frase=f"subió el plano «{nombre}»" + (f" a la OT #{id_orden_trabajo}" if id_orden_trabajo
+                                              else f" al artículo #{id_articulo}"))
     return result
 
 

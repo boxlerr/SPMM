@@ -29,6 +29,19 @@
  *   · Actividad por persona — cada usuario con su último ingreso y, en el período,
  *     cuántas acciones hizo y cuántos intentos fallidos tuvo su cuenta. Tocar a alguien
  *     lleva a «Todo lo que se hizo» filtrado por esa persona.
+ *
+ * RF-17 (23/09) suma el historial de cada orden y de cada persona, ACÁ y no en la ficha
+ * de la OT ni en la planificación (Julián: «¿esto podríamos mostrarlo en la sección de
+ * Auditoría? No meterlo dentro de planificación»):
+ *
+ *   · Por orden — buscar una OT y ver todo lo que pasó con ella, con quién y cuándo.
+ *   · Por persona — elegir a alguien del taller y ver su línea de tiempo. Tocar una OT
+ *     ahí la abre en «Por orden».
+ *
+ * Con siete solapas la barra ya no entraba en un teléfono ni partida en renglones (eran
+ * cuatro filas de botones antes de ver nada): ahora es una sola fila que se desliza de
+ * costado, con la flecha y el degradado que avisan que hay más (ScrollableTabsBar, la
+ * misma de Operaciones).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -38,10 +51,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollableTabsBar } from "@/components/planning/ScrollableTabsBar";
 import { RegistroDeMovimientos } from "@/components/auditoria/RegistroDeMovimientos";
 import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
 import { ActividadPorPersona } from "@/components/auditoria/ActividadPorPersona";
+import { HistorialPorOrden, type PedidoDeOrden } from "@/components/auditoria/HistorialPorOrden";
+import { HistorialPorPersona } from "@/components/auditoria/HistorialPorPersona";
 import type { PedidoDeFiltro } from "@/lib/auditoria";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -113,6 +129,12 @@ function Quien({ usuario }: { usuario?: string | null }) {
         </span>
     );
 }
+
+/** Cada solapa: una píldora, como las de Operaciones (misma barra deslizable). */
+const SOLAPA =
+    "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium text-gray-500 transition-all hover:text-gray-800 " +
+    "data-[state=active]:bg-white data-[state=active]:text-red-700 data-[state=active]:shadow-sm " +
+    "data-[state=active]:ring-1 data-[state=active]:ring-black/5";
 
 const TIPO_LABEL: Record<string, string> = {
     preview: "Vista previa",
@@ -191,7 +213,7 @@ export default function AuditoriaPage() {
     const [solapa, setSolapa] = useState(solapaInicial);
     const [pedido, setPedido] = useState<PedidoDeFiltro | null>(null);
     const visibles = useMemo(() => [
-        ...(veTodo ? ["todo", "ingresos", "personas"] : []),
+        ...(veTodo ? ["todo", "ingresos", "personas", "orden", "persona"] : []),
         ...(vePasos ? ["procesos"] : []),
         ...(vePlanificaciones ? ["planificacion"] : []),
     ], [veTodo, vePasos, vePlanificaciones]);
@@ -203,6 +225,22 @@ export default function AuditoriaPage() {
         setSolapa(p.destino);
     }, []);
     const pedidoPara = (destino: "todo" | "ingresos") => (pedido?.destino === destino ? pedido : null);
+    // RF-17: desde «Por persona», tocar una OT la abre en «Por orden».
+    const [pedidoOrden, setPedidoOrden] = useState<PedidoDeOrden | null>(null);
+    const verOrden = useCallback((ot: { id: number; numero: number }) => {
+        setPedidoOrden({ ...ot, n: Date.now() });
+        setSolapa("orden");
+    }, []);
+    // «Por orden» y «Por persona» se montan la primera vez que se abren y después quedan
+    // montadas (ocultas): ir de una a la otra y volver no hace perder la OT ni la persona
+    // elegida, ni las fechas. Hasta que alguien las abre, no piden nada.
+    const [montadas, setMontadas] = useState<string[]>([]);
+    useEffect(() => {
+        if ((solapa === "orden" || solapa === "persona") && !montadas.includes(solapa)) {
+            setMontadas((m) => [...m, solapa]);
+        }
+    }, [solapa, montadas]);
+    const montar = (clave: "orden" | "persona") => solapa === clave || montadas.includes(clave);
 
     const cargar = useCallback(async () => {
         if (!vePlanificaciones) {
@@ -261,18 +299,19 @@ export default function AuditoriaPage() {
             </div>
 
             <Tabs value={solapa} onValueChange={setSolapa}>
-                {/* `flex-wrap h-auto`: «Todo lo que se hizo», «Pasos de las OT» y
-                    «Planificaciones» suman ~430px y en un teléfono la tercera quedaba
-                    afuera sin forma de llegar. Ahora baja a otra fila; en la computadora
-                    entran en una. Con Ingresos y Actividad por persona (RF-25) son cinco:
-                    en el teléfono ocupan tres filas, en la computadora siguen en una. */}
-                <TabsList className="mb-4 max-w-full h-auto flex-wrap justify-start">
-                    {veTodo && <TabsTrigger value="todo">Todo lo que se hizo</TabsTrigger>}
-                    {veTodo && <TabsTrigger value="ingresos">Ingresos</TabsTrigger>}
-                    {veTodo && <TabsTrigger value="personas">Actividad por persona</TabsTrigger>}
-                    {vePasos && <TabsTrigger value="procesos">Pasos de las OT</TabsTrigger>}
-                    {vePlanificaciones && <TabsTrigger value="planificacion">Planificaciones</TabsTrigger>}
-                </TabsList>
+                {/* Una sola fila que se desliza de costado (RF-17). Con `flex-wrap` las
+                    siete solapas ocupaban cuatro renglones en un teléfono de 375px antes de
+                    mostrar nada; así ocupan uno, y la flecha y el degradado del borde avisan
+                    que hay más. En la computadora entran todas. */}
+                <ScrollableTabsBar className="mb-4 rounded-full bg-gray-100/90 p-1 ring-1 ring-black/[0.03]">
+                    {veTodo && <TabsTrigger value="todo" className={SOLAPA}>Todo lo que se hizo</TabsTrigger>}
+                    {veTodo && <TabsTrigger value="ingresos" className={SOLAPA}>Ingresos</TabsTrigger>}
+                    {veTodo && <TabsTrigger value="personas" className={SOLAPA}>Actividad por persona</TabsTrigger>}
+                    {veTodo && <TabsTrigger value="orden" className={SOLAPA}>Por orden</TabsTrigger>}
+                    {veTodo && <TabsTrigger value="persona" className={SOLAPA}>Por persona</TabsTrigger>}
+                    {vePasos && <TabsTrigger value="procesos" className={SOLAPA}>Pasos de las OT</TabsTrigger>}
+                    {vePlanificaciones && <TabsTrigger value="planificacion" className={SOLAPA}>Planificaciones</TabsTrigger>}
+                </ScrollableTabsBar>
 
                 {/* Las tres leen el mismo registro, con la misma sección («Todo lo que se
                     hizo»): ver core/permisos_rutas.py. La llave vuelve a montarlas con
@@ -303,6 +342,20 @@ export default function AuditoriaPage() {
                 {veTodo && (
                     <TabsContent value="personas">
                         <ActividadPorPersona key={`personas-${refresco}`} onVerPersona={verPersona} />
+                    </TabsContent>
+                )}
+                {/* RF-17. Leen el mismo registro, con la misma sección: ver
+                    core/permisos_rutas.py. «Actualizar» no las vuelve a montar (se perdería
+                    la OT o la persona elegida): les avisa que pidan de nuevo. `forceMount`
+                    + `hidden` cuando no están a la vista: ver `montadas`. */}
+                {veTodo && montar("orden") && (
+                    <TabsContent value="orden" forceMount className="data-[state=inactive]:hidden">
+                        <HistorialPorOrden refresco={refresco} pedido={pedidoOrden} />
+                    </TabsContent>
+                )}
+                {veTodo && montar("persona") && (
+                    <TabsContent value="persona" forceMount className="data-[state=inactive]:hidden">
+                        <HistorialPorPersona refresco={refresco} onVerOT={verOrden} />
                     </TabsContent>
                 )}
 

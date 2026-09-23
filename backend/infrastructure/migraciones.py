@@ -719,6 +719,23 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "intento fallido o un bloqueo no tienen autor: no se sabe quién tipeó.'",
         ],
     ),
+    (
+        # RF-17. Un índice PARCIAL (y su comentario) sobre la tabla del registro, para el
+        # historial de una OT en Auditoría: los pedidos cuyo número va en el cuerpo. Sin
+        # él el historial anda igual, un poco más lento (medido en el .sql). No reescribe
+        # filas.
+        "2026-09-23_historial_por_ot_y_persona",
+        [
+            "CREATE INDEX IF NOT EXISTS ix_auditoria_mov_sin_numero "
+            "ON auditoria_movimiento (ruta, creado_en) "
+            "WHERE id_entidad IS NULL",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON INDEX ix_auditoria_mov_sin_numero IS "
+            "'RF-17: los pedidos cuyo número va en el cuerpo y no en la dirección (estado "
+            "masivo, materia prima de la OT, consumos y no conformidades que no se pudieron "
+            "guardar). Los busca el historial de una OT en Auditoría.'",
+        ],
+    ),
 ]
 
 

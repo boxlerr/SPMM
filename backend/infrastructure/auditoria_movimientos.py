@@ -675,17 +675,26 @@ def armar_fila(*, usuario: dict | None, metodo: str, ruta: str, estado: int,
     resumen = resumen or {}
     if resumen.get("frase") and estado < 400:
         frase = f"{nombre or 'alguien'} {resumen['frase']}"
+    # RF-17: en un alta el número no está en la dirección («POST /ordenes»), y sin él
+    # la fila no se puede atar a la OT ni a la persona que se creó. Lo deja el endpoint
+    # (infrastructure/historial_cambios.dejar_dicho_alta). Sólo si salió bien y sólo si
+    # la dirección no traía uno: el del camino manda.
+    if id_entidad is None and resumen.get("id_entidad") is not None and estado < 400:
+        id_entidad = str(resumen["id_entidad"])[:40]
 
     detalle = None
     datos = {}
     por_lista = any(p in ruta for p in POR_LISTA)
+    # `antes` y `despues` van PRIMERO (RF-17): el detalle se corta a TOPE_DETALLE, y el
+    # cuerpo de un guardado de OT (con sus pasos) lo llena solo. Si iban al final, lo
+    # único que dice qué cambió era justo lo que se perdía en el recorte.
+    for clave in ("antes", "despues"):
+        if clave in resumen:
+            datos[clave] = _limpiar(resumen[clave], por_lista=por_lista)
     if parametros:
         datos["parametros"] = _limpiar(parametros, por_lista=por_lista)
     if cuerpo is not None:
         datos["datos"] = _limpiar(cuerpo, por_lista=por_lista)
-    for clave in ("antes", "despues"):
-        if clave in resumen:
-            datos[clave] = _limpiar(resumen[clave], por_lista=por_lista)
     if datos:
         try:
             detalle = json.dumps(datos, ensure_ascii=False, default=str)[:TOPE_DETALLE]

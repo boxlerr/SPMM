@@ -4,6 +4,7 @@ from backend.application.OrdenTrabajoService import OrdenTrabajoService
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoRequestDTO
 from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
 from backend.infrastructure.db import SessionLocal
+from backend.infrastructure import historial_cambios
 from backend.commons.loggers.logger import logger
 from datetime import datetime
 
@@ -35,7 +36,14 @@ async def crear_orden(
     logger.info("API - Inicio POST /ordenes (Multipart)")
     event_bus = getattr(request.app.state, "event_bus", None)
     service = OrdenTrabajoService(db, event_bus)
-    return await service.crearOrdenTrabajo(data, files, user=current_user)
+    resultado = await service.crearOrdenTrabajo(data, files, user=current_user)
+    # RF-17: el alta no lleva el número en la dirección; sin esto la fila de Auditoría
+    # no se puede atar a la OT que se creó (ver historial_cambios.dejar_dicho_alta).
+    numero = historial_cambios.dato_de_respuesta(resultado, "id_otvieja")
+    historial_cambios.dejar_dicho_alta(
+        request, id_entidad=historial_cambios.id_de_respuesta(resultado),
+        frase=f"creó la OT {numero}" if numero else None)
+    return resultado
 
 from backend.dto.RegistrarEntregaDTO import RegistrarEntregaDTO
 
@@ -111,14 +119,21 @@ async def obtener_orden(id: int, db=Depends(get_db)):
 async def modificar_orden(
     id: int,
     dto: OrdenTrabajoUpdateDTO,
+    request: Request,
     db=Depends(get_db),
     current_user: dict = Depends(get_current_user),
     # De dónde salió el cambio, para el historial: el modal de la OT o la pantalla de
     # planificación. Lo manda el front como query param.
     motivo: str = "edicion",
 ):
+    # RF-17: la foto de la cabecera antes y después, para que Auditoría diga QUÉ cambió
+    # (fecha prometida, cliente, prioridad...) y no sólo que alguien guardó. Nunca
+    # frena el guardado: ver infrastructure/historial_cambios.py.
+    antes = await historial_cambios.foto_de_ot_sin_romper(db, id)
     service = OrdenTrabajoService(db)
-    return await service.modificarOrden(id, dto, motivo=motivo, usuario=current_user)
+    resultado = await service.modificarOrden(id, dto, motivo=motivo, usuario=current_user)
+    await historial_cambios.dejar_dicho_cambios_de_ot(request, db, id, antes)
+    return resultado
 
 
 # 🔹 Deshacer un cambio de procesos.

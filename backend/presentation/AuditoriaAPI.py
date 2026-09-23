@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import defer
 
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, get_permisos_actuales
 from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento
 from backend.domain.AuditoriaProcesoOT import AuditoriaProcesoOT
 from backend.infrastructure.auditoria_movimientos import (
@@ -508,3 +508,97 @@ async def movimientos_de(
     )
     filas = (await db.execute(q)).scalars().all()
     return {"movimientos": [_fila(m) for m in filas]}
+
+
+# ─────────────────────────── RF-17: el historial de una OT y de una persona ───────────────────────────
+#
+# El SRS pide «repositorio centralizado de documentos históricos y registros de auditoría
+# de cada orden y cada operario», y Julián lo quiso ACÁ, en Auditoría, y no adentro de la
+# planificación. La línea de tiempo la arma el servidor (application/HistorialService.py)
+# con el registro central buscado por entidad y número, completado con las tablas que
+# guardan cada hecho (pasos, pausas, consumos, no conformidades, planos, plan, ausencias).
+#
+# Permisos: el router pide la sección «Todo lo que se hizo» (core/permisos_rutas.py). Lo
+# que tiene sección propia se respeta adentro: los pasos («Pasos de las OT»), el plan
+# («Planificaciones») y lo estimado contra lo que llevó cada paso de una persona
+# («Rendimiento por persona», confidencial). Sin la sección, eso no se lee ni se manda.
+
+def _secciones(permisos) -> dict:
+    def tiene(seccion: str) -> bool:
+        try:
+            return bool(permisos and permisos.tiene_seccion(seccion, "read"))
+        except Exception:
+            return False
+    return {
+        "ve_pasos": tiene("auditoria_procesos"),
+        "ve_plan": tiene("auditoria_planificacion"),
+        "ve_rendimiento": tiene("dashboard_rendimiento"),
+    }
+
+
+def _periodo(desde: date | None, hasta: date | None) -> None:
+    if desde and hasta and desde > hasta:
+        raise HTTPException(status_code=400,
+                            detail="La fecha «desde» es posterior a la fecha «hasta».")
+
+
+@router.get("/auditoria/historial/ordenes")
+async def historial_buscar_ordenes(
+    buscar: str | None = None,
+    limite: int = Query(30, ge=1, le=100),
+    db=Depends(get_db),
+    _u=Depends(get_current_user),
+):
+    """Para elegir la OT: por número, cliente o artículo. Sin texto, las últimas."""
+    from backend.application.HistorialService import HistorialService
+    return {"ordenes": await HistorialService(db).buscar_ordenes(buscar, limite)}
+
+
+@router.get("/auditoria/historial/ordenes/{id_orden}")
+async def historial_de_orden(
+    id_orden: int,
+    desde: date | None = None,
+    hasta: date | None = None,
+    db=Depends(get_db),
+    _u=Depends(get_current_user),
+    permisos=Depends(get_permisos_actuales),
+):
+    """Todo lo que pasó con UNA OT, lo último primero (RF-17)."""
+    from backend.application.HistorialService import HistorialService
+    _periodo(desde, hasta)
+    s = _secciones(permisos)
+    datos = await HistorialService(db).de_orden(id_orden, desde, hasta,
+                                               ve_pasos=s["ve_pasos"], ve_plan=s["ve_plan"])
+    if datos is None:
+        raise HTTPException(status_code=404, detail=f"No existe la orden de trabajo {id_orden}.")
+    return datos
+
+
+@router.get("/auditoria/historial/personas")
+async def historial_buscar_personas(
+    buscar: str | None = None,
+    db=Depends(get_db),
+    _u=Depends(get_current_user),
+):
+    """Para elegir a la persona (Recurso humano)."""
+    from backend.application.HistorialService import HistorialService
+    return {"personas": await HistorialService(db).buscar_personas(buscar)}
+
+
+@router.get("/auditoria/historial/personas/{id_operario}")
+async def historial_de_persona(
+    id_operario: int,
+    desde: date | None = None,
+    hasta: date | None = None,
+    db=Depends(get_db),
+    _u=Depends(get_current_user),
+    permisos=Depends(get_permisos_actuales),
+):
+    """Todo lo que pasó con UNA persona del taller, lo último primero (RF-17)."""
+    from backend.application.HistorialService import HistorialService
+    _periodo(desde, hasta)
+    s = _secciones(permisos)
+    datos = await HistorialService(db).de_persona(id_operario, desde, hasta, **s)
+    if datos is None:
+        raise HTTPException(status_code=404, detail=f"No existe la persona {id_operario}.")
+    return datos

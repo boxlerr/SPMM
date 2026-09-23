@@ -70,6 +70,7 @@ y como solapa de Recursos):
   No conformidades   /incidencias/*
   Auditoría          /auditoria/movimientos (también la vista Ingresos, ?tipo=ingresos),
                      /auditoria/actividad (Actividad por persona, RF-25),
+                     /auditoria/historial/* (Historial de una OT y de una persona, RF-17),
                      /auditoria/procesos, /auditoria/planificacion
   Configuración      /auth/usuarios (sección confidencial), /auth/change-password,
                      /backups/* (la solapa Copias de seguridad: sólo admin, RF-19)
@@ -416,6 +417,13 @@ POLITICAS: dict[str, Politica] = {
     # con su sección. Quien puede leer el registro entero ya puede contar quién hizo
     # qué; una sección aparte sólo serviría para que alguien vea el resumen y no el
     # detalle, y nadie lo pidió.
+    # El historial de una OT y de una persona (RF-17, /auditoria/historial/*) también:
+    # es el mismo registro buscado por entidad y número. Lo que ahí tiene sección propia
+    # —los pasos («Pasos de las OT»), el plan («Planificaciones») y lo estimado contra lo
+    # que llevó cada paso («Rendimiento por persona», confidencial)— lo mira el endpoint
+    # con los permisos de quien pide, y sin la sección no lo lee ni lo manda
+    # (AuditoriaAPI._secciones). Julián lo pidió acá y no en la ficha de la OT ni en la
+    # de la persona: no se abre por Operaciones ni por Recursos.
     "auditoria": Politica(
         leer=(seccion("auditoria_movimientos"),),
         escribir=(area("auditoria", "write"),),
