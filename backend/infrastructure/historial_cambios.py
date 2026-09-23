@@ -401,10 +401,14 @@ async def quien_era_sin_romper(db, id_operario: int) -> dict | None:
 
 def dejar_dicho_baja(request, id_operario: int, antes: dict | None) -> None:
     """Después de borrar a la persona: «dio de baja a Juan Pérez» y quién era (`antes`),
-    para que su historial la siga pudiendo nombrar. Sólo se llama si el borrado salió."""
+    para que su historial la siga pudiendo nombrar. Sólo se llama si el borrado salió.
+
+    `antes` va SIEMPRE, vacío si no se pudo leer quién era: es lo que distingue una baja
+    de verdad de un DELETE a un número que no estaba, que también contesta 200
+    («Operario no encontrado») y queda en el registro igual (HistorialService
+    .dejo_dicho_quien_era, revisión del 23/09)."""
     try:
-        if not antes:
-            return
+        antes = antes or {}
         quien = " ".join(x for x in (antes.get("nombre"), antes.get("apellido")) if x).strip()
         _dejar(request, {"frase": f"dio de baja a {quien or f'la persona #{id_operario}'}",
                          "antes": antes})

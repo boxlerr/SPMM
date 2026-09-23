@@ -186,6 +186,27 @@ CATALOGOS = {
 }
 
 
+# Campos cuyo NÚMERO se guarda además del nombre, como `id_antes` / `id_despues` en el
+# cambio (revisión del 23/09). El nombre de una persona se repite —dos «Juan Perez»,
+# uno dado de baja y otro que entró después— y se cambia; el número no. El historial de
+# cada persona (application/HistorialService) buscaba «le asignó / le sacó un paso» por
+# el nombre y le mostraba a cada una lo de la otra. Con el número no hay nada que
+# adivinar. Las filas anteriores sólo tienen el nombre y ahí se sigue deduciendo.
+CON_NUMERO = frozenset({"id_operario"})
+
+
+def cambio_de_campo(campo: str, antes, despues, nombres: dict) -> dict:
+    """Un cambio como lo guarda `cambios`: {campo, antes, despues} legibles y, para los
+    campos de CON_NUMERO, también los números."""
+    cambio = {"campo": CAMPOS.get(campo, campo),
+              "antes": _legible(campo, antes, nombres),
+              "despues": _legible(campo, despues, nombres)}
+    if campo in CON_NUMERO:
+        cambio["id_antes"] = antes if isinstance(antes, int) else None
+        cambio["id_despues"] = despues if isinstance(despues, int) else None
+    return cambio
+
+
 def _nombre_de_fila(modelo, fila) -> str:
     if modelo is Operario:
         return " ".join(p for p in (fila.nombre, fila.apellido) if p).strip()
@@ -415,14 +436,7 @@ def _armar_filas(session) -> list[dict]:
 
     def _fila(obj, accion, cambios=None):
         nombre_proceso = nombres.get(("id_proceso", obj.id_proceso))
-        detalle = [
-            {
-                "campo": CAMPOS[c],
-                "antes": _legible(c, a, nombres),
-                "despues": _legible(c, d, nombres),
-            }
-            for c, a, d in (cambios or [])
-        ]
+        detalle = [cambio_de_campo(c, a, d, nombres) for c, a, d in (cambios or [])]
         return {
             **comun,
             "id_orden_trabajo": obj.id_orden_trabajo,
@@ -564,12 +578,12 @@ async def anotar(db, filas: list[dict], accion: str, *, nuevos=None,
         for f in filas:
             cambios = []
             for campo, valor in de_la_fila(f).items():
-                antes = _legible(campo, f.get(campo), nombres)
-                despues = _legible(campo, valor, nombres)
-                if antes == despues:
+                cambio = cambio_de_campo(campo, f.get(campo), valor, nombres)
+                # Dos personas que se llaman igual se leen igual, pero no son la misma.
+                if (cambio["antes"] == cambio["despues"]
+                        and cambio.get("id_antes") == cambio.get("id_despues")):
                     continue
-                cambios.append({"campo": CAMPOS.get(campo, campo),
-                                "antes": antes, "despues": despues})
+                cambios.append(cambio)
             # Una edición que no cambió nada no deja renglón; una baja sí, siempre.
             if accion == "edicion" and not cambios:
                 continue

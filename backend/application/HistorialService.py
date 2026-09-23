@@ -48,6 +48,14 @@ registro (su alta, su último guardado o la baja, que desde el 23/09 deja dicho 
 y lo demás —el plan, lo trabajado, los pasos que se le soltaron— sigue en sus tablas.
 Un guardado que le cambió el nombre se lee «cambió el nombre de Juan Perez a Juan Pérez».
 
+Revisión del 23/09. Una baja es un DELETE que PRUEBA que había a quién borrar (dejó dicho
+quién era, o vino después de algo que prueba que estaba cargada): un DELETE a un número
+que no existe también contesta 200. Y el historial de pasos, que guardaba el nombre de la
+persona elegida y no su número, mezclaba a dos que se llaman igual: desde ese día guarda
+también el número; en las filas viejas no se le cuenta a nadie lo de antes de su alta ni
+lo de después de su baja, y si en ese momento otra se llamaba igual, el renglón va como
+deducido.
+
 PERMISOS
 
 Todo cuelga de la sección «Todo lo que se hizo» de Auditoría (core/permisos_rutas.py).
@@ -113,6 +121,11 @@ VENTANA_MISMO_HECHO = timedelta(seconds=120)
 # Las no conformidades se guardaban en UTC hasta el 22/09 (ver domain/IncidenciaProceso).
 # No se reescriben (dato del cliente): se avisa en el renglón.
 NC_EN_HORA_LOCAL_DESDE = datetime(2026, 9, 22)
+
+# Desde el 23/09 el guardado de una persona que existe deja su antes/después
+# (historial_cambios.dejar_dicho_cambios_de_persona), aunque no haya cambiado nada. Uno
+# que no lo deja es de antes o fue a un número que no estaba cargado (contesta 200 igual).
+GUARDADO_CON_ANTES_DESDE = datetime(2026, 9, 23)
 
 ESTADO_PASO = {1: "Pendiente", 2: "En proceso", 3: "Terminado"}
 
@@ -496,6 +509,39 @@ def es_baja_de_persona(m: dict) -> bool:
     return m.get("metodo") == "DELETE" and bool(_RE_PERSONA_ID.match(m.get("ruta") or ""))
 
 
+def dejo_dicho_quien_era(m: dict) -> bool:
+    """Si la baja dejó dicho quién era (`antes`). DELETE /operarios/{id} sólo lo escribe
+    si el borrado salió (OperarioAPI.eliminar_operario): es la prueba de que se borró a
+    alguien. Un DELETE a un número que no está también contesta 200 («Operario no
+    encontrado», status false) y el registro lo guarda igual, pero sin `antes`."""
+    return isinstance(leer_detalle(m.get("detalle")).get("antes"), dict)
+
+
+def prueba_que_existio(m: dict) -> bool:
+    """Si este pedido prueba que la persona ESTABA cargada con ese número (revisión del
+    23/09: un DELETE a un número inventado armaba una baja de alguien que nunca existió).
+
+    Lo prueban: el alta que salió bien (quedó atada al número que se creó); la baja que
+    dejó dicho quién era; el 409 de la baja (el sistema la encontró y pidió confirmar); y
+    un guardado que dejó su antes/después. Un guardado de antes del 23/09 no lo dejaba:
+    ése cuenta como rastro, porque es lo único que hay de esas fechas."""
+    if es_baja_de_persona(m):
+        if m.get("estado") == 409:
+            return True
+        return _salio_bien(m) and dejo_dicho_quien_era(m)
+    if not _salio_bien(m):
+        return False
+    if es_alta_de_persona(m):
+        return True
+    if es_ficha_de_persona(m):
+        det = leer_detalle(m.get("detalle"))
+        if isinstance(det.get("antes"), dict) and isinstance(det.get("despues"), dict):
+            return True
+        cuando = m.get("creado_en")
+        return isinstance(cuando, datetime) and cuando < GUARDADO_CON_ANTES_DESDE
+    return False
+
+
 def nombre_completo_de(identidad: dict) -> str | None:
     """«Nombre Apellido», o el nombre entero que dijo la frase del alta, o None."""
     partes = [identidad.get("nombre"), identidad.get("apellido")]
@@ -566,18 +612,29 @@ def historia_de_la_persona(movs: list[dict]) -> dict:
       · nombres: todos los nombres que tuvo, en orden (así la nombra el historial de pasos);
       · al_momento: {id del pedido: cómo se llamaba después de ese pedido};
       · renombres: {id del guardado: (cómo se llamaba, cómo quedó, deducido)};
-      · baja: el primer DELETE que salió bien (el que la borró) o None."""
+      · alta: el alta que salió bien, o None;
+      · baja: el DELETE que la borró, o None. Es el primero que salió bien Y que lo
+        prueba: dejó dicho quién era o, en filas de antes del 23/09 (que no lo dejaban),
+        vino después de algo que prueba que estaba cargada (prueba_que_existio). Un
+        DELETE a un número que no está contesta 200 igual: sin eso no es una baja;
+      · existio: si algo del registro prueba que esa persona estuvo cargada."""
     identidad: dict = {}
     nombres: list[str] = []
     al_momento: dict = {}
     renombres: dict = {}
-    baja = None
+    alta = baja = None
+    existio = False
     for m in sorted(movs, key=lambda x: (x["creado_en"] or datetime.min, x["id"])):
+        prueba = prueba_que_existio(m)
+        estaba = existio
+        existio = existio or prueba
         if not _salio_bien(m):
             continue
         if not (es_alta_de_persona(m) or es_ficha_de_persona(m) or es_baja_de_persona(m)):
             continue
-        if es_baja_de_persona(m) and baja is None:
+        if es_alta_de_persona(m) and alta is None:
+            alta = m
+        if es_baja_de_persona(m) and baja is None and (prueba or estaba):
             baja = m
         conocido = dict(identidad)
         nuevo = identidad_de_movimiento(m)
@@ -593,7 +650,8 @@ def historia_de_la_persona(movs: list[dict]) -> dict:
         if nombre and nombre not in nombres:
             nombres.append(nombre)
     return {"identidad": identidad, "nombre": nombre_completo_de(identidad), "nombres": nombres,
-            "al_momento": al_momento, "renombres": renombres, "baja": baja}
+            "al_momento": al_momento, "renombres": renombres, "alta": alta, "baja": baja,
+            "existio": existio}
 
 
 def persona_dada_de_baja(id_operario: int, historia: dict) -> dict:
@@ -1166,11 +1224,32 @@ def eventos_de_trabajo(pasos: list[dict], *, ot_de, tiempos: dict | None = None)
     return salida
 
 
+def _en_el_periodo(cuando, desde, hasta) -> bool:
+    """`cuando` cae entre `desde` y `hasta` (una punta en None = abierta)."""
+    if not isinstance(cuando, datetime):
+        return True
+    return (desde is None or cuando >= desde) and (hasta is None or cuando <= hasta)
+
+
 def eventos_de_asignaciones(filas: list[dict], nombre_completo, *, numero_de, ot_de,
-                            altas_sin_cambio: list[dict]) -> list[dict]:
+                            altas_sin_cambio: list[dict], id_operario: int | None = None,
+                            desde: datetime | None = None, hasta: datetime | None = None,
+                            homonimos: list[dict] = ()) -> list[dict]:
     """Cuándo y quién le eligió (o le sacó) un paso a mano a la persona, del historial de
-    pasos. `nombre_completo` es como lo guarda ese historial («Nombre Apellido»): uno, o
-    todos los que tuvo si le cambiaron el nombre (el historial dice el de ese momento)."""
+    pasos.
+
+    Desde el 23/09 cada cambio de «persona elegida» guarda también el NÚMERO de la
+    persona (`id_antes` / `id_despues`, auditoria_procesos.CON_NUMERO), y con eso se
+    reconoce a la persona sin mirar el nombre. Las filas anteriores sólo tienen el
+    nombre: `nombre_completo` es como lo guarda ese historial («Nombre Apellido»), uno o
+    todos los que tuvo si le cambiaron el nombre (el historial dice el de ese momento).
+
+    Por el nombre, dos personas que se llaman igual se mezclaban (revisión del 23/09: la
+    dada de baja mostraba lo de la que entró después, y al revés). Por eso:
+      · nada antes de su alta (`desde`) ni después de su baja (`hasta`): no se le pudo
+        elegir un paso a alguien que todavía no estaba o que ya no estaba;
+      · si en ese momento otra persona se llamaba igual (`homonimos`: {id, nombres,
+        desde, hasta}), el renglón va marcado como deducido: puede ser de cualquiera."""
     nombres = {nombre_completo} if isinstance(nombre_completo, str) else set(nombre_completo or ())
     nombres.discard("")
     nombres.discard(None)
@@ -1180,26 +1259,48 @@ def eventos_de_asignaciones(filas: list[dict], nombre_completo, *, numero_de, ot
             cambios = json.loads(f.get("cambios") or "[]")
         except ValueError:
             continue
+        if not _en_el_periodo(f.get("creado_en"), desde, hasta):
+            continue
         for c in cambios:
             if c.get("campo") != "persona elegida":
                 continue
+            con_numero = id_operario is not None and ("id_antes" in c or "id_despues" in c)
+            if con_numero:
+                asigno, saco = c.get("id_despues") == id_operario, c.get("id_antes") == id_operario
+            else:
+                asigno, saco = c.get("despues") in nombres, c.get("antes") in nombres
             numero = numero_de(f["id_orden_trabajo"])
             que = f"el paso {f.get('paso') or '?'} — {f.get('nombre_proceso') or 'sin nombre'} de la OT {numero}"
-            if c.get("despues") in nombres:
+            if asigno:
                 titulo = segun_autor(f.get("usuario"), "le asignó", "se le asignó") + f" {que}"
                 lineas = [f"Antes lo tenía: {c['antes']}"] if c.get("antes") else []
-            elif c.get("antes") in nombres:
+            elif saco:
                 titulo = segun_autor(f.get("usuario"), "le sacó", "se le sacó") + f" {que}"
                 lineas = [f"Pasó a: {c.get('despues') or 'nadie (lo decide el plan)'}"]
             else:
                 continue
+            nota = f"Desde: {f['origen']}" if f.get("origen") else None
+            deducido = False
+            if not con_numero:
+                nombre = c.get("despues") if asigno else c.get("antes")
+                otros = [h for h in homonimos if nombre in h["nombres"]
+                         and _en_el_periodo(f.get("creado_en"), h.get("desde"), h.get("hasta"))]
+                if otros:
+                    deducido = True
+                    cuales = ", ".join(f"#{h['id']}" for h in otros)
+                    quien = (f"la persona {cuales}. Puede ser de ella." if len(otros) == 1
+                             else f"las personas {cuales}. Puede ser de alguna de ellas.")
+                    nota = (f"Deducido por el nombre: hasta el 23/09 el historial de pasos guardaba "
+                            f"el nombre y no el número, y en ese momento también se llamaba "
+                            f"{nombre} {quien}" + (f" {nota}." if nota else ""))
             salida.append(evento(
                 id=f"asig-{f['id']}", cuando=f["creado_en"], tipo="asignaciones", titulo=titulo,
                 quien=f.get("usuario"), id_usuario=f.get("id_usuario"), lineas=lineas,
-                fuente="Pasos", ot=ot_de(f["id_orden_trabajo"]),
-                nota=f"Desde: {f['origen']}" if f.get("origen") else None,
+                fuente="Pasos", ot=ot_de(f["id_orden_trabajo"]), nota=nota, deducido=deducido,
             ))
     for f in altas_sin_cambio:
+        if not _en_el_periodo(f.get("creado_en"), desde, hasta):
+            continue
         numero = numero_de(f["id_orden_trabajo"])
         salida.append(evento(
             id=f"asig-alta-{f['id']}", cuando=f["creado_en"], tipo="asignaciones",
@@ -1380,9 +1481,10 @@ class HistorialService:
         return salida
 
     async def dadas_de_baja(self, ids=None) -> dict[int, dict]:
-        """{id: persona} de las que se borraron (un DELETE /operarios/{id} que salió bien) y
-        ya no están en `operario`, con su último nombre conocido y quién y cuándo la dio de
-        baja. `ids` acota a esas."""
+        """{id: persona} de las que se borraron (un DELETE /operarios/{id} que salió bien y
+        que prueba que había a quién borrar: ver historia_de_la_persona) y ya no están en
+        `operario`, con su último nombre conocido y quién y cuándo la dio de baja. `ids`
+        acota a esas."""
         from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento as M
         from backend.domain.Operario import Operario
 
@@ -1398,7 +1500,14 @@ class HistorialService:
         siguen = set(await self._ids(Operario.id, Operario.id.in_(sorted(candidatos))))
         idas = candidatos - siguen
         pedidos = await self._pedidos_de_la_ficha(idas)
-        return {i: persona_dada_de_baja(i, historia_de_la_persona(pedidos.get(i, []))) for i in idas}
+        salida = {}
+        for i in idas:
+            historia = historia_de_la_persona(pedidos.get(i, []))
+            # Un DELETE a un número que nunca estuvo cargado contesta 200 igual: sin algo
+            # que pruebe que se borró a alguien, no es una baja (revisión del 23/09).
+            if historia["baja"] is not None:
+                salida[i] = persona_dada_de_baja(i, historia)
+        return salida
 
     async def _alta_por_nombre(self, id_operario: int, nombre_actual: str | None,
                                historia: dict) -> list[dict]:
@@ -1429,6 +1538,59 @@ class HistorialService:
             if filas:
                 return filas
         return []
+
+    async def _homonimos(self, id_operario: int, nombres: list[str]) -> list[dict]:
+        """Las OTRAS personas —cargadas o dadas de baja— que alguna vez se llamaron como
+        ella (alguno de `nombres`), con desde y hasta cuándo estuvieron: [{id, nombres,
+        desde, hasta}] (una punta en None = no se sabe, o sigue cargada).
+
+        El historial de pasos anterior al 23/09 guarda el nombre y no el número: un
+        renglón con ese nombre, de un momento en que las dos estaban, puede ser de
+        cualquiera, y eventos_de_asignaciones lo marca como deducido. Se las busca por el
+        nombre de hoy (`operario`) y por el registro, donde el alta y cada guardado dicen
+        el nombre en la frase («dio de alta a Juan Perez», «editó a Juan Perez: …»,
+        «editó persona #9 — Juan Perez»)."""
+        from backend.domain.AuditoriaMovimiento import AuditoriaMovimiento as M
+        from backend.domain.Operario import Operario
+
+        buscados = {n for n in nombres if n}
+        if not buscados:
+            return []
+        hoy: dict[int, str | None] = {}
+        candidatos: set[int] = set()
+        for f in (await self.db.execute(select(Operario.id, Operario.nombre, Operario.apellido))).all():
+            if f.id == id_operario:
+                continue
+            hoy[f.id] = nombre_completo_de({"nombre": f.nombre, "apellido": f.apellido})
+            if hoy[f.id] in buscados:
+                candidatos.add(f.id)
+        for (id_entidad,) in (await self.db.execute(
+                select(M.id_entidad).where(
+                    M.entidad == "persona", M.id_entidad.isnot(None), M.id_entidad != str(id_operario),
+                    or_(*[M.descripcion.like(f"%{_escapar_like(n)}%", escape="\\") for n in buscados]))
+                .distinct())).all():
+            if str(id_entidad).isdigit():
+                candidatos.add(int(id_entidad))
+        if not candidatos:
+            return []
+        pedidos = await self._pedidos_de_la_ficha(candidatos)
+        salida = []
+        for i in sorted(candidatos):
+            historia = historia_de_la_persona(pedidos.get(i, []))
+            sigue = i in hoy
+            if not sigue and not historia["existio"]:
+                continue  # un número que nunca estuvo cargado
+            suyos = set(historia["nombres"]) | ({hoy[i]} if sigue and hoy[i] else set())
+            comunes = suyos & buscados
+            if not comunes:
+                continue
+            salida.append({
+                "id": i,
+                "nombres": comunes,
+                "desde": historia["alta"]["creado_en"] if historia["alta"] else None,
+                "hasta": None if sigue else (historia["baja"]["creado_en"] if historia["baja"] else None),
+            })
+        return salida
 
     # ── lo común ──
 
@@ -1840,10 +2002,12 @@ class HistorialService:
         movs = [fila_de_movimiento(m) for m in (await db.execute(
             select(M).where(M.id_entidad == str(id_operario), _de_la_entidad(M, "persona"))
             .order_by(M.creado_en, M.id))).scalars().all()]
-        if op is None and not any(_salio_bien(m) for m in movs):
-            # Ni está cargada ni quedó nada suyo en el registro: no existe (o es de otra base).
-            return None
         historia = historia_de_la_persona(movs)
+        if op is None and not historia["existio"]:
+            # Ni está cargada ni hay nada en el registro que pruebe que lo estuvo: no existe
+            # (o es de otra base). Un DELETE o un guardado a un número inventado contestan
+            # 200 igual («Operario no encontrado»): eso solo no alcanza (revisión del 23/09).
+            return None
         if op is not None:
             nombre_completo = " ".join(x for x in (op.nombre, op.apellido) if x).strip()
         else:
@@ -1866,6 +2030,12 @@ class HistorialService:
         # Todos los nombres que tuvo: el historial de pasos la nombra como se llamaba entonces.
         nombres = list(dict.fromkeys(n for n in [nombre_completo] + historia["nombres"] if n))
         id_baja = historia["baja"]["id"] if historia["baja"] else None
+        cuando_baja = (historia["baja"]["creado_en"], id_baja) if historia["baja"] else None
+        # Desde cuándo y hasta cuándo estuvo: del alta atada a su número (la reconocida por
+        # el nombre no: si fuera de otra, correría la punta) y de su baja.
+        alta_propia = next((m for m in movs if es_alta_de_persona(m) and _salio_bien(m)), None)
+        estuvo_desde = alta_propia["creado_en"] if alta_propia else None
+        estuvo_hasta = historia["baja"]["creado_en"] if (op is None and historia["baja"]) else None
 
         nombres_proceso = await self._nombres_para_habilidades(movs, Proceso, Rango)
 
@@ -1926,9 +2096,12 @@ class HistorialService:
                                 "el sistema avisó qué se perdía y pidió confirmar.")
                 elif m["id"] == id_baja:
                     titulo = f"dio de baja a {en_ese_momento}"
-                else:
+                elif cuando_baja and (m["creado_en"], m["id"]) > cuando_baja:
                     # Un segundo DELETE (dos clics): contesta bien, pero ya no había a quién.
                     titulo = f"volvió a pedir la baja de {en_ese_momento}, que ya no estaba"
+                else:
+                    # Contestó 200 sin borrar a nadie («Operario no encontrado»).
+                    titulo = f"pidió dar de baja a {en_frases}, pero no estaba cargada: no se borró nada"
                 eventos.append(evento_de_movimiento(m, "baja", titulo=titulo, nota=nota))
             else:
                 eventos.append(evento_de_movimiento(m, tipo))
@@ -1965,11 +2138,16 @@ class HistorialService:
             [], avisos, "las no conformidades")
         ids_ot |= {i["id_orden_trabajo"] for i in incidencias}
 
-        filas_asig, altas_sin_cambio = [], []
+        filas_asig, altas_sin_cambio, homonimos = [], [], []
         if ve_pasos:
             filas_asig, altas_sin_cambio = await _sin_romper(
-                db, lambda: self._asignaciones(P, nombres, elegidos), ([], []), avisos,
+                db, lambda: self._asignaciones(P, nombres, elegidos, id_operario), ([], []), avisos,
                 "las asignaciones de pasos")
+            # Quién más se llamó igual (y cuándo estuvo): las filas viejas sólo tienen el
+            # nombre. Si no se puede leer, los renglones salen sin la marca de deducido, y
+            # la pantalla avisa.
+            homonimos = await _sin_romper(db, lambda: self._homonimos(id_operario, nombres), [], avisos,
+                                          "si otra persona se llamaba igual")
             ids_ot |= {f["id_orden_trabajo"] for f in filas_asig + altas_sin_cambio}
         else:
             ocultos.append({"que": "pasos", "texto": "Cuándo y quién le eligió o le sacó un paso a "
@@ -2014,7 +2192,9 @@ class HistorialService:
         # descripción, por ejemplo) es de la OT, no de la persona.
         eventos += [m for m in movs_nc if m.get("_absorbido")]
         eventos += eventos_de_asignaciones(filas_asig, nombres, numero_de=numero_de,
-                                           ot_de=ot_de, altas_sin_cambio=altas_sin_cambio)
+                                           ot_de=ot_de, altas_sin_cambio=altas_sin_cambio,
+                                           id_operario=id_operario, desde=estuvo_desde,
+                                           hasta=estuvo_hasta, homonimos=homonimos or [])
 
         if ve_plan:
             intentos = await self._intentos_por_lote(avisos)
@@ -2042,14 +2222,19 @@ class HistorialService:
         )).all()
         return [dict(f._mapping) for f in filas]
 
-    async def _asignaciones(self, P, nombres: list[str], elegidos: list[int]):
+    async def _asignaciones(self, P, nombres: list[str], elegidos: list[int], id_operario: int):
         """(cambios de «persona elegida» que la nombran —con cualquiera de los nombres que
-        tuvo—, altas de pasos que hoy la tienen elegida y nunca cambiaron de persona)."""
-        filas = []
-        if nombres:
-            filas = await self._filas_de_pasos(P, and_(
-                P.accion == "edicion", P.cambios.like("%persona elegida%"),
-                or_(*[P.cambios.like(f"%{_escapar_like(n)}%", escape="\\") for n in nombres])))
+        tuvo, o con su número desde el 23/09—, altas de pasos que hoy la tienen elegida y
+        nunca cambiaron de persona). Lo que es de otra que se llama igual lo separa
+        eventos_de_asignaciones."""
+        # Así escribe json.dumps el número (auditoria_procesos.cambio_de_campo): seguido
+        # de «,» o de «}». «7» no encuentra «70».
+        por_numero = ["%" + _escapar_like('"%s": %d' % (clave, int(id_operario))) + fin + "%"
+                      for clave in ("id_antes", "id_despues") for fin in (",", "}")]
+        filas = await self._filas_de_pasos(P, and_(
+            P.accion == "edicion", P.cambios.like("%persona elegida%"),
+            or_(*[P.cambios.like(n, escape="\\") for n in por_numero],
+                *[P.cambios.like(f"%{_escapar_like(n)}%", escape="\\") for n in nombres])))
         altas = []
         if elegidos:
             con_cambio = set(await self._ids(P.id_otp, and_(

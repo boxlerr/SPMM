@@ -1032,3 +1032,274 @@ async def test_una_baja_de_antes_se_arma_con_lo_que_quedo_en_el_registro(api, ba
     # El 32 nunca existió: el DELETE que falló no alcanza para inventarle una historia.
     r = await api.get("/auditoria/historial/personas/32")
     assert r.status_code == 404
+
+
+# ─────────────────────────── revisión del 23/09: bajas y homónimos ───────────────────────────
+#
+# Una verificación de lo de arriba encontró tres cosas:
+#   1. Una dada de baja y otra que entró después con el MISMO nombre se distinguían en la
+#      lista, pero sus líneas de tiempo se mezclaban: «le asignó / le sacó un paso» se
+#      buscaba por el nombre (así lo guardaba el historial de pasos) y cada una mostraba
+#      lo de la otra, aun lo de antes de su alta o lo de después de su baja.
+#   2. Un DELETE /operarios/{id} a un número que no existe contesta 200 («Operario no
+#      encontrado», status false): quedaba como una baja y aparecía una «Persona #424242
+#      dada de baja» que nunca existió.
+#   3. Quien no puede leer ausencias (política 'asistencia') no las veía en el historial,
+#      pero sí en «Todo lo que se hizo»: el motivo (ENFERMEDAD) y la observación libre.
+
+async def _elegir_a_mano(sesiones, id_otp, id_operario):
+    """Le elige a mano la persona a un paso, por el ORM (como el guardado de la OT): el
+    historial de pasos lo anota solo."""
+    async with sesiones() as s:
+        paso = await s.get(OrdenTrabajoProceso, id_otp)
+        paso.id_operario = id_operario
+        await s.commit()
+
+
+async def _alta(cliente, nombre, apellido):
+    r = await cliente.post("/operarios", json={"nombre": nombre, "apellido": apellido, "categoria": "OFICIAL"})
+    assert r.status_code == 200, r.text
+    return r.json()["data"]["id"]
+
+
+async def test_la_dada_de_baja_y_la_que_entro_despues_con_el_mismo_nombre_no_se_mezclan(app_real):
+    """Por los endpoints de verdad: A entra, le eligen el paso 2 (FRESA) y se la da de baja
+    (el paso se le suelta); B entra DESPUÉS con el mismo nombre y le eligen el paso 1
+    (TORNO CNC). Cada línea de tiempo trae lo suyo y nada de la otra. Desde el 23/09 el
+    historial de pasos guarda el número de la persona, y con eso no hay que adivinar."""
+    a = await _alta(app_real, "Pedro", "Gonzalez")
+    # Otra persona en el medio: SQLite reusa el número más alto si se borra (Postgres no),
+    # y B tiene que tener otro número que A, como en producción.
+    await _alta(app_real, "Rita", "Luz")
+    await _elegir_a_mano(app_real.sesiones, OTP2, a)
+    r = await app_real.delete(f"/operarios/{a}", params={"forzar": "true"})
+    assert r.status_code == 200 and r.json()["status"], r.text
+    b = await _alta(app_real, "Pedro", "Gonzalez")
+    assert b != a
+    await _elegir_a_mano(app_real.sesiones, OTP1, b)
+
+    # El historial de pasos guarda el número además del nombre.
+    async with app_real.sesiones() as s:
+        filas = (await s.execute(select(AuditoriaProcesoOT).where(
+            AuditoriaProcesoOT.cambios.like("%persona elegida%")).order_by(AuditoriaProcesoOT.id))).scalars().all()
+    cambios = [c for f in filas for c in json.loads(f.cambios) if c["campo"] == "persona elegida"]
+    assert {"campo": "persona elegida", "antes": None, "despues": "Pedro Gonzalez",
+            "id_antes": None, "id_despues": a} in cambios
+    assert {"campo": "persona elegida", "antes": "Pedro Gonzalez", "despues": None,
+            "id_antes": a, "id_despues": None} in cambios   # el que se le soltó al borrarla
+    assert {"campo": "persona elegida", "antes": "Juan Perez", "despues": "Pedro Gonzalez",
+            "id_antes": 7, "id_despues": b} in cambios
+
+    personas = await _lista(app_real)
+    assert [(p["id"], p["dada_de_baja"]) for p in personas if p["nombre"] == "Pedro Gonzalez"] == [
+        (b, False), (a, True)]
+
+    h_a = await _historial(app_real, "personas", a)
+    asig_a = [(e["titulo"], e["deducido"]) for e in h_a["eventos"] if e["tipo"] == "asignaciones"]
+    assert asig_a == [("le sacó el paso 2 — FRESA de la OT 15300", False),
+                      ("se le asignó el paso 2 — FRESA de la OT 15300", False)]
+    h_b = await _historial(app_real, "personas", b)
+    asig_b = [(e["titulo"], e["deducido"]) for e in h_b["eventos"] if e["tipo"] == "asignaciones"]
+    assert asig_b == [("se le asignó el paso 1 — TORNO CNC de la OT 15300", False)]
+    # Y a Juan Perez (7) se le sacó el paso 1: por el número, sin mirar el nombre.
+    h7 = await _historial(app_real, "personas", 7)
+    assert _por_titulo(h7, "se le sacó el paso 1 — TORNO CNC de la OT 15300")
+
+
+async def test_con_filas_viejas_por_el_nombre_cuenta_cuando_estuvo_cada_una(api, base):
+    """Filas del historial de pasos de antes del 23/09 (sólo el nombre). La 41 entró el
+    02/09 y se dio de baja el 15/09; la 42, con el mismo nombre, entró el 18/09. Lo del
+    10/09 y lo que se le soltó al borrarla son de la 41; lo del 20/09, de la 42: nada de
+    alguien antes de su alta ni después de su baja."""
+    def alta(id_, cuando):
+        return _mov(d(cuando), "/operarios", metodo="POST", accion="creó", entidad="persona",
+                    id_entidad=str(id_), descripcion=f"{LUCAS} dio de alta a Carlos Ruiz",
+                    detalle={"datos": {"nombre": "Carlos", "apellido": "Ruiz", "categoria": "OFICIAL"}})
+
+    def eligio(cuando, antes, despues, *, id_otp, proceso, paso, origen="Guardado de la orden"):
+        return _paso_orm(d(cuando), cambios=[{"campo": "persona elegida", "antes": antes, "despues": despues}],
+                         id_otp=id_otp, proceso=proceso, paso=paso, origen=origen,
+                         descripcion=f"cambió el paso {paso} — {proceso}: persona elegida: "
+                                     f"{antes or '—'} → {despues or '—'}")
+
+    async with base() as s:
+        s.add(Operario(id=42, nombre="Carlos", apellido="Ruiz", categoria="OFICIAL", disponible=True,
+                       hora_inicio=time(7), hora_fin=time(16)))
+        s.add_all([
+            alta(41, "2026-09-02 08:00:00"),
+            _mov(d("2026-09-15 08:00:01"), "/operarios/41", metodo="DELETE", accion="eliminó", entidad="persona",
+                 id_entidad="41", descripcion=f"{LUCAS} dio de baja a Carlos Ruiz",
+                 detalle={"antes": {"nombre": "Carlos", "apellido": "Ruiz", "categoría": "OFICIAL"}}),
+            alta(42, "2026-09-18 08:00:00"),
+            eligio("2026-09-10 09:00:00", None, "Carlos Ruiz", id_otp=OTP2, proceso="FRESA", paso=2),
+            eligio("2026-09-15 08:00:00", "Carlos Ruiz", None, id_otp=OTP2, proceso="FRESA", paso=2,
+                   origen="Al borrar una persona"),
+            eligio("2026-09-20 09:00:00", "Juan Perez", "Carlos Ruiz", id_otp=OTP1, proceso="TORNO CNC", paso=1),
+        ])
+        await s.commit()
+
+    def asignaciones(h):
+        return [(e["cuando"][:10], e["titulo"], e["deducido"]) for e in h["eventos"] if e["tipo"] == "asignaciones"]
+
+    h41 = await _historial(api, "personas", 41)
+    assert h41["persona"]["dada_de_baja"] is True
+    assert asignaciones(h41) == [
+        ("2026-09-15", "le sacó el paso 2 — FRESA de la OT 15300", False),
+        ("2026-09-10", "le asignó el paso 2 — FRESA de la OT 15300", False),
+    ]
+    h42 = await _historial(api, "personas", 42)
+    assert asignaciones(h42) == [("2026-09-20", "le asignó el paso 1 — TORNO CNC de la OT 15300", False)]
+
+    # Una tercera «Carlos Ruiz», cargada y sin alta en el registro (de antes): no se sabe
+    # desde cuándo está, así que cualquiera de esos renglones puede ser suyo. Se muestran,
+    # marcados como deducidos y diciendo con quién se confunden.
+    async with base() as s:
+        s.add(Operario(id=43, nombre="Carlos", apellido="Ruiz", categoria="OFICIAL", disponible=True,
+                       hora_inicio=time(7), hora_fin=time(16)))
+        await s.commit()
+    h42 = await _historial(api, "personas", 42)
+    assert asignaciones(h42) == [("2026-09-20", "le asignó el paso 1 — TORNO CNC de la OT 15300", True)]
+    nota = [e for e in h42["eventos"] if e["tipo"] == "asignaciones"][0]["nota"]
+    assert "#43" in nota and "#41" not in nota and "Desde: Guardado de la orden" in nota
+    h41 = await _historial(api, "personas", 41)
+    assert [x[2] for x in asignaciones(h41)] == [True, True]
+
+
+def test_el_historial_de_pasos_prefiere_el_numero_al_nombre():
+    """Con el número guardado, el nombre no se mira: ni para tomar lo de otra que se llama
+    igual, ni para perder lo suyo si el nombre del renglón era otro."""
+    filas = [
+        _paso(1, d("2026-09-24 10:00"), cambios=[{"campo": "persona elegida", "antes": None,
+                                                  "despues": "Ana Gomez", "id_antes": None, "id_despues": 8}]),
+        _paso(2, d("2026-09-24 11:00"), cambios=[{"campo": "persona elegida", "antes": None,
+                                                  "despues": "Ana Gomez", "id_antes": None, "id_despues": 9}]),
+        _paso(3, d("2026-09-24 12:00"), cambios=[{"campo": "persona elegida", "antes": "Ana Gomez",
+                                                  "despues": "Otro Nombre", "id_antes": 8, "id_despues": 5}]),
+    ]
+    ev = H.eventos_de_asignaciones(filas, ["Ana Gomez"], numero_de=lambda i: 15300, ot_de=lambda i: None,
+                                   altas_sin_cambio=[], id_operario=8,
+                                   homonimos=[{"id": 9, "nombres": {"Ana Gomez"}, "desde": None, "hasta": None}])
+    assert [(e["id"], e["titulo"].split(" el paso")[0], e["deducido"]) for e in ev] == [
+        ("asig-1", "le asignó", False), ("asig-3", "le sacó", False)]
+
+
+async def test_la_busqueda_por_numero_no_toma_otro_numero(base):
+    """El número se busca entero en el JSON de los cambios: el 7 no encuentra al 70."""
+    async with base() as s:
+        s.add_all([
+            _paso_orm(d("2026-09-24 10:00"), cambios=[{"campo": "persona elegida", "antes": None, "despues": "X",
+                                                       "id_antes": None, "id_despues": 70}]),
+            _paso_orm(d("2026-09-24 11:00"), cambios=[{"campo": "persona elegida", "antes": "X", "despues": None,
+                                                       "id_antes": 7, "id_despues": None}]),
+        ])
+        await s.commit()
+        filas, _ = await H.HistorialService(s)._asignaciones(AuditoriaProcesoOT, [], [], 7)
+    assert [json.loads(f["cambios"])[0]["id_antes"] for f in filas] == [7]
+
+
+def test_un_delete_a_un_numero_que_no_estaba_no_es_una_baja():
+    """DELETE /operarios/{id} contesta 200 también cuando no la encuentra. Es una baja sólo
+    si dejó dicho quién era (desde el 23/09) o, en filas de antes, si algo anterior prueba
+    que estaba cargada: el alta, el 409 que pidió confirmar o un guardado."""
+    borrar = lambda id_, cuando, **k: _fila(id_, cuando, "/operarios/9", "DELETE", **k)  # noqa: E731
+    solo = H.historia_de_la_persona([borrar(1, "2026-09-24 10:00")])
+    assert solo["baja"] is None and not solo["existio"]
+    # El 409 prueba que estaba (el sistema la encontró y pidió confirmar).
+    con_409 = H.historia_de_la_persona([borrar(1, "2026-09-20 10:00", estado=409), borrar(2, "2026-09-20 10:01")])
+    assert con_409["baja"]["id"] == 2
+    # Un guardado viejo (antes del 23/09 no dejaban antes/después) también.
+    viejo = H.historia_de_la_persona([
+        _fila(1, "2026-09-10 10:00", "/operarios/9", "PUT", detalle={"datos": {"nombre": "Juan"}}),
+        borrar(2, "2026-09-20 10:00")])
+    assert viejo["baja"]["id"] == 2
+    # Uno de ahora sin antes/después fue a un número que no estaba: no prueba nada.
+    nuevo = H.historia_de_la_persona([
+        _fila(1, "2026-09-24 10:00", "/operarios/9", "PUT", detalle={"datos": {"nombre": "Juan"}}),
+        borrar(2, "2026-09-24 10:01")])
+    assert nuevo["baja"] is None and not nuevo["existio"]
+    # La que dejó dicho quién era, aunque sea vacío (no se pudo leer el nombre), sí.
+    vacia = H.historia_de_la_persona([borrar(1, "2026-09-24 10:00", detalle={"antes": {}})])
+    assert vacia["baja"]["id"] == 1 and vacia["existio"]
+
+
+def test_la_baja_deja_dicho_antes_aunque_no_se_haya_podido_leer_quien_era():
+    class _Pedido:
+        class state:
+            pass
+    pedido = _Pedido()
+    hc.dejar_dicho_baja(pedido, 5, None)
+    assert pedido.state.auditoria == {"frase": "dio de baja a la persona #5", "antes": {}}
+
+
+async def test_un_delete_a_un_numero_inventado_no_inventa_una_baja(app_real):
+    r = await app_real.delete("/operarios/424242", params={"forzar": "true"})
+    assert r.status_code == 200 and r.json()["status"] is False  # así contesta hoy
+    fila = await _ultima(app_real.sesiones, "/operarios/424242", "DELETE")
+    assert fila.estado == 200 and "antes" not in json.loads(fila.detalle or "{}")
+    assert not [p for p in await _lista(app_real) if p["dada_de_baja"]]
+    r = await app_real.get("/auditoria/historial/personas/424242")
+    assert r.status_code == 404
+
+    # Un segundo DELETE a alguien que sí se dio de baja no es otra baja.
+    a = await _alta(app_real, "Rita", "Luz")
+    await _alta(app_real, "Otra", "Persona")
+    for _ in range(2):
+        r = await app_real.delete(f"/operarios/{a}", params={"forzar": "true"})
+        assert r.status_code == 200, r.text
+    h = await _historial(app_real, "personas", a)
+    bajas = [e["titulo"] for e in h["eventos"] if e["tipo"] == "baja"]
+    assert bajas == ["volvió a pedir la baja de Rita Luz, que ya no estaba", "dio de baja a Rita Luz"]
+
+
+async def test_todo_lo_que_se_hizo_no_muestra_ausencias_sin_la_politica_asistencia(api, base):
+    """El motivo (ENFERMEDAD) y la observación de una ausencia no salen por «Todo lo que se
+    hizo» ni por /movimientos/de/… a quien no puede leer ausencias: ni las filas que las
+    cargaron, ni el «por qué» de pasar a alguien a Ausente dentro del guardado de la ficha.
+    Con Recursos (o Operaciones) se ven como siempre."""
+    secreto = "gripe fuerte certificado 123"
+    async with base() as s:
+        s.add_all([
+            _mov(d("2026-09-17 07:30:05"), "/operarios/7/ausencias", metodo="POST", accion="creó",
+                 entidad="persona › ausencias", id_entidad="7",
+                 descripcion=f"{LUCAS} cargó una ausencia de Juan Perez el 17/09 (enfermedad)",
+                 detalle={"datos": {"desde": "2026-09-17", "motivo": "ENFERMEDAD", "observacion": secreto}}),
+            _mov(d("2026-09-17 07:40:00"), "/operarios/7", entidad="persona", id_entidad="7",
+                 descripcion=f"{LUCAS} editó a Juan Perez: estado: Activo → Ausente",
+                 detalle={"antes": {"estado": "Activo"}, "despues": {"estado": "Ausente"},
+                          "datos": {"nombre": "Juan", "disponible": False, "ausencia_observacion": secreto}}),
+        ])
+        await s.commit()
+
+    api.estado["permisos"] = _permisos(ausencias=False)
+    for ruta, params in (("/auditoria/movimientos", {}), ("/auditoria/movimientos/de/persona/7", {}),
+                         ("/auditoria/movimientos", {"buscar": "enfermedad"}),
+                         ("/auditoria/movimientos", {"entidad": "persona › ausencias"})):
+        r = await api.get(ruta, params=params)
+        assert r.status_code == 200, r.text
+        texto = r.text.lower()
+        assert "gripe" not in texto and "enfermedad" not in texto and "vacaciones" not in texto, (ruta, params)
+        assert not [m for m in r.json()["movimientos"] if "ausencias" in (m["entidad"] or "")]
+    r = await api.get("/auditoria/movimientos")
+    datos = r.json()
+    assert "persona › ausencias" not in {e["entidad"] for e in datos["entidades"]}
+    guardado = [m for m in datos["movimientos"] if m["cuando"] == "2026-09-17T07:40:00"]
+    assert len(guardado) == 1  # el guardado de la ficha sigue: sólo se tapa el «por qué»
+    assert json.loads(guardado[0]["detalle"])["datos"] == {
+        "nombre": "Juan", "disponible": False, "ausencia_observacion": hc.OCULTO}
+    r = await api.get("/auditoria/movimientos", params={"buscar": "enfermedad"})
+    assert r.json()["total"] == 0
+
+    # Con Recursos se ve todo, como siempre.
+    api.estado["permisos"] = _permisos(ausencias=True)
+    r = await api.get("/auditoria/movimientos")
+    assert secreto in r.text and "(enfermedad)" in r.text
+    r = await api.get("/auditoria/movimientos/de/persona/7")
+    assert secreto in r.text
+
+
+def test_un_detalle_recortado_con_el_por_que_de_la_ausencia_manda_solo_antes_y_despues():
+    recortado = json.dumps({"antes": {"estado": "Activo"}, "despues": {"estado": "Ausente"},
+                            "datos": {"ausencia_observacion": "gripe", "x": "y" * 50}})[:-20]
+    assert json.loads(AuditoriaAPI._detalle_sin_ausencia(recortado)) == {
+        "antes": {"estado": "Activo"}, "despues": {"estado": "Ausente"}}
+    assert AuditoriaAPI._detalle_sin_ausencia('{"datos": {"nombre": "Juan"}}') == '{"datos": {"nombre": "Juan"}}'

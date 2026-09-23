@@ -87,7 +87,64 @@ def _sin_ingresos():
     return M.entidad.notin_(ENTIDADES_DE_INGRESO)
 
 
-def _fila(m: AuditoriaMovimiento, con_detalle: bool = True) -> dict:
+# ─────────────────────────── las ausencias, sólo con la política 'asistencia' ───────────────────────────
+#
+# Revisión del 23/09. Una ausencia dice por qué faltó alguien —ENFERMEDAD— y trae una
+# observación libre («gripe fuerte, certificado 123»). Afuera se lee con la política
+# 'asistencia' (Recursos u Operaciones), y el historial de la persona ya la respetaba.
+# Pero el registro central guarda el pedido entero: la frase («cargó una ausencia de
+# Juan Pérez del 17/09 al 18/09 (enfermedad)») y el cuerpo (motivo y observación), y
+# también el «por qué» de pasar a alguien a Ausente, que viaja en el guardado de la
+# persona (`ausencia_observacion`). Quien tenía sólo Auditoría lo leía en «Todo lo que se
+# hizo» y en /movimientos/de/persona/{id}. Ahora, sin la política:
+#   · no van las filas de cargar, corregir o borrar una ausencia (ni cuentan en el total,
+#     ni se encuentran buscando «enfermedad», ni aparecen en el desplegable de «Qué»);
+#   · del guardado de la persona va todo menos ese «por qué», que sale tapado.
+# Las filas no se tocan (son datos del cliente): se filtra lo que se manda.
+
+def _ve_ausencias(permisos) -> bool:
+    """Si puede leer ausencias: la misma regla que afuera (política 'asistencia')."""
+    from backend.core.permisos_rutas import POLITICAS, permite
+    try:
+        return bool(permisos) and permite(POLITICAS["asistencia"].leer, permisos, {})
+    except Exception:
+        return False
+
+
+def _sin_ausencias():
+    """Lo que no es cargar, corregir ni borrar una ausencia («persona › ausencias», por
+    la entidad o por el camino)."""
+    return and_(
+        func.coalesce(M.entidad, "").not_like("persona › ausencias%"),
+        func.coalesce(M.ruta, "").not_like("/operarios/%/ausencias%"),
+    )
+
+
+def _detalle_sin_ausencia(detalle: str | None) -> str | None:
+    """El detalle con el «por qué» de un paso a Ausente tapado (`ausencia_observacion` del
+    guardado de la persona). Si el detalle vino recortado y no se puede leer entero, van
+    sólo el antes y el después, que no lo traen."""
+    if not detalle or "ausencia_observacion" not in detalle:
+        return detalle
+    from backend.application.HistorialService import leer_detalle
+    from backend.infrastructure.historial_cambios import OCULTO
+    try:
+        valor = json.loads(detalle)
+    except ValueError:
+        valor = None
+    if not isinstance(valor, dict):
+        rescatado = {k: v for k, v in leer_detalle(detalle).items() if k in ("antes", "despues")}
+        return json.dumps(rescatado, ensure_ascii=False) if rescatado else None
+    datos = valor.get("datos")
+    if isinstance(datos, dict) and datos.get("ausencia_observacion") not in (None, ""):
+        datos["ausencia_observacion"] = OCULTO
+    return json.dumps(valor, ensure_ascii=False)
+
+
+def _fila(m: AuditoriaMovimiento, con_detalle: bool = True, ve_ausencias: bool = True) -> dict:
+    detalle = m.detalle if con_detalle else None
+    if detalle and not ve_ausencias:
+        detalle = _detalle_sin_ausencia(detalle)
     return {
         "id": m.id,
         "cuando": m.creado_en.isoformat() if m.creado_en else None,
@@ -103,7 +160,7 @@ def _fila(m: AuditoriaMovimiento, con_detalle: bool = True) -> dict:
         "salio_bien": (m.estado or 0) < 400,
         "duracion_ms": m.duracion_ms,
         # Sin detalle en el Exportar: no va al archivo y es lo más pesado de la fila.
-        "detalle": m.detalle if con_detalle else None,
+        "detalle": detalle,
     }
 
 
@@ -270,6 +327,7 @@ async def movimientos(
     """
     ve_ingresos = _puede(permisos, "auditoria_ingresos")
     ve_cuentas = _puede(permisos, "configuracion_usuarios")
+    ve_ausencias = _ve_ausencias(permisos)
     if tipo == "ingresos" and not ve_ingresos:
         raise _prohibido("auditoria_ingresos")
     if tipo != "ingresos" and not _puede(permisos, "auditoria_movimientos"):
@@ -281,6 +339,8 @@ async def movimientos(
     )
     if not ve_ingresos:
         condiciones.append(_sin_ingresos())
+    if not ve_ausencias:
+        condiciones.append(_sin_ausencias())
 
     q = select(M).where(*condiciones).order_by(M.creado_en.desc(), M.id.desc())
     if not con_detalle:
@@ -296,7 +356,7 @@ async def movimientos(
         )).scalar() or 0
 
     salida = {
-        "movimientos": [_fila(m, con_detalle) for m in filas],
+        "movimientos": [_fila(m, con_detalle, ve_ausencias) for m in filas],
         "total": total,
         "desplazamiento": desplazamiento,
         "limite": limite,
@@ -309,7 +369,7 @@ async def movimientos(
     if opciones:
         # Para armar los desplegables de filtro sin que el front tenga que adivinar qué
         # hay. Salen de los datos, así que una entidad nueva aparece sola.
-        visibles = [] if ve_ingresos else [_sin_ingresos()]
+        visibles = ([] if ve_ingresos else [_sin_ingresos()]) + ([] if ve_ausencias else [_sin_ausencias()])
         entidades = (await db.execute(
             select(M.entidad, func.count().label("cuantos"))
             .where(*visibles)
@@ -571,7 +631,8 @@ async def movimientos_de(
 
     Es la pregunta que motivó todo esto, así que tiene su propia dirección en vez de
     depender de que alguien acierte el filtro. Sin «Ingresos y actividad por persona»
-    no manda las filas de entrar, salir y claves (/de/sesión/5 era otra puerta a eso)."""
+    no manda las filas de entrar, salir y claves (/de/sesión/5 era otra puerta a eso), y
+    sin la política 'asistencia', las de las ausencias (ver _sin_ausencias)."""
     q = (
         select(AuditoriaMovimiento)
         .where(AuditoriaMovimiento.entidad.like(f"{entidad}%"))
@@ -581,8 +642,11 @@ async def movimientos_de(
     )
     if not _puede(permisos, "auditoria_ingresos"):
         q = q.where(_sin_ingresos())
+    ve_ausencias = _ve_ausencias(permisos)
+    if not ve_ausencias:
+        q = q.where(_sin_ausencias())
     filas = (await db.execute(q)).scalars().all()
-    return {"movimientos": [_fila(m) for m in filas]}
+    return {"movimientos": [_fila(m, ve_ausencias=ve_ausencias) for m in filas]}
 
 
 # ─────────────────────────── RF-17: el historial de una OT y de una persona ───────────────────────────
@@ -603,20 +667,14 @@ def _secciones(permisos) -> dict:
     def tiene(seccion: str) -> bool:
         return _puede(permisos, seccion)
 
-    def ve_ausencias() -> bool:
-        # Las ausencias (con el motivo: ENFERMEDAD, y la observación) se leen afuera con
-        # la política 'asistencia' (Recursos u Operaciones). Revisión del 23/09: acá
-        # quedaban abiertas a quien sólo tiene Auditoría. Mismo requisito, del mapa.
-        from backend.core.permisos_rutas import POLITICAS, permite
-        try:
-            return bool(permisos) and permite(POLITICAS["asistencia"].leer, permisos, {})
-        except Exception:
-            return False
     return {
         "ve_pasos": tiene("auditoria_procesos"),
         "ve_plan": tiene("auditoria_planificacion"),
         "ve_rendimiento": tiene("dashboard_rendimiento"),
-        "ve_ausencias": ve_ausencias(),
+        # Las ausencias (con el motivo: ENFERMEDAD, y la observación) se leen afuera con
+        # la política 'asistencia' (Recursos u Operaciones). Revisión del 23/09: acá
+        # quedaban abiertas a quien sólo tiene Auditoría. Mismo requisito, del mapa.
+        "ve_ausencias": _ve_ausencias(permisos),
     }
 
 

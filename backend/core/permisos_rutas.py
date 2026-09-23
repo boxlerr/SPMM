@@ -426,6 +426,9 @@ POLITICAS: dict[str, Politica] = {
     # endpoint separa (AuditoriaAPI.movimientos): ?tipo=ingresos pide la confidencial; sin
     # tipo pide «Todo lo que se hizo», y a quien no tiene la confidencial no le manda las
     # filas de entrar, salir y claves (ni en la lista, ni en /movimientos/de/...).
+    # Tampoco las de las AUSENCIAS a quien no pasa la política 'asistencia' (el motivo y
+    # la observación: una enfermedad), ni el «por qué» de pasar a alguien a Ausente dentro
+    # del guardado de su ficha (AuditoriaAPI._sin_ausencias, revisión del 23/09).
     # La lista de cuentas (usuario, si tiene acceso, último login) es de «Usuarios y
     # permisos», confidencial y del admin: sin esa sección no se manda en ningún lado de
     # Auditoría, sólo el nombre con que cada uno firmó en el registro.
