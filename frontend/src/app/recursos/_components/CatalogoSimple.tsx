@@ -28,8 +28,10 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { API_URL } from "@/config";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
 
-interface Item {
+export interface Item {
   id: number;
   nombre: string;
 }
@@ -64,6 +66,12 @@ interface CatalogoSimpleProps {
    * sin obligar a abrir uno por uno para descubrir que alguno está vacío.
    */
   renderBadge?: (item: Item) => React.ReactNode;
+  /**
+   * RF-22. Columnas que se suman al exportar, después de # y Nombre. Rangos las usa
+   * para llevar lo que dicen sus carteles (cuánta maquinaria habilita, cuánta gente lo
+   * tiene), que en pantalla se ven al lado del nombre.
+   */
+  columnasExport?: ColumnaExport<Item>[];
 }
 
 const getAuthHeaders = (): HeadersInit => {
@@ -82,6 +90,7 @@ export default function CatalogoSimple({
   descripcion,
   renderExpanded,
   renderBadge,
+  columnasExport = [],
 }: CatalogoSimpleProps) {
   const cleanUrl = API_URL.replace(/\/$/, "");
   const { showToast } = useToast();
@@ -240,6 +249,17 @@ export default function CatalogoSimple({
           )}
         </div>
         <div className="flex gap-2">
+          <ExportarMenu
+            titulo={titulo}
+            archivo={resource}
+            filas={items}
+            columnas={[
+              { titulo: "#", tipo: "entero", valor: (_: Item, i: number) => i + 1 },
+              { titulo: "Nombre", valor: (it: Item) => it.nombre },
+              ...columnasExport,
+            ]}
+            disabled={loading}
+          />
           <Button
             onClick={abrirCrear}
             size="sm"

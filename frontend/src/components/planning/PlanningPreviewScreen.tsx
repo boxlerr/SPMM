@@ -30,6 +30,8 @@ import {
     type AjusteDelPlan, type AjustesDelPlanPayload, type AccionDeSolucion,
 } from "@/lib/ajustesPlan";
 import { MaterialChip } from "@/components/common/MaterialChip";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import {
     useProcesosEnPlan, contarCambios, resumirCambios, filasVisiblesDeOT, pasadasEnOrden,
 } from "@/components/planning/useProcesosEnPlan";
@@ -2470,6 +2472,59 @@ ${bloques || '<p class="gris">El plan no tiene trabajos.</p>'}
                                     )}
                                 </div>
                             )}
+                            {/* RF-22: el plan que se está mirando —con los retoques a mano y
+                                los filtros de la tabla—, un renglón por proceso. Todavía no
+                                está confirmado, y el archivo lo dice. */}
+                            {results.length > 0 && (() => {
+                                const nombreOperario = (i: PlanificacionResult) => {
+                                    if (i.tercerizado) return "Tercerizado";
+                                    const op = availableOperators.find((o: any) => o.id === i.id_operario);
+                                    return op ? `${op.nombre ?? ""} ${op.apellido ?? ""}`.trim() : (i.operario_nombre || "Sin asignar");
+                                };
+                                const nombreMaquina = (i: PlanificacionResult) => {
+                                    if (i.tercerizado) return "Tercerizado";
+                                    const m = availableMachines.find((x: any) => x.id === i.id_maquinaria);
+                                    if (m) return m.nombre;
+                                    if (i.maquinaria_nombre) return i.maquinaria_nombre;
+                                    return i.usa_maquina === false ? "No necesita" : "Sin asignar";
+                                };
+                                const columnas: ColumnaExport<PlanificacionResult>[] = [
+                                    { titulo: "OT", tipo: "id", valor: (i) => i.id_otvieja ?? i.orden_id },
+                                    { titulo: "Cliente", valor: (i) => i.cliente ?? "" },
+                                    { titulo: "Código", valor: (i) => i.codigo ?? "" },
+                                    { titulo: "Artículo", valor: (i) => i.articulo ?? "" },
+                                    { titulo: "Proceso", valor: (i) => i.nombre_proceso },
+                                    { titulo: "Inicio", tipo: "fechaHora", valor: (i) => i.fecha_inicio_estimada },
+                                    { titulo: "Fin", tipo: "fechaHora", valor: (i) => i.fecha_fin_estimada },
+                                    { titulo: "Minutos", tipo: "entero", valor: (i) => i.duracion_min },
+                                    { titulo: "Recurso humano", valor: nombreOperario },
+                                    { titulo: "Recurso maquinaria", valor: nombreMaquina },
+                                    { titulo: "Prometida", tipo: "fecha", valor: (i) => i.fecha_prometida },
+                                    {
+                                        titulo: "Termina tarde",
+                                        tipo: "booleano",
+                                        valor: (i) => !!(i.fecha_fin_estimada && i.fecha_prometida
+                                            && new Date(i.fecha_fin_estimada) > new Date(i.fecha_prometida)),
+                                    },
+                                ];
+                                const filas = Object.values(gruposFiltrados).flatMap(items => items.map(i => getEffectiveItem(i)));
+                                return (
+                                    <ExportarMenu
+                                        titulo="Vista previa del plan (sin confirmar)"
+                                        archivo="plan_vista_previa"
+                                        filas={filas}
+                                        columnas={columnas}
+                                        filtros={() => [
+                                            ...filtroBusqueda(filtroTexto),
+                                            ...(filtros.atrasadas ? ["Sólo las que llegan tarde"] : []),
+                                            ...(filtros.forzadas ? ["Sólo las forzadas"] : []),
+                                            ...(filtros.sinOperario ? ["Sólo con procesos sin recurso humano"] : []),
+                                            ...(filtros.sinMaquina ? ["Sólo con procesos sin recurso maquinaria"] : []),
+                                        ]}
+                                        disabled={isCalculating}
+                                    />
+                                );
+                            })()}
                             {/* La hoja del pañol. Va acá arriba y no en el pie porque se
                                 imprime ANTES de confirmar: el pañol prepara con el plan que
                                 se está mirando, no con uno que ya se guardó. */}

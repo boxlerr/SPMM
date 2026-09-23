@@ -6,6 +6,8 @@ import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { capitalizeName } from '@/lib/utils';
+import { ExportarMenu } from '@/components/common/ExportarMenu';
+import { filtroBusqueda } from '@/lib/exportar';
 import {
   Search,
   UserPlus,
@@ -444,6 +446,26 @@ export default function UsuariosTable() {
             className="pl-10"
           />
         </div>
+        <div className="flex items-center gap-2">
+        {/* RF-22: los usuarios que quedan con la búsqueda puesta. Nunca contraseñas. */}
+        <ExportarMenu
+          titulo="Usuarios"
+          archivo="usuarios"
+          filas={filteredUsuarios}
+          columnas={[
+            { titulo: "Usuario", valor: (u: Usuario) => u.username },
+            { titulo: "Email", valor: (u: Usuario) => u.email },
+            { titulo: "Nombre completo", valor: (u: Usuario) => `${capitalizeName(u.nombre)} ${capitalizeName(u.apellido)}`.trim() },
+            { titulo: "Rol", valor: (u: Usuario) => u.rol },
+            { titulo: "Estado", valor: (u: Usuario) => (u.activo ? "Activo" : "Inactivo") },
+            { titulo: "Bloqueado hasta", tipo: "fechaHora", valor: (u: Usuario) => (u.bloqueado ? u.bloqueado_hasta : null) },
+            { titulo: "Intentos fallidos", tipo: "entero", valor: (u: Usuario) => u.intentos_fallidos ?? null },
+            { titulo: "Último acceso", tipo: "fechaHora", valor: (u: Usuario) => u.ultimo_login },
+            { titulo: "Creado", tipo: "fecha", valor: (u: Usuario) => u.fecha_creacion },
+          ]}
+          filtros={() => filtroBusqueda(searchTerm)}
+          className="h-9"
+        />
         <Button
           onClick={handleCreateUser}
           className="bg-[#DC143C] hover:bg-[#B01030] text-white"
@@ -451,6 +473,7 @@ export default function UsuariosTable() {
           <UserPlus className="h-4 w-4 mr-2" />
           Nuevo Usuario
         </Button>
+        </div>
       </div>
 
       {/* Tabla de usuarios */}

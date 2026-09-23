@@ -3,6 +3,28 @@ import { OrdenEstado } from "./types"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { CalendarClock, CheckCircle2, AlertTriangle, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar"
+
+/** RF-22: las columnas de la tabla del cartel. */
+const COLUMNAS_EXPORT: ColumnaExport<OrdenEstado>[] = [
+    { titulo: "OT", tipo: "id", valor: (o) => o.id },
+    { titulo: "F. Entrada", tipo: "fecha", valor: (o) => o.fecha_entrada },
+    { titulo: "Cliente", valor: (o) => o.cliente },
+    { titulo: "Código", valor: (o) => o.cod_articulo ?? "" },
+    { titulo: "Descripción", valor: (o) => o.articulo },
+    { titulo: "Cant.", tipo: "entero", valor: (o) => o.cantidad },
+    { titulo: "Prioridad", valor: (o) => o.prioridad },
+    { titulo: "Estado", valor: (o) => o.estado },
+    { titulo: "Sector", valor: (o) => o.sector },
+    { titulo: "F. Prometida", tipo: "fecha", valor: (o) => o.fecha_prometida },
+    { titulo: "F. Entrega", tipo: "fecha", valor: (o) => o.fecha_entrega },
+]
+
+const ROTULOS_ORDEN: Record<string, string> = {
+    id: "OT", fecha_entrada: "F. Entrada", cliente: "Cliente", cod_articulo: "Código", articulo: "Descripción",
+    cantidad: "Cant.", prioridad: "Prioridad", fecha_prometida: "F. Prometida", fecha_entrega: "F. Entrega",
+}
 
 interface StatusOrdersModalProps {
     isOpen: boolean
@@ -162,11 +184,26 @@ export default function StatusOrdersModal({
                             {filteredOrders.length} {filteredOrders.length === 1 ? "orden encontrada" : "órdenes encontradas"}
                         </p>
                     </div>
+                    <div className="flex items-center gap-2">
+                    <ExportarMenu
+                        titulo={title || `Órdenes ${getStatusLabel(selectedStatus || "")}`}
+                        archivo={`dashboard_ordenes_${(selectedStatus || "estado").toLowerCase()}`}
+                        filas={filteredOrders}
+                        columnas={COLUMNAS_EXPORT}
+                        disabled={loading}
+                        filtros={() => [
+                            ...filtroBusqueda(searchTerm),
+                            ...(sortConfig.key
+                                ? [`Ordenado por ${ROTULOS_ORDEN[sortConfig.key] ?? sortConfig.key} (${sortConfig.direction === "asc" ? "ascendente" : "descendente"})`]
+                                : []),
+                        ]}
+                    />
                     <button onClick={onClose} className="p-2 hover:bg-white/50 rounded-lg transition-colors">
                         <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
+                    </div>
                 </div>
 
                 {/* Search Bar */}

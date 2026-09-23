@@ -29,6 +29,8 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -76,6 +78,21 @@ const VERBO: Record<string, string> = {
 };
 
 /** Día, mes, año y hora con segundos. Reloj de 24 h: «12:10 p. m.» parte el renglón. */
+/** RF-22: un renglón por cambio; los campos tocados, en una sola celda y legibles. */
+const COLUMNAS_EXPORT: ColumnaExport<CambioDeProceso>[] = [
+    { titulo: "Fecha", tipo: "fechaHora", valor: (c) => c.cuando },
+    { titulo: "Quién", valor: (c) => c.usuario ?? "El sistema" },
+    { titulo: "Qué hizo", valor: (c) => VERBO[c.accion] ?? c.accion },
+    { titulo: "OT", tipo: "id", valor: (c) => c.id_orden_trabajo },
+    { titulo: "Paso", tipo: "entero", valor: (c) => c.paso },
+    { titulo: "Proceso", valor: (c) => c.nombre_proceso ?? "" },
+    {
+        titulo: "Cambios",
+        valor: (c) => c.cambios.map((x) => `${x.campo}: ${x.antes ?? "vacío"} → ${x.despues ?? "vacío"}`).join("\n"),
+    },
+    { titulo: "Desde", valor: (c) => c.origen ?? "" },
+];
+
 const fmtMomento = (iso: string | null) => {
     if (!iso) return "—";
     const d = new Date(iso);
@@ -261,6 +278,18 @@ export function HistorialDeProcesos({ idOrden }: { idOrden?: number }) {
                         </Button>
                     ))}
                 </div>
+                <ExportarMenu
+                    titulo={idOrden ? `Historial de pasos · OT ${idOrden}` : "Auditoría · Pasos de las OT"}
+                    archivo={idOrden ? `historial_pasos_ot_${idOrden}` : "auditoria_pasos"}
+                    filas={filtrados}
+                    columnas={COLUMNAS_EXPORT}
+                    disabled={cargando}
+                    filtros={() => [
+                        ...filtroBusqueda(texto),
+                        ...(accion ? [`Sólo ${accion === "alta" ? "agregados" : accion === "baja" ? "sacados" : "cambiados"}`] : []),
+                        ...(cambios.length >= tope ? [`Los ${tope} cambios más nuevos`] : []),
+                    ]}
+                />
             </div>
 
             {filtrados.length === 0 ? (

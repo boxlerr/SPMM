@@ -35,6 +35,8 @@ import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos"
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -110,6 +112,37 @@ const TIPO_LABEL: Record<string, string> = {
 // Reloj de 24 horas, igual que en RegistroDeMovimientos: con el de 12 el es-AR
 // escribe «10:15 a. m.», que no entra en la columna de 96px y parte la fecha en dos
 // renglones (se veía así en la computadora y, más apretado, en el teléfono).
+/** RF-22: las dos listas de la solapa, una hoja cada una. */
+const COLUMNAS_INTENTOS: ColumnaExport<Intento>[] = [
+    { titulo: "Fecha", tipo: "fechaHora", valor: (it) => it.creado_en },
+    { titulo: "Tipo", valor: (it) => TIPO_LABEL[it.tipo] ?? it.tipo },
+    { titulo: "Quién", valor: (it) => it.usuario ?? "sin registrar" },
+    { titulo: "OTs pedidas", valor: (it) => (it.ordenes_pedidas > 0 ? it.ordenes_pedidas : "todas las disponibles") },
+    {
+        titulo: "Resultado",
+        valor: (it) => (it.resultado === "ok" ? "Bien" : it.resultado === "sin_solucion" ? "Sin solución" : "Falló"),
+    },
+    { titulo: "Procesos planificados", tipo: "entero", valor: (it) => it.procesos_planificados },
+    { titulo: "Sin lugar", tipo: "entero", valor: (it) => it.procesos_excedentes },
+    { titulo: "Sin recurso humano", tipo: "entero", valor: (it) => it.sin_asignar },
+    { titulo: "Trabas", tipo: "entero", valor: (it) => it.diagnosticos_bloqueantes },
+    { titulo: "Avisos", tipo: "entero", valor: (it) => it.diagnosticos_avisos },
+    { titulo: "Duración (s)", tipo: "numero", decimales: 1, valor: (it) => (it.duracion_ms == null ? null : it.duracion_ms / 1000) },
+    { titulo: "OTs", valor: (it) => it.ordenes_visibles ?? "" },
+    { titulo: "Lote guardado", valor: (it) => it.id_planificacion_lote ?? "" },
+    { titulo: "Error", valor: (it) => it.error ?? "" },
+];
+
+const COLUMNAS_BORRADOS: ColumnaExport<Borrado>[] = [
+    { titulo: "Fecha", tipo: "fechaHora", valor: (b) => b.borrado_en },
+    { titulo: "Alcance", valor: (b) => (b.alcance === "lote" ? "Lote entero" : "OTs sueltas") },
+    { titulo: "Quién", valor: (b) => b.usuario ?? "sin registrar" },
+    { titulo: "Filas", tipo: "entero", valor: (b) => b.filas_borradas },
+    { titulo: "OTs", tipo: "entero", valor: (b) => b.ots_borradas },
+    { titulo: "Planificación", valor: (b) => b.descripcion_lote ?? "" },
+    { titulo: "OTs borradas", valor: (b) => b.orden_ids ?? "" },
+];
+
 const fmtFecha = (iso: string) =>
     new Date(iso).toLocaleString("es-AR", {
         day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
@@ -226,8 +259,17 @@ export default function AuditoriaPage() {
             ) : (
                 <>
                     <section className="rounded-lg border bg-card overflow-hidden mb-8">
-                        <div className="px-4 py-3 border-b bg-muted/40">
+                        <div className="px-4 py-3 border-b bg-muted/40 flex items-center justify-between gap-2">
                             <h2 className="text-sm font-semibold">Intentos de planificación</h2>
+                            <ExportarMenu
+                                titulo="Auditoría · Planificaciones"
+                                archivo="auditoria_planificaciones"
+                                cantidad={intentos.length + borrados.length}
+                                secciones={[
+                                    { titulo: "Intentos", filas: intentos, columnas: COLUMNAS_INTENTOS },
+                                    { titulo: "Borrados", filas: borrados, columnas: COLUMNAS_BORRADOS },
+                                ]}
+                            />
                         </div>
                         {intentos.length === 0 ? (
                             <p className="px-4 py-8 text-center text-sm text-muted-foreground">

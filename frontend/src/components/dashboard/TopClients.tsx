@@ -1,6 +1,7 @@
 
 import { Users } from "lucide-react"
 import { TopCliente } from "./types"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
 
 interface TopClientsProps {
     clientes: TopCliente[]
@@ -30,7 +31,7 @@ export default function TopClients({ clientes, loading }: TopClientsProps) {
 
     return (
         <section className="bg-white rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-gray-100 overflow-hidden h-full">
-            <div className="px-6 py-4 border-b border-gray-50">
+            <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100/50">
                         <Users className="h-5 w-5" />
@@ -40,6 +41,17 @@ export default function TopClients({ clientes, loading }: TopClientsProps) {
                         <p className="text-gray-500 text-xs">Mayor volumen de órdenes</p>
                     </div>
                 </div>
+                <ExportarMenu
+                    titulo="Top clientes"
+                    archivo="dashboard_top_clientes"
+                    filas={clientes ?? []}
+                    columnas={[
+                        { titulo: "#", tipo: "entero", valor: (_: TopCliente, i: number) => i + 1 },
+                        { titulo: "Cliente", valor: (c: TopCliente) => c.cliente },
+                        { titulo: "Órdenes", tipo: "entero", valor: (c: TopCliente) => c.cantidad },
+                    ]}
+                    soloIcono
+                />
             </div>
 
             <div className="p-6">

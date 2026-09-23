@@ -14,6 +14,22 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import OperarioEditForm from "./OperarioEditForm";
 import { parseApiError } from "@/lib/utils";
 import { API_URL } from "@/config"
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { ColumnaExport } from "@/lib/exportar";
+
+const ESTADO_PASO: Record<number, string> = { 1: "Pendiente", 2: "En Proceso", 3: "Finalizado" };
+
+/** RF-22: un renglón por proceso asignado, agrupado por OT como en la lista. */
+const COLUMNAS_TAREAS: ColumnaExport<PlanificacionItem>[] = [
+  { titulo: "OT", tipo: "id", valor: (t) => t.orden_id },
+  { titulo: "Artículo", valor: (t) => t.descripcion_articulo ?? "" },
+  { titulo: "Cliente", valor: (t) => t.cliente ?? "" },
+  { titulo: "Proceso", valor: (t) => t.nombre_proceso },
+  { titulo: "Horas", tipo: "numero", decimales: 1, valor: (t) => (t.fin_min - t.inicio_min) / 60 },
+  { titulo: "Estado", valor: (t) => ESTADO_PASO[t.id_estado ?? 1] ?? "Pendiente" },
+  { titulo: "Inicio estimado", tipo: "fechaHora", valor: (t) => t.fecha_inicio_estimada },
+  { titulo: "F. Prometida", tipo: "fecha", valor: (t) => t.fecha_prometida },
+];
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -731,6 +747,16 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                       <Badge variant="secondary" className="text-[11px] bg-gray-100">
                         {groupedTasks.length} Órdenes ({tasks.length} procesos)
                       </Badge>
+                      {groupedTasks.length > 0 && (
+                        <ExportarMenu
+                          titulo={`Órdenes asignadas · ${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}`}
+                          archivo={`ordenes_asignadas_${operario.nombre}_${operario.apellido}`}
+                          filas={groupedTasks.flatMap((g) => g.tasks)}
+                          columnas={COLUMNAS_TAREAS}
+                          soloIcono
+                          className="h-6 w-6"
+                        />
+                      )}
                       {groupedTasks.length > 0 && (
                         <Button
                           variant="outline"

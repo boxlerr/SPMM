@@ -1,5 +1,6 @@
 import { Package } from "lucide-react"
 import { TopArticulo } from "./types"
+import { ExportarMenu } from "@/components/common/ExportarMenu"
 
 interface TopArticlesProps {
     articulos: TopArticulo[]
@@ -19,6 +20,18 @@ export default function TopArticles({ articulos, loading }: TopArticlesProps) {
                         <p className="text-gray-500 text-xs">Mayor cantidad producida</p>
                     </div>
                 </div>
+                <ExportarMenu
+                    titulo="Top artículos producidos"
+                    archivo="dashboard_top_articulos"
+                    filas={articulos ?? []}
+                    columnas={[
+                        { titulo: "#", tipo: "entero", valor: (_: TopArticulo, i: number) => i + 1 },
+                        { titulo: "Artículo", valor: (a: TopArticulo) => a.articulo },
+                        { titulo: "Unidades", tipo: "entero", valor: (a: TopArticulo) => a.cantidad },
+                    ]}
+                    disabled={loading}
+                    soloIcono
+                />
             </div>
             <div className="p-6">
                 {loading ? (

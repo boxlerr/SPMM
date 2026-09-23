@@ -4,6 +4,8 @@ import React from "react";
 import { FileWarning, Clock, Users, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { API_URL } from "@/config";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import type { SeccionExport } from "@/lib/exportar";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === "undefined") return {};
@@ -25,6 +27,40 @@ interface Metricas {
     por_mes: PorMes[];
     recientes: Reciente[];
 }
+
+/** RF-22: las tres tablas del detalle, una hoja cada una. */
+const seccionesExport = (d: Metricas | null): SeccionExport[] => [
+    {
+        titulo: "Por recurso humano",
+        filas: d?.por_operario ?? [],
+        columnas: [
+            { titulo: "Recurso humano", valor: (o: PorOperario) => o.operario?.trim() || "Sin asignar" },
+            { titulo: "Incidencias", tipo: "entero", valor: (o: PorOperario) => o.incidencias },
+            { titulo: "Minutos perdidos", tipo: "entero", valor: (o: PorOperario) => o.minutos },
+        ],
+    },
+    {
+        titulo: "Por mes",
+        filas: d?.por_mes ?? [],
+        columnas: [
+            { titulo: "Mes", valor: (m: PorMes) => m.mes },
+            { titulo: "Incidencias", tipo: "entero", valor: (m: PorMes) => m.incidencias },
+            { titulo: "Minutos perdidos", tipo: "entero", valor: (m: PorMes) => m.minutos },
+        ],
+    },
+    {
+        titulo: "Últimas incidencias",
+        filas: d?.recientes ?? [],
+        columnas: [
+            { titulo: "Fecha", tipo: "fechaHora", valor: (r: Reciente) => r.fecha_registro },
+            { titulo: "OT", tipo: "id", valor: (r: Reciente) => r.nro_ot },
+            { titulo: "Proceso", valor: (r: Reciente) => r.proceso ?? "" },
+            { titulo: "Recurso humano", valor: (r: Reciente) => r.operario?.trim() ?? "" },
+            { titulo: "Minutos perdidos", tipo: "entero", valor: (r: Reciente) => r.minutos_perdidos },
+            { titulo: "Qué pasó", valor: (r: Reciente) => r.descripcion ?? "" },
+        ],
+    },
+];
 
 const fmtHoras = (min: number) => {
     const h = Math.floor(min / 60);
@@ -74,12 +110,21 @@ export default function IncidenciasPlanos() {
                     </div>
                 </div>
                 {total > 0 && (
-                    <button
-                        onClick={() => setOpen(true)}
-                        className="text-xs font-medium text-amber-700 hover:text-amber-900 hover:underline"
-                    >
-                        Ver detalle
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setOpen(true)}
+                            className="text-xs font-medium text-amber-700 hover:text-amber-900 hover:underline"
+                        >
+                            Ver detalle
+                        </button>
+                        <ExportarMenu
+                            titulo="Interpretación de planos: incidencias y tiempo perdido"
+                            archivo="dashboard_incidencias_planos"
+                            secciones={() => seccionesExport(data)}
+                            filtros={[`${total} incidencias · ${fmtHoras(minutos)} perdidas · ${extra} de recurso humano extra`]}
+                            soloIcono
+                        />
+                    </div>
                 )}
             </div>
 

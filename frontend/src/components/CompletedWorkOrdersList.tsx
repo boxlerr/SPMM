@@ -21,6 +21,15 @@ import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 import { MaterialChip } from "@/components/common/MaterialChip";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { columnasOrdenes, filtroOrden, resumenFiltrosOT } from "@/lib/exportes/ordenes";
+import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano } from "@/hooks/useOrdenesConPlano";
+
+/** Cómo se llama cada columna ordenable, para decir en el archivo por cuál se ordenó. */
+const ROTULOS_ORDEN: Record<string, string> = {
+    id: "OT", id_otvieja: "OT", fecha_entrada: "F. Entrada", cliente: "Cliente", codigo: "Código",
+    descripcion: "Producto", unidades: "Cant.", fecha_entrega: "F. Entrega",
+};
 
 interface CompletedWorkOrdersListProps {
     orders: WorkOrder[];
@@ -33,6 +42,10 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
     const [searchTerm, setSearchTerm] = useState("");
     const [expandedOrderIds, setExpandedOrderIds] = useState<number[]>([]);
     const [filters, setFilters] = useState<WorkOrderFilterState>(initialFilterState);
+    // Para la columna Plano del archivo exportado: las mismas respuestas que usa el
+    // cartelito de cada fila (cacheadas a nivel módulo, no son pedidos nuevos).
+    const ordenesConPlano = useOrdenesConPlano();
+    const planosDisponibles = usePlanosDisponibles();
 
     // Mismo patrón que PlanningListTable: el degradado del borde derecho se oculta
     // dinámicamente cuando el usuario llegó al final del scroll horizontal.
@@ -182,6 +195,7 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                         <p className="text-xs text-gray-500">Visualiza todas las órdenes finalizadas y entregadas.</p>
                     </div>
                 </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
                 <div className="relative w-full md:w-96">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <Input
@@ -190,6 +204,24 @@ export function CompletedWorkOrdersList({ orders, onEdit, tableZoom = 100 }: Com
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="pl-10 h-10 bg-gray-50/50 border-gray-200 focus:bg-white transition-all rounded-lg"
                     />
+                </div>
+                {/* RF-22: exporta lo que queda en la tabla con la búsqueda, los filtros y
+                    el orden que tenga puestos. */}
+                <ExportarMenu
+                    titulo="Historial de órdenes"
+                    archivo="ordenes_historial"
+                    filas={sortedOrders}
+                    columnas={columnasOrdenes({
+                        plano: (o) => estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles),
+                        estado: "Finalizada",
+                        conEntrega: true,
+                    })}
+                    filtros={() => [
+                        ...resumenFiltrosOT(filters, searchTerm),
+                        ...filtroOrden(sortConfig.key ? ROTULOS_ORDEN[sortConfig.key] : null, sortConfig.direction),
+                    ]}
+                    className="h-10"
+                />
                 </div>
             </div>
 

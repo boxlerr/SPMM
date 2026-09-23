@@ -27,7 +27,9 @@ import { useToast } from "@/components/ui/toast";
 import CreateWorkOrderModal from "@/components/CreateWorkOrderModal";
 import { API_URL } from "@/config";
 import { cn } from "@/lib/utils";
-import { TipoTrabajoBadge, type TipoTrabajo } from "@/components/common/TipoTrabajoBadge";
+import { TipoTrabajoBadge, textoTipoTrabajo, type TipoTrabajo } from "@/components/common/TipoTrabajoBadge";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import {
     Search, RefreshCw, Plus, CalendarClock, FileText, AlertTriangle,
     ClipboardList, CheckCircle2, CircleDashed, ArrowUpDown, Ban,
@@ -102,6 +104,48 @@ const diasPara = (f: string | null): number | null => {
     const d = new Date(f); d.setHours(0, 0, 0, 0);
     return Math.round((d.getTime() - hoy.getTime()) / 86400000);
 };
+
+const ROTULO_ESTADO: Record<EstadoPlan, string> = {
+    entregada: "Entregada",
+    planificada: "En el plan",
+    sin_planificar: "Sin planificar",
+};
+
+const ROTULO_ORDEN: Record<Orden, string> = {
+    prometida: "Fecha prometida (más urgente)",
+    ot: "N° de OT (más nueva)",
+    cliente: "Cliente (A-Z)",
+    procesos: "Cantidad de procesos",
+};
+
+/** Las columnas del archivo exportado: las de la tabla, con los números separados. */
+const COLUMNAS_EXPORT: ColumnaExport<OrdenResumen>[] = [
+    { titulo: "N° OT", tipo: "id", valor: (o) => o.id_otvieja ?? o.id },
+    { titulo: "Cliente", valor: (o) => o.cliente ?? "" },
+    { titulo: "Código", valor: (o) => o.codigo ?? "" },
+    { titulo: "Artículo", valor: (o) => o.articulo ?? "" },
+    { titulo: "Cant.", tipo: "entero", valor: (o) => o.unidades },
+    { titulo: "Prometida", tipo: "fecha", valor: (o) => o.fecha_prometida },
+    {
+        titulo: "Días de atraso",
+        tipo: "entero",
+        valor: (o) => {
+            const d = o.entregada ? null : diasPara(o.fecha_prometida);
+            return d !== null && d < 0 ? -d : null;
+        },
+    },
+    { titulo: "Trabajo", valor: (o) => textoTipoTrabajo(o.tipo_trabajo) },
+    { titulo: "Prioridad", valor: (o) => o.prioridad ?? "" },
+    { titulo: "Procesos", tipo: "entero", valor: (o) => o.procesos },
+    { titulo: "Procesos terminados", tipo: "entero", valor: (o) => o.procesos_finalizados },
+    {
+        titulo: "Plano",
+        valor: (o) => (o.planos > 0 ? `${o.planos} archivo${o.planos === 1 ? "" : "s"}` : o.estado_plano === "no_lleva" ? "No lleva" : "Falta"),
+    },
+    { titulo: "Estado", valor: (o) => ROTULO_ESTADO[o.estado_plan] ?? o.estado_plan },
+    { titulo: "Planificada el", tipo: "fecha", valor: (o) => o.planificada_en },
+    { titulo: "Entregada el", tipo: "fecha", valor: (o) => o.fecha_entrega },
+];
 
 export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void }) {
     const { showToast } = useToast();
@@ -189,6 +233,24 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                 {/* `flex-wrap` (RF-27): Actualizar y «Nueva orden de trabajo» piden ~330px
                     y en un teléfono angosto el segundo se salía del recuadro. */}
                 <div className="flex flex-wrap gap-2">
+                    {/* RF-22: sale lo que la lista tiene filtrado y ordenado, también lo que
+                        todavía no se dibujó por el «Ver más». */}
+                    <ExportarMenu
+                        titulo="Todas las órdenes"
+                        archivo="ordenes_todas"
+                        filas={filtradas}
+                        columnas={COLUMNAS_EXPORT}
+                        filtros={() => [
+                            ...(filtro !== "todas" ? [`Estado: ${FILTROS.find((f) => f.id === filtro)?.label ?? filtro}`] : []),
+                            ...filtroBusqueda(busqueda),
+                            ...(huecos.length
+                                ? [`Con huecos: ${huecos.map((h) => (h === "procesos" ? "sin procesos" : h === "tipo" ? "sin tipo" : "falta plano")).join(", ")}`]
+                                : []),
+                            `Ordenado por ${ROTULO_ORDEN[orden]}`,
+                        ]}
+                        disabled={cargando}
+                        className="h-9"
+                    />
                     <Button variant="outline" onClick={cargar} disabled={cargando}>
                         <RefreshCw className={cn("h-4 w-4 mr-2", cargando && "animate-spin")} />
                         Actualizar

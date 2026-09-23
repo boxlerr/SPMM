@@ -37,6 +37,11 @@ const ESTILOS: Record<Exclude<TipoTrabajo, null>, { texto: string; clase: string
     ambas: { texto: "Las dos", clase: "bg-gray-100 text-gray-600" },
 };
 
+/** El mismo texto que el cartel, para los archivos exportados. Vacío si no tiene tipo. */
+export function textoTipoTrabajo(tipo: TipoTrabajo): string {
+    return (tipo && ESTILOS[tipo]?.texto) || "";
+}
+
 export function TipoTrabajoBadge({ tipo, className }: { tipo: TipoTrabajo; className?: string }) {
     if (!tipo) return <span className="text-gray-300">—</span>;
     const e = ESTILOS[tipo];

@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Search, ChevronLeft, ChevronRight, Loader2, AlertTriangle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { estaBajoMinimo, formatearCantidad, leerMinimo } from "@/lib/stockMinimo";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 
 interface Pieza {
     id: number;
@@ -265,6 +267,27 @@ const MateriaPrimaTab = ({ piezaInicial = null, onPiezaInicialUsada }: MateriaPr
 
     const columnas = soportaMinimo ? 12 : 11;
 
+    // RF-22: las columnas de la tabla. Stock, mínimo y precio van como números.
+    const columnasExport: ColumnaExport<Pieza>[] = [
+        { titulo: "Código", valor: (p) => p.cod_pieza },
+        { titulo: "Descripción", valor: (p) => p.descripcion },
+        { titulo: "Material", valor: (p) => p.material ?? "" },
+        { titulo: "Formato", valor: (p) => p.formato ?? "" },
+        { titulo: "Stock", tipo: "numero", valor: (p) => p.stockactual },
+        ...(soportaMinimo
+            ? [
+                { titulo: "Mínimo", tipo: "numero", valor: (p: Pieza) => p.stock_minimo } as ColumnaExport<Pieza>,
+                { titulo: "Bajo mínimo", tipo: "booleano", valor: (p: Pieza) => estaBajoMinimo(p.stockactual, p.stock_minimo) } as ColumnaExport<Pieza>,
+            ]
+            : []),
+        { titulo: "Unidad", valor: (p) => p.unidad ?? "" },
+        { titulo: "Ubicación", valor: (p) => `${p.estante || ""} ${p.letra || ""} ${p.nro || ""}`.trim() },
+        { titulo: "Proveedor", valor: (p) => p.proveedor ?? "" },
+        { titulo: "Precio", tipo: "moneda", valor: (p) => p.unitario ?? 0 },
+        { titulo: "N° OT", tipo: "id", valor: (p) => p.id_otvieja || null },
+        { titulo: "Observaciones", valor: (p) => p.observaciones ?? "" },
+    ];
+
     return (
         <div className="space-y-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
@@ -343,6 +366,24 @@ const MateriaPrimaTab = ({ piezaInicial = null, onPiezaInicialUsada }: MateriaPr
                     </div>
                     {meta && (
                         <div className="flex items-center gap-2 text-sm text-gray-500">
+                            {/* RF-22: sale la página que se está viendo, con su búsqueda. La
+                                lista viene de a 50 del servidor y exportar no pide nada más. */}
+                            <ExportarMenu
+                                titulo="Inventario de materia prima"
+                                archivo="materia_prima"
+                                filas={piezas}
+                                columnas={columnasExport}
+                                disabled={loading}
+                                filtros={() => [
+                                    ...filtroBusqueda(debouncedSearch),
+                                    ...(onlyWithOT ? ["Sólo con OT asignada"] : []),
+                                    ...(filtroStock !== "todas" ? [`Stock: ${FILTROS_STOCK.find(f => f.clave === filtroStock)?.rotulo}`] : []),
+                                    ...(meta.total_pages > 1 ? [`Página ${meta.page} de ${meta.total_pages} (${piezas.length} de ${meta.total_count} registros)`] : []),
+                                ]}
+                                aviso={meta.total_pages > 1
+                                    ? `Sale la página que estás viendo: ${piezas.length} de ${meta.total_count.toLocaleString("es-AR")}. Para otra parte, pasá de página o buscá.`
+                                    : undefined}
+                            />
                             <span>Página {meta.page} de {meta.total_pages}</span>
                             <div className="flex gap-1">
                                 <Button

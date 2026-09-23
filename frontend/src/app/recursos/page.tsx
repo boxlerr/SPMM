@@ -30,6 +30,9 @@ import { useCoberturaRangos, problemaDelProceso } from "@/hooks/useCoberturaRang
 import EditorRangosDe from "./_components/EditorRangosDe";
 import EditorMaquinasDe from "./_components/EditorMaquinasDe";
 import { BibliotecaPlanos } from "@/components/planos/BibliotecaPlanos";
+import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
+import { etiquetaTipo } from "./_maquinaOpciones";
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -450,6 +453,46 @@ export default function RecursosPage() {
     if (currentProcesosPage < totalProcesosPages) setCurrentProcesosPage(p => p + 1);
   };
 
+  // RF-22: lo que muestran las tablas de Recurso maquinaria y Procesos. Procesos sale
+  // entero con la búsqueda y el filtro puestos, no sólo la página de 20 que se ve.
+  const columnasMaquinas: ColumnaExport<Maquina>[] = [
+    { titulo: "Nombre", valor: (m) => m.nombre },
+    { titulo: "Código", valor: (m) => m.cod_maquina ?? "" },
+    ...(conoceEstado
+      ? [
+          { titulo: "Estado", valor: (m: Maquina) => infoEstado(m.estado_operativo).etiqueta } as ColumnaExport<Maquina>,
+          { titulo: "Tipo", valor: (m: Maquina) => etiquetaTipo(m.tipo) ?? "" } as ColumnaExport<Maquina>,
+          { titulo: "Mantenimiento cada (días)", tipo: "entero", valor: (m: Maquina) => m.frecuencia_mantenimiento_dias } as ColumnaExport<Maquina>,
+        ]
+      : []),
+    {
+      titulo: "Rangos",
+      valor: (m) => (coberturaListo ? (rangosPorMaquina.get(m.id) ?? []).map((r) => r.nombre).join(", ") || "Sin rango" : ""),
+    },
+    { titulo: "Limitación", valor: (m) => m.limitacion ?? "" },
+    { titulo: "Capacidad", valor: (m) => m.capacidad ?? "" },
+    { titulo: "Especialidad", valor: (m) => m.especialidad ?? "" },
+  ];
+  const columnasProcesos: ColumnaExport<Proceso>[] = [
+    { titulo: "Nombre", valor: (p) => p.nombre },
+    {
+      titulo: "Quién puede hacerlo",
+      valor: (p) => {
+        const cob = porProceso.get(p.id);
+        if (!coberturaListo || !cob) return "";
+        const problema = problemaDelProceso(cob);
+        if (problema === "nadie") return "No lo puede hacer nadie";
+        if (problema === "sin_rango") return "Sin rango";
+        return cob.rangos.map((r) => r.nombre).join(", ");
+      },
+    },
+    { titulo: "Recurso humano habilitado", tipo: "entero", valor: (p) => porProceso.get(p.id)?.habilitados ?? null },
+    { titulo: "Habilitados a mano", tipo: "entero", valor: (p) => porProceso.get(p.id)?.por_habilidad_manual ?? null },
+    { titulo: "Recurso maquinaria", valor: (p) => (porProceso.get(p.id)?.maquinas ?? []).map((m) => m.nombre).join(", ") },
+    { titulo: "Líneas en OT abiertas", tipo: "entero", valor: (p) => porProceso.get(p.id)?.lineas_abiertas ?? null },
+    { titulo: "Descripción", valor: (p) => p.descripcion ?? "" },
+  ];
+
   return (
     // RF-27: en el teléfono casi sin margen propio, porque el layout ya pone el suyo
     // (sumados eran 28px de cada lado de 375). Desde `sm`, los de siempre. El `pr-12`
@@ -575,6 +618,15 @@ export default function RecursosPage() {
             <div className="flex items-center gap-2">
               <Factory className="h-5 w-5 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Recurso maquinaria</h2>
+              <div className="ml-auto">
+                <ExportarMenu
+                  titulo="Recurso maquinaria"
+                  archivo="recurso_maquinaria"
+                  filas={maquinas}
+                  columnas={columnasMaquinas}
+                  disabled={api.loading}
+                />
+              </div>
             </div>
             <p className="text-sm text-muted-foreground mt-1">Gestión del recurso maquinaria</p>
 
@@ -844,6 +896,19 @@ export default function RecursosPage() {
             <div className="flex items-center gap-2">
               <Layers className="h-5 w-5 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Procesos</h2>
+              <div className="ml-auto">
+                <ExportarMenu
+                  titulo="Procesos"
+                  archivo="procesos"
+                  filas={procesosFiltrados}
+                  columnas={columnasProcesos}
+                  disabled={api.loading}
+                  filtros={() => [
+                    ...filtroBusqueda(busquedaProceso),
+                    ...(soloProblemas ? ["Sólo los que frenan un plan"] : []),
+                  ]}
+                />
+              </div>
             </div>
             <p className="text-sm text-muted-foreground mt-1">Gestión de procesos productivos</p>
           </div>
@@ -1150,6 +1215,17 @@ export default function RecursosPage() {
           renderExpanded={(rango) => (
             <RangoComposicion idRango={rango.id} nombreRango={rango.nombre} />
           )}
+          columnasExport={[
+            {
+              titulo: "Recurso maquinaria",
+              valor: (rango) => (porRango.get(rango.id)?.maquinas ?? []).map((m) => m.nombre).join(", "),
+            },
+            {
+              titulo: "Recurso humano con el rango",
+              tipo: "entero",
+              valor: (rango) => porRango.get(rango.id)?.operarios ?? null,
+            },
+          ]}
         />
       )}
 
