@@ -60,6 +60,10 @@ export function useDashboardData(visibles: readonly TarjetaCodigo[]) {
     const [selectedStatus, setSelectedStatus] = useState<string | null>(null)
     const [statusOrders, setStatusOrders] = useState<OrdenEstado[]>([])
     const [loadingStatusOrders, setLoadingStatusOrders] = useState(false)
+    // Si la lista no se pudo traer se dice, en vez de mostrarla vacía como si no hubiera
+    // ninguna: con el backend de antes de RF-02, Pendientes y Retrasadas fallaban siempre
+    // (GETDATE en Postgres) y la tarjeta decía 40 pero la lista «no hay órdenes».
+    const [errorStatusOrders, setErrorStatusOrders] = useState<string | null>(null)
 
     const fetchWithAuth = useCallback(async (endpoint: string) => {
         const response = await fetch(`${apiUrl}${endpoint}`, { headers: getAuthHeaders() })
@@ -188,17 +192,20 @@ export function useDashboardData(visibles: readonly TarjetaCodigo[]) {
             try {
                 console.log("Fetching orders for status:", estado)
                 setLoadingStatusOrders(true)
+                setErrorStatusOrders(null)
+                setStatusOrders([])
                 setSelectedStatus(estado)
                 const endpoint = `/api/dashboard/ordenes-por-estado/${encodeURIComponent(estado)}`
-                console.log("Fetch URL:", endpoint)
 
                 const response = await fetchWithAuth(endpoint)
+                if (response.status === 401) return
                 if (!response.ok) throw new Error("Error al cargar órdenes por estado")
                 const data = await response.json()
-                console.log("Status orders response:", data)
+                if (data?.success === false) throw new Error(data.error || "Error al cargar órdenes por estado")
                 setStatusOrders(data.data || [])
             } catch (err) {
                 console.error("Error fetching ordenes por estado:", err)
+                setErrorStatusOrders("No se pudo traer la lista. Probá de nuevo en un rato; si sigue igual, avisá.")
             } finally {
                 setLoadingStatusOrders(false)
             }
@@ -275,6 +282,7 @@ export function useDashboardData(visibles: readonly TarjetaCodigo[]) {
         selectedStatus,
         statusOrders,
         loadingStatusOrders,
+        errorStatusOrders,
         setSelectedStatus,
         setStatusOrders,
         fetchOrdenesPorEstado,

@@ -5,10 +5,20 @@ import { cn } from "@/lib/utils"
 import { CalendarClock, CheckCircle2, AlertTriangle, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react"
 import { ExportarMenu } from "@/components/common/ExportarMenu"
 import { filtroBusqueda, type ColumnaExport } from "@/lib/exportar"
+import { rangoPrioridad } from "@/lib/prioridad"
+
+/** El N° de OT con el que la conoce el taller. `id` es la clave interna: con el backend
+ *  viejo (sin `numero`) se sigue mostrando ése, como antes. */
+const numeroOT = (o: OrdenEstado) => o.numero ?? o.id
+
+// RF-02: ordenar por estado pone arriba lo que más apura. Sirve sobre todo en la lista de
+// un día de la línea de entregas, que mezcla en curso y pendientes.
+const RANGO_ESTADO: Record<string, number> = { retrasada: 0, "en curso": 1, "en proceso": 1, pendiente: 2, completada: 3 }
+const rangoEstado = (o: OrdenEstado) => RANGO_ESTADO[(o.estado || "").toLowerCase()] ?? 4
 
 /** RF-22: las columnas de la tabla del cartel. */
 const COLUMNAS_EXPORT: ColumnaExport<OrdenEstado>[] = [
-    { titulo: "OT", tipo: "id", valor: (o) => o.id },
+    { titulo: "OT", tipo: "id", valor: (o) => numeroOT(o) },
     { titulo: "F. Entrada", tipo: "fecha", valor: (o) => o.fecha_entrada },
     { titulo: "Cliente", valor: (o) => o.cliente },
     { titulo: "Código", valor: (o) => o.cod_articulo ?? "" },
@@ -23,7 +33,7 @@ const COLUMNAS_EXPORT: ColumnaExport<OrdenEstado>[] = [
 
 const ROTULOS_ORDEN: Record<string, string> = {
     id: "OT", fecha_entrada: "F. Entrada", cliente: "Cliente", cod_articulo: "Código", articulo: "Descripción",
-    cantidad: "Cant.", prioridad: "Prioridad", fecha_prometida: "F. Prometida", fecha_entrega: "F. Entrega",
+    cantidad: "Cant.", prioridad: "Prioridad", estado: "Estado", fecha_prometida: "F. Prometida", fecha_entrega: "F. Entrega",
 }
 
 interface StatusOrdersModalProps {
@@ -33,6 +43,8 @@ interface StatusOrdersModalProps {
     statusOrders: OrdenEstado[]
     loading: boolean
     title?: string
+    /** La lista no se pudo traer: se dice eso y no «no hay órdenes». */
+    error?: string | null
 }
 
 export default function StatusOrdersModal({
@@ -42,6 +54,7 @@ export default function StatusOrdersModal({
     statusOrders,
     loading,
     title,
+    error,
 }: StatusOrdersModalProps) {
     const [searchTerm, setSearchTerm] = useState("")
     const [sortConfig, setSortConfig] = useState<{ key: keyof OrdenEstado | 'fecha_prometida' | 'fecha_entrada' | 'cod_articulo' | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' })
@@ -101,7 +114,7 @@ export default function StatusOrdersModal({
         const lowerTerm = searchTerm.toLowerCase()
 
         let filtered = safeOrders.filter(orden =>
-            orden.id.toString().includes(lowerTerm) ||
+            numeroOT(orden).toString().includes(lowerTerm) ||
             (orden.articulo || "").toLowerCase().includes(lowerTerm) ||
             (orden.cod_articulo || "").toLowerCase().includes(lowerTerm) ||
             (orden.cliente || "").toLowerCase().includes(lowerTerm) ||
@@ -110,6 +123,16 @@ export default function StatusOrdersModal({
 
         if (sortConfig.key) {
             filtered.sort((a, b) => {
+                const signo = sortConfig.direction === 'asc' ? 1 : -1;
+                // El N° que se ve, no la clave interna.
+                if (sortConfig.key === 'id') return signo * (numeroOT(a) - numeroOT(b));
+                // Prioridad y estado por urgencia, no alfabético («Normal» antes que
+                // «Urgente» no dice nada). Ascendente = lo más urgente arriba.
+                if (sortConfig.key === 'prioridad') {
+                    return signo * (rangoPrioridad(a.prioridad) - rangoPrioridad(b.prioridad));
+                }
+                if (sortConfig.key === 'estado') return signo * (rangoEstado(a) - rangoEstado(b));
+
                 let valA: any = a[sortConfig.key as keyof OrdenEstado];
                 let valB: any = b[sortConfig.key as keyof OrdenEstado];
 
@@ -228,6 +251,10 @@ export default function StatusOrdersModal({
                         <div className="flex items-center justify-center py-20">
                             <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-blue-500"></div>
                         </div>
+                    ) : error ? (
+                        <div className="text-center py-12 px-4 bg-white rounded-lg border border-amber-200 mx-auto max-w-2xl shadow-sm">
+                            <p className="text-amber-800 text-sm">{error}</p>
+                        </div>
                     ) : filteredOrders.length === 0 ? (
                         <div className="text-center py-20 bg-white rounded-lg border border-gray-200 mx-auto max-w-2xl shadow-sm">
                             <p className="text-gray-500">No hay órdenes que coincidan con la búsqueda</p>
@@ -258,6 +285,9 @@ export default function StatusOrdersModal({
                                         <th className="px-4 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 group" onClick={() => handleSort('prioridad')}>
                                             <div className="flex items-center justify-center">Prioridad {renderSortIcon('prioridad')}</div>
                                         </th>
+                                        <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 group" onClick={() => handleSort('estado')}>
+                                            <div className="flex items-center">Estado {renderSortIcon('estado')}</div>
+                                        </th>
 
                                         <th className="px-4 py-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-200 group" onClick={() => handleSort('fecha_prometida')}>
                                             <div className="flex items-center">F. Prom. {renderSortIcon('fecha_prometida')}</div>
@@ -273,17 +303,18 @@ export default function StatusOrdersModal({
                                             key={orden.id}
                                             className={`border-b transition-colors duration-150 ${getRowClass(orden)}`}
                                         >
-                                            <td className="px-4 py-3 font-medium">{orden.id}</td>
+                                            <td className="px-4 py-3 font-medium">{numeroOT(orden)}</td>
                                             <td className="px-4 py-3">{formatDate(orden.fecha_entrada)}</td>
                                             <td className="px-4 py-3 text-gray-500 italic truncate max-w-[150px]" title={orden.cliente}>{orden.cliente}</td>
                                             <td className="px-4 py-3 font-mono text-xs">{orden.cod_articulo || "-"}</td>
                                             <td className="px-4 py-3 font-medium text-gray-900 truncate max-w-[250px]" title={orden.articulo}>{orden.articulo}</td>
-                                            <td className="px-4 py-3 text-center font-bold">{orden.cantidad}</td>
+                                            <td className="px-4 py-3 text-center font-bold">{orden.cantidad ?? "—"}</td>
                                             <td className="px-4 py-3 text-center">
                                                 <Badge variant="outline" className={`bg-white/50 border-gray-400 text-gray-800 ${orden.prioridad === 'Urgente' ? 'text-red-700 bg-red-50 border-red-200' : ''}`}>
                                                     {orden.prioridad}
                                                 </Badge>
                                             </td>
+                                            <td className="px-4 py-3 text-xs font-semibold whitespace-nowrap">{orden.estado}</td>
 
                                             <td className="px-4 py-3 text-xs">{formatDate(orden.fecha_prometida)}</td>
                                             <td className="px-4 py-3 text-xs font-semibold">

@@ -4,7 +4,8 @@ import { ExportarMenu } from "@/components/common/ExportarMenu"
 import type { ColumnaExport } from "@/lib/exportar"
 
 const COLUMNAS_EXPORT: ColumnaExport<OrdenCritica>[] = [
-    { titulo: "Orden", tipo: "id", valor: (o) => o.id },
+    // El N° de OT del taller; con el backend viejo (sin `numero`), la clave interna, como antes.
+    { titulo: "Orden", tipo: "id", valor: (o) => o.numero ?? o.id },
     { titulo: "Artículo", valor: (o) => o.articulo },
     { titulo: "Prioridad", valor: (o) => o.prioridad },
     { titulo: "Estado", valor: (o) => o.estado },
@@ -78,7 +79,7 @@ export default function OrdenesCriticas({ ordenes, loading }: OrdenesCriticasPro
                                 <div className="flex items-start justify-between mb-3">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <span className="text-sm font-bold text-gray-900">Orden #{orden.id}</span>
+                                            <span className="text-sm font-bold text-gray-900">Orden #{orden.numero ?? orden.id}</span>
                                             <span className={`text-xs px-2 py-0.5 rounded-full border ${getPrioridadColor(orden.prioridad)}`}>
                                                 {orden.prioridad}
                                             </span>

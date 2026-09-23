@@ -1,70 +1,145 @@
-from fastapi import APIRouter, Depends
-from backend.infrastructure.db import SessionLocal
-from sqlalchemy import func, case, text
+"""
+El Dashboard (RF-02: «tablero con el estado actual de todas las órdenes en curso,
+ordenadas por prioridad, fechas y estado»).
+
+Cada tarjeta y la lista que abre leen el estado de la OT de la misma expresión
+(infrastructure/estado_ordenes.py): la tarjeta «Retrasadas 40» abre una lista de 40.
+Hasta el 23/09 las listas de Pendientes y Retrasadas usaban GETDATE, de SQL Server, y en
+Postgres se abrían vacías; y el rótulo de cada fila tomaba el 1950-01-01 del sistema
+viejo como fecha de entrega y mostraba OT abiertas como «Completada». Ver ese módulo.
+
+Las fechas que salen de acá son AAAA-MM-DD o null: un centinela (1950-01-01, 3000-01-01)
+sale como null, «sin fecha», nunca como una fecha.
+
+Las listas traen `numero` (el N° de OT con el que el taller conoce la orden,
+id_otvieja) además de `id` (la clave interna): la pantalla mostraba la clave interna
+como si fuera el número de la OT.
+"""
 from datetime import datetime, timedelta
-from backend.domain.OrdenTrabajo import OrdenTrabajo
-from backend.domain.Sector import Sector
-from backend.domain.Proceso import Proceso
-from backend.domain.Articulo import Articulo
-from backend.domain.Cliente import Cliente
-from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
-from backend.domain.Prioridad import Prioridad
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+
+from backend.infrastructure.db import SessionLocal
+from backend.infrastructure.estado_ordenes import (
+    ALIAS,
+    ESTADO_SQL,
+    ESTADOS,
+    POR_ENTREGAR_SQL,
+    ROTULO,
+    consulta,
+    fecha_o_nada,
+    fecha_real,
+    hoy_ar,
+    leer_fecha,
+    parametros,
+)
 
 router = APIRouter(prefix="/api/dashboard")
+
+# Órdenes críticas y próximas entregas: hoy y los 7 días que siguen, enteros. Antes se
+# cortaba con la HORA (now() .. now() + 7 días), así que una OT prometida para hoy a las
+# 00:00 dejaba de ser «crítica» apenas pasada la medianoche: justo la más urgente.
+DIAS_PROXIMOS = 7
+
 
 async def get_db():
     async with SessionLocal() as session:
         yield session
 
+
+def _dia(valor) -> datetime | None:
+    """El día (00:00) de un valor leído de la base, venga como datetime, date o texto."""
+    f = leer_fecha(valor)
+    return f.replace(hour=0, minute=0, second=0, microsecond=0) if f else None
+
+
+# Lo que muestra cada fila de las listas del Dashboard. UNA consulta para todas (la de
+# un estado, la de una prioridad, la de un día): así una OT se ve igual abra la lista
+# que abra. LEFT JOIN en todo: una OT sin cliente, sin sector o con un artículo que ya no
+# está en el catálogo sigue siendo una OT y la tarjeta la cuenta.
+_FILAS_SQL = f"""
+    SELECT
+        ot.id,
+        ot.id_otvieja,
+        a.descripcion   AS articulo,
+        a.cod_articulo,
+        ot.fecha_entrada,
+        ot.unidades,
+        ot.fecha_prometida,
+        ot.fecha_entrega,
+        s.nombre        AS sector,
+        c.nombre        AS cliente,
+        p.descripcion   AS prioridad,
+        {ESTADO_SQL}    AS estado,
+        (SELECT COUNT(*) FROM orden_trabajo_proceso x
+          WHERE x.id_orden_trabajo = ot.id) AS total_procesos,
+        (SELECT COUNT(*) FROM orden_trabajo_proceso x
+          WHERE x.id_orden_trabajo = ot.id AND x.id_estado = 3) AS procesos_completados,
+        (SELECT pr.nombre FROM orden_trabajo_proceso x
+           JOIN proceso pr ON pr.id = x.id_proceso
+          WHERE x.id_orden_trabajo = ot.id AND x.id_estado = 2
+          ORDER BY x.orden, x.id
+          LIMIT 1) AS proceso_actual
+    FROM orden_trabajo ot
+    LEFT JOIN articulo  a ON a.id = ot.id_articulo
+    LEFT JOIN sector    s ON s.id = ot.id_sector
+    LEFT JOIN prioridad p ON p.id = ot.id_prioridad
+    LEFT JOIN cliente   c ON c.id = ot.id_cliente
+"""
+
+
+def _fila(r) -> dict:
+    total = int(r.total_procesos or 0)
+    terminados = int(r.procesos_completados or 0)
+    return {
+        "id": r.id,
+        "numero": r.id_otvieja or r.id,
+        "articulo": r.articulo or "Sin artículo",
+        "cod_articulo": r.cod_articulo,
+        "fecha_entrada": fecha_o_nada(r.fecha_entrada),
+        "fecha_prometida": fecha_o_nada(r.fecha_prometida),
+        # La entrega REAL, o null. Antes, en las OT abiertas, este campo traía la
+        # prometida y la columna «F. Entrega» mostraba como entregada una fecha que era
+        # una promesa.
+        "fecha_entrega": fecha_o_nada(r.fecha_entrega),
+        "estado": ROTULO.get(r.estado, r.estado),
+        "estado_codigo": r.estado,
+        "sector": r.sector or "Sin sector",
+        "cliente": r.cliente or "Sin Cliente",
+        "prioridad": r.prioridad or "Sin prioridad",
+        # Las unidades de la OT. null si no se cargaron: antes se inventaba un 1.
+        "cantidad": r.unidades,
+        "proceso_actual": r.proceso_actual,
+        "procesos_totales": total,
+        "procesos_pendientes": total - terminados,
+    }
+
+
 @router.get("/estadisticas")
 async def get_estadisticas(db=Depends(get_db)):
-    """Obtiene estadísticas generales de órdenes de trabajo.
+    """Cuántas OT hay en cada estado (las cuatro tarjetas de «Estado de Órdenes»).
 
-    Reglas de los 4 buckets (mutuamente excluyentes y exhaustivos):
-      - Completadas:  finalizadototal = 1
-      - En Curso:     finalizadototal != 1 AND existe algún proceso con id_estado > 1
-      - Retrasadas:   finalizadototal != 1 AND sin proceso iniciado AND fecha_prometida < HOY
-      - Pendientes:   finalizadototal != 1 AND sin proceso iniciado AND (fecha_prometida >= HOY o sin fecha)
-
-    El total real de OTs en SMPP debe coincidir con la suma de los 4 buckets.
-    Para evitar inconsistencias en el dashboard se calcula todo en una sola query
-    con SUM(CASE WHEN ...) — más rápido y atómico que 4 queries separadas, y
-    no depende de INNER JOIN con catálogos (articulo / sector / prioridad).
+    Los cuatro estados salen de un CASE (estado_ordenes.ESTADO_SQL): cada OT cae en uno
+    solo y los cuatro suman el total, que son TODAS las OT de la base. No depende de los
+    catálogos (artículo, sector, prioridad): una OT sin esos datos cuenta igual.
     """
     try:
-        # SQL Server no permite subqueries (EXISTS) dentro de una función de
-        # agregación, por eso el EXISTS se resuelve por fila en la subconsulta
-        # derivada y los SUM agregan sobre la columna ya calculada.
-        query = text("""
+        query = consulta(f"""
+            WITH est AS (
+                SELECT {ESTADO_SQL} AS estado, ot.fecha_orden
+                FROM orden_trabajo ot
+            )
             SELECT
                 COUNT(*) AS total,
-                SUM(CASE WHEN t.fin = 1 THEN 1 ELSE 0 END) AS completadas,
-                SUM(CASE WHEN t.fin = 0 AND t.iniciado = 1 THEN 1 ELSE 0 END) AS en_proceso,
-                SUM(CASE
-                        WHEN t.fin = 0 AND t.iniciado = 0
-                         AND t.fecha_prometida IS NOT NULL
-                         AND t.fecha_prometida > '1950-01-01'
-                         AND t.fecha_prometida < CURRENT_DATE
-                        THEN 1 ELSE 0 END) AS retrasadas,
-                SUM(CASE
-                        WHEN t.fin = 0 AND t.iniciado = 0
-                         AND (t.fecha_prometida IS NULL
-                              OR t.fecha_prometida <= '1950-01-01'
-                              OR t.fecha_prometida >= CURRENT_DATE)
-                        THEN 1 ELSE 0 END) AS pendientes,
-                SUM(CASE WHEN t.fecha_orden >= CURRENT_DATE THEN 1 ELSE 0 END) AS creadas_hoy
-            FROM (
-                SELECT
-                    COALESCE(ot.finalizadototal, 0) AS fin,
-                    CASE WHEN EXISTS (SELECT 1 FROM orden_trabajo_proceso otp
-                                      WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado > 1)
-                         THEN 1 ELSE 0 END AS iniciado,
-                    ot.fecha_prometida,
-                    ot.fecha_orden
-                FROM orden_trabajo ot
-            ) t
+                SUM(CASE WHEN estado = 'completadas' THEN 1 ELSE 0 END) AS completadas,
+                SUM(CASE WHEN estado = 'en_curso'    THEN 1 ELSE 0 END) AS en_proceso,
+                SUM(CASE WHEN estado = 'retrasadas'  THEN 1 ELSE 0 END) AS retrasadas,
+                SUM(CASE WHEN estado = 'pendientes'  THEN 1 ELSE 0 END) AS pendientes,
+                SUM(CASE WHEN fecha_orden >= :hoy     THEN 1 ELSE 0 END) AS creadas_hoy
+            FROM est
         """)
-        result = await db.execute(query)
+        result = await db.execute(query, parametros())
         row = result.mappings().first() or {}
 
         total = int(row.get("total") or 0)
@@ -74,7 +149,7 @@ async def get_estadisticas(db=Depends(get_db)):
         pendientes = int(row.get("pendientes") or 0)
         creadas_hoy = int(row.get("creadas_hoy") or 0)
 
-        # Los porcentajes se calculan sobre el total real (los 4 buckets ya cubren todo).
+        # Los porcentajes se calculan sobre el total real (los 4 estados ya cubren todo).
         denom = max(total, 1)
 
         data = {
@@ -95,47 +170,52 @@ async def get_estadisticas(db=Depends(get_db)):
         print(f"Error en estadisticas: {e}")
         return {"success": False, "error": str(e)}
 
+
+async def _por_entregar_entre(db, desde: datetime, hasta: datetime, limite: int | None = None):
+    """Las OT por entregar con fecha prometida en [desde, hasta), la más próxima primero.
+
+    Es la misma selección para las órdenes críticas, la línea de próximas entregas y la
+    lista de un día: el número de un día de la línea es el largo de su lista.
+    """
+    sql = f"""
+        SELECT * FROM ({_FILAS_SQL}
+            WHERE {POR_ENTREGAR_SQL}
+              AND ot.fecha_prometida >= :desde
+              AND ot.fecha_prometida <  :hasta
+        ) t
+        ORDER BY t.fecha_prometida ASC, t.id ASC
+    """
+    if limite:
+        sql += f" LIMIT {int(limite)}"
+    result = await db.execute(consulta(sql), parametros(desde=desde, hasta=hasta))
+    return result.fetchall()
+
+
 @router.get("/ordenes-criticas")
 async def get_ordenes_criticas(db=Depends(get_db)):
-    """Obtiene órdenes críticas (próximas a vencer en 7 días)"""
+    """Las OT por entregar prometidas para hoy o los próximos 7 días (las 10 primeras).
+
+    «Por entregar» = ni finalizada ni con una entrega real cargada: una OT finalizada no
+    está «por vencer» aunque nadie le haya cargado la fecha de entrega.
+    """
     try:
-        # Query raw para asegurar compatibilidad
-        query = text("""
-            SELECT
-                ot.id, 
-                a.descripcion as articulo, 
-                ot.fecha_prometida, 
-                p.descripcion as prioridad
-            FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            WHERE (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
-            AND ot.fecha_prometida <= now() + INTERVAL '7 days'
-            AND ot.fecha_prometida >= now()
-            AND ot.fecha_prometida > '1950-01-01'
-            ORDER BY ot.fecha_prometida ASC
-            LIMIT 10
-        """)
-        
-        result = await db.execute(query)
-        ordenes = result.fetchall()
-        
+        hoy = hoy_ar()
+        filas = await _por_entregar_entre(db, hoy, hoy + timedelta(days=DIAS_PROXIMOS + 1), limite=10)
         data = []
-        hoy = datetime.now().date()
-        
-        for orden in ordenes:
-            fecha_prometida = orden.fecha_prometida.date() if orden.fecha_prometida else None
-            dias_restantes = (fecha_prometida - hoy).days if fecha_prometida else 0
-            
+        for r in filas:
+            f = _fila(r)
+            dia = _dia(r.fecha_prometida)
             data.append({
-                "id": orden.id,
-                "articulo": orden.articulo,
-                "fecha_entrega": fecha_prometida.strftime("%Y-%m-%d") if fecha_prometida else None,
-                "dias_restantes": dias_restantes,
-                "prioridad": orden.prioridad or "Media",
-                "estado": "En Proceso" # Calculado
+                "id": f["id"],
+                "numero": f["numero"],
+                "articulo": f["articulo"],
+                # Se llama «fecha_entrega» porque así lo lee la tarjeta: es la fecha en
+                # que hay que entregarla, la prometida.
+                "fecha_entrega": f["fecha_prometida"],
+                "dias_restantes": (dia - hoy).days if dia else 0,
+                "prioridad": f["prioridad"],
+                "estado": f["estado"],
             })
-        
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en ordenes-criticas: {e}")
@@ -144,37 +224,31 @@ async def get_ordenes_criticas(db=Depends(get_db)):
 
 @router.get("/timeline-entregas")
 async def get_timeline_entregas(db=Depends(get_db)):
-    """Obtiene el timeline de entregas para los próximos 7 días"""
+    """Cuántas OT por entregar hay prometidas para cada día, de hoy a hoy + 7.
+
+    Se agrupa acá y no con un GROUP BY de la fecha: así sale de la MISMA selección que la
+    lista del día (_por_entregar_entre) y no hay un CAST que cada base lea distinto.
+    """
     try:
-        query = text("""
-            SELECT CAST(fecha_prometida AS DATE) as fecha, COUNT(*) as ordenes
-            FROM orden_trabajo ot
-            WHERE (fecha_entrega IS NULL OR fecha_entrega = '1950-01-01')
-            AND fecha_prometida >= now()
-            AND fecha_prometida <= now() + INTERVAL '7 days'
-            AND fecha_prometida > '1950-01-01'
-            GROUP BY CAST(fecha_prometida AS DATE)
-            ORDER BY fecha ASC
-        """)
-        
-        result = await db.execute(query)
-        timeline = result.fetchall()
-        
-        data = []
-        for row in timeline:
-            data.append({
-                "fecha": row.fecha.strftime("%Y-%m-%d"),
-                "ordenes": row.ordenes
-            })
-        
+        hoy = hoy_ar()
+        filas = await _por_entregar_entre(db, hoy, hoy + timedelta(days=DIAS_PROXIMOS + 1))
+        por_dia: dict[str, int] = {}
+        for r in filas:
+            dia = _dia(r.fecha_prometida)
+            if dia is None:
+                continue
+            clave = dia.strftime("%Y-%m-%d")
+            por_dia[clave] = por_dia.get(clave, 0) + 1
+        data = [{"fecha": f, "ordenes": n} for f, n in sorted(por_dia.items())]
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en timeline-entregas: {e}")
         return {"success": False, "error": str(e)}
 
+
 @router.get("/clientes-mayor-volumen")
 async def get_clientes_mayor_volumen(db=Depends(get_db)):
-    """Obtiene los clientes con mayor volumen de órdenes activas"""
+    """Los 5 clientes con más órdenes (todas, históricas y actuales)."""
     try:
         query = text("""
             SELECT c.nombre as cliente, COUNT(ot.id) as cantidad
@@ -184,21 +258,22 @@ async def get_clientes_mayor_volumen(db=Depends(get_db)):
             ORDER BY cantidad DESC
             LIMIT 5
         """)
-        
+
         result = await db.execute(query)
         clientes = result.fetchall()
-        
+
         data = []
         for row in clientes:
             data.append({
                 "cliente": row.cliente,
                 "cantidad": row.cantidad
             })
-        
+
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en clientes-mayor-volumen: {e}")
         return {"success": False, "error": str(e)}
+
 
 @router.get("/distribucion-prioridades")
 async def get_distribucion_prioridades(db=Depends(get_db)):
@@ -209,21 +284,21 @@ async def get_distribucion_prioridades(db=Depends(get_db)):
             FROM orden_trabajo ot
             JOIN prioridad p ON ot.id_prioridad = p.id
             GROUP BY p.descripcion
-            ORDER BY 
-                CASE 
-                    WHEN p.descripcion LIKE '%Urgente%' THEN 1 
-                    WHEN p.descripcion = 'Reclamo' THEN 2 
-                    WHEN p.descripcion = 'Normal' THEN 3 
-                    ELSE 4 
+            ORDER BY
+                CASE
+                    WHEN p.descripcion LIKE '%Urgente%' THEN 1
+                    WHEN p.descripcion = 'Reclamo' THEN 2
+                    WHEN p.descripcion = 'Normal' THEN 3
+                    ELSE 4
                 END ASC
         """)
-        
+
         result = await db.execute(query)
         distribucion = result.fetchall()
-        
+
         total_ordenes = sum(row.cantidad for row in distribucion)
         total = max(total_ordenes, 1)
-        
+
         data = []
         for row in distribucion:
             data.append({
@@ -231,19 +306,22 @@ async def get_distribucion_prioridades(db=Depends(get_db)):
                 "cantidad": row.cantidad,
                 "porcentaje": round((row.cantidad / total) * 100, 1)
             })
-        
+
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en distribucion-prioridades: {e}")
         return {"success": False, "error": str(e)}
 
+
 @router.get("/top-articulos")
 async def get_top_articulos(db=Depends(get_db)):
-    """Obtiene los artículos más producidos"""
+    """Los 5 artículos con más unidades en OT finalizadas."""
     try:
-        # Contamos órdenes por artículo ya que no tenemos cantidad
+        # COALESCE: en Postgres, ORDER BY ... DESC pone los NULL PRIMERO (SQL Server los
+        # ponía al final). Un artículo cuyas OT no tienen unidades cargadas encabezaba el
+        # ranking con «null».
         query = text("""
-            SELECT a.descripcion as articulo, SUM(ot.unidades) as cantidad
+            SELECT a.descripcion as articulo, COALESCE(SUM(ot.unidades), 0) as cantidad
             FROM orden_trabajo ot
             JOIN articulo a ON ot.id_articulo = a.id
             WHERE COALESCE(ot.finalizadototal, 0) = 1
@@ -251,21 +329,22 @@ async def get_top_articulos(db=Depends(get_db)):
             ORDER BY cantidad DESC
             LIMIT 5
         """)
-        
+
         result = await db.execute(query)
         articulos = result.fetchall()
-        
+
         data = []
         for row in articulos:
             data.append({
                 "articulo": row.articulo,
-                "cantidad": row.cantidad
+                "cantidad": int(row.cantidad or 0)
             })
-        
+
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en top-articulos: {e}")
         return {"success": False, "error": str(e)}
+
 
 @router.get("/tiempo-promedio")
 async def get_tiempo_promedio(db=Depends(get_db)):
@@ -283,267 +362,92 @@ async def get_tiempo_promedio(db=Depends(get_db)):
             ) AS tiempos_por_orden
             WHERE tiempo_total > 0
         """)
-        
+
         result = await db.execute(query)
-        promedio_horas = result.scalar() or 0
-        
+        promedio_horas = float(result.scalar() or 0)
+
         dias = int(promedio_horas // 24)
         horas = int(promedio_horas % 24)
-        
+
         return {"success": True, "data": {"dias": dias, "horas": horas}}
     except Exception as e:
         print(f"Error en tiempo-promedio: {e}")
         return {"success": False, "error": str(e)}
 
+
 @router.get("/ordenes-por-prioridad/{prioridad}")
 async def get_ordenes_por_prioridad(prioridad: str, db=Depends(get_db)):
-    """Obtiene todas las órdenes de una prioridad específica (Histórico + Actual)"""
+    """Las OT de una prioridad (históricas y actuales): la barra de «Órdenes por
+    prioridad» que se tocó. Son las mismas que cuenta esa barra."""
     try:
-        query = text("""
-            SELECT 
-                ot.id, 
-                a.descripcion as articulo, 
-                ot.fecha_prometida, 
-                ot.fecha_entrega,
-                s.nombre as sector,
-                c.nombre as cliente
-            FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN sector s ON ot.id_sector = s.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            LEFT JOIN cliente c ON ot.id_cliente = c.id
-            WHERE p.descripcion = :prioridad
+        query = consulta(f"""
+            SELECT * FROM ({_FILAS_SQL}
+                WHERE p.descripcion = :prioridad
+            ) t
+            ORDER BY t.id DESC
         """)
-        
-        result = await db.execute(query, {"prioridad": prioridad})
-        ordenes = result.fetchall()
-        
+        result = await db.execute(query, parametros(prioridad=prioridad))
         data = []
-        for orden in ordenes:
-            # Determinar estado
-            estado = "Completada" if orden.fecha_entrega else "En Proceso"
-            
-            data.append({
-                "id": orden.id,
-                "articulo": orden.articulo,
-                "fecha_entrega": orden.fecha_entrega.strftime("%Y-%m-%d") if orden.fecha_entrega else (orden.fecha_prometida.strftime("%Y-%m-%d") if orden.fecha_prometida else None),
-                "estado": estado,
-                "sector": orden.sector,
-                "cliente": orden.cliente or "Sin Cliente",
-                "cantidad": 1 # Default
-            })
-        
+        for r in result.fetchall():
+            f = _fila(r)
+            # Esta lista muestra UNA fecha: la entrega si ya salió, si no la prometida.
+            f["fecha_entrega"] = f["fecha_entrega"] or f["fecha_prometida"]
+            data.append(f)
         return {"success": True, "data": data}
     except Exception as e:
         print(f"Error en ordenes-por-prioridad: {e}")
         return {"success": False, "error": str(e)}
 
+
 @router.get("/ordenes-por-estado/{estado}")
 async def get_ordenes_por_estado(estado: str, db=Depends(get_db)):
-    """Obtiene todas las órdenes de un estado específico"""
-    try:
-        # Determinar el filtro según el estado
-        estado_lower = estado.lower()
-        
-        if estado_lower == "completadas":
-            where_clause = "ot.finalizadototal = 1"
-        elif estado_lower == "en_proceso" or estado_lower == "en_curso":
-            where_clause = """
-                (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-                AND EXISTS (
-                    SELECT 1 FROM orden_trabajo_proceso otp 
-                    WHERE otp.id_orden_trabajo = ot.id 
-                    AND otp.id_estado > 1
-                )
-            """
-        elif estado_lower == "retrasadas":
-            where_clause = """
-                (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-                AND ot.fecha_prometida < GETDATE() 
-                AND NOT EXISTS (
-                    SELECT 1 FROM orden_trabajo_proceso otp 
-                    WHERE otp.id_orden_trabajo = ot.id 
-                    AND otp.id_estado > 1
-                )
-            """
-        elif estado_lower == "pendientes":
-            where_clause = """
-                (ot.finalizadototal IS NULL OR ot.finalizadototal = 0)
-                AND ot.fecha_prometida >= GETDATE() 
-                AND NOT EXISTS (
-                    SELECT 1 FROM orden_trabajo_proceso otp 
-                    WHERE otp.id_orden_trabajo = ot.id 
-                    AND otp.id_estado > 1
-                )
-            """
-        else:
-            return {"success": False, "error": "Estado no válido"}
-        
-        # Add planificacion filter to all except completed (removed per user request)
-        # if estado_lower != "completadas":
-        #    where_clause += " AND EXISTS (SELECT 1 FROM planificacion pl WHERE pl.orden_id = ot.id)"
-        
-        query = text(f"""
-            SELECT 
-                ot.id, 
-                a.descripcion as articulo,
-                a.cod_articulo,
-                ot.fecha_entrada,
-                ot.unidades,
-                ot.fecha_prometida, 
-                ot.fecha_entrega,
-                s.nombre as sector,
-                c.nombre as cliente,
-                p.descripcion as prioridad,
-                (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id) as total_procesos,
-                (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 3) as procesos_completados,
-                (SELECT pr.nombre 
-                 FROM orden_trabajo_proceso otp 
-                 JOIN proceso pr ON otp.id_proceso = pr.id 
-                 WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 2 LIMIT 1) as proceso_actual
-            FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN sector s ON ot.id_sector = s.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            LEFT JOIN cliente c ON ot.id_cliente = c.id
-            WHERE {where_clause}
-            ORDER BY ot.fecha_prometida DESC
-        """)
-        
-        result = await db.execute(query)
-        ordenes = result.fetchall()
-        
-        data = []
-        for orden in ordenes:
-            # Determinar estado display
-            if orden.fecha_entrega:
-                estado_display = "Completada"
-                fecha_display = orden.fecha_entrega
-            else:
-                hoy = datetime.now().date()
-                # Handle both datetime and date objects safely
-                if isinstance(orden.fecha_prometida, datetime):
-                    fecha_prom = orden.fecha_prometida.date()
-                else:
-                    fecha_prom = orden.fecha_prometida
-                
-                # Logic for display status
-                if estado_lower == "pendientes":
-                    estado_display = "Pendiente"
-                elif estado_lower == "retrasadas":
-                    estado_display = "Retrasada"
-                elif estado_lower in ["en_proceso", "en_curso"]:
-                    estado_display = "En Curso"
-                else:
-                    # Fallback logic
-                    if fecha_prom and fecha_prom < hoy:
-                        estado_display = "Retrasada"
-                    else:
-                        estado_display = "En Proceso"
+    """Las OT de un estado: la lista que abre cada tarjeta de «Estado de Órdenes».
 
-                # Handle placeholder date 3000-01-01
-                if fecha_prom and fecha_prom.year == 3000:
-                    fecha_display = None # Will show as "Sin fecha" in frontend
-                else:
-                    fecha_display = orden.fecha_prometida
-            
-            # Calculate pending processes
-            total_procs = orden.total_procesos or 0
-            completed_procs = orden.procesos_completados or 0
-            pending_procs = total_procs - completed_procs
-            
-            data.append({
-                "id": orden.id,
-                "articulo": orden.articulo,
-                "cod_articulo": orden.cod_articulo,
-                "fecha_entrada": orden.fecha_entrada.strftime("%Y-%m-%d") if orden.fecha_entrada else None,
-                "fecha_entrega": fecha_display.strftime("%Y-%m-%d") if fecha_display else None,
-                "fecha_prometida": orden.fecha_prometida.strftime("%Y-%m-%d") if orden.fecha_prometida else None,
-                "estado": estado_display,
-                "sector": orden.sector,
-                "cliente": orden.cliente or "Sin Cliente",
-                "prioridad": orden.prioridad,
-                "cantidad": orden.unidades or 1,
-                "proceso_actual": orden.proceso_actual,
-                "procesos_totales": total_procs,
-                "procesos_pendientes": pending_procs
-            })
-        
-        return {"success": True, "data": data}
+    Filtra con la MISMA expresión que cuenta la tarjeta, así que trae exactamente las
+    que la tarjeta dice. Orden de salida: las abiertas por fecha prometida, la más
+    urgente arriba y las sin fecha al final; las completadas, la última entregada arriba.
+    La pantalla después reordena por la columna que se toque.
+    """
+    try:
+        codigo = ALIAS.get((estado or "").strip().lower())
+        if codigo not in ESTADOS:
+            return {"success": False, "error": "Estado no válido"}
+
+        # Las sin fecha van juntas al final y entre ellas por número: el centinela no
+        # es una fecha y no tiene por qué ordenar (un 1950 no va «antes» que un 3000).
+        if codigo == "completadas":
+            real = fecha_real("t.fecha_entrega")
+            orden = (f"CASE WHEN {real} THEN 0 ELSE 1 END, "
+                     f"CASE WHEN {real} THEN t.fecha_entrega END DESC, t.id DESC")
+        else:
+            real = fecha_real("t.fecha_prometida")
+            orden = (f"CASE WHEN {real} THEN 0 ELSE 1 END, "
+                     f"CASE WHEN {real} THEN t.fecha_prometida END ASC, t.id ASC")
+
+        query = consulta(f"""
+            SELECT * FROM ({_FILAS_SQL}) t
+            WHERE t.estado = :estado
+            ORDER BY {orden}
+        """)
+        result = await db.execute(query, parametros(estado=codigo))
+        return {"success": True, "data": [_fila(r) for r in result.fetchall()]}
     except Exception as e:
         print(f"Error en ordenes-por-estado: {e}")
         return {"success": False, "error": str(e)}
 
+
 @router.get("/ordenes-por-fecha/{fecha}")
 async def get_ordenes_por_fecha(fecha: str, db=Depends(get_db)):
-    """Obtiene todas las órdenes prometidas para una fecha específica"""
+    """Las OT por entregar prometidas para un día: el día de la línea de entregas que se
+    tocó. Mismo criterio que cuenta la línea."""
     try:
-        print(f"DEBUG: Buscando órdenes para fecha: {fecha}")
-        # Validar formato de fecha
         try:
-            fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
+            dia = datetime.strptime(fecha, "%Y-%m-%d")
         except ValueError:
             return {"success": False, "error": "Formato de fecha inválido. Use YYYY-MM-DD"}
 
-        query = text("""
-            SELECT 
-                ot.id, 
-                a.descripcion as articulo, 
-                ot.fecha_prometida, 
-                ot.fecha_entrega,
-                s.nombre as sector,
-                c.nombre as cliente,
-                p.descripcion as prioridad,
-                (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id) as total_procesos,
-                (SELECT COUNT(*) FROM orden_trabajo_proceso otp WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 3) as procesos_completados,
-                (SELECT pr.nombre 
-                 FROM orden_trabajo_proceso otp 
-                 JOIN proceso pr ON otp.id_proceso = pr.id 
-                 WHERE otp.id_orden_trabajo = ot.id AND otp.id_estado = 2 LIMIT 1) as proceso_actual
-            FROM orden_trabajo ot
-            JOIN articulo a ON ot.id_articulo = a.id
-            JOIN sector s ON ot.id_sector = s.id
-            JOIN prioridad p ON ot.id_prioridad = p.id
-            LEFT JOIN cliente c ON ot.id_cliente = c.id
-            WHERE ot.fecha_prometida >= :fecha_inicio AND ot.fecha_prometida < :fecha_fin
-            AND (ot.fecha_entrega IS NULL OR ot.fecha_entrega = '1950-01-01')
-            ORDER BY ot.id ASC
-        """)
-        
-        # Create range for the whole day
-        fecha_fin = fecha_obj + timedelta(days=1)
-        
-        # Pass both datetimes
-        result = await db.execute(query, {
-            "fecha_inicio": datetime.combine(fecha_obj, datetime.min.time()),
-            "fecha_fin": datetime.combine(fecha_fin, datetime.min.time())
-        })
-        ordenes = result.fetchall()
-        
-        print(f"DEBUG: Encontradas {len(ordenes)} órdenes para {fecha}")
-        
-        data = []
-        for orden in ordenes:
-            # Calculate pending processes
-            total_procs = orden.total_procesos or 0
-            completed_procs = orden.procesos_completados or 0
-            pending_procs = total_procs - completed_procs
-            
-            data.append({
-                "id": orden.id,
-                "articulo": orden.articulo,
-                "fecha_entrega": orden.fecha_prometida.strftime("%Y-%m-%d") if orden.fecha_prometida else None,
-                "estado": "En Proceso", # Default for timeline items
-                "sector": orden.sector,
-                "cliente": orden.cliente or "Sin Cliente",
-                "prioridad": orden.prioridad,
-                "cantidad": 1,  # Default
-                "proceso_actual": orden.proceso_actual,
-                "procesos_totales": total_procs,
-                "procesos_pendientes": pending_procs
-            })
-        
-        return {"success": True, "data": data}
+        filas = await _por_entregar_entre(db, dia, dia + timedelta(days=1))
+        return {"success": True, "data": [_fila(r) for r in filas]}
     except Exception as e:
         print(f"Error en ordenes-por-fecha: {e}")
         return {"success": False, "error": str(e)}

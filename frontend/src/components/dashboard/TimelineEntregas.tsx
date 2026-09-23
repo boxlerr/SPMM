@@ -14,11 +14,15 @@ export default function TimelineEntregas({ timeline, loading }: TimelineEntregas
     const [selectedDate, setSelectedDate] = useState<string | null>(null)
     const [orders, setOrders] = useState<OrdenEstado[]>([])
     const [loadingOrders, setLoadingOrders] = useState(false)
+    const [errorOrders, setErrorOrders] = useState<string | null>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
 
     const handleDateClick = async (fecha: string) => {
         setSelectedDate(fecha)
         setLoadingOrders(true)
+        setErrorOrders(null)
+        // Sin esto, si el pedido fallaba quedaba a la vista la lista del día anterior.
+        setOrders([])
         setIsModalOpen(true)
 
         try {
@@ -32,9 +36,12 @@ export default function TimelineEntregas({ timeline, loading }: TimelineEntregas
             const data = await response.json()
             if (data.success) {
                 setOrders(data.data)
+            } else {
+                throw new Error(data.error || "Error al cargar las órdenes del día")
             }
         } catch (error) {
             console.error("Error fetching orders by date:", error)
+            setErrorOrders("No se pudo traer la lista. Probá de nuevo en un rato; si sigue igual, avisá.")
         } finally {
             setLoadingOrders(false)
         }
@@ -126,6 +133,7 @@ export default function TimelineEntregas({ timeline, loading }: TimelineEntregas
                     selectedStatus="en_curso"
                     statusOrders={orders}
                     loading={loadingOrders}
+                    error={errorOrders}
                 />
             )}
         </>

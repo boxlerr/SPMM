@@ -63,6 +63,7 @@ export default function DashboardPage() {
     selectedStatus,
     statusOrders,
     loadingStatusOrders,
+    errorStatusOrders,
     setSelectedStatus,
     setStatusOrders,
     fetchOrdenesPorEstado,
@@ -199,6 +200,7 @@ export default function DashboardPage() {
         selectedStatus={selectedStatus}
         statusOrders={statusOrders}
         loading={loadingStatusOrders}
+        error={errorStatusOrders}
       />
     </div>
   )

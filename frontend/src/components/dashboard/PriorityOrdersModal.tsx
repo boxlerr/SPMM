@@ -5,7 +5,8 @@ import type { ColumnaExport } from "@/lib/exportar"
 
 /** RF-22: lo que dice cada tarjeta de la lista. */
 const COLUMNAS_EXPORT: ColumnaExport<OrdenPrioridad>[] = [
-    { titulo: "Orden", tipo: "id", valor: (o) => o.id },
+    // El N° de OT del taller; con el backend viejo (sin `numero`), la clave interna, como antes.
+    { titulo: "Orden", tipo: "id", valor: (o) => o.numero ?? o.id },
     { titulo: "Artículo", valor: (o) => o.articulo },
     { titulo: "Fecha entrega", tipo: "fecha", valor: (o) => o.fecha_entrega },
     { titulo: "Estado", valor: (o) => o.estado },
@@ -83,7 +84,7 @@ export default function PriorityOrdersModal({
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                         <div>
                                             <p className="text-xs text-gray-500 font-semibold uppercase">Orden #</p>
-                                            <p className="text-sm font-bold text-gray-900">{orden.id}</p>
+                                            <p className="text-sm font-bold text-gray-900">{orden.numero ?? orden.id}</p>
                                         </div>
                                         <div>
                                             <p className="text-xs text-gray-500 font-semibold uppercase">Artículo</p>
@@ -107,7 +108,9 @@ export default function PriorityOrdersModal({
                                         </div>
                                         <div>
                                             <p className="text-xs text-gray-500 font-semibold uppercase">Cantidad</p>
-                                            <p className="text-sm text-gray-900">{orden.cantidad} unidades</p>
+                                            <p className="text-sm text-gray-900">
+                                                {orden.cantidad != null ? `${orden.cantidad} unidades` : "Sin cargar"}
+                                            </p>
                                         </div>
                                     </div>
                                 </div>

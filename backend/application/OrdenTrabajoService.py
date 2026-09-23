@@ -489,16 +489,19 @@ class OrdenTrabajoService:
         try:
             logger.info(f"Service - Obtener órdenes críticas (próximas {dias} días).")
             ordenes = await self.repository.get_ordenes_criticas(dias)
-            
-            # Formatear la respuesta con información relevante
+
+            # El día del TALLER, no el del servidor (UTC en Cloud Run). Y la resta es de
+            # días: fecha_prometida es datetime y restarle un date tiraba TypeError, o sea
+            # un 500 apenas había una sola OT crítica.
+            from backend.infrastructure.estado_ordenes import hoy_ar
+            hoy = hoy_ar().date()
             ordenes_formateadas = []
             for orden in ordenes:
-                from datetime import date
-                hoy = date.today()
-                dias_restantes = (orden.fecha_prometida - hoy).days
-                
+                dias_restantes = (orden.fecha_prometida.date() - hoy).days
+
                 orden_data = {
                     "id": orden.id,
+                    "numero": orden.id_otvieja or orden.id,
                     "articulo": orden.articulo.descripcion if orden.articulo else "Sin artículo",
                     "sector": orden.sector.nombre if orden.sector else "Sin sector",
                     "fecha_prometida": orden.fecha_prometida.isoformat(),

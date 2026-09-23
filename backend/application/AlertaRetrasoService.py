@@ -31,8 +31,9 @@ justo las órdenes de las que hay que hablar hoy.
 
 Se dejó UNA sola regla para el aviso y **no se tocó el número del tablero**: es el que
 Lucas mira todos los días y cambiarlo sin que nadie lo pida es cambiarle el piso abajo
-de los pies. (Hay incluso una tercera definición, en
-`OrdenTrabajoRepository.get_estadisticas_estados`, que se apoya en `fecha_entrega`.)
+de los pies. (Había una tercera definición, en
+`OrdenTrabajoRepository.get_estadisticas_estados`, apoyada en `fecha_entrega`; desde el
+23/09 usa la misma regla que el tablero: infrastructure/estado_ordenes.py.)
 Consecuencia conocida y esperada: el aviso va a nombrar órdenes que el tablero muestra
 como «En Curso». Está anotado para avisarlo, no es un bug.
 
