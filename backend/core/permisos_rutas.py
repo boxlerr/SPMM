@@ -63,6 +63,8 @@ y como solapa de Recursos):
                      Planos de Recursos va por el área Planos, igual que la pantalla.
   Recursos y         la ficha de la persona: /operarios/{id}/ausencias y
   Operaciones        /operarios/{id}/tiempos (RF-06). La ficha se monta en las dos.
+                     Su solapa Rendimiento (/operarios/{id}/rendimiento, RF-07) pide
+                     además la sección confidencial «Rendimiento por persona».
   Clientes           /clientes
   No conformidades   /incidencias/*
   Auditoría          /auditoria/movimientos, /auditoria/procesos, /auditoria/planificacion
@@ -244,6 +246,18 @@ POLITICAS: dict[str, Politica] = {
     "asistencia": Politica(
         leer=(area("recursos"), area("operaciones")),
         escribir=(seccion("recursos_humano", "write"),),
+    ),
+    # Su reporte de rendimiento (RF-07): tareas completadas, tiempo promedio y
+    # EFICIENCIA, exportable. Sólo se lee. Pide la sección confidencial «Rendimiento por
+    # persona», la misma del cuadro estimado vs. real del Dashboard y por lo mismo: pone
+    # un número de eficiencia al lado de un nombre, y eso lo abre Lucas a quien decida
+    # (hoy, sólo el admin). Abrírsela a alguien le abre las dos cosas juntas. No alcanza
+    # con Recursos u Operaciones como los tiempos de RF-06: esos son el dato de cada paso;
+    # esto es la evaluación de la persona. La ficha, sin la sección, no muestra la
+    # solapa (y no pide nada: un 403 al abrir cada ficha sería un aviso de más).
+    "rendimiento_operario": Politica(
+        leer=(seccion("dashboard_rendimiento"),),
+        escribir=(seccion("dashboard_rendimiento", "write"),),
     ),
     # El plan. Lo leen Operaciones (el Gantt) y Recursos (lo que tiene asignado cada
     # persona). Moverlo —planificar, borradores, confirmar, quitar órdenes, correr una

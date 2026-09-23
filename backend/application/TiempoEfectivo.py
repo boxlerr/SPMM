@@ -204,3 +204,91 @@ def tiempo_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
         efectivo=en_jornada - en_pausa,
         en_curso=en_curso,
     )
+
+
+# ── Los tramos, no sólo los minutos (RF-07) ───────────────────────────────────
+#
+# El reporte de rendimiento de una persona necesita más que los minutos de cada paso:
+#
+#   · RECORTARLOS AL PERÍODO. Un paso que arrancó el 28 del mes pasado y terminó el 3
+#     de éste tiene la mayor parte de su trabajo en el mes pasado: las «horas
+#     trabajadas» de este mes no pueden llevarse el paso entero.
+#   · NO CONTAR DOS VECES LA MISMA HORA. Si a una persona le quedaron dos pasos «en
+#     proceso» a la vez (pasa: se arranca todo lo de la OT de una), sumar el efectivo de
+#     cada uno da más horas de las que tiene el día. Uniendo los tramos, esa hora cuenta
+#     una vez.
+#   · SABER DE QUÉ PAUSA ES CADA MINUTO PARADO, para decir «máquina rota: 2 h».
+#
+# Por eso esto devuelve los TRAMOS. La cuenta es la misma que la de tiempo_de_un_paso
+# (un test compara las dos, caso por caso): minutos(efectivos) == efectivo y
+# minutos(en_pausa) == en_pausa.
+
+
+def restar(a: Iterable[Tramo], b: Iterable[Tramo]) -> list[Tramo]:
+    """Lo de `a` que no está en `b`."""
+    a, b = unir(a), unir(b)
+    salida: list[Tramo] = []
+    for ini, fin in a:
+        cursor = ini
+        for b_ini, b_fin in b:
+            if b_fin <= cursor:
+                continue
+            if b_ini >= fin:
+                break
+            if b_ini > cursor:
+                salida.append((cursor, b_ini))
+            cursor = max(cursor, b_fin)
+            if cursor >= fin:
+                break
+        if cursor < fin:
+            salida.append((cursor, fin))
+    return salida
+
+
+class TramosDePaso(NamedTuple):
+    """Dónde cayó el tiempo de un paso, tramo por tramo."""
+
+    jornada: list[Tramo]            # lo que del paso cae adentro de la jornada
+    efectivos: list[Tramo]          # jornada sin lo pausado: lo trabajado
+    en_pausa: list[Tramo]           # jornada Y pausado (unidas: cada minuto una vez)
+    por_pausa: list[list[Tramo]]    # lo de cada pausa de la entrada, en el mismo orden
+    en_curso: bool
+
+
+def tramos_de_un_paso(inicio: Optional[datetime], fin: Optional[datetime],
+                      pausas: Iterable[tuple[datetime, Optional[datetime]]] = (), *,
+                      ahora: datetime, feriados: Iterable[date] = ()) -> Optional[TramosDePaso]:
+    """Lo mismo que tiempo_de_un_paso, pero con los tramos. None si no arrancó.
+
+    `por_pausa[i]` es lo que la pausa `pausas[i]` paró adentro de la jornada y del paso:
+    dos pausas que se pisan tienen, cada una, su parte entera (sirve para repartir por
+    motivo); `en_pausa` es la unión, lo que de verdad se descuenta.
+    """
+    inicio = fecha_real(inicio)
+    if inicio is None:
+        return None
+    pausas = list(pausas)
+    en_curso = fecha_real(fin) is None
+    ahora = _al_minuto(ahora)
+    inicio = _al_minuto(inicio)
+    hasta = ahora if en_curso else _al_minuto(fin)
+    if hasta <= inicio:
+        return TramosDePaso([], [], [], [[] for _ in pausas], en_curso)
+
+    jornada = tramos_de_jornada(inicio, hasta, feriados)
+    por_pausa: list[list[Tramo]] = []
+    for p_desde, p_hasta in pausas:
+        if p_desde is None:
+            por_pausa.append([])
+            continue
+        a = max(_al_minuto(p_desde), inicio)
+        b = min(_al_minuto(p_hasta) if p_hasta is not None else ahora, hasta)
+        por_pausa.append(interseccion(jornada, [(a, b)]) if b > a else [])
+    en_pausa = unir(t for tramos in por_pausa for t in tramos)
+    return TramosDePaso(
+        jornada=jornada,
+        efectivos=restar(jornada, en_pausa),
+        en_pausa=en_pausa,
+        por_pausa=por_pausa,
+        en_curso=en_curso,
+    )

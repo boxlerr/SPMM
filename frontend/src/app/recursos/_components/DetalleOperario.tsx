@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { User, Phone, Activity, Calendar, CalendarOff, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench, Trash2, Plus, Briefcase, Search, X } from "lucide-react";
+import { User, Phone, Activity, Calendar, CalendarOff, FileText, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Pencil, Wrench, Trash2, Plus, Briefcase, Search, X, Gauge } from "lucide-react";
 import { Operario, ProcesoSkill } from "../_types";
 import { PlanificacionItem } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ClavePeriodo } from "@/lib/asistencia";
 import AsistenciaOperario, { useAsistencia } from "./AsistenciaOperario";
 import TiemposOperario, { useTiempos } from "./TiemposOperario";
+import RendimientoOperario, { useRendimiento } from "./RendimientoOperario";
+import type { PeriodoRendimiento } from "@/lib/rendimiento";
 
 const ESTADO_PASO: Record<number, string> = { 1: "Pendiente", 2: "En Proceso", 3: "Finalizado" };
 
@@ -100,6 +102,9 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   const { puedeSeccion } = usePermisos();
   const editaPersona = puedeSeccion("recursos_humano", "write");
   const editaPasos = puedeSeccion("operaciones_ordenes", "write");
+  // RF-07: el reporte de rendimiento es la sección confidencial «Rendimiento por
+  // persona» (la misma del Dashboard). Sin ella la solapa no aparece ni se pide.
+  const veRendimiento = puedeSeccion("dashboard_rendimiento", "read");
   const [isUpdating, setIsUpdating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [procesosMap, setProcesosMap] = useState<Record<number, string>>({});
@@ -124,17 +129,22 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
   // Las versiones suben cuando la ficha cambia algo que las mueve —el Activo / Ausente
   // abre o cierra una ausencia; el estado de un paso cambia sus tiempos— y ahí se
   // vuelven a pedir en silencio.
-  const [solapa, setSolapa] = useState<"ordenes" | "tiempos" | "asistencia">("ordenes");
+  const [solapa, setSolapa] = useState<"ordenes" | "tiempos" | "asistencia" | "rendimiento">("ordenes");
   const [periodoTiempos, setPeriodoTiempos] = useState<ClavePeriodo>("30d");
   const [periodoAsistencia, setPeriodoAsistencia] = useState<ClavePeriodo>("anio");
+  const [periodoRendimiento, setPeriodoRendimiento] = useState<PeriodoRendimiento>({ clave: "30d" });
   const [versionEstado, setVersionEstado] = useState(0);
   const [versionPasos, setVersionPasos] = useState(0);
   const asistencia = useAsistencia(operario?.id, periodoAsistencia, versionEstado);
   const tiempos = useTiempos(operario?.id, periodoTiempos, versionPasos);
+  // El reporte junta las dos cosas (pasos y ausencias): se vuelve a pedir con cualquiera.
+  const rendimiento = useRendimiento(operario?.id, periodoRendimiento, versionPasos + versionEstado, veRendimiento);
   const hayTiempos = tiempos.estado !== "no";
   const hayAsistencia = asistencia.estado !== "no";
+  const hayRendimiento = rendimiento.estado !== "no";
   const solapaVisible =
-    (solapa === "tiempos" && !hayTiempos) || (solapa === "asistencia" && !hayAsistencia) ? "ordenes" : solapa;
+    (solapa === "tiempos" && !hayTiempos) || (solapa === "asistencia" && !hayAsistencia)
+      || (solapa === "rendimiento" && !hayRendimiento) ? "ordenes" : solapa;
 
   // Sync props to state if props change (re-opening modal)
   useEffect(() => {
@@ -768,7 +778,7 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
               >
                 {/* RF-06. Las solapas sólo aparecen si hay más de una: con un backend de
                     antes, la ficha queda exactamente como estaba. */}
-                {(hayTiempos || hayAsistencia) && (
+                {(hayTiempos || hayAsistencia || hayRendimiento) && (
                   <TabsList className="mx-3 mt-2 mb-0 h-9 shrink-0 justify-start gap-1 rounded-xl bg-gray-100/60 p-1 self-start max-w-[calc(100%-1.5rem)] overflow-x-auto">
                     <TabsTrigger value="ordenes" className="h-7 rounded-lg px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
                       <Calendar className="h-3.5 w-3.5 mr-1.5 hidden sm:block" /> Órdenes
@@ -786,11 +796,24 @@ export default function DetalleOperario({ operario, tasks: initialTasks = [], on
                         )}
                       </TabsTrigger>
                     )}
+                    {hayRendimiento && (
+                      <TabsTrigger value="rendimiento" className="h-7 rounded-lg px-3 text-xs data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-sm">
+                        <Gauge className="h-3.5 w-3.5 mr-1.5 hidden sm:block" /> Rendimiento
+                      </TabsTrigger>
+                    )}
                   </TabsList>
                 )}
 
                 <TabsContent value="tiempos" className="mt-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
                   <TiemposOperario tiempos={tiempos} periodo={periodoTiempos} onPeriodo={setPeriodoTiempos} />
+                </TabsContent>
+                <TabsContent value="rendimiento" className="mt-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
+                  <RendimientoOperario
+                    rendimiento={rendimiento}
+                    periodo={periodoRendimiento}
+                    onPeriodo={setPeriodoRendimiento}
+                    nombre={`${capitalizeName(operario.nombre)} ${capitalizeName(operario.apellido)}`.trim()}
+                  />
                 </TabsContent>
                 <TabsContent value="asistencia" className="mt-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
                   <AsistenciaOperario

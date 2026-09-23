@@ -96,25 +96,66 @@ def le_toca(id_operario: int, elegido: int | None, del_plan: set[int], cant_oper
     return "plan" if id_operario in del_plan else None
 
 
+def trabajado_en(paso: dict, ini_p: datetime | None, fin_p: datetime | None,
+                 ahora: datetime) -> bool:
+    """Si el paso se trabajó en [ini_p, fin_p): arrancó antes de que termine el período y
+    no terminó antes de que empiece (uno sin fin sigue abierto hasta ahora)."""
+    ini_p = ini_p or datetime.min
+    fin_p = fin_p or datetime.max
+    return paso["inicio_real"] < fin_p and (fecha_real(paso["fin_real"]) or ahora) >= ini_p
+
+
+def pausas_por_orden(pausas) -> dict[int, list]:
+    salida: dict[int, list] = defaultdict(list)
+    for pausa in pausas or []:
+        salida[pausa.id_orden_trabajo].append(pausa)
+    return salida
+
+
+def dato_roto(paso: dict) -> bool:
+    """Terminado y sin fin (o con el fin antes del arranque): no hay cuenta honesta."""
+    fin = fecha_real(paso["fin_real"])
+    return (paso["id_estado"] == 3 and fin is None) or (fin is not None and fin < paso["inicio_real"])
+
+
+def fila_de_tarea(paso: dict, t) -> dict:
+    """Cómo sale un paso por la API. `t` es su TiempoDePaso (None si el dato está roto)."""
+    return {
+        "id_otp": paso["id_otp"],
+        "id_orden_trabajo": paso["id_orden_trabajo"],
+        "numero_ot": paso["id_otvieja"] or paso["id_orden_trabajo"],
+        "articulo": paso["articulo"],
+        "proceso": paso["proceso"],
+        "paso": paso["paso"],
+        "id_estado": paso["id_estado"],
+        "estado": ESTADO_TEXTO.get(paso["id_estado"], "Pendiente"),
+        "inicio_real": paso["inicio_real"],
+        "fin_real": fecha_real(paso["fin_real"]),
+        "en_curso": bool(t.en_curso) if t else False,
+        "sin_datos": t is None,
+        "origen": paso["origen"],
+        "estimado_min": paso["tiempo_proceso"],
+        "corrido_min": t.corrido if t else None,
+        "fuera_de_jornada_min": t.fuera_de_jornada if t else None,
+        "pausa_min": t.en_pausa if t else None,
+        "efectivo_min": t.efectivo if t else None,
+    }
+
+
 class TiemposOperarioService:
     def __init__(self, db_session):
         self.db = db_session
         self.repository = TiemposOperarioRepository(db_session)
 
-    async def tareas(self, id_operario: int, desde=None, hasta=None) -> ResponseDTO:
-        """Los pasos de OT de la persona que arrancaron, con estimado, corrido y efectivo.
-
-        `desde` / `hasta` (días, incluidos) filtran los que se TRABAJARON en ese período:
-        los que arrancaron antes de que termine y terminaron (o siguen) después de que
-        empiece. Los minutos son los del paso entero, no recortados al período.
-        """
+    async def persona(self, id_operario: int):
         op = await AusenciaRepository(self.db).find_operario(id_operario)
         if op is None:
             raise NotFoundException(f"No existe la persona {id_operario}.")
-        p_desde, p_hasta = _leer_fecha(desde, "desde"), _leer_fecha(hasta, "hasta")
-        if p_desde and p_hasta and p_hasta < p_desde:
-            raise BusinessException("El período termina antes de empezar.")
+        return op
 
+    async def pasos_atribuidos(self, id_operario: int) -> list[dict]:
+        """Los pasos que arrancaron y le tocan a la persona (la regla de le_toca), de
+        toda la historia, con `origen` («ot» o «plan»)."""
         # 1. Los candidatos: los elegidos a mano, y los pasos de las OT donde algún plan
         #    le dio algo.
         elegidos = set(await self.repository.pasadas_elegidas(id_operario))
@@ -126,62 +167,60 @@ class TiemposOperarioService:
         del_plan = personas_del_ultimo_plan(filas_plan, pasos_por_ot_proceso)
         candidatos = elegidos | {p for p, gente in del_plan.items() if id_operario in gente}
 
-        # 2. Los que arrancaron y le tocan de verdad (la regla de le_toca).
+        # 2. Los que arrancaron y le tocan de verdad.
         pasos = []
         for p in await self.repository.pasadas_arrancadas(sorted(candidatos)):
             origen = le_toca(id_operario, p["id_operario_elegido"],
                              del_plan.get(p["id_otp"], set()), p["cant_operarios"])
             if origen is not None:
                 pasos.append({**p, "origen": origen})
+        return pasos
+
+    async def pausas_y_feriados(self, pasos: list[dict]) -> tuple[dict[int, list], bool, list[date]]:
+        """Las pausas de las OT de esos pasos (por OT), si se pudieron leer, y los
+        feriados. Sin la tabla de pausas: nada que descontar, y `False` para decirlo."""
+        pausas = await self.repository.pausas_sin_romper(sorted({p["id_orden_trabajo"] for p in pasos}))
+        feriados = await self.repository.feriados()
+        return pausas_por_orden(pausas), pausas is not None, feriados
+
+    @staticmethod
+    def pausas_de(paso: dict, pausas_por_ot: dict[int, list]) -> list:
+        return pausas_del_paso(pausas_por_ot.get(paso["id_orden_trabajo"], []), paso["id_otp"])
+
+    async def tareas(self, id_operario: int, desde=None, hasta=None) -> ResponseDTO:
+        """Los pasos de OT de la persona que arrancaron, con estimado, corrido y efectivo.
+
+        `desde` / `hasta` (días, incluidos) filtran los que se TRABAJARON en ese período:
+        los que arrancaron antes de que termine y terminaron (o siguen) después de que
+        empiece. Los minutos son los del paso entero, no recortados al período.
+        """
+        await self.persona(id_operario)
+        p_desde, p_hasta = _leer_fecha(desde, "desde"), _leer_fecha(hasta, "hasta")
+        if p_desde and p_hasta and p_hasta < p_desde:
+            raise BusinessException("El período termina antes de empezar.")
+
+        pasos = await self.pasos_atribuidos(id_operario)
 
         # 3. El período: se trabajó en él si arrancó antes de que termine y no terminó
         #    antes de que empiece.
         ahora = ahora_ar()
         if p_desde or p_hasta:
-            ini_p = datetime.combine(p_desde, time()) if p_desde else datetime.min
-            fin_p = datetime.combine(p_hasta + timedelta(days=1), time()) if p_hasta else datetime.max
-            pasos = [p for p in pasos
-                     if p["inicio_real"] < fin_p and (fecha_real(p["fin_real"]) or ahora) >= ini_p]
+            ini_p = datetime.combine(p_desde, time()) if p_desde else None
+            fin_p = datetime.combine(p_hasta + timedelta(days=1), time()) if p_hasta else None
+            pasos = [p for p in pasos if trabajado_en(p, ini_p, fin_p, ahora)]
 
         # 4. Las pausas de esas OT y los feriados, y la cuenta.
-        pausas = await self.repository.pausas_sin_romper(sorted({p["id_orden_trabajo"] for p in pasos}))
-        feriados = await self.repository.feriados()
-        pausas_por_ot: dict[int, list] = defaultdict(list)
-        for pausa in pausas or []:
-            pausas_por_ot[pausa.id_orden_trabajo].append(pausa)
+        pausas_por_ot, pausas_disponibles, feriados = await self.pausas_y_feriados(pasos)
 
         tareas = []
         for p in pasos:
-            fin = fecha_real(p["fin_real"])
-            terminado = p["id_estado"] == 3
-            # Terminado y sin fin (o con el fin antes del arranque): el dato está roto y
-            # no hay cuenta honesta. Se muestra, pero sin minutos y fuera de los totales.
-            sin_datos = (terminado and fin is None) or (fin is not None and fin < p["inicio_real"])
             t = None
-            if not sin_datos:
-                del_paso = pausas_del_paso(pausas_por_ot.get(p["id_orden_trabajo"], []), p["id_otp"])
-                t = tiempo_de_un_paso(p["inicio_real"], fin, [(x.desde, x.hasta) for x in del_paso],
+            if not dato_roto(p):
+                del_paso = self.pausas_de(p, pausas_por_ot)
+                t = tiempo_de_un_paso(p["inicio_real"], fecha_real(p["fin_real"]),
+                                      [(x.desde, x.hasta) for x in del_paso],
                                       ahora=ahora, feriados=feriados)
-            tareas.append({
-                "id_otp": p["id_otp"],
-                "id_orden_trabajo": p["id_orden_trabajo"],
-                "numero_ot": p["id_otvieja"] or p["id_orden_trabajo"],
-                "articulo": p["articulo"],
-                "proceso": p["proceso"],
-                "paso": p["paso"],
-                "id_estado": p["id_estado"],
-                "estado": ESTADO_TEXTO.get(p["id_estado"], "Pendiente"),
-                "inicio_real": p["inicio_real"],
-                "fin_real": fin,
-                "en_curso": bool(t.en_curso) if t else False,
-                "sin_datos": sin_datos,
-                "origen": p["origen"],
-                "estimado_min": p["tiempo_proceso"],
-                "corrido_min": t.corrido if t else None,
-                "fuera_de_jornada_min": t.fuera_de_jornada if t else None,
-                "pausa_min": t.en_pausa if t else None,
-                "efectivo_min": t.efectivo if t else None,
-            })
+            tareas.append(fila_de_tarea(p, t))
 
         tareas.sort(key=lambda x: x["inicio_real"], reverse=True)
         recortado = len(tareas) > TOPE_TAREAS
@@ -204,7 +243,7 @@ class TiemposOperarioService:
                         "hasta": p_hasta.isoformat() if p_hasta else None},
             "jornada": jornada_en_palabras(),
             # False = la tabla de pausas todavía no está: el efectivo no descuenta pausas.
-            "pausas_disponibles": pausas is not None,
+            "pausas_disponibles": pausas_disponibles,
             "recortado": recortado,
             "resumen": resumen,
             "tareas": tareas,

@@ -234,6 +234,9 @@ MATRIZ = [
     ("PUT", "/operarios/1/ausencias/2", OK, NO, NO),
     ("DELETE", "/operarios/1/ausencias/2", OK, NO, NO),
     ("GET", "/operarios/1/tiempos", OK, OK, OK),
+    # RF-07: el reporte de rendimiento de la ficha pide la sección confidencial
+    # «Rendimiento por persona», igual que el cuadro del Dashboard.
+    ("GET", "/operarios/1/rendimiento", OK, NO, NO),
     # el plan y el planificador
     ("GET", "/planificacion", OK, OK, OK),
     ("POST", "/planificar", OK, OK, NO),
@@ -304,6 +307,9 @@ async def test_el_mensaje_dice_que_falta(espejo):
         "No tenés permiso para modificar «Recurso humano» (Recursos)."
     r = await _pedir(espejo, "GET", "/api/dashboard/rendimiento-operarios", SOFIA, "supervisor")
     assert "«Rendimiento por persona» (Dashboard)" in r.json()["errors"][0]["message"]
+    r = await _pedir(espejo, "GET", "/operarios/1/rendimiento", SOFIA, "supervisor")
+    assert r.json()["errors"][0]["message"] == \
+        "No tenés permiso para ver «Rendimiento por persona» (Dashboard)."
 
 
 async def test_la_seccion_restringida_del_rol_vale_tambien_para_escribir(espejo):
@@ -406,6 +412,8 @@ PANTALLAS = {
         "/articulos", "/clientes", "/sectores", "/prioridades", "/piezas",
         # RF-06: la ficha de la persona (se abre también desde Operaciones)
         "/operarios/1/ausencias", "/operarios/1/tiempos",
+        # (su solapa Rendimiento, RF-07, es la sección confidencial «Rendimiento por
+        # persona»: la ficha no la pide si no se tiene)
     ],
     "planos": ["/planos/biblioteca", "/planos/1", "/planos/1/archivo", "/articulos"],
     "recursos": [
@@ -496,6 +504,10 @@ async def test_un_permiso_de_mas_vencido_no_abre_y_uno_vigente_si(espejo):
     await _ejecutar(espejo, update(UsuarioSeccion).values(vence_en=None))
     assert (await _pedir(espejo, "GET", ruta, MATIAS, "operario")).status_code == OK
     assert (await _pedir(espejo, "GET", ruta, SOFIA, "supervisor")).status_code == NO
+    # La misma sección abre el reporte de rendimiento de la ficha (RF-07).
+    ficha = "/operarios/1/rendimiento"
+    assert (await _pedir(espejo, "GET", ficha, MATIAS, "operario")).status_code == OK
+    assert (await _pedir(espejo, "GET", ficha, SOFIA, "supervisor")).status_code == NO
 
 
 async def test_el_planificador_se_abre_al_operario_con_un_permiso_de_mas(espejo):
