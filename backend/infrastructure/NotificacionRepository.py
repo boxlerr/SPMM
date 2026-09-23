@@ -1,32 +1,57 @@
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from backend.domain.Notificacion import Notificacion
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
 from backend.commons.loggers.logger import logger
+
+
+# Los avisos que salen de «Usuarios y permisos» (alta, cambio y baja de una cuenta:
+# «Usuario 'x' (Nombre Apellido) fue creado»). Esa sección es confidencial, así que sus
+# avisos los ve sólo quien la puede ver (NotificacionAPI decide quién; acá se filtra).
+PREFIJO_AVISOS_DE_USUARIOS = "usuario_"
+
+
+def es_aviso_de_usuarios(tipo) -> bool:
+    return (tipo or "").startswith(PREFIJO_AVISOS_DE_USUARIOS)
+
+
+def _visibles(consulta, ocultar_avisos_de_usuarios: bool):
+    if ocultar_avisos_de_usuarios:
+        consulta = consulta.where(
+            ~Notificacion.tipo.startswith(PREFIJO_AVISOS_DE_USUARIOS, autoescape=True)
+        )
+    return consulta
 
 
 class NotificacionRepository:
     """
     Repositorio asincrónico de `Notificacion`.
     Maneja transacciones usando AsyncSession y errores con InfrastructureException.
+
+    `ocultar_avisos_de_usuarios`: la campanita es UNA para todo el taller, pero los
+    avisos de «Usuarios y permisos» no son para todos (ver PREFIJO_AVISOS_DE_USUARIOS).
+    Lo que se oculta no se lista, no se cuenta, no se lee por id y no se marca como
+    leído: para quien no lo ve, no existe.
     """
 
     def __init__(self, db):
         self.db = db
 
-    async def find_by_id(self, id: int):
+    async def find_by_id(self, id: int, ocultar_avisos_de_usuarios: bool = False):
         try:
-            result = await self.db.execute(
-                select(Notificacion).where(Notificacion.id_notificacion == id)
-            )
+            result = await self.db.execute(_visibles(
+                select(Notificacion).where(Notificacion.id_notificacion == id),
+                ocultar_avisos_de_usuarios,
+            ))
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Repository - Error al buscar Notificacion {id}: {e}")
             raise InfrastructureException("Error al buscar la Notificacion por ID.") from e
 
-    async def find_all(self, limit: int = None, offset: int = None, solo_no_leidas: bool = False):
+    async def find_all(self, limit: int = None, offset: int = None, solo_no_leidas: bool = False,
+                       ocultar_avisos_de_usuarios: bool = False):
         try:
             logger.info("Repository - Obtener todas las notificaciones desde la base de datos.")
-            query = select(Notificacion)
+            query = _visibles(select(Notificacion), ocultar_avisos_de_usuarios)
             
             if solo_no_leidas:
                 query = query.where(Notificacion.leida == False)
@@ -46,14 +71,13 @@ class NotificacionRepository:
             logger.error(f"Repository - Error al listar Notificaciones: {e}")
             raise InfrastructureException("Error al listar Notificaciones.") from e
 
-    async def count(self, solo_no_leidas: bool = False):
+    async def count(self, solo_no_leidas: bool = False, ocultar_avisos_de_usuarios: bool = False):
         """Cuenta el total de notificaciones"""
         try:
-            query = select(Notificacion)
+            query = _visibles(select(func.count()).select_from(Notificacion), ocultar_avisos_de_usuarios)
             if solo_no_leidas:
                 query = query.where(Notificacion.leida == False)
-            result = await self.db.execute(query)
-            return len(result.scalars().all())
+            return int((await self.db.execute(query)).scalar() or 0)
         except Exception as e:
             logger.error(f"Repository - Error al contar Notificaciones: {e}")
             raise InfrastructureException("Error al contar Notificaciones.") from e
@@ -92,11 +116,12 @@ class NotificacionRepository:
             logger.error(f"Repository - Error al guardar notificaciones en lote: {e}")
             raise InfrastructureException("Error al guardar las Notificaciones.") from e
 
-    async def update(self, id: int, nueva_data: dict):
+    async def update(self, id: int, nueva_data: dict, ocultar_avisos_de_usuarios: bool = False):
         try:
-            result = await self.db.execute(
-                select(Notificacion).where(Notificacion.id_notificacion == id)
-            )
+            result = await self.db.execute(_visibles(
+                select(Notificacion).where(Notificacion.id_notificacion == id),
+                ocultar_avisos_de_usuarios,
+            ))
             notificacion = result.scalar_one_or_none()
             if not notificacion:
                 logger.info(f"Repository - Notificacion {id} no encontrada para actualizar.")
@@ -115,12 +140,14 @@ class NotificacionRepository:
             logger.error(f"Repository - Error al actualizar Notificacion {id}: {e}")
             raise InfrastructureException("Error al actualizar la Notificacion.") from e
 
-    async def mark_all_as_read(self):
-        """Marca todas las notificaciones como leídas"""
+    async def mark_all_as_read(self, ocultar_avisos_de_usuarios: bool = False):
+        """Marca como leídas todas las que ve quien lo pide (las que no ve, no las toca:
+        un operario no puede dejar leído para el admin un aviso que él ni ve)."""
         try:
-            result = await self.db.execute(
-                select(Notificacion).where(Notificacion.leida == False)
-            )
+            result = await self.db.execute(_visibles(
+                select(Notificacion).where(Notificacion.leida == False),
+                ocultar_avisos_de_usuarios,
+            ))
             notificaciones = result.scalars().all()
             
             for notif in notificaciones:

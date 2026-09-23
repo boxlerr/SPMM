@@ -30,6 +30,10 @@ export default function ConfiguracionPage() {
   const { puede, puedeSeccion } = usePermisos();
   const veUsuarios = puedeSeccion('configuracion_usuarios');
   const veSistema = puede('configuracion');
+  // La campanita es una sola para todo el taller: vaciarla la vacía para todos, y eso es
+  // sólo del admin (el backend lo exige desde el 23/09). Sin permisos (backend viejo),
+  // como siempre.
+  const puedeVaciarAvisos = puede('configuracion', 'admin');
   const solapaVisible = (id: string) =>
     (id !== 'usuarios' || veUsuarios) && (id !== 'sistema' || veSistema);
   const solapaActiva = solapaVisible(activeTab) ? activeTab : 'mi-cuenta';
@@ -252,15 +256,18 @@ export default function ConfiguracionPage() {
                       Marcar todas como leídas
                     </Button>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={clearNotifications}
-                    className="text-sm text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Limpiar todo
-                  </Button>
+                  {puedeVaciarAvisos && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={clearNotifications}
+                      className="text-sm text-red-600 hover:text-red-700"
+                      title="Borra los avisos para todos, no sólo para vos."
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Limpiar todo
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

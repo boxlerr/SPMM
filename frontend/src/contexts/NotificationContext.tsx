@@ -285,18 +285,27 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Vacía la campanita de TODO el taller (es una sola para todos), así que desde el 23/09
+   * el backend lo deja sólo al admin, y la pantalla sólo le ofrece el botón a él. Se ve
+   * al toque y, si el servidor dice que no (o no contesta), vuelve a como estaba: antes
+   * se vaciaba en la pantalla igual y los avisos reaparecían solos en la próxima vuelta.
+   */
   const clearNotifications = async () => {
-    if (token) {
-      try {
-        await fetch(`${API_URL}/notificaciones`, {
-          method: "DELETE",
-          headers: getHeaders(),
-        });
-      } catch (error) {
-        console.error("Error al eliminar todas las notificaciones:", error);
-      }
-    }
+    const antes = notifications;
     setNotifications([]);
+    if (!token) return;
+    try {
+      const response = await fetch(`${API_URL}/notificaciones`, {
+        method: "DELETE",
+        headers: getHeaders(),
+      });
+      // El 403 lo avisa el interceptor de AuthContext («No tenés permiso para esto»).
+      if (!response.ok) setNotifications(antes);
+    } catch (error) {
+      console.error("Error al eliminar todas las notificaciones:", error);
+      setNotifications(antes);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;

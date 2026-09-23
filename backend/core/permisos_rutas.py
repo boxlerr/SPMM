@@ -66,7 +66,8 @@ y como solapa de Recursos):
   No conformidades   /incidencias/*
   Auditoría          /auditoria/movimientos, /auditoria/procesos, /auditoria/planificacion
   Configuración      /auth/usuarios (sección confidencial), /auth/change-password
-  todas              /notificaciones, /auth/me
+  todas              /notificaciones (leer y marcar leída; crear, lo de Recursos; borrar,
+                     el admin), /auth/me
 
 tests/test_permisos_rutas.py tiene esa tabla por pantalla y exige que alguien con SOLO
 esa área pueda leer cada cosa, además de la matriz rol × router × método.
@@ -386,9 +387,28 @@ POLITICAS: dict[str, Politica] = {
         ),
     ),
 
-    # ── De todos ──
-    # La campanita: cada uno la suya. Con cuenta activa alcanza para todo.
-    "notificaciones": Politica(leer=LIBRE, escribir=LIBRE),
+    # ── La campanita ──
+    # Es UNA para todo el taller: no hay avisos «de» alguien, y leída es leída para
+    # todos. Leerla y marcarla como leída, cualquiera con cuenta activa. Lo demás no
+    # (revisión del 23/09: hasta ahí un operario sin ningún permiso vaciaba la campanita
+    # de todos y firmaba avisos a nombre de un admin).
+    # Además NotificacionAPI esconde los avisos de «Usuarios y permisos» a quien no ve
+    # esa sección (es confidencial), y la firma de un aviso sale de la sesión.
+    "notificaciones": Politica(
+        leer=LIBRE,
+        escribir=LIBRE,
+        excepciones=(
+            Excepcion("POST", "/notificaciones", (seccion("recursos_humano", "write"),),
+                      "Los únicos avisos que arma la pantalla son los de Recursos › Recurso "
+                      "humano (alta, cambio y baja de una persona), después de guardarla: "
+                      "pide lo mismo que guardarla. El resto los escribe el sistema."),
+            Excepcion("DELETE", "/notificaciones", (area("configuracion", "admin"),),
+                      "Vacía la campanita de TODO el taller, no la de quien lo pide: "
+                      "sólo el admin."),
+            Excepcion("DELETE", "/notificaciones/{id}", (area("configuracion", "admin"),),
+                      "Un aviso borrado desaparece para todos: sólo el admin."),
+        ),
+    ),
 }
 
 

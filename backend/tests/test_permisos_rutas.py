@@ -252,10 +252,15 @@ MATRIZ = [
     ("GET", "/auditoria/procesos", OK, NO, NO),
     ("GET", "/auditoria/procesos?id_orden=5", OK, OK, OK),  # el historial de UNA OT
     ("GET", "/auditoria/procesos?id_orden=", OK, NO, NO),
-    # la campanita: de todos
+    # la campanita: leerla y marcarla, todos; crear, quien edita personas; borrar, el
+    # admin (revisión del 23/09: el operario vaciaba la de todo el taller)
     ("GET", "/notificaciones", OK, OK, OK),
+    ("GET", "/notificaciones/contador/no-leidas", OK, OK, OK),
     ("PUT", "/notificaciones/leer-todas", OK, OK, OK),
-    ("DELETE", "/notificaciones/1", OK, OK, OK),
+    ("PUT", "/notificaciones/1/leida", OK, OK, OK),
+    ("POST", "/notificaciones", OK, NO, NO),
+    ("DELETE", "/notificaciones/1", OK, NO, NO),
+    ("DELETE", "/notificaciones", OK, NO, NO),
 ]
 
 
@@ -330,12 +335,12 @@ async def test_el_admin_pasa_por_todas_las_rutas(espejo):
 
 async def test_el_operario_no_escribe_en_ninguna_salvo_su_campanita(espejo):
     """El operario tiene «ver» (o nada) en todas las áreas: toda escritura le da 403,
-    menos las notificaciones, que son de todos."""
+    menos marcar los avisos como leídos. Crear o borrar avisos, tampoco."""
     for nombre, metodo, path in _rutas_con_politica():
         if metodo in ("GET", "HEAD", "OPTIONS"):
             continue
         r = await _pedir(espejo, metodo, _concreta(path), MATIAS, "operario")
-        esperado = OK if nombre == "notificaciones" else NO
+        esperado = OK if nombre == "notificaciones" and metodo == "PUT" else NO
         assert r.status_code == esperado, f"{metodo} {path}: {r.status_code}"
 
 

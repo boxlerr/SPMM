@@ -57,10 +57,14 @@ class NotificacionService:
             raise InfrastructureException("Error al guardar la Notificacion.") from e
 
     # 🔹 Listar Notificaciones
-    async def listarNotificaciones(self, limit: int = None, offset: int = None, solo_no_leidas: bool = False):
+    async def listarNotificaciones(self, limit: int = None, offset: int = None, solo_no_leidas: bool = False,
+                                   ocultar_avisos_de_usuarios: bool = False):
         try:
             logger.info("Service - Listar Notificaciones.")
-            notificaciones = await self.repository.find_all(limit=limit, offset=offset, solo_no_leidas=solo_no_leidas)
+            notificaciones = await self.repository.find_all(
+                limit=limit, offset=offset, solo_no_leidas=solo_no_leidas,
+                ocultar_avisos_de_usuarios=ocultar_avisos_de_usuarios,
+            )
 
             data = [notif.to_dict() for notif in notificaciones]
 
@@ -70,10 +74,10 @@ class NotificacionService:
             raise InfrastructureException("Error al listar Notificaciones.") from e
 
     # 🔹 Obtener Notificación por ID
-    async def obtenerNotificacionPorId(self, id: int):
+    async def obtenerNotificacionPorId(self, id: int, ocultar_avisos_de_usuarios: bool = False):
         try:
             logger.info(f"Service - Obtener Notificacion id={id}")
-            notif = await self.repository.find_by_id(id)
+            notif = await self.repository.find_by_id(id, ocultar_avisos_de_usuarios)
 
             if not notif:
                 return ResponseDTO(status=False, data={}, errorDescription="Notificacion no encontrada")
@@ -88,10 +92,10 @@ class NotificacionService:
             raise InfrastructureException("Error al obtener Notificacion.") from e
 
     # 🔹 Marcar como leída
-    async def marcarComoLeida(self, id: int):
+    async def marcarComoLeida(self, id: int, ocultar_avisos_de_usuarios: bool = False):
         try:
             logger.info(f"Service - Marcar Notificacion {id} como leída")
-            actualizada = await self.repository.update(id, {"leida": True})
+            actualizada = await self.repository.update(id, {"leida": True}, ocultar_avisos_de_usuarios)
 
             if not actualizada:
                 return ResponseDTO(status=False, data={}, errorDescription="Notificacion no encontrada")
@@ -106,10 +110,10 @@ class NotificacionService:
             raise InfrastructureException("Error al marcar la Notificacion como leída.") from e
 
     # 🔹 Marcar todas como leídas
-    async def marcarTodasComoLeidas(self):
+    async def marcarTodasComoLeidas(self, ocultar_avisos_de_usuarios: bool = False):
         try:
             logger.info("Service - Marcar todas las notificaciones como leídas")
-            count = await self.repository.mark_all_as_read()
+            count = await self.repository.mark_all_as_read(ocultar_avisos_de_usuarios)
             return ResponseDTO(
                 status=True,
                 data={"marcadas": count},
@@ -120,10 +124,12 @@ class NotificacionService:
             raise InfrastructureException("Error al marcar todas las notificaciones como leídas.") from e
 
     # 🔹 Obtener contador de no leídas
-    async def contarNoLeidas(self):
+    async def contarNoLeidas(self, ocultar_avisos_de_usuarios: bool = False):
         try:
             logger.info("Service - Contar notificaciones no leídas")
-            count = await self.repository.count(solo_no_leidas=True)
+            count = await self.repository.count(
+                solo_no_leidas=True, ocultar_avisos_de_usuarios=ocultar_avisos_de_usuarios
+            )
             return ResponseDTO(
                 status=True,
                 data={"count": count},
