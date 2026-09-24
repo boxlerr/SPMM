@@ -897,6 +897,37 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "(id_maquinaria, clave)",
         ],
     ),
+    (
+        # RF-12, los rechazos: en qué paso, de cuántas controladas y qué se hace con lo
+        # rechazado. Sin esto el primer GET de no conformidades después del deploy
+        # rompe (SQLAlchemy pide las tres columnas en cada SELECT). Todo nullable y sin
+        # default: no reescribe filas.
+        "2026-09-23_rechazos_por_paso",
+        [
+            "ALTER TABLE incidencia_proceso "
+            "ADD COLUMN IF NOT EXISTS id_otp BIGINT, "
+            "ADD COLUMN IF NOT EXISTS piezas_controladas INTEGER, "
+            "ADD COLUMN IF NOT EXISTS disposicion VARCHAR(30)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN incidencia_proceso.id_otp IS "
+            "'En qué paso de la OT se rechazó: orden_trabajo_proceso.id, la pasada y no el "
+            "proceso (el mismo proceso puede ir varias veces en una orden). NULL = no se dijo, "
+            "o se cargó antes del 23/09/2026. Sin FK a propósito: sacar un paso de la OT no "
+            "tiene que fallar por una no conformidad vieja; id_proceso sigue diciendo qué "
+            "trabajo era.'",
+            "COMMENT ON COLUMN incidencia_proceso.piezas_controladas IS "
+            "'De cuántas piezas controladas salieron las rechazadas (piezas_afectadas). "
+            "NULL = no se dijo; nunca se completa con las unidades de la OT, porque no "
+            "siempre se controla todo.'",
+            "COMMENT ON COLUMN incidencia_proceso.disposicion IS "
+            "'Qué se hace con lo rechazado: RETRABAJO, DESCARTE, CONCESION (se acepta con "
+            "concesión) o DEVOLUCION_PROVEEDOR. NULL = todavía no se decidió. No es la acción "
+            "correctiva: ésta dice qué se hizo para que no vuelva a pasar.'",
+            "CREATE INDEX IF NOT EXISTS ix_incidencia_operario "
+            "ON incidencia_proceso (id_operario, fecha_registro DESC) "
+            "WHERE id_operario IS NOT NULL",
+        ],
+    ),
 ]
 
 

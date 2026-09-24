@@ -20,6 +20,14 @@ class IncidenciaProcesoRequestDTO(BaseModel):
     # valor medio inventado.
     gravedad: Optional[str] = None
     piezas_afectadas: Optional[int] = None
+    # Los rechazos (23/09). Todos opcionales: el modal viejo del planificador no los
+    # manda y tiene que seguir andando igual.
+    #   id_otp              en qué paso de la OT (la pasada, no el proceso).
+    #   piezas_controladas  de cuántas controladas salieron las `piezas_afectadas`.
+    #   disposicion         qué se hace con lo rechazado (DISPOSICIONES en el servicio).
+    id_otp: Optional[int] = None
+    piezas_controladas: Optional[int] = None
+    disposicion: Optional[str] = None
 
 
 class IncidenciaProcesoUpdateDTO(BaseModel):
@@ -40,6 +48,9 @@ class IncidenciaProcesoUpdateDTO(BaseModel):
     operarios_extra: Optional[int] = None
     id_proceso: Optional[int] = None
     id_operario: Optional[int] = None
+    id_otp: Optional[int] = None
+    piezas_controladas: Optional[int] = None
+    disposicion: Optional[str] = None
 
 
 class CerrarIncidenciaDTO(BaseModel):
