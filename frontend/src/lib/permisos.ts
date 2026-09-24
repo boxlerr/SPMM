@@ -328,6 +328,11 @@ export const RUTAS_SUELTAS: Record<string, Requisito> = {
   // Los artículos no tienen pantalla que los edite; si la tienen, son un catálogo de
   // Recursos (así está en el mapa del backend).
   "/articulos": { area: "recursos" },
+  // RF-21: el reporte mensual, que se abre desde el botón del Dashboard. Cuelga de
+  // /dashboard (requisitoDeRuta lo encuentra por el menú antes de llegar acá) y pide lo
+  // mismo: el área Dashboard. Adentro, cada parte la filtra el backend con los permisos
+  // de quien mira (ReporteMensualService.alcance_de).
+  "/dashboard/reporte-mensual": { area: "dashboard" },
 };
 
 /** Sin permiso: las ve todo el que entra (o todavía no entró). */

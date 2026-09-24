@@ -11,6 +11,7 @@ import TopClients from "@/components/dashboard/TopClients"
 import TopArticles from "@/components/dashboard/TopArticles"
 import IncidenciasPlanos from "@/components/dashboard/IncidenciasPlanos"
 import RendimientoEstimadoReal from "@/components/dashboard/RendimientoEstimadoReal"
+import BotonReporteMensual from "@/components/dashboard/BotonReporteMensual"
 
 
 import { usePermisos } from "@/hooks/usePermisos"
@@ -115,16 +116,20 @@ export default function DashboardPage() {
               </p>
             </div>
             {visibles.length > 0 && (
-              <button
-                onClick={refreshAll}
-                disabled={isRefreshing}
-                className="shrink-0 flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-[#DC143C] to-[#B8112E] text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              >
-                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-                {/* Con rótulo también en el teléfono: ahí va solo en su renglón, y un
-                    botón rojo con dos flechitas y nada más no dice qué hace. */}
-                <span>Actualizar</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* RF-21: el reporte de un mes (por defecto el que cerró), en su pantalla. */}
+                <BotonReporteMensual />
+                <button
+                  onClick={refreshAll}
+                  disabled={isRefreshing}
+                  className="shrink-0 flex items-center gap-2 px-4 md:px-6 py-2.5 md:py-3 bg-gradient-to-r from-[#DC143C] to-[#B8112E] text-white rounded-lg hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                  {/* Con rótulo también en el teléfono: ahí va solo en su renglón, y un
+                      botón rojo con dos flechitas y nada más no dice qué hace. */}
+                  <span>Actualizar</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

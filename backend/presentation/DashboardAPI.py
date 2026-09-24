@@ -20,6 +20,9 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
+from backend.commons.exceptions.BusinessException import BusinessException
+from backend.commons.loggers.logger import logger
+from backend.core.security import get_permisos_actuales
 from backend.infrastructure.db import SessionLocal
 from backend.infrastructure.estado_ordenes import (
     ALIAS,
@@ -27,6 +30,7 @@ from backend.infrastructure.estado_ordenes import (
     ESTADOS,
     POR_ENTREGAR_SQL,
     ROTULO,
+    ahora_ar,
     consulta,
     fecha_o_nada,
     fecha_real,
@@ -542,3 +546,40 @@ async def get_rendimiento_operarios(db=Depends(get_db)):
     except Exception as e:
         print(f"Error en rendimiento-operarios: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# RF-21: el reporte mensual. Se abre desde el botón «Reporte mensual» del Dashboard.
+# La cuenta entera está en application/ReporteMensualService.py; acá sólo se elige el
+# mes y se miran los permisos de quien lo pide: cada parte del reporte pide lo mismo que
+# la pantalla o la tarjeta que la muestra afuera (alcance_de), y la que no se puede ver
+# no se lee ni se manda. La exportación (PDF, Excel, CSV) se arma en el navegador con
+# esta misma respuesta.
+# ---------------------------------------------------------------------------
+
+@router.get("/reporte-mensual")
+async def get_reporte_mensual(
+    anio: int | None = None,
+    mes: int | None = None,
+    db=Depends(get_db),
+    permisos=Depends(get_permisos_actuales),
+):
+    """El reporte de un mes comparado con el anterior (RF-21). Sin año y mes, el mes
+    anterior al de hoy (el último que cerró). Un mes que todavía no empezó, o un mes que
+    no es un mes, contesta 422 con el porqué."""
+    from backend.application.ReporteMensualService import (
+        ReporteMensualService,
+        alcance_de,
+        mes_por_defecto,
+    )
+
+    if anio is None or mes is None:
+        anio, mes = mes_por_defecto(ahora_ar())
+    try:
+        data = await ReporteMensualService(db).armar(anio, mes, alcance_de(permisos))
+        return {"success": True, "data": data}
+    except BusinessException:
+        raise
+    except Exception as e:
+        logger.error(f"Reporte mensual {anio}-{mes}: {e}")
+        return {"success": False, "error": "No se pudo armar el reporte mensual. Probá de nuevo en unos segundos."}
