@@ -244,3 +244,85 @@ def test_editada_en_spmm_solo_cuenta_despues_de_la_ultima_recarga():
     assert imp.editada_despues(datetime(2026, 9, 24, 9, 0), recarga)
     assert not imp.editada_despues(None, recarga)
     assert imp.editada_despues(datetime(2026, 9, 17), None)
+
+
+# ---------------------------------------------------------------------------
+# Lo que encontró la revisión adversarial del 24/9 antes de publicar
+# ---------------------------------------------------------------------------
+def test_si_sobra_una_copia_se_conserva_la_que_tiene_avance():
+    """Dos TORNO CNC en SPMM, uno arrancado en el paso 7 y el viejo tiene uno solo: se
+    borra el pendiente, no el que ya tiene trabajo."""
+    en_spmm = [{"id": 101, "orden": 1, "clave": "TORNO CNC", "minutos": 420},
+               {"id": 107, "orden": 7, "clave": "TORNO CNC", "minutos": 420, "con_datos": True}]
+    actualizar, borrar, insertar = imp.cambios_de_procesos(en_spmm, [(1, "TORNO CNC", 420)])
+    assert borrar == [101]
+    assert actualizar == [(107, 1, 420)]
+    assert insertar == []
+
+
+def test_que_cuenta_como_dato_cargado_en_spmm():
+    assert not imp.tiene_datos_de_spmm({"id_estado": 1, "observaciones": "  "})
+    assert imp.tiene_datos_de_spmm({"id_estado": 3})
+    assert imp.tiene_datos_de_spmm({"id_estado": 1, "id_operario": 30})
+    assert imp.tiene_datos_de_spmm({"id_estado": 1, "en_plan": 2})
+
+
+def test_otra_ot_del_mismo_cliente_el_mismo_dia_se_detecta_por_el_articulo():
+    """24/9: el cliente 126 dio de alta 15919-15922 y 15925 el mismo día. Una OT creada en
+    SPMM que tome el 15919 con otro artículo es OTRA orden y no se puede recargar encima."""
+    spmm = {"cliente_viejo": 126, "fecha_orden": datetime(2026, 9, 24), "cod_articulo": "BC00P001"}
+    viejo = {"_cliente_viejo": 126, "fecha_orden": datetime(2026, 9, 24), "_cod_articulo": "BC00E003"}
+    assert imp.es_otra_ot(spmm, viejo)
+    assert not imp.es_otra_ot(dict(spmm, cod_articulo="bc00e003 "), viejo)
+    # Un artículo que SPMM no conoce (NO-DEF) no sirve para comparar.
+    assert not imp.es_otra_ot(dict(spmm, cod_articulo="NO-DEF"), viejo)
+
+
+def test_una_edicion_desde_la_pantalla_durante_la_corrida_aborta():
+    antes = [(1, 50, 6, 1, 420), (2, 50, 34, 2, 10), (3, 60, 6, 1, 60)]
+    assert imp.pasadas_que_cambiaron(antes, list(antes)) == []
+    # En la OT 50 alguien guardó: se borró la 2 y apareció la 9.
+    ahora = [(1, 50, 6, 1, 420), (9, 50, 34, 2, 10), (3, 60, 6, 1, 60)]
+    assert imp.pasadas_que_cambiaron(antes, ahora) == [50]
+
+
+def test_el_respaldo_no_choca_si_se_relanza_en_el_mismo_minuto():
+    assert re.fullmatch(r"\d{8}_\d{6}", imp._sello())
+
+
+def _mapas_de_prueba():
+    return {"cliente": {4: 40}, "articulo": {"ART-1": 7, "NO-DEF": 1},
+            "sector": {"SIN SECTOR": 13}, "prioridad": {"NORMAL": 2, "SIN PRIORIDAD": 3}}
+
+
+def _fila_viejo(**cambios):
+    fila = {c: 0 for c in imp.COLS_OT}
+    fila.update(id_otvieja=15919, _cliente_viejo=4, _cod_articulo="ART-1", _sector="", _prioridad="Normal",
+                fecha_orden=datetime(2026, 9, 24), fecha_entrada=datetime(2026, 9, 24),
+                fecha_prometida=datetime(1950, 1, 1), fecha_entrega=None)
+    fila.update(cambios)
+    return fila
+
+
+def test_una_ot_nueva_se_revisa_antes_de_escribir():
+    avisos = []
+    f = imp.preparar_alta(_fila_viejo(_cod_articulo="NUEVO", _cliente_viejo=999), _mapas_de_prueba(),
+                          {15919}, avisos)
+    assert f["id_articulo"] == 1 and f["id_cliente"] is None and f["finalizadototal"] == 0
+    assert any("artículo" in a for a in avisos) and any("cliente" in a for a in avisos)
+    # Sin fecha de alta no puede entrar (la columna es NOT NULL): se avisa y no se trae.
+    avisos = []
+    assert imp.preparar_alta(_fila_viejo(fecha_orden=None), _mapas_de_prueba(), {15919}, avisos) is None
+    assert any("NO se trae" in a for a in avisos)
+
+
+def test_una_pedida_que_el_viejo_ya_entrego_entra_cerrada():
+    avisos = []
+    f = imp.preparar_alta(_fila_viejo(fecha_entrega=datetime(2026, 9, 20)), _mapas_de_prueba(),
+                          {15919}, avisos)
+    assert f["finalizadototal"] == 1
+    assert any("entra cerrada" in a for a in avisos)
+
+
+def test_igualar_no_se_combina_con_una_lista():
+    assert "--igualar no se combina con --ot" in inspect.getsource(imp.main)

@@ -126,6 +126,16 @@ def _ahora_ar():
     return datetime.now(_TZ_AR).replace(tzinfo=None)
 
 
+def _sello():
+    """Sufijo de las tablas de respaldo. Con segundos: dos corridas en el mismo minuto (el
+    CONTROL da DISTINTAS y se relanza) chocaban en el CREATE TABLE y abortaban."""
+    return _ahora_ar().strftime("%Y%m%d_%H%M%S")
+
+
+class CambioDuranteLaCorrida(Exception):
+    """Alguien tocó los procesos de una OT entre la lectura y la escritura."""
+
+
 def clave_proceso(nombre) -> str:
     """Nombre de proceso para comparar: mayúsculas y espacios colapsados. El catálogo de
     SPMM se cosechó de texto libre y tiene gemelos que difieren sólo en eso."""
@@ -166,17 +176,22 @@ def elegir_id_por_nombre(catalogo):
 def cambios_de_procesos(spmm, viejo):
     """Qué hay que hacer para que los procesos de una OT queden como en el viejo.
 
-    spmm:  [{"id", "orden", "clave", "minutos"}] tal como están, en orden de paso.
+    spmm:  [{"id", "orden", "clave", "minutos", "con_datos"?}] tal como están.
     viejo: [(paso, clave, minutos)] de `lista_del_viejo`.
 
     Se machea la n-ésima pasada de un proceso en SPMM con la n-ésima del viejo. Lo que
     machea se conserva (con su id, su avance y su lugar en el plan) y sólo se le corrige
     el paso y los minutos; lo que sobra se borra; lo que falta se inserta.
 
+    Si SPMM tiene más copias de un proceso que el viejo, se conservan primero las que
+    tienen algo cargado acá (`con_datos`: avance, máquina, persona, observaciones, plan)
+    y después las de paso más chico. Sin eso, una copia en Pendiente le ganaba a la que
+    ya tenía el trabajo arrancado, y la del avance se borraba.
+
     -> (actualizar [(id, paso, minutos)], borrar [id], insertar [(paso, clave, minutos)])
     """
     libres = defaultdict(list)
-    for fila in sorted(spmm, key=lambda x: (x["orden"] or 0, x["id"])):
+    for fila in sorted(spmm, key=lambda x: (not x.get("con_datos"), x["orden"] or 0, x["id"])):
         libres[fila["clave"]].append(fila)
 
     actualizar, insertar = [], []
@@ -190,6 +205,26 @@ def cambios_de_procesos(spmm, viejo):
             actualizar.append((fila["id"], paso, minutos))
     borrar = [f["id"] for cola in libres.values() for f in cola]
     return actualizar, sorted(borrar), insertar
+
+
+def tiene_datos_de_spmm(fila) -> bool:
+    """¿La pasada tiene algo que se cargó en SPMM y se perdería si se borra?"""
+    return bool((fila.get("id_estado") or 1) != 1 or fila.get("inicio_real") or fila.get("fin_real")
+                or fila.get("id_maquinaria") or fila.get("id_operario")
+                or (fila.get("observaciones") or "").strip() or fila.get("en_plan"))
+
+
+def pasadas_que_cambiaron(leidas_antes, leidas_ahora):
+    """OT cuyas pasadas cambiaron entre la lectura del informe y la escritura (alguien
+    guardó los procesos desde la pantalla mientras corría el script). Cada fila es
+    (id, id_orden_trabajo, id_proceso, orden, tiempo_proceso)."""
+    def por_ot(filas):
+        d = defaultdict(set)
+        for f in filas:
+            d[f[1]].add(tuple(f))
+        return d
+    a, b = por_ot(leidas_antes), por_ot(leidas_ahora)
+    return sorted(o for o in set(a) | set(b) if a.get(o) != b.get(o))
 
 
 def finalizada_segun_el_viejo(idot, pendientes) -> int:
@@ -270,13 +305,18 @@ def motivo_de_cierre(v) -> str:
 
 def es_otra_ot(spmm, viejo) -> bool:
     """¿El número está en SPMM pero es OTRA orden? Pasa si alguien crea una OT en SPMM:
-    toma max(id_otvieja)+1, que es el próximo número del viejo. Se compara cliente y día
-    de alta, que no cambian en la vida de una OT. Una OT de SPMM sin cliente sólo se
-    compara por el día."""
+    toma max(id_otvieja)+1, que es el próximo número del viejo. Se compara día de alta,
+    cliente y artículo. El artículo hace falta: el 24/9 el cliente 126 dio de alta 5 OT
+    el mismo día (15919-15922, 15925), así que cliente y día no alcanzan para distinguir
+    una OT de la de al lado. Un dato que SPMM no tiene (sin cliente del viejo, artículo
+    NO-DEF) no se compara. Ante la duda es otra orden: no se toca y se avisa."""
     fecha = lambda v: v.date() if isinstance(v, datetime) else v
     if fecha(spmm["fecha_orden"]) != fecha(viejo["fecha_orden"]):
         return True
-    return spmm["cliente_viejo"] is not None and spmm["cliente_viejo"] != viejo["_cliente_viejo"]
+    if spmm.get("cliente_viejo") is not None and spmm["cliente_viejo"] != viejo["_cliente_viejo"]:
+        return True
+    art = _clave(spmm.get("cod_articulo"))
+    return bool(art) and art != "NO-DEF" and art != _clave(viejo.get("_cod_articulo"))
 
 
 # Columnas NOT NULL de orden_trabajo que vienen del viejo. Si el viejo no trae valor, se
@@ -389,6 +429,21 @@ async def _escribir_recarga(c, sello, cabeceras_cambian, plan_procesos, spmm_ots
                             id_por_nombre, a_mano):
     """La recarga de cero. Es el ÚNICO lugar del script que actualiza o borra: el modo
     por defecto no pasa por acá (lo cuida test_importar_ot_legacy)."""
+    # Lo primero: tomar las pasadas de las OT a tocar (FOR UPDATE) y comprobar que son las
+    # mismas que se leyeron para armar el informe. Si alguien guardó los procesos desde la
+    # pantalla en el medio, el plan de cambios ya no vale (terminaría en pasadas repetidas):
+    # se aborta sin escribir nada y se vuelve a correr.
+    ids_ot = [spmm_ots[o]["id"] for o in plan_procesos]
+    if ids_ot:
+        ahora = await c.fetch("""
+            SELECT id, id_orden_trabajo, id_proceso, orden, tiempo_proceso
+            FROM orden_trabajo_proceso WHERE id_orden_trabajo = ANY($1::int[])
+            ORDER BY id FOR UPDATE""", ids_ot)
+        antes = [(f["id"], spmm_ots[o]["id"], f["id_proceso"], f["orden"], f["tiempo_proceso"])
+                 for o in plan_procesos for f in spmm_procs.get(o, [])]
+        cambiaron = pasadas_que_cambiaron(antes, [tuple(r) for r in ahora])
+        if cambiaron:
+            raise CambioDuranteLaCorrida(cambiaron)
     for tabla, corto in (("orden_trabajo", "ot"), ("orden_trabajo_proceso", "otp"),
                          ("planificacion", "plan")):
         await c.execute(f"CREATE TABLE backup_{sello}_recarga_{corto} AS SELECT * FROM {tabla}")
@@ -433,15 +488,31 @@ async def _escribir_cierres(c, sello, a_cerrar, cabeceras):
                           v["suspendida"]) for otv in a_cerrar for v in (cabeceras[otv],)])
 
 
-async def _altas(c, nuevas, cabeceras, listas, mapas, pendientes, id_por_nombre, a_mano, avisos):
+def preparar_alta(fila_viejo, mapas, pendientes, avisos):
+    """La cabecera con la que entra una OT nueva, o None si no puede entrar.
+
+    Se arma en la lectura, antes del informe, para que la corrida en seco muestre sus
+    avisos (cliente o artículo que SPMM no tiene) y no se descubra un NULL a mitad de la
+    transacción. Una OT que el viejo ya entregó entra CERRADA: abierta con fecha de
+    entrega es un estado que ninguna pantalla entiende (la listaba como Retrasada)."""
+    f = _cabecera(fila_viejo, mapas, pendientes, avisos)
+    otv = f["id_otvieja"]
+    if f["id_articulo"] is None:
+        f["id_articulo"] = mapas["articulo"].get("NO-DEF")
+    faltan = [col for col in NO_NULAS if f.get(col) is None]
+    if faltan:
+        avisos.append(f"OT {otv}: NO se trae, el viejo no tiene {', '.join(faltan)}")
+        return None
+    if f.get("fecha_entrega") is not None and f["finalizadototal"] == 0:
+        f["finalizadototal"] = 1
+        avisos.append(f"OT {otv}: el viejo la entregó el {f['fecha_entrega']:%d/%m/%Y}: entra cerrada")
+    return f
+
+
+async def _altas(c, cabeceras_nuevas, listas, id_por_nombre, a_mano):
     """Modo por defecto: SÓLO INSERT. Una OT que ya está no se toca."""
     insertadas = 0
-    for otv in nuevas:
-        if otv not in cabeceras:
-            continue
-        f = _cabecera(cabeceras[otv], mapas, pendientes, avisos)
-        if f["id_articulo"] is None:
-            f["id_articulo"] = mapas["articulo"].get("NO-DEF")
+    for otv, f in cabeceras_nuevas.items():
         cols = ["id_otvieja"] + COLS_OT
         id_ot = await c.fetchval(
             f"INSERT INTO orden_trabajo ({', '.join(cols)}) "
@@ -461,8 +532,9 @@ async def main():
         spmm_ots = {r["id_otvieja"]: dict(r) for r in await c.fetch("""
             SELECT ot.id, ot.id_otvieja, ot.fecha_orden, ot.modificado_en,
                    COALESCE(ot.finalizadototal, 0) = 0 AND ot.fecha_entrega IS NULL AS abierta,
-                   cl.id_viejo AS cliente_viejo
+                   cl.id_viejo AS cliente_viejo, a.cod_articulo
             FROM orden_trabajo ot LEFT JOIN cliente cl ON cl.id = ot.id_cliente
+            LEFT JOIN articulo a ON a.id = ot.id_articulo
             WHERE ot.id_otvieja IS NOT NULL""")}
         catalogo = await c.fetch("""
             SELECT p.id, p.nombre,
@@ -479,6 +551,10 @@ async def main():
             "SELECT max(creado_en) FROM orden_trabajo_proceso_version WHERE motivo = $1", MOTIVO)
 
         pedidas = _pedidas()
+        if IGUALAR and pedidas:
+            print("--igualar no se combina con --ot: iguala TODAS las OT que importan. "
+                  "Para tocar sólo una lista: --recargar --ot <lista>. No se hizo nada.")
+            return
         abiertas = [otv for otv, o in spmm_ots.items() if o["abierta"]]
         a_recargar, nuevas = alcance(RECARGAR, pedidas, pendientes, spmm_ots, IGUALAR, abiertas)
         candidatas_cierre = ot_a_cerrar(spmm_ots, pendientes) if CERRAR else []
@@ -499,6 +575,17 @@ async def main():
 
         colisiones = [otv for otv in sorted(set(spmm_ots) & set(cabeceras))
                       if es_otra_ot(spmm_ots[otv], cabeceras[otv])]
+
+        avisos = []
+        # En altas, una OT pedida a mano con --ot entra abierta aunque el viejo no la liste
+        # como pendiente (una tercerizada, una suspendida): si la pidieron es para
+        # trabajarla. En la recarga manda la regla del viejo, igual que para las demás.
+        pend_altas = pendientes if RECARGAR else pendientes | set(pedidas)
+        cabeceras_nuevas = {}
+        for otv in nuevas:
+            f = preparar_alta(cabeceras[otv], mapas, pend_altas, avisos)
+            if f is not None:
+                cabeceras_nuevas[otv] = f
 
         # --- procesos de las que ya están ---
         spmm_procs = defaultdict(list)
@@ -522,6 +609,11 @@ async def main():
             and otv not in colisiones]
 
         a_cerrar = [o for o in candidatas_cierre if o in cabeceras and o not in colisiones]
+        # Las que además se recargan las cierra la recarga (y quedan en su respaldo, tomado
+        # ANTES de escribir). Pasarlas también por --cerrar copiaba al respaldo del cierre
+        # las filas ya cerradas: un respaldo que no deshacía nada.
+        cierra_la_recarga = [o for o in a_cerrar if o in set(a_recargar)] if RECARGAR else []
+        a_cerrar = [o for o in a_cerrar if o not in cierra_la_recarga]
 
         plan_procesos, viejo_sin_lista = {}, []
         if RECARGAR:
@@ -535,12 +627,13 @@ async def main():
                         viejo_sin_lista.append(otv)
                     continue
                 actuales = [{"id": f["id"], "orden": f["orden"], "minutos": f["tiempo_proceso"] or 0,
-                             "clave": clave_proceso(f["nombre_proceso"])} for f in spmm_procs.get(otv, [])]
+                             "clave": clave_proceso(f["nombre_proceso"]),
+                             "con_datos": tiene_datos_de_spmm(f)} for f in spmm_procs.get(otv, [])]
                 cambios = cambios_de_procesos(actuales, listas[otv])
                 if any(cambios):
                     plan_procesos[otv] = cambios
 
-        cabeceras_cambian, reabren, cierran, pisan_spmm, avisos = {}, [], [], [], []
+        cabeceras_cambian, reabren, cierran, pisan_spmm = {}, [], [], []
         if RECARGAR:
             actuales_ot = {r["id_otvieja"]: dict(r) for r in await c.fetch(
                 f"SELECT id_otvieja, {', '.join(COLS_OT)} FROM orden_trabajo WHERE id_otvieja IS NOT NULL")}
@@ -568,6 +661,7 @@ async def main():
         print("=" * 78)
         print(f"Pendientes en el viejo        : {len(pendientes)}")
         print(f"OT del viejo en SPMM          : {len(spmm_ots)}  (abiertas {sum(o['abierta'] for o in spmm_ots.values())})")
+        nuevas = list(cabeceras_nuevas)
         print(f"OT nuevas a traer             : {len(nuevas)} {nuevas if len(nuevas) <= 40 else ''}")
         for otv in nuevas:
             n = len(listas.get(otv, []))
@@ -633,7 +727,9 @@ async def main():
             if viejo_sin_lista:
                 print(f"El viejo no tiene lista de procesos y SPMM sí (se dejan como están): {viejo_sin_lista}")
         if CERRAR:
-            print(f"\nCIERRES: {len(a_cerrar)} OT abiertas en SPMM que el viejo ya no tiene pendientes")
+            print(f"\nCIERRES: {len(a_cerrar)} OT abiertas en SPMM que el viejo ya no tiene pendientes"
+                  + (f" (más {len(cierra_la_recarga)} que cierra la recarga: {cierra_la_recarga})"
+                     if cierra_la_recarga else ""))
             for otv in a_cerrar:
                 en_plan = sum(f["en_plan"] for f in spmm_procs.get(otv, []))
                 print(f"   OT {otv}: {motivo_de_cierre(cabeceras[otv])}"
@@ -653,22 +749,24 @@ async def main():
             return
 
         # --- escribir, todo o nada ---
-        sello = _ahora_ar().strftime("%Y%m%d_%H%M")
-        async with c.transaction():
-            if RECARGAR:
-                await _escribir_recarga(c, sello, cabeceras_cambian, plan_procesos,
-                                        spmm_ots, spmm_procs, id_por_nombre, a_mano)
-            if CERRAR and a_cerrar:
-                await _escribir_cierres(c, sello, a_cerrar, cabeceras)
-            for otv in a_llenar:
-                await _insertar_procesos(c, spmm_ots[otv]["id"], listas[otv], id_por_nombre, a_mano)
-            nuevas_sin_choque = [o for o in nuevas if o not in colisiones]
-            # En altas, una OT pedida a mano con --ot entra abierta aunque el viejo no la
-            # liste como pendiente (una tercerizada, una suspendida): si la pidieron es para
-            # trabajarla. En la recarga manda la regla del viejo, igual que para las demás.
-            insertadas = await _altas(c, nuevas_sin_choque, cabeceras, listas, mapas,
-                                      pendientes if RECARGAR else pendientes | set(pedidas),
-                                      id_por_nombre, a_mano, avisos)
+        sello = _sello()
+        try:
+            async with c.transaction():
+                if RECARGAR:
+                    await _escribir_recarga(c, sello, cabeceras_cambian, plan_procesos,
+                                            spmm_ots, spmm_procs, id_por_nombre, a_mano)
+                if CERRAR and a_cerrar:
+                    await _escribir_cierres(c, sello, a_cerrar, cabeceras)
+                for otv in a_llenar:
+                    await _insertar_procesos(c, spmm_ots[otv]["id"], listas[otv], id_por_nombre, a_mano)
+                nuevas_sin_choque = [o for o in cabeceras_nuevas if o not in colisiones]
+                insertadas = await _altas(c, {o: cabeceras_nuevas[o] for o in nuevas_sin_choque},
+                                          listas, id_por_nombre, a_mano)
+        except CambioDuranteLaCorrida as e:
+            print(f"\n!! NO SE ESCRIBIÓ NADA: mientras corría, alguien cambió los procesos de "
+                  f"{len(e.args[0])} OT desde la pantalla (id de SPMM {e.args[0]}). "
+                  "Volver a correr, primero en seco.")
+            return
 
         print(f"\nLISTO. OT nuevas: {insertadas}. OT a las que se les cargó la lista: {len(a_llenar)}.")
         if CERRAR and a_cerrar:
