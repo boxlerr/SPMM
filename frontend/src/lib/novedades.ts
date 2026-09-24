@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "ot-procesos-como-el-viejo",
+        fecha: "2026-09-23",
+        tipo: "arreglo",
+        seccion: "Operaciones",
+        titulo: "Cada orden tiene los mismos procesos que ves en el sistema viejo, sin pasos repetidos de más",
+        detalle:
+            "Volvimos a traer del sistema viejo todas las órdenes. Había órdenes con procesos de más: la 15243 tenía 13 pasos y en el viejo tiene 7, la 15556 tenía 18 y en el viejo 9. En otras faltaban pasos que se agregaron en el viejo después, o los minutos estaban en 0. Ahora las 214 órdenes abiertas tienen la misma lista que el viejo: los mismos pasos, en el mismo orden y con los mismos minutos. Y son las mismas 214 que el viejo tiene pendientes. Si una orden repite un proceso (por ejemplo TORNO CNC dos veces), es porque así está cargada en el viejo: para dejarlo en uno solo hay que corregirlo allá. Si habías cambiado los procesos de alguna orden acá, se reemplazaron por los del viejo; avisá cuál y la volvemos a como estaba. Las órdenes nuevas que se carguen en el viejo se van a sumar sin tocar las que ya están.",
+        href: "/operaciones",
+    },
+    {
         id: "planificar-dias-reales",
         fecha: "2026-09-23",
         tipo: "arreglo",

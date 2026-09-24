@@ -40,8 +40,13 @@ que se repita porque se copió un parte de trabajo.
 
 Es de sólo lectura: no escribe nunca.
 
-🚫 NO arreglar con `remigrar_procesos_legacy`: ese script es el que metió los partes
-como procesos. Está frenado hasta que se le agregue este filtro.
+⚠️ DESDE EL 23/09/2026 compara contra `dbo.ZoTProcesos`, la lista de procesos que el
+taller ve en el programa viejo. Todo lo que dice más arriba sobre líneas de plan y
+partes era la lectura de `otrabajoProceso` (la hoja de ruta), que tampoco era la lista:
+la tenía duplicada en 20 OT y le faltaban procesos en 87. Ver importar_ot_legacy.py.
+
+🚫 NO arreglar con `remigrar_procesos_legacy` ni `limpiar_partes_de_trabajo`: leen la
+hoja de ruta. Para dejar una OT como el viejo: `importar_ot_legacy --recargar`.
 
     venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy 13345 13813
     venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy --abiertas
@@ -176,17 +181,18 @@ async def main():
             return
         print(f"Auditando {len(por_vieja)} OT contra el legacy…\n")
 
-        # --- Lo que dice el legacy: una fila por pasada, en orden de paso ---
+        # --- Lo que dice el legacy: la LISTA de procesos (ZoTProcesos) ---
+        # Desde el 23/09/2026. Antes se leía dbo.otrabajoProceso, que es la hoja de ruta:
+        # trae la lista duplicada cuando la hoja se armó dos veces y no trae lo que se
+        # agregó después. Con esa tabla, la 15243 (13 filas contra los 7 procesos que ve
+        # Lucas) salía IDENTICA. Ver importar_ot_legacy.py.
+        from backend.scripts.importar_ot_legacy import Q_LISTA, lista_del_viejo
         lista = ",".join(str(v) for v in por_vieja)
-        crudas = await sync_db._leer(
-            f"SELECT op.Idot AS idot, op.orden, op.proceso, op.total, "
-            f"       op.empleado, op.fecha "
-            f"FROM dbo.otrabajoProceso op WHERE op.Idot IN ({lista})")
-
-        legacy = {otv: _procesos_del_legacy(filas)
-                  for otv, filas in _por_ot(crudas).items()}
-        partes_por_ot = {otv: sum(1 for r in filas if not _es_linea_de_plan(r))
-                         for otv, filas in _por_ot(crudas).items()}
+        filas_lista = defaultdict(list)
+        for f in await sync_db._leer(Q_LISTA.format(ids=lista)):
+            filas_lista[f["ot"]].append(f)
+        legacy = {otv: lista_del_viejo(filas) for otv, filas in filas_lista.items()}
+        partes_por_ot = {}
 
         # --- Lo que hay en SPMM ---
         spmm = defaultdict(list)
@@ -279,11 +285,9 @@ async def main():
 
         rotas = veredictos["SOBRAN"] + veredictos["DIFIEREN"] + veredictos["FALTAN"]
         if rotas:
-            print("\nNinguna se toca sola. Para ver qué habría que sacar, en seco:")
-            print("  venv/bin/python -m backend.scripts.limpiar_partes_de_trabajo "
-                  + " ".join(str(o) for o in sorted(rotas)[:30]))
-            print("\nY ojo: una fila de más puede ser un proceso que el taller cargó en "
-                  "SPMM después del cutover de julio. Esas son de ellos y quedan.")
+            print("\nNinguna se toca sola. Para dejarlas como el viejo (pisa lo cargado en "
+                  "SPMM), en seco:")
+            print("  .venv/bin/python -m backend.scripts.importar_ot_legacy --recargar")
     finally:
         await c.close()
 

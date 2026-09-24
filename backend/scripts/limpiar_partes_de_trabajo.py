@@ -55,6 +55,25 @@ minutos de una OT cambia, y eso cambia lo que entra en la semana.
 
 Los números son de OT VIEJA (id_otvieja), el que se ve en pantalla.
 """
+
+# ---------------------------------------------------------------------------
+# 🚫 FRENADO EL 23/09/2026 — NO CORRER. Reemplazado por `importar_ot_legacy`.
+#
+# Limpiaba contra `dbo.otrabajoProceso` (la hoja de ruta). Esa tabla no es la lista de
+# procesos: la lista está en `dbo.ZoTProcesos`. Para dejar una OT como el viejo se usa
+# `importar_ot_legacy --recargar`.
+#
+#   Traer OT nuevas y sus procesos:  .venv/bin/python -m backend.scripts.importar_ot_legacy
+#   Ver cómo está cada OT:           .venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy --abiertas
+# ---------------------------------------------------------------------------
+import sys as _sys
+
+# Sólo frena si alguien lo EJECUTA; importarlo sigue andando (la auditoría reusa helpers).
+if __name__ == "__main__" and "--sin-freno" not in _sys.argv:
+    print("🚫 FRENADO: compara contra la hoja de ruta (otrabajoProceso), no contra la lista de procesos.")
+    print("   Usar:  .venv/bin/python -m backend.scripts.importar_ot_legacy")
+    _sys.exit(1)
+
 import asyncio
 import os
 import re

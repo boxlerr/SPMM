@@ -20,6 +20,25 @@ Los procesos vienen aparte, con `migrar_procesos_faltantes` (el legacy suele no 
     .venv/bin/python -m backend.scripts.migrar_ot_faltantes --aplicar
     .venv/bin/python -m backend.scripts.migrar_ot_faltantes --ot 15820 --aplicar
 """
+
+# ---------------------------------------------------------------------------
+# 🚫 FRENADO EL 23/09/2026 — NO CORRER. Reemplazado por `importar_ot_legacy`.
+#
+# Traía la cabecera de las OT nuevas pero no sus procesos, y dejaba ese paso a
+# `migrar_procesos_faltantes`, que leía la tabla equivocada. `importar_ot_legacy` hace
+# las dos cosas en una corrida, sólo agrega y avisa si un número ya es de otra orden.
+#
+#   Traer OT nuevas y sus procesos:  .venv/bin/python -m backend.scripts.importar_ot_legacy
+#   Ver cómo está cada OT:           .venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy --abiertas
+# ---------------------------------------------------------------------------
+import sys as _sys
+
+# Sólo frena si alguien lo EJECUTA; importarlo sigue andando (la auditoría reusa helpers).
+if __name__ == "__main__" and "--sin-freno" not in _sys.argv:
+    print("🚫 FRENADO: reemplazado por importar_ot_legacy (trae la OT y sus procesos juntos).")
+    print("   Usar:  .venv/bin/python -m backend.scripts.importar_ot_legacy")
+    _sys.exit(1)
+
 import asyncio
 import sys
 

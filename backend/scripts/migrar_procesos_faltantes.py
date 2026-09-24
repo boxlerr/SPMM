@@ -23,6 +23,26 @@ Corre en seco por defecto. Con --aplicar escribe.
     venv/bin/python -m backend.scripts.migrar_procesos_faltantes --aplicar
 """
 
+# ---------------------------------------------------------------------------
+# 🚫 FRENADO EL 23/09/2026 — NO CORRER. Reemplazado por `importar_ot_legacy`.
+#
+# Lee `dbo.otrabajoProceso`, que es la HOJA DE RUTA del viejo y no la lista de procesos
+# (`dbo.ZoTProcesos`). La hoja trae la lista duplicada cuando se armó dos veces (15243:
+# 13 filas contra 7 procesos; 15556: 18 contra 9) y no trae lo que se agregó después.
+# Copiarla fielmente es copiar esos errores: de acá salían los procesos multiplicados.
+#
+#   Traer OT nuevas y sus procesos:  .venv/bin/python -m backend.scripts.importar_ot_legacy
+#   Ver cómo está cada OT:           .venv/bin/python -m backend.scripts.auditoria_procesos_vs_legacy --abiertas
+# ---------------------------------------------------------------------------
+import sys as _sys
+
+# Sólo frena si alguien lo EJECUTA; importarlo sigue andando (la auditoría reusa helpers).
+if __name__ == "__main__" and "--sin-freno" not in _sys.argv:
+    print("🚫 FRENADO: lee la hoja de ruta (otrabajoProceso), no la lista de procesos (ZoTProcesos).")
+    print("   Usar:  .venv/bin/python -m backend.scripts.importar_ot_legacy")
+    _sys.exit(1)
+
+
 import asyncio, os, re, sys
 import asyncpg
 from dotenv import load_dotenv
