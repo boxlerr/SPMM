@@ -194,3 +194,53 @@ def test_el_motivo_de_cierre_se_lee_del_viejo():
 def test_los_cierres_corren_solo_con_cerrar():
     """Cerrar es un UPDATE: vive en su función y sólo se llama detrás de --cerrar."""
     assert re.search(r"if CERRAR and a_cerrar:\s*\n\s*await _escribir_cierres", inspect.getsource(imp.main))
+
+
+# ---------------------------------------------------------------------------
+# --igualar y «va a mano» (24/9, antes de la prueba piloto)
+# ---------------------------------------------------------------------------
+def test_igualar_toma_las_pendientes_y_las_abiertas():
+    """Las dos puntas de «abierta en SPMM ⇔ pendiente en el viejo»: la 15661 (pendiente
+    allá, cerrada acá) entra para reabrirse, la 15902 (abierta acá, entregada allá) entra
+    para cerrarse, y la 15919 (nueva) se trae. Una cerrada en los dos lados no se toca."""
+    en_spmm = {15661: {}, 15902: {}, 15243: {}, 13000: {}}
+    pendientes = {15661, 15243, 15919}
+    abiertas = [15902, 15243]
+    assert imp.alcance(True, [], pendientes, en_spmm, igualar=True, abiertas=abiertas) == (
+        [15243, 15661, 15902], [15919])
+
+
+def test_igualar_no_depende_de_la_lista_del_plan():
+    en_spmm = {15661: {}, 15243: {}}
+    assert imp.alcance(True, [15243], {15661, 15243}, en_spmm, igualar=True, abiertas=[15243]) == (
+        [15243, 15661], [])
+
+
+def test_las_pasadas_nuevas_de_trabajos_sin_maquina_fija_van_a_mano():
+    """15/9: ENDEREZADO, OXICORTE, PREP. PINTURA… no llevan máquina fija. Una pasada nueva
+    de esos procesos que entra sin la marca sale en el plan como «sin máquina»."""
+    catalogo = [{"id": 50, "nombre": "ENDEREZADO"}, {"id": 99, "nombre": "PREPARACION  DE PINTURA"},
+                {"id": 6, "nombre": "TORNO CNC"}]
+    a_mano = imp.claves_a_mano(catalogo, {50, 99, 82})
+    assert a_mano == {"ENDEREZADO", "PREPARACION DE PINTURA"}
+    ids = {"ENDEREZADO": 50, "PREPARACION DE PINTURA": 99, "TORNO CNC": 6}
+    filas = imp.filas_a_insertar(7, [(1, "TORNO CNC", 420), (2, "ENDEREZADO", 60),
+                                     (3, "PREPARACION DE PINTURA", 30)], ids, a_mano)
+    assert filas == [(7, 6, 1, 420, 0), (7, 50, 2, 60, 1), (7, 99, 3, 30, 1)]
+
+
+def test_la_lista_a_mano_es_la_del_15_9():
+    """Una sola lista: la de resolver_trabas_20260915. Si alguien la cambia allá, cambia acá."""
+    from backend.scripts.resolver_trabas_20260915 import SIN_MAQUINA_FIJA
+    assert {50, 82, 95, 99, 66, 106} <= set(SIN_MAQUINA_FIJA)
+    assert "SIN_MAQUINA_FIJA" in inspect.getsource(imp.main)
+
+
+def test_editada_en_spmm_solo_cuenta_despues_de_la_ultima_recarga():
+    """La 15755 salía como «editada en SPMM que el viejo pisa» por un cambio del 17/9, que
+    ya había pisado la recarga del 23/9: falsa alarma."""
+    recarga = datetime(2026, 9, 23, 16, 49)
+    assert not imp.editada_despues(datetime(2026, 9, 17, 10, 0), recarga)
+    assert imp.editada_despues(datetime(2026, 9, 24, 9, 0), recarga)
+    assert not imp.editada_despues(None, recarga)
+    assert imp.editada_despues(datetime(2026, 9, 17), None)
