@@ -128,6 +128,10 @@ SUBENTIDAD = {
     # «/consumos-material/5/anular»: el consumo no se borra, se anula. Sin esto el
     # renglón diría «editó consumo de material #5» y no se sabría que fue la anulación.
     "anular": "anulación",
+    # RF-10: el mantenimiento preventivo de una máquina (configurarlo, registrar uno
+    # hecho). La frase con el nombre de la máquina la deja el endpoint (UsoMaquinaAPI).
+    "mantenimiento": "mantenimiento",
+    "mantenimientos": "mantenimiento hecho",
     # «/piezas/5/stock-minimo» (RF-14): cambiarle el mínimo a una materia prima no es
     # editarla —sus datos son del sistema viejo—, es decidir desde cuándo avisar.
     "stock-minimo": "stock mínimo",
