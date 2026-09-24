@@ -77,6 +77,7 @@ console.log(JSON.stringify({
     resumen: m.resumenEstadoYControl({ programada: true, finalizadoparcial: true, controlado: true,
         finalizado_tercerizacion_final: true, cantidad_finalizada_parcial: '3' }),
     resumen_sin_cant: m.resumenEstadoYControl({ finalizadoparcial: true, cantidad_finalizada_parcial: '' }),
+    resumen_cant_sin_casilla: m.resumenEstadoYControl({ controlado: true, cantidad_finalizada_parcial: 4 }),
     cuando: [m.cuandoLegible('2026-09-23T14:05:00'), m.cuandoLegible('2026-09-23'), m.cuandoLegible(null)],
     marcada: [1, true, '1', 0, null, undefined, false, 2].map(m.marcada),
 }));
@@ -135,9 +136,11 @@ def test_el_exportar_dice_si_no_o_nada(front):
         "Controlado el": "2026-09-23T14:05:00", "Fin. para pintar": False,
         "Fin. terc. final": True, "Fin. terc. intermedia": False,
     }
-    # Quién la controló sólo si sigue controlada; la cantidad, sólo con el parcial marcado.
+    # Quién la controló sólo si sigue controlada. La cantidad, siempre que esté cargada:
+    # es un dato guardado aparte de la casilla, y antes el archivo lo escondía.
     assert ex["sinControlar"]["Controlado por"] == "" and ex["sinControlar"]["Controlado el"] is None
-    assert ex["sinControlar"]["Fin. parcial (cant.)"] is None
+    assert ex["sinControlar"]["Fin. parcial (cant.)"] == 5
+    assert ex["delBackendViejo"]["Fin. parcial (cant.)"] is None
     # Backend viejo: vacío (null), no «No».
     viejo = ex["delBackendViejo"]
     assert [viejo[c] for c in ("Controlado", "Fin. para pintar", "Fin. terc. final",
@@ -149,6 +152,7 @@ def test_la_ficha_exportada_y_las_fechas(front):
     assert front["resumen"] == ("Programada, Finalizado parcial (3), Controlado, "
                                 "Finalizado tercerización final")
     assert front["resumen_sin_cant"] == "Finalizado parcial"
+    assert front["resumen_cant_sin_casilla"] == "Controlado, Cant. finalizada parcial: 4"
     # Sin zona: se lee tal cual, sin correrla tres horas.
     assert front["cuando"] == ["23/09/2026 14:05", "23/09/2026", ""]
     assert front["marcada"] == [True, True, True, False, False, False, False, False]
@@ -166,8 +170,9 @@ def test_la_celda_del_pdf_dice_todo_junto(front):
     assert front["celdaPdf"] == {
         # Mismas palabras que los chips de la pantalla, y quién/cuándo en otro renglón.
         "controlada": "Parcial: 3 · Controlada · Terc. final\npor Lucas Longchamps, 23/09/2026 14:05",
-        # Sin controlar: el «quién» que quedó de antes no sale.
-        "sinControlar": "Para pintar · Terc. intermedia",
+        # Sin controlar: el «quién» que quedó de antes no sale. La cantidad cargada sin la
+        # casilla sale como cantidad, no como «Parcial».
+        "sinControlar": "Cant. parcial: 5 · Para pintar · Terc. intermedia",
         # Backend viejo: vacío, no se sabe.
         "delBackendViejo": "",
     }

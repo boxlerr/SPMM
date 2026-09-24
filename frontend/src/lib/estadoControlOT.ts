@@ -148,8 +148,12 @@ const siNo = (o: object, clave: string) =>
 export function estadoYControlEnUnaCelda(o: ConEstadoDeControl): string {
     if (!conoceEstadosDeControl(o)) return "";
     const partes: string[] = [];
+    // La cantidad sale siempre que esté cargada, aunque la casilla no esté marcada: es un
+    // dato guardado aparte y esconderlo en el archivo lo perdía. Sin la casilla, dice que
+    // es la cantidad y no que la OT está en parcial.
     const cant = o.cantidad_finalizada_parcial;
-    if (marcada(o.finalizadoparcial) && cant !== null && cant !== undefined) partes.push(`Parcial: ${cant}`);
+    if (cant !== null && cant !== undefined)
+        partes.push(marcada(o.finalizadoparcial) ? `Parcial: ${cant}` : `Cant. parcial: ${cant}`);
     partes.push(...etapasDe(o).map((e) => e.corto));
     const renglones = partes.length ? [partes.join(" · ")] : [];
     if (marcada(o.controlado)) {
@@ -175,7 +179,8 @@ export function columnasEstadoYControl<T extends object>(): ColumnaExport<T>[] {
             titulo: "Fin. parcial (cant.)",
             tipo: "entero",
             formatos: planilla,
-            valor: (o: any) => (marcada(o.finalizadoparcial) ? o.cantidad_finalizada_parcial ?? null : null),
+            // Siempre que esté cargada, con la casilla marcada o no (ver estadoYControlEnUnaCelda).
+            valor: (o: any) => o.cantidad_finalizada_parcial ?? null,
         },
         { titulo: "Controlado", tipo: "booleano", formatos: planilla, valor: (o) => siNo(o, "controlado") },
         { titulo: "Controlado por", formatos: planilla, valor: (o: any) => (marcada(o.controlado) ? o.controlado_por ?? "" : "") },
@@ -189,14 +194,13 @@ export function columnasEstadoYControl<T extends object>(): ColumnaExport<T>[] {
 
 /** «Programada, Finalizado parcial (3), Controlado» — para la ficha exportada. */
 export function resumenEstadoYControl(v: Partial<Record<CasillaDeEstado, unknown>> & { cantidad_finalizada_parcial?: unknown }): string {
-    return CASILLAS_DE_ESTADO.filter((c) => marcada(v[c.clave]))
-        .map((c) => {
-            const cant = v.cantidad_finalizada_parcial;
-            return c.clave === "finalizadoparcial" && cant !== null && cant !== undefined && cant !== ""
-                ? `${c.rotulo} (${cant})`
-                : c.rotulo;
-        })
-        .join(", ");
+    const cant = v.cantidad_finalizada_parcial;
+    const hayCant = cant !== null && cant !== undefined && cant !== "";
+    const partes = CASILLAS_DE_ESTADO.filter((c) => marcada(v[c.clave]))
+        .map((c) => (c.clave === "finalizadoparcial" && hayCant ? `${c.rotulo} (${cant})` : c.rotulo));
+    // Cargada sin la casilla: igual sale (es un dato guardado), dicho como cantidad.
+    if (hayCant && !marcada(v.finalizadoparcial)) partes.push(`Cant. finalizada parcial: ${cant}`);
+    return partes.join(", ");
 }
 
 /** «23/09/2026 14:05» de una fecha del backend (sin zona: se lee tal cual). */
