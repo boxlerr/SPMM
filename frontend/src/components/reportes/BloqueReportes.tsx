@@ -93,11 +93,17 @@ export function BloqueReportes({ children, className }: { children?: React.React
             )}
             aria-labelledby="titulo-reportes"
         >
-            {/* La marca de Metalúrgica Longchamps, grande y apagada, de fondo */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="" aria-hidden
-                 className="pointer-events-none absolute -right-8 -top-6 hidden h-44 w-44 select-none object-contain opacity-[0.08] brightness-0 invert sm:block" />
-            <div className="pointer-events-none absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-[#DC143C]/20 blur-3xl" aria-hidden />
+            {/* Los adornos van en su propia capa, del tamaño de la sección y recortada. Sueltos
+                (con -right-8, -bottom-20...) agrandaban el área de scroll de la sección: un
+                overflow-hidden igual se puede desplazar desde el código, y al abrir el popover
+                de «Reporte mensual» el navegador la corría sola 32 px (scrollLeft = 32). */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl" aria-hidden>
+                {/* La marca de Metalúrgica Longchamps, grande y apagada, de fondo */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo.png" alt=""
+                     className="absolute -right-8 -top-6 hidden h-44 w-44 select-none object-contain opacity-[0.08] brightness-0 invert sm:block" />
+                <div className="absolute -bottom-20 -left-10 h-48 w-48 rounded-full bg-[#DC143C]/20 blur-3xl" />
+            </div>
 
             <div className="relative flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex min-w-0 items-start gap-3">

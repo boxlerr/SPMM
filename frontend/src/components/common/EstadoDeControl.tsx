@@ -186,10 +186,12 @@ export function ChipsDeControl({ orden, className }: { orden: ConEstadoDeControl
                            cuandoLegible(orden.controlado_en)].filter(Boolean).join(" · ")
                         : undefined}
                     className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
+                        // Con borde y fondo blanco: la tarjeta de la OT en el teléfono es gris
+                        // (el color de su estado) y un chip gris claro sobre gris no se leía.
+                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap",
                         e.clave === "controlado"
-                            ? "bg-blue-100 text-blue-800"
-                            : "bg-slate-100 text-slate-700",
+                            ? "border-blue-300 bg-blue-100 text-blue-900"
+                            : "border-slate-400 bg-white text-slate-800",
                     )}
                 >
                     {e.clave === "controlado" && <ShieldCheck className="h-3 w-3" />}
