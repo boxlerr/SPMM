@@ -652,12 +652,19 @@ def test_el_csv_neutraliza_formulas():
 async def test_preparar_los_mails_del_mes_va_a_los_admin_activos(base):
     async with base() as s:
         mails = await preparar_mails_del_mes(s, url_app="https://www.metlosys.com", ahora=AHORA)
-    (mail,) = mails
-    assert mail["para"] == ["julian@metlo.com.ar", "lucas@metlo.com.ar"]
-    assert mail["asunto"].endswith("agosto de 2026")          # el mes que cerró
-    assert mail["enviado"] is False
+    # Uno por destinatario, con una sola dirección en «Para» (la regla de email.py: nadie
+    # ve la dirección de los demás). Antes era UN mail con los dos admin juntos.
+    assert [m["para"] for m in mails] == [["julian@metlo.com.ar"], ["lucas@metlo.com.ar"]]
+    for mail in mails:
+        assert mail["asunto"].endswith("agosto de 2026")      # el mes que cerró
+        assert mail["enviado"] is False
+    assert mails[0]["html"] == mails[1]["html"]              # el mismo reporte
     async with base() as s:
         assert await preparar_mails_del_mes(s, para=[], ahora=AHORA) == []
+        # Repetidos o vacíos no duplican el mail.
+        repetidos = await preparar_mails_del_mes(
+            s, para=["a@metlo.com.ar", " A@metlo.com.ar ", "", "b@metlo.com.ar"], ahora=AHORA)
+    assert [m["para"] for m in repetidos] == [["a@metlo.com.ar"], ["b@metlo.com.ar"]]
 
 
 async def test_un_mail_con_destinatarios_a_mano_no_lleva_lo_confidencial(base):
@@ -670,8 +677,8 @@ async def test_un_mail_con_destinatarios_a_mano_no_lleva_lo_confidencial(base):
     assert "Eficiencia" not in adjunto and "Calidad por persona" not in adjunto
     assert "Órdenes entregadas" in adjunto
     async with base() as s:
-        (mail,) = await preparar_mails_del_mes(s, ahora=AHORA)
-    assert "Calidad por persona" in mail["adjuntos"][0]["contenido"].decode("utf-8")
+        mails = await preparar_mails_del_mes(s, ahora=AHORA)
+    assert all("Calidad por persona" in m["adjuntos"][0]["contenido"].decode("utf-8") for m in mails)
 
 
 # ─────────────────────────── la ruta, con los permisos de verdad ───────────────────────────

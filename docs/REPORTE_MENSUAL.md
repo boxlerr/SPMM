@@ -88,11 +88,14 @@ from backend.application.ReporteMensualService import (
 )
 
 mails = await preparar_mails_del_mes(db)          # el mes que cerró, para los admin
-# [{"para": [...], "asunto": "SPMM · Reporte mensual de agosto de 2026",
+# UNO POR DESTINATARIO, cada uno con una sola dirección en «para» (la regla de
+# infrastructure/notifications/email.py: nadie ve la dirección de los demás):
+# [{"para": ["julian@..."], "asunto": "SPMM · Reporte mensual de agosto de 2026",
 #   "html": "...", "texto": "...", "link": ".../dashboard/reporte-mensual?anio=2026&mes=8",
 #   "adjuntos": [{"nombre": "reporte_mensual_2026-08.csv", "tipo": "text/csv; charset=utf-8",
 #                 "contenido": b"..."}],
-#   "enviado": False}]
+#   "enviado": False},
+#  {"para": ["lucas@..."], ...}]
 ```
 
 - **Asunto:** `SPMM · Reporte mensual de <mes> de <año>`.

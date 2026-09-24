@@ -65,7 +65,9 @@ EL MAIL (preparado, NO activado)
 HTML con el resumen, texto plano, el CSV del reporte adjunto y el link a la pantalla,
 donde están el PDF y el Excel) y `enviado: False`. No manda nada, no programa nada.
 `preparar_mails_del_mes(db, anio, mes)` arma el del mes anterior para los destinatarios
-por defecto (los usuarios admin activos con mail). Cuando se configure el envío junto con
+por defecto (los usuarios admin activos con mail): UN mail por destinatario, cada uno con
+una sola dirección en «Para», como manda la regla de infrastructure/notifications/email.py
+(nadie ve la dirección de los demás: la lista de usuarios con su email es confidencial). Cuando se configure el envío junto con
 RF-04, el plan es (docs/REPORTE_MENSUAL.md tiene el detalle y el código del endpoint):
 
   Cloud Scheduler, el 1° de cada mes a las 07:00 (America/Argentina/Buenos_Aires)
@@ -1481,15 +1483,22 @@ async def preparar_mails_del_mes(db, anio: int | None = None, mes: int | None = 
                                  url_app: str | None = None, para: Iterable[str] | None = None,
                                  ahora: datetime | None = None) -> list[dict]:
     """Lo que va a correr el endpoint interno el 1° de cada mes: el reporte del mes
-    anterior (o el pedido), armado para los admin, y su mail. NO manda nada: devuelve
-    los mails armados. Una lista (hoy de uno, a todos juntos) para que el día que cada
-    destinatario reciba el suyo según sus permisos no cambie quien lo llama."""
+    anterior (o el pedido), armado para los admin, y sus mails. NO manda nada: devuelve
+    los mails armados, UNO POR DESTINATARIO con una sola dirección en «para» (la regla de
+    email.py: nadie ve la dirección de los demás). El reporte se arma una vez: hoy todos
+    reciben el mismo; el día que cada uno reciba el suyo según sus permisos, se arma
+    acá por destinatario y quien lo llama no cambia."""
     from backend.core.config import settings
 
     ahora = ahora or ahora_ar()
     if anio is None or mes is None:
         anio, mes = mes_por_defecto(ahora)
-    destinatarios = list(para) if para is not None else await destinatarios_por_defecto(db)
+    crudos = list(para) if para is not None else await destinatarios_por_defecto(db)
+    destinatarios: list[str] = []
+    for d in crudos:
+        d = (d or "").strip()
+        if d and d.lower() not in {x.lower() for x in destinatarios}:
+            destinatarios.append(d)
     if not destinatarios:
         return []
     # Los destinatarios por defecto son admin: les va todo. Una lista `para` puesta a mano
@@ -1500,5 +1509,5 @@ async def preparar_mails_del_mes(db, anio: int | None = None, mes: int | None = 
     alcance = Alcance.todo() if para is None else replace(Alcance.todo(), personas=False,
                                                           ausencias=False)
     reporte = await ReporteMensualService(db).armar(anio, mes, alcance, ahora=ahora)
-    return [armar_mail_del_reporte(reporte, para=destinatarios,
-                                   url_app=url_app or settings.FRONTEND_URL)]
+    return [armar_mail_del_reporte(reporte, para=[d], url_app=url_app or settings.FRONTEND_URL)
+            for d in destinatarios]
