@@ -161,8 +161,10 @@ class OrdenTrabajoRepository:
             # así que el filtro de arriba las dejaría pasar: si el día de mañana el DTO
             # las expone, cualquiera podría escribir quién tocó la OT — y el dato existe
             # justamente para no tener que creerle a nadie.
-            for reservada in ("modificado_en", "modificado_por"):
+            # Lo mismo con quién marcó Controlado (RF-11): lo pone el backend, abajo.
+            for reservada in ("modificado_en", "modificado_por", "controlado_en", "controlado_por"):
                 nueva_data.pop(reservada, None)
+            estaba_controlada = bool(orden.controlado)
 
             # Red de contención de la zona horaria. El normalizado real vive en el DTO
             # (backend/dto/fechas.py), que es por donde entran el alta y la edición;
@@ -185,6 +187,19 @@ class OrdenTrabajoRepository:
                 if getattr(orden, key) != limpio:
                     hubo_cambio = True
                 setattr(orden, key, limpio)
+
+            # RF-11: quién marcó CONTROLADO y cuándo, sólo cuando la marca CAMBIA. Volver
+            # a guardar una OT ya controlada (el modal manda la cabecera entera) no le
+            # cambia el autor: el que la controló sigue siendo el primero. Al desmarcarla
+            # se borran los dos, que una OT sin controlar no diga «controlada por». Un
+            # guardado que no es de una persona (estampar=False) no inventa autor.
+            if "controlado" in nueva_data and bool(orden.controlado) != estaba_controlada:
+                if orden.controlado and estampar:
+                    orden.controlado_en = _ahora_ar()
+                    orden.controlado_por = nombre_de(usuario)
+                else:
+                    orden.controlado_en = None
+                    orden.controlado_por = None
 
             if estampar and hubo_cambio:
                 await self._sellar_modificacion(id, usuario)
@@ -1477,6 +1492,18 @@ class OrdenTrabajoRepository:
                        ot.tiene_plano,
                        ot.no_lleva_plano,
                        ot.no_lleva_materia_prima,
+                       -- RF-11: «Estado y control», para verlo y filtrarlo en la lista
+                       -- sin abrir la OT de a una.
+                       ot.programada,
+                       ot.en_proceso,
+                       ot.finalizadoparcial,
+                       ot.cantidad_finalizada_parcial,
+                       ot.controlado,
+                       ot.controlado_por,
+                       ot.controlado_en,
+                       ot.finalizado_para_pintar,
+                       ot.finalizado_tercerizacion_intermedia,
+                       ot.finalizado_tercerizacion_final,
                        p.descripcion                  as prioridad,
                        coalesce(proc.procesos, 0)             as procesos,
                        coalesce(proc.procesos_finalizados, 0) as procesos_finalizados,

@@ -76,6 +76,13 @@ export interface ColumnaExport<T> {
     tipo?: TipoColumna;
     /** Para numero / moneda / porcentaje. */
     decimales?: number;
+    /**
+     * En qué archivos va la columna. Sin esto, en los tres. Sirve cuando el PDF tiene que
+     * decir en UNA celda lo que la planilla dice en varias: el PDF es una hoja apaisada
+     * para leer y cada columna de más le achica las otras hasta partir números y nombres;
+     * el Excel y el CSV no tienen ese límite y ahí conviene una columna por dato.
+     */
+    formatos?: FormatoExport[];
 }
 
 export interface SeccionExport<T = any> {
@@ -98,6 +105,19 @@ export interface ReporteExport {
     secciones: SeccionExport[];
     /** «auto» (por defecto) pone el PDF horizontal cuando la tabla no entra parada. */
     orientacion?: "auto" | "vertical" | "horizontal";
+}
+
+/** Las columnas que van en ese formato (las que no dicen `formatos` van en todos). */
+export function columnasPara<T>(formato: FormatoExport, columnas: ColumnaExport<T>[]): ColumnaExport<T>[] {
+    return columnas.filter((c) => !c.formatos || c.formatos.includes(formato));
+}
+
+/** El reporte con las columnas de ese formato: lo primero que hace cada constructor. */
+export function reporteParaFormato(reporte: ReporteExport, formato: FormatoExport): ReporteExport {
+    return {
+        ...reporte,
+        secciones: reporte.secciones.map((sec) => ({ ...sec, columnas: columnasPara(formato, sec.columnas) })),
+    };
 }
 
 // ---------------------------------------------------------------------------------
@@ -362,7 +382,8 @@ function campoCsv(texto: string): string {
  * datos. Con varias (la OT: procesos y materias primas) cada una va con su título en
  * un renglón propio y una línea en blanco entre medio.
  */
-export function construirCsv(reporte: ReporteExport): string {
+export function construirCsv(reporteCompleto: ReporteExport): string {
+    const reporte = reporteParaFormato(reporteCompleto, "csv");
     const renglones: string[] = [];
     const varias = reporte.secciones.length > 1;
     reporte.secciones.forEach((sec, i) => {

@@ -19,6 +19,7 @@ import {
     aTexto,
     neutralizarFormula,
     partesDeFecha,
+    reporteParaFormato,
     textoQueNoEsFecha,
     type ColumnaExport,
     type ReporteExport,
@@ -119,7 +120,8 @@ function largoVisible(valor: ExcelJS.CellValue, col: ColumnaExport<any>): number
 const ANCHO_MIN = 6;
 const ANCHO_MAX = 60;
 
-export async function construirXlsx(reporte: ReporteExport): Promise<Blob> {
+export async function construirXlsx(reporteCompleto: ReporteExport): Promise<Blob> {
+    const reporte = reporteParaFormato(reporteCompleto, "xlsx");
     const libro = new ExcelJS.Workbook();
     libro.creator = "SPMM · Metalúrgica Longchamps";
     libro.title = reporte.titulo;

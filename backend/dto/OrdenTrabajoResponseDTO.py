@@ -110,6 +110,16 @@ class OrdenTrabajoResponseDTO(BaseModel):
     finalizadototal: Optional[int] = 0
     finalizadoparcial: Optional[int] = 0
 
+    # RF-11: «Estado y control». `controlado_por` / `controlado_en` en None con
+    # controlado=1 = no se registró quién la marcó (nunca un autor inventado).
+    controlado: Optional[int] = 0
+    finalizado_para_pintar: Optional[int] = 0
+    finalizado_tercerizacion_intermedia: Optional[int] = 0
+    finalizado_tercerizacion_final: Optional[int] = 0
+    cantidad_finalizada_parcial: Optional[int] = None
+    controlado_en: Optional[datetime] = None
+    controlado_por: Optional[str] = None
+
     fecha_orden: Optional[datetime] = None
     fecha_entrada: Optional[datetime] = None
     fecha_prometida: Optional[datetime] = None

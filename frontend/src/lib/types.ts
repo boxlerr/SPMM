@@ -103,6 +103,18 @@ export interface WorkOrder {
     finalizadototal?: number | boolean;
     finalizadoparcial?: number | boolean;
 
+    /** RF-11: el resto de «Estado y control» de la ficha vieja. El backend de antes
+     *  (3422285) no los manda: ausentes = no se sabe, no «no» (ver lib/estadoControlOT). */
+    controlado?: number | boolean | null;
+    finalizado_para_pintar?: number | boolean | null;
+    finalizado_tercerizacion_final?: number | boolean | null;
+    finalizado_tercerizacion_intermedia?: number | boolean | null;
+    /** El «Cant.» de Finalizado parcial. No es `cantidad_entregada`. */
+    cantidad_finalizada_parcial?: number | null;
+    /** Quién marcó Controlado y cuándo: los pone el backend, no se mandan. */
+    controlado_por?: string | null;
+    controlado_en?: string | null;
+
     prioridad?: {
         id?: number;
         descripcion?: string;

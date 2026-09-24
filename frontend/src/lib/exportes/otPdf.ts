@@ -30,6 +30,7 @@ import {
 } from "@/lib/exportarPdf";
 import { ahoraAR, fechaAR, partesDeFecha, textoParaLeer } from "@/lib/exportar";
 import type { DatosDeOT } from "./ot";
+import { cuandoLegible } from "@/lib/estadoControlOT";
 
 const GRIS_TEXTO: [number, number, number] = [102, 102, 102];
 const GRIS_LINEA: [number, number, number] = [153, 153, 153];
@@ -297,6 +298,15 @@ export async function pdfDeOT(d: DatosDeOT): Promise<Blob> {
     if (d.descripcion) {
         y = subtitulo(doc, "Descripción", y);
         y = caja(doc, d.descripcion, y, 10);
+    }
+    // RF-11: las casillas de «Estado y control» marcadas. Sólo si hay alguna: la hoja de
+    // una OT recién cargada sale igual que siempre.
+    if (d.estadoYControl) {
+        const quien = [d.controladoPor ? `controlada por ${d.controladoPor}` : "",
+                       cuandoLegible(d.controladoEl)]
+            .filter(Boolean).join(" · ");
+        y = subtitulo(doc, "Estado y control", y);
+        y = caja(doc, d.estadoYControl + (quien ? ` (${quien})` : ""), y, 8);
     }
 
     // Firmas

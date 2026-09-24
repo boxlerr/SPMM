@@ -34,6 +34,16 @@ import { MarcaPausada } from "@/components/pausas/MarcaPausada";
 import { filtroBusqueda, partesDeFecha, type ColumnaExport } from "@/lib/exportar";
 import { rangoPrioridad } from "@/lib/prioridad";
 import { useDeATandas } from "@/hooks/useDeATandas";
+import { ChipsDeControl } from "@/components/common/EstadoDeControl";
+import {
+    OPCIONES_FILTRO_CONTROL,
+    ROTULO_FILTRO_CONTROL,
+    columnasEstadoYControl,
+    conoceEstadosDeControl,
+    cumpleFiltroControl,
+    type ConEstadoDeControl,
+    type FiltroControl,
+} from "@/lib/estadoControlOT";
 import { PieDeTandas } from "@/components/common/PieDeTandas";
 import { FilasDeATandas } from "@/components/common/FilasDeATandas";
 import {
@@ -48,7 +58,9 @@ const getAuthHeaders = (): HeadersInit => {
 
 type EstadoPlan = "planificada" | "sin_planificar" | "entregada";
 
-interface OrdenResumen {
+// RF-11: «Estado y control» (Controlado, pintura, tercerización, el «Cant.» del parcial).
+// El backend de antes (3422285) no los manda: ahí la lista se ve como siempre.
+interface OrdenResumen extends ConEstadoDeControl {
     id: number;
     id_otvieja: number | null;
     cliente: string | null;
@@ -169,6 +181,8 @@ const COLUMNAS_EXPORT: ColumnaExport<OrdenResumen>[] = [
     { titulo: "Estado", valor: (o) => ROTULO_ESTADO[o.estado_plan] ?? o.estado_plan },
     { titulo: "Planificada el", tipo: "fecha", valor: (o) => o.planificada_en },
     { titulo: "Entregada el", tipo: "fecha", valor: (o) => o.fecha_entrega },
+    // RF-11: al final, para no correr las columnas de antes.
+    ...columnasEstadoYControl<OrdenResumen>(),
 ];
 
 export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void }) {
@@ -187,6 +201,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
     const [busqueda, setBusqueda] = useState("");
     const [huecos, setHuecos] = useState<("procesos" | "tipo" | "plano")[]>([]);
     const [orden, setOrden] = useState<Orden>("prometida");
+    const [control, setControl] = useState<FiltroControl>("ALL");
 
     const [modalAbierto, setModalAbierto] = useState(false);
     const [otAEditar, setOtAEditar] = useState<any>(null);
@@ -222,6 +237,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                 h === "procesos" ? o.procesos === 0
                     : h === "tipo" ? !o.tipo_trabajo
                         : o.estado_plano === "falta")) return false;
+            if (!cumpleFiltroControl(o, control)) return false;
             if (!q) return true;
             return [o.id_otvieja, o.cliente, o.articulo, o.codigo, o.detalle]
                 .some(v => String(v ?? "").toLowerCase().includes(q));
@@ -240,11 +256,20 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                 || cmp.prometida(a, b),
         };
         return [...lista].sort(cmp[orden]);
-    }, [ordenes, filtro, busquedaDiferida, huecos, orden]);
+    }, [ordenes, filtro, busquedaDiferida, huecos, orden, control]);
+
+    // RF-11: cuántas tiene cada opción del filtro «Control», sobre todas las OT. Si el
+    // backend no manda las marcas, el selector no se muestra y la barra queda como antes.
+    const sabeControl = ordenes.some(o => conoceEstadosDeControl(o));
+    const cuantasPorControl = useMemo(() => {
+        const n = {} as Record<FiltroControl, number>;
+        for (const op of OPCIONES_FILTRO_CONTROL) n[op] = ordenes.filter(o => cumpleFiltroControl(o, op)).length;
+        return n;
+    }, [ordenes]);
 
     // De a 60 a medida que se baja, como el Historial (ver `useDeATandas`). Antes era
     // un botón «Ver más» que había que ir tocando para llegar a las de abajo.
-    const tandas = useDeATandas(filtradas, JSON.stringify([filtro, busquedaDiferida, huecos, orden]));
+    const tandas = useDeATandas(filtradas, JSON.stringify([filtro, busquedaDiferida, huecos, orden, control]));
 
     const abrirOT = useCallback(async (o: OrdenResumen) => {
         try {
@@ -271,9 +296,11 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                 className="hover:bg-red-50/40 cursor-pointer transition-colors"
             >
                 <td className="px-3 py-2 font-semibold text-gray-900 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
                         {o.id_otvieja ?? o.id}
                         <MarcaPausada idOrden={o.id} />
+                        {/* RF-11: Controlada, Para pintar, Terc. intermedia / final. */}
+                        <ChipsDeControl orden={o} />
                     </span>
                 </td>
                 <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate" title={o.cliente || ""}>
@@ -374,6 +401,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                             ...(huecos.length
                                 ? [`Con huecos: ${huecos.map((h) => (h === "procesos" ? "sin procesos" : h === "tipo" ? "sin tipo" : "falta plano")).join(", ")}`]
                                 : []),
+                            ...(control !== "ALL" ? [`Control: ${ROTULO_FILTRO_CONTROL[control]}`] : []),
                             `Ordenado por ${ROTULO_ORDEN[orden]}`,
                         ]}
                         disabled={cargando}
@@ -469,6 +497,26 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                         )}
                     </label>
                 ))}
+                {/* RF-11: Controlado y las etapas de pintura / tercerización, con cuántas
+                    hay de cada una. Se ve si el backend manda las marcas (o si ya hay un
+                    filtro puesto, para poder sacarlo). */}
+                {(sabeControl || control !== "ALL") && (
+                    <select
+                        value={control}
+                        onChange={e => setControl(e.target.value as FiltroControl)}
+                        aria-label="Filtrar por control"
+                        className={cn(
+                            "h-9 rounded-md border bg-white px-2 text-sm shrink-0",
+                            control !== "ALL" ? "border-blue-300 text-blue-800 font-medium" : "border-gray-200",
+                        )}
+                    >
+                        {OPCIONES_FILTRO_CONTROL.map(op => (
+                            <option key={op} value={op}>
+                                {op === "ALL" ? "Control: todas" : `${ROTULO_FILTRO_CONTROL[op]} (${cuantasPorControl[op]})`}
+                            </option>
+                        ))}
+                    </select>
+                )}
                 <select
                     value={orden}
                     onChange={e => setOrden(e.target.value as Orden)}
@@ -490,7 +538,7 @@ export default function TodasLasOrdenes({ onRefresh }: { onRefresh?: () => void 
                     <div className="text-sm text-gray-500 flex items-center gap-1.5">
                         <ArrowUpDown className="h-3.5 w-3.5" />
                         {filtradas.length} {filtradas.length === 1 ? "orden" : "órdenes"}
-                        {filtro !== "todas" || busqueda || huecos.length
+                        {filtro !== "todas" || busqueda || huecos.length || control !== "ALL"
                             ? ` de ${ordenes.length} en total` : ""}
                     </div>
 

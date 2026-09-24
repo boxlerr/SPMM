@@ -22,6 +22,7 @@ import { cn, getWorkOrderRowColor } from "@/lib/utils";
 import { WorkOrderFilters, WorkOrderFilterState, initialFilterState, applyWorkOrderFilters } from "./common/WorkOrderFilters";
 import { MaterialChip } from "@/components/common/MaterialChip";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
+import { ChipsDeControl } from "@/components/common/EstadoDeControl";
 import { columnasOrdenes, filtroOrden, resumenFiltrosOT } from "@/lib/exportes/ordenes";
 import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano } from "@/hooks/useOrdenesConPlano";
 import { useDeATandas, useVistaDeTarjetas } from "@/hooks/useDeATandas";
@@ -229,7 +230,13 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
                     </button>
                 </td>
                 <td className="px-3 py-3 text-center text-gray-500 font-mono text-xs select-none">{index + 1}</td>
-                <td className="px-3 py-3 font-medium">{order.id_otvieja || order.id}</td>
+                <td className="px-3 py-3 font-medium">
+                    <span className="inline-flex flex-wrap items-center gap-1.5">
+                        {order.id_otvieja || order.id}
+                        {/* RF-11: Controlada, Para pintar, Terc. intermedia / final. */}
+                        <ChipsDeControl orden={order} />
+                    </span>
+                </td>
                 <td className="px-3 py-3">{formatDate(order.fecha_entrada)}</td>
                 <td className="px-3 py-3 text-gray-500 italic">{typeof order.cliente === 'object' ? order.cliente?.nombre : order.cliente || "-"}</td>
                 <td className="px-3 py-3 font-mono text-xs">{order.articulo?.cod_articulo || "-"}</td>
@@ -366,11 +373,12 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
         <Card key={order.id} className={cn("overflow-hidden border border-gray-200 shadow-sm", getWorkOrderRowColor(order))}>
             <div className="p-4" onClick={() => toggleRow(order.id)}>
                 <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-lg text-gray-800">#{order.id_otvieja || order.id}</span>
                         {estaSuspendida(order)
                                 ? <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-[9px]">SUSPENDIDA</Badge>
                                 : <Badge className="bg-green-100 text-green-700 border-green-200 text-[9px]">FINALIZADA</Badge>}
+                        <ChipsDeControl orden={order} />
                     </div>
                     <button className="text-gray-400">
                         {expandedOrderIds.includes(order.id) ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
@@ -488,6 +496,7 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
                     filas={sortedOrders}
                     columnas={columnasOrdenes({
                         plano: (o) => estadoPlano(o.id, o.tiene_plano, ordenesConPlano, planosDisponibles),
+                        conControl: true,
                         estado: (o) => (estaSuspendida(o) ? "Suspendida" : "Finalizada"),
                         conEntrega: true,
                     })}
@@ -500,7 +509,7 @@ export const CompletedWorkOrdersList = React.memo(function CompletedWorkOrdersLi
                 </div>
             </div>
 
-            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} compacto />
+            <WorkOrderFilters filters={filters} setFilters={setFilters} orders={orders} compacto conControl />
 
             {filteredOrders.length === 0 ? (
                 <div className="py-20 text-center bg-gray-50/30 rounded-2xl border-2 border-dashed border-gray-100">

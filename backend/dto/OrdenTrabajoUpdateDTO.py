@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from backend.dto.fechas import FechaSinZona
 from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoProcesoCreateDTO
@@ -41,6 +41,15 @@ class OrdenTrabajoUpdateDTO(BaseModel):
     finalizadototal: Optional[bool] = None
     finalizadoparcial: Optional[bool] = None
     reclamo: Optional[bool] = None
+
+    # RF-11: el resto de las casillas de «Estado y control» de la ficha vieja. Quién
+    # marcó Controlado y cuándo NO van acá a propósito: los pone el backend.
+    controlado: Optional[bool] = None
+    finalizado_para_pintar: Optional[bool] = None
+    finalizado_tercerizacion_intermedia: Optional[bool] = None
+    finalizado_tercerizacion_final: Optional[bool] = None
+    # El «Cant.» de Finalizado parcial. Mandar null lo vacía (no se cargó).
+    cantidad_finalizada_parcial: Optional[int] = Field(default=None, ge=0)
 
     id_prioridad: Optional[int] = None
     id_sector: Optional[int] = None

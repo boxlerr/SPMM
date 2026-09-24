@@ -13,6 +13,7 @@ import type { EstadoPlano } from "@/hooks/useOrdenesConPlano";
 import { fechaDeFiltro, filtroBusqueda, type ColumnaExport } from "@/lib/exportar";
 import type { WorkOrderFilterState } from "@/components/common/WorkOrderFilters";
 import { finDeLaFila, inicioDeLaFila } from "@/lib/plan-fechas";
+import { ROTULO_FILTRO_CONTROL, columnasEstadoYControl } from "@/lib/estadoControlOT";
 
 /** Lo mismo que muestran las listas: la descripción del artículo, o las observaciones
  *  cuando el artículo es el genérico que dejó la migración (NO-DEF / «heredado»). */
@@ -55,6 +56,9 @@ export interface OpcionesColumnasOT {
     conEntrega?: boolean;
     /** Agrega «Estado» con lo que dice la pantalla (fijo, o deducido de los pasos). */
     estado?: string | ((o: WorkOrder) => string);
+    /** RF-11: agrega al final las columnas de «Estado y control» (Controlado, quién,
+     *  cuándo, las etapas de pintura y tercerización y la cantidad del parcial). */
+    conControl?: boolean;
 }
 
 /** Las columnas de la tabla de OT, en el orden en que se ven. */
@@ -94,6 +98,7 @@ export function columnasOrdenes(op: OpcionesColumnasOT = {}): ColumnaExport<Work
         { titulo: "Aprobado por", valor: (o) => o.aprobado_por ?? "" },
         { titulo: "Pedido por", valor: (o) => o.requerido_por ?? "" },
     );
+    if (op.conControl) cols.push(...columnasEstadoYControl<WorkOrder>());
     return cols;
 }
 
@@ -126,6 +131,7 @@ export function resumenFiltrosOT(f: WorkOrderFilterState, busqueda?: string): st
     if (f.showWithProcessesOnly) r.push("Sólo con procesos");
     if (f.showDelayedOnly) r.push("Sólo retrasadas");
     if (f.showClaimsOnly) r.push("Sólo con reclamos");
+    if (f.control && f.control !== "ALL") r.push(`Control: ${ROTULO_FILTRO_CONTROL[f.control]}`);
     return r;
 }
 

@@ -78,6 +78,13 @@ ETIQUETAS_OT: dict[str, str] = {
     "programada": "programada",
     "en_proceso": "en proceso",
     "email": "aviso por mail",
+    # RF-11: el resto de «Estado y control» de la ficha vieja. Quién marcó Controlado y
+    # cuándo no van: lo dice el autor de la fila misma.
+    "controlado": "controlada",
+    "cantidad_finalizada_parcial": "cantidad terminada (parcial)",
+    "finalizado_para_pintar": "terminada para pintar",
+    "finalizado_tercerizacion_final": "terminada la tercerización final",
+    "finalizado_tercerizacion_intermedia": "terminada la tercerización intermedia",
 }
 
 # Las marcas sí / no de la OT (en la base, 0/1 o NULL).
@@ -86,7 +93,37 @@ MARCAS_OT = frozenset({
     "sin_cargo", "stock", "interno", "revisada", "reclamo", "tercerizado_total",
     "tercerizado_parcial", "no_lleva_plano", "no_lleva_materia_prima", "tiene_plano",
     "programada", "en_proceso", "email",
+    "controlado", "finalizado_para_pintar", "finalizado_tercerizacion_final",
+    "finalizado_tercerizacion_intermedia",
 })
+
+# RF-11: marcar la OT como Controlada es EL hecho del guardado, no un campo más entre
+# veinte: la frase lo dice primero («marcó la OT 15300 como Controlada») y el resto de lo
+# que cambió va detrás. Lo mismo al sacarle la marca.
+ETIQUETA_CONTROLADA = ETIQUETAS_OT["controlado"]
+
+
+def cambio_de_control(antes: dict | None, despues: dict | None) -> str | None:
+    """«marcó» / «desmarcó» si el guardado cambió la marca de Controlada, o None.
+
+    `antes` y `despues` son el detalle por ETIQUETA («controlada»: «sí» / «no»), el mismo
+    que queda en la fila de auditoría (como_detalle)."""
+    if not isinstance(antes, dict) or not isinstance(despues, dict):
+        return None
+    a, d = antes.get(ETIQUETA_CONTROLADA), despues.get(ETIQUETA_CONTROLADA)
+    if a == "no" and d == "sí":
+        return "marcó"
+    if a == "sí" and d == "no":
+        return "desmarcó"
+    return None
+
+
+def frase_de_control(cual: str, numero=None) -> str:
+    """«marcó la OT 15300 como Controlada» / «le sacó la marca de Controlada a la OT»."""
+    ot = f"la OT {numero}" if numero else "la OT"
+    if cual == "marcó":
+        return f"marcó {ot} como Controlada"
+    return f"le sacó la marca de Controlada a {ot}"
 
 # Los que en la base son un id y se leen por el nombre del catálogo.
 CATALOGOS_OT = ("id_cliente", "id_prioridad", "id_sector", "id_articulo")
@@ -347,7 +384,13 @@ async def dejar_dicho_cambios_de_ot(request, db, id_orden: int, antes: dict | No
         resumen = {"antes": a, "despues": d}
         if cambios:
             numero = despues.get("id_otvieja") or id_orden
-            resumen["frase"] = f"editó la OT {numero}: {frase_de_cambios(cambios)}"
+            control = cambio_de_control(a, d)
+            if control:
+                resto = [c for c in cambios if c["campo"] != ETIQUETA_CONTROLADA]
+                resumen["frase"] = frase_de_control(control, numero) + (
+                    f"; además: {frase_de_cambios(resto)}" if resto else "")
+            else:
+                resumen["frase"] = f"editó la OT {numero}: {frase_de_cambios(cambios)}"
         # Sin cambios, `antes` y `despues` van vacíos: la línea de tiempo lee eso como
         # «la cabecera quedó igual» (el guardado pudo tocar sólo los pasos).
         _dejar(request, resumen)

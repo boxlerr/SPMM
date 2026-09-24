@@ -6,6 +6,13 @@ import { Check, ChevronsUpDown, Search, Info, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { WorkOrder } from "@/lib/types";
 import { claveMaterial } from "@/lib/materialOT";
+import {
+    OPCIONES_FILTRO_CONTROL,
+    ROTULO_FILTRO_CONTROL,
+    conoceEstadosDeControl,
+    cumpleFiltroControl,
+    type FiltroControl,
+} from "@/lib/estadoControlOT";
 
 export interface WorkOrderFilterState {
     priority: string[];
@@ -19,6 +26,9 @@ export interface WorkOrderFilterState {
     showClaimsOnly: boolean;
     showDelayedOnly: boolean;
     showWithProcessesOnly: boolean;
+    /** RF-11: Controlado y las etapas de pintura / tercerización. Sólo lo muestran las
+     *  listas que piden `conControl`; en las demás queda en «Todas» y no filtra nada. */
+    control: FiltroControl;
 }
 
 export const initialFilterState: WorkOrderFilterState = {
@@ -33,6 +43,7 @@ export const initialFilterState: WorkOrderFilterState = {
     showClaimsOnly: false,
     showDelayedOnly: false,
     showWithProcessesOnly: false,
+    control: 'ALL',
 };
 
 interface WorkOrderFiltersProps {
@@ -46,13 +57,21 @@ interface WorkOrderFiltersProps {
     /** Modo compacto: menos aire y selects más angostos. Lo usa el planificador, donde
         cada píxel que se come la barra de filtros es una fila menos de la lista. */
     compacto?: boolean;
+    /** RF-11: agrega el selector «Control» (Controladas, Sin controlar, Para pintar,
+     *  Terc. intermedia, Terc. final). Lo piden las listas de OT; el planificador no. */
+    conControl?: boolean;
 }
 
-export function WorkOrderFilters({ filters, setFilters, orders, children, acciones, compacto = false }: WorkOrderFiltersProps) {
+export function WorkOrderFilters({ filters, setFilters, orders, children, acciones, compacto = false, conControl = false }: WorkOrderFiltersProps) {
     const [clientSearchTerm, setClientSearchTerm] = useState("");
 
     const uniqueClients = Array.from(new Set(orders.map(o => o.cliente?.nombre).filter((n): n is string => !!n))).sort();
     const uniqueSectors = Array.from(new Set(orders.map(o => o.sector?.nombre).filter((n): n is string => !!n))).sort();
+    // RF-11: con el backend de antes las OT no traen las marcas de control. Ahí el
+    // selector no se muestra (la barra queda como siempre) en vez de filtrar a vacío.
+    // Si ya había un filtro puesto, se sigue viendo para poder sacarlo.
+    const muestraControl = conControl && (
+        filters.control !== 'ALL' || orders.length === 0 || orders.some(o => conoceEstadosDeControl(o)));
     
     const hasFiltersActive = 
         filters.priority.length > 0 ||
@@ -65,7 +84,8 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, accion
         filters.dateTo !== '' ||
         filters.showClaimsOnly ||
         filters.showDelayedOnly ||
-        filters.showWithProcessesOnly;
+        filters.showWithProcessesOnly ||
+        filters.control !== 'ALL';
 
     const filteredClients = uniqueClients.filter(c =>
         c.toLowerCase().includes(clientSearchTerm.toLowerCase())
@@ -353,6 +373,19 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, accion
                     </SelectContent>
                 </Select>
 
+                {muestraControl && (
+                    <Select value={filters.control} onValueChange={(v) => setFilters(prev => ({ ...prev, control: v as FiltroControl }))}>
+                        <SelectTrigger className="bg-white h-8 text-[11px] px-2.5 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all font-normal [&>span:first-child]:flex-1 [&>span:first-child]:truncate">
+                            {triggerLabel("Control", ROTULO_FILTRO_CONTROL[filters.control], filters.control === "ALL")}
+                        </SelectTrigger>
+                        <SelectContent>
+                            {OPCIONES_FILTRO_CONTROL.map((op) => (
+                                <SelectItem key={op} value={op} className="text-xs">{ROTULO_FILTRO_CONTROL[op]}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+
                 {/* Custom Date Range Filter */}
                 <Popover>
                     <PopoverTrigger asChild>
@@ -444,6 +477,10 @@ export function applyWorkOrderFilters(orders: WorkOrder[], filters: WorkOrderFil
         if (filters.sector !== 'ALL') {
             if (order.sector?.nombre !== filters.sector) return false
         }
+
+        // RF-11: Controlado y las etapas de pintura / tercerización. `?? 'ALL'` por si
+        // alguien arma el estado a mano sin el campo.
+        if (!cumpleFiltroControl(order, filters.control ?? 'ALL')) return false
 
         // Claims Filter
         if (filters.showClaimsOnly) {
