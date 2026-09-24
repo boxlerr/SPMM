@@ -187,7 +187,8 @@ export async function construirXlsx(reporteCompleto: ReporteExport): Promise<Blo
     } else if (filtros.length === 0) {
         renglones.push(["Filtros", "Sin filtros: la lista completa de la pantalla"]);
     } else {
-        filtros.forEach((f, i) => renglones.push([i === 0 ? "Filtros" : "", neutralizarFormula(f)]));
+        const rotulo = reporte.rotuloFiltros || "Filtros";
+        filtros.forEach((f, i) => renglones.push([i === 0 ? rotulo : "", neutralizarFormula(f)]));
     }
     reporte.secciones.forEach((sec) => {
         renglones.push([`Filas (${neutralizarFormula(sec.titulo)})`, sec.filas.length]);

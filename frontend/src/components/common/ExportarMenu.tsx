@@ -58,15 +58,27 @@ export interface ExportarMenuProps<T> {
      * al exportar.
      */
     secciones?: SeccionExport[] | (() => SeccionExport[]);
+    /**
+     * Como `secciones`, pero se piden recién al exportar y al servidor: el armador de
+     * reportes (RF-23) tiene 50 filas en la vista previa y el archivo trae todo lo filtrado,
+     * con los totales en su propia tabla. `filtros`, si es una función, se lee DESPUÉS.
+     */
+    cargarSecciones?: () => Promise<SeccionExport[]>;
     /** Cuántas filas se van a exportar, cuando se pasan `secciones` (para el menú). */
     cantidad?: number;
     /** Resumen de los filtros puestos, un renglón por filtro. `null` = no aplica (una OT). */
     filtros?: string[] | (() => string[]) | null;
+    /** Cómo se llama el renglón de `filtros` en el archivo («Filtros» si no se dice; ver
+     *  ReporteExport.rotuloFiltros). */
+    rotuloFiltros?: string;
     /** Una aclaración que sale en el menú (p. ej. «sale la página que estás viendo»). */
     aviso?: string;
     /** Lo que dice arriba del menú, si no es una lista («Exportar esta orden»). */
     rotulo?: string;
     orientacion?: ReporteExport["orientacion"];
+    /** Lo que va debajo del título del PDF (ver ReporteExport.subtitulo). Si es una función,
+     *  se lee después de cargar las filas, como `filtros`. */
+    subtitulo?: string | (() => string | undefined);
     /** Reemplaza el PDF genérico. La OT tiene su propia hoja, parecida a la impresa. */
     pdf?: () => Promise<Blob>;
     /** Sólo el ícono, también en la computadora (tarjetas chicas del tablero). */
@@ -89,11 +101,14 @@ export function ExportarMenu<T>({
     columnas,
     cargarFilas,
     secciones,
+    cargarSecciones,
     cantidad,
     filtros,
+    rotuloFiltros,
     aviso,
     rotulo,
     orientacion,
+    subtitulo,
     pdf,
     soloIcono = false,
     disabled = false,
@@ -105,8 +120,10 @@ export function ExportarMenu<T>({
     const total = filas ? filas.length : cantidad;
     const vacio = total === 0;
 
-    const armarReporte = (cargadas?: T[]): ReporteExport => {
-        const secs: SeccionExport[] = typeof secciones === "function"
+    const armarReporte = (cargadas?: T[], seccionesCargadas?: SeccionExport[]): ReporteExport => {
+        const secs: SeccionExport[] = seccionesCargadas
+            ? seccionesCargadas
+            : typeof secciones === "function"
             ? secciones()
             : secciones ?? [{ titulo, filas: cargadas ?? filas ?? [], columnas: (columnas ?? []) as ColumnaExport<any>[] }];
         return {
@@ -115,6 +132,8 @@ export function ExportarMenu<T>({
             filtros: typeof filtros === "function" ? filtros() : filtros === null ? null : (filtros ?? []),
             secciones: secs,
             orientacion,
+            subtitulo: typeof subtitulo === "function" ? subtitulo() : subtitulo,
+            rotuloFiltros,
         };
     };
 
@@ -128,12 +147,16 @@ export function ExportarMenu<T>({
                 bajarArchivo(await pdf(), nombre, "pdf");
             } else {
                 const cargadas = cargarFilas ? await cargarFilas() : undefined;
-                nombre = await exportarReporte(formato, armarReporte(cargadas));
+                const seccionesCargadas = cargarSecciones ? await cargarSecciones() : undefined;
+                nombre = await exportarReporte(formato, armarReporte(cargadas, seccionesCargadas));
             }
             toast.success(`Listo: se bajó ${nombre}`);
         } catch (e) {
             console.error("No se pudo exportar:", e);
-            toast.error("No se pudo armar el archivo. Probá de nuevo en unos segundos.");
+            // Un error que trae su explicación (el servidor dijo por qué: «el reporte tardó
+            // más de 20 segundos…») se muestra tal cual; el resto, con el aviso de siempre.
+            const explicado = e instanceof Error && (e as Error & { paraMostrar?: boolean }).paraMostrar;
+            toast.error(explicado ? (e as Error).message : "No se pudo armar el archivo. Probá de nuevo en unos segundos.");
         } finally {
             setOcupado(null);
         }

@@ -32,6 +32,7 @@ from backend.presentation.AsistenciaAPI import router as asistencia_router
 from backend.presentation.RendimientoOperarioAPI import router as rendimiento_operario_router
 from backend.presentation.RangoAPI import router as rango_router
 from backend.presentation.UsoMaquinaAPI import router as uso_maquina_router
+from backend.presentation.ReportesAPI import router as reportes_router
 from backend.presentation.ws_routes import get_ws_manager
 from backend.application.event_bus import EventBus
 from backend.application.AlertaRetrasoService import AlertaRetrasoService, TOPE_POR_CORRIDA
@@ -319,6 +320,11 @@ app.include_router(uso_maquina_router, tags=["uso_maquinas"], dependencies=_prot
 app.include_router(auditoria_router, tags=["auditoria"], dependencies=_protegido("auditoria"))
 # RF-19: bajar una copia completa y restaurarla. Sólo admin (la política «backups»).
 app.include_router(copia_seguridad_router, tags=["copias de seguridad"], dependencies=_protegido("backups"))
+# RF-23: el armador de reportes personalizados del Dashboard. El router pide el Dashboard
+# (leer para armar y exportar, editar para guardar); cada fuente pide además lo suyo, y
+# eso lo mira el servicio (application/ReportesCatalogo.py).
+app.include_router(reportes_router, tags=["reportes personalizados"],
+                   dependencies=_protegido("reportes_personalizados"))
 
 # RF-24: la administración de permisos (matriz rol × área y rol × sección, permisos de
 # más por persona, secciones confidenciales, cambio de rol). No va por el mapa: cada

@@ -17,6 +17,8 @@ import BotonReporteMensual from "@/components/dashboard/BotonReporteMensual"
 import { usePermisos } from "@/hooks/usePermisos"
 import { tarjetasVisibles, type TarjetaCodigo } from "@/lib/permisos"
 
+import { BloqueReportes } from "@/components/reportes/BloqueReportes"
+
 import PriorityOrdersModal from "@/components/dashboard/PriorityOrdersModal"
 import StatusOrdersModal from "@/components/dashboard/StatusOrdersModal"
 
@@ -137,6 +139,11 @@ export default function DashboardPage() {
 
       {/* Contenedor principal */}
       <div className="max-w-[1600px] mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8 space-y-6 md:space-y-8">
+        {/* RF-23: los reportes. El armador es de todo el que ve el Dashboard (cada fuente
+            pide adentro lo suyo). Es el bloque de los reportes: el «Reporte mensual» de
+            RF-21 va como hijo, al lado de «Armar un reporte». */}
+        <BloqueReportes />
+
         {visibles.length === 0 && (
           <div className="rounded-xl border border-gray-200 bg-white px-5 py-10 text-center shadow-sm">
             <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-gray-100">

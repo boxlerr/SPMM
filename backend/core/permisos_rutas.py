@@ -56,7 +56,9 @@ y como solapa de Recursos):
   Dashboard          /api/dashboard/*, /incidencias/metricas: desde RF-28 cada tarjeta
                      pide el área de la que muestra datos (TARJETAS_DASHBOARD). El reporte
                      mensual (/api/dashboard/reporte-mensual, RF-21) pide el Dashboard y
-                     adentro cada parte pide lo de su pantalla (ReporteMensualService.alcance_de)
+                     adentro cada parte pide lo de su pantalla (ReporteMensualService.alcance_de).
+                     /reportes/personalizados/* (RF-23): el armador de reportes; cada
+                     fuente pide además lo suyo adentro (ReportesCatalogo)
   Operaciones        /ordenes*, /ordenes-resumen, /ordenes-pausadas, /planificacion*, /planificar,
                      /config/availability, /ordenes-trabajo-piezas, /consumos-material,
                      /planos/orden/*, /planos/{id}/archivo, /ordenes/{id}/incidencias,
@@ -537,6 +539,29 @@ POLITICAS: dict[str, Politica] = {
             Excepcion("DELETE", "/notificaciones/{id}", (area("configuracion", "admin"),),
                       "Un aviso borrado desaparece para todos: sólo el admin."),
         ),
+    ),
+
+    # ── El armador de reportes personalizados (RF-23) ──
+    # Vive en el Dashboard: leer el área alcanza para armar un reporte, verlo y exportarlo
+    # (correrlo es un GET: ver ReportesAPI). Pero el área es sólo la puerta: CADA FUENTE
+    # pide adentro lo mismo que la pantalla que muestra esos datos (las OT, Operaciones; la
+    # auditoría, «Todo lo que se hizo»; la eficiencia de cada persona, la sección
+    # confidencial «Rendimiento por persona»...), con los permisos de quien pide, y eso lo
+    # mira el servicio (application/ReportesCatalogo.py, que toma las políticas de ESTE
+    # mapa, no una copia). Con sólo el Dashboard se arman reportes de los catálogos libres
+    # (máquinas, materia prima) y de nada más.
+    #
+    # GUARDAR un reporte con nombre pide EDITAR el Dashboard. Es la opción conservadora,
+    # pendiente de que Lucas decida: hoy todos los usuarios son admin y guardan; con la
+    # matriz sembrada (supervisor y operario ven el Dashboard en «ver») arman, ven y
+    # exportan, pero no guardan hasta que se les dé «editar» en el Dashboard desde la
+    # pantalla de permisos. Guardar no abre ningún dato (el reporte se vuelve a validar con
+    # los permisos de quien lo abre) y el área Dashboard no tenía ninguna escritura: darle
+    # «editar» a un rol es darle esto y nada más. Compartir con todos es además de un admin
+    # (lo mira el servicio con el rol de la base) y cambiar o borrar, sólo de quien lo guardó.
+    "reportes_personalizados": Politica(
+        leer=(area("dashboard"),),
+        escribir=(area("dashboard", "write"),),
     ),
 
     # ── Copias de seguridad (RF-19): sólo el admin del área de sistema ──
