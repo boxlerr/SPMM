@@ -1302,7 +1302,9 @@ EJEMPLOS: tuple[dict, ...] = (
     {
         "codigo": "horas_por_persona_y_proceso",
         "nombre": "Horas por persona y proceso",
-        "descripcion": "Pasos terminados este mes, sumados por persona y por proceso.",
+        "descripcion": ("Pasos terminados este mes por persona y proceso, con las horas estimadas y las "
+                        "corridas de inicio a fin (noches y pausas incluidas). Las horas efectivas de cada "
+                        "persona, las de su ficha, salen en la fuente Personas."),
         "config": {
             "fuente": "pasos",
             "columnas": ["numero", "proceso", "persona", "horas_estimadas", "horas_reales"],
