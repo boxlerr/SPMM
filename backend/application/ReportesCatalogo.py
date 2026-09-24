@@ -155,6 +155,13 @@ ATAJOS = {
 }
 
 
+# Los números del reporte de la ficha de cada persona (RF-07) que el armador puede traer.
+# Los mismos que el perfil y el reporte mensual (RF-21): ver ReportesService.valores_de_la_ficha.
+VALORES_DE_LA_FICHA = ("tareas_completadas", "horas_trabajadas", "estimado", "efectivo", "eficiencia")
+# Hasta cuánto se le pide a la ficha: su propio tope (RendimientoOperarioService).
+TOPE_DIAS_DE_LA_FICHA = 366
+
+
 def rango_del_atajo(atajo: str, hoy: date) -> tuple[date, date]:
     """(desde, hasta) de un atajo, los dos días INCLUIDOS. Espejo de rangoDelAtajo en
     frontend/src/lib/reportesPeriodo.ts (test_los_atajos_del_periodo_dan_lo_mismo_en_la_
@@ -398,10 +405,18 @@ class Columna:
     # Sumada o promediada POR PERSONA es el rendimiento de cada una (las horas estimadas
     # y reales de sus pasos): ver `Fuente.por_persona` y REQUISITOS_RENDIMIENTO.
     rendimiento: bool = False
+    # El valor NO sale de SQL: es un número del reporte de la ficha de la persona (RF-07,
+    # RendimientoOperarioService.reporte), con el tiempo EFECTIVO (jornada menos pausas).
+    # La clave dice cuál (ver ReportesService.valores_de_la_ficha). Se calcula en Python
+    # después de la consulta, así que no se filtra ni se agrupa por ella, y pide período.
+    de_la_ficha: Optional[str] = None
 
     def __post_init__(self):
         assert self.tipo in TIPOS, (self.codigo, self.tipo)
         assert re.fullmatch(r"[a-z][a-z0-9_]{0,39}", self.codigo), self.codigo
+        if self.de_la_ficha:
+            assert self.de_la_ficha in VALORES_DE_LA_FICHA, (self.codigo, self.de_la_ficha)
+            assert not self.filtrable and not self.agrupable, self.codigo
 
     @property
     def filtro(self) -> Optional[str]:
@@ -471,7 +486,9 @@ class Fuente:
     por_persona: tuple[str, ...] = ()
     # Agrupar por una columna de `por_persona` (con CUALQUIER cuenta, también la cantidad)
     # o filtrar por ella pide la sección: es lo que hace RF-12 con las no conformidades
-    # por persona. Sin esto, sólo lo pide medir una columna con `rendimiento`.
+    # por persona, y lo que tienen todas las fuentes de rendimiento (pasos, uso de
+    # máquinas): la CANTIDAD de pasos de cada persona también es confidencial en el resto
+    # de la app. Sin esto, sólo lo pide medir una columna con `rendimiento`.
     persona_confidencial: bool = False
 
     def __post_init__(self):
@@ -715,54 +732,30 @@ PASOS = Fuente(
         C("horas_estimadas", "Horas estimadas", "numero", otp.c.tiempo_proceso / 60.0,
           decimales=2, totaliza=True, por_defecto=True, rendimiento=True,
           ayuda="El tiempo cargado en la OT para el paso."),
-        C("horas_reales", "Horas reales", "numero", horas_reales(otp.c.inicio_real, otp.c.fin_real),
+        # El código sigue siendo «horas_reales» (los reportes guardados lo nombran), pero NO
+        # son las horas reales de la ficha ni del reporte mensual: ésas son EFECTIVAS
+        # (jornada menos pausas) y están en la fuente «Personas».
+        C("horas_reales", "Horas corridas (de inicio a fin)", "numero",
+          horas_reales(otp.c.inicio_real, otp.c.fin_real),
           decimales=2, totaliza=True, por_defecto=True, rendimiento=True,
-          ayuda="Del arranque al fin marcados, corridas (como el cuadro «estimado vs. real» del "
-                "Dashboard): incluye noches y pausas. Vacío si el paso no tiene los dos."),
+          ayuda="Del arranque al fin marcados, de corrido (como el cuadro «estimado vs. real» "
+                "del Dashboard): incluye noches, fines de semana y pausas. NO es el tiempo "
+                "efectivo de la ficha de cada persona ni del reporte mensual: para ése, la "
+                "fuente «Personas». Vacío si el paso no tiene los dos."),
         C("personas_en_el_paso", "Personas en el paso", "entero", otp.c.cant_operarios),
     ),
     periodo=("fin", "inicio"),
     orden_inicial=("fin", "desc"),
-    # Paso por paso, persona y horas son lo que ya muestra cada OT. Lo confidencial es el
-    # ranking: las horas estimadas y reales sumadas por persona (la tarjeta
-    # /dashboard/rendimiento-operarios). Eso pide la sección.
+    # Paso por paso, persona y horas son lo que ya muestra cada OT. Lo confidencial es
+    # comparar a las personas: agrupar o filtrar por persona, con CUALQUIER cuenta. No sólo
+    # las horas: la CANTIDAD de pasos de cada una es la tarjeta /dashboard/rendimiento-
+    # operarios y las «tareas completadas» del reporte mensual, que piden la sección.
     por_persona=("persona",),
+    persona_confidencial=True,
 )
 
 
-# ── 3. Personas: sus tiempos, su rendimiento y sus ausencias en el período ──
-
-def _personas_pasos(ctx: Contexto):
-    """Los pasos TERMINADOS de cada persona con el fin adentro del período (sin período:
-    todos), ya sumados. Una tabla derivada y no una subconsulta por columna: el último
-    plan se calcula una vez, no una por persona."""
-    def armar():
-        x = OrdenTrabajoProceso.__table__.alias("otp_p")
-        up = _ultimo_plan()
-        quien = func.coalesce(x.c.id_operario, up.c.id_operario)
-        horas = horas_reales(x.c.inicio_real, x.c.fin_real)
-        condiciones = [x.c.id_estado == 3, fecha_real(x.c.fin_real), quien.isnot(None)]
-        if ctx.desde:
-            condiciones.append(x.c.fin_real >= _fecha(datetime.combine(ctx.desde, datetime.min.time())))
-        if ctx.hasta:
-            condiciones.append(x.c.fin_real < _fecha(
-                datetime.combine(ctx.hasta + timedelta(days=1), datetime.min.time())))
-        return (
-            select(
-                quien.label("id_persona"),
-                func.count().label("pasos"),
-                func.sum(horas).label("horas_reales"),
-                # Lo estimado sólo de los pasos que se pudieron medir: si no, la eficiencia
-                # compararía horas estimadas de pasos sin fin contra nada.
-                func.sum(case((horas.isnot(None), x.c.tiempo_proceso / 60.0), else_=None))
-                .label("horas_estimadas"),
-            )
-            .select_from(x.outerjoin(up, up.c.id_otp == x.c.id))
-            .where(*condiciones)
-            .group_by(quien)
-            .subquery("pasos_p")
-        )
-    return ctx.memo("personas_pasos", armar)
+# ── 3. Personas: su rendimiento (el de su ficha) y sus ausencias en el período ──
 
 
 def _personas_ausencias(ctx: Contexto):
@@ -792,29 +785,28 @@ def _personas_ausencias(ctx: Contexto):
     return ctx.memo("personas_ausencias", armar)
 
 
-def _col_pasos(nombre: str):
-    return lambda ctx: _personas_pasos(ctx).c[nombre]
+def _de_la_ficha(codigo: str, nombre: str, tipo: str, valor: str, **kw) -> Columna:
+    """Un número del reporte de la ficha de la persona (RF-07): se calcula en Python con
+    el MISMO servicio que la ficha y el reporte mensual (ver Columna.de_la_ficha). En SQL
+    es un NULL que después se reemplaza."""
+    return C(codigo, nombre, tipo, lambda ctx: literal(None, Float()), de_la_ficha=valor,
+             filtrable=False, agrupable=False, requisitos=REQUISITOS_RENDIMIENTO, **kw)
 
 
-def _eficiencia(ctx: Contexto) -> ColumnElement:
-    t = _personas_pasos(ctx)
-    return case(
-        (and_(t.c.horas_reales > 0, t.c.horas_estimadas > 0),
-         t.c.horas_estimadas * 100.0 / t.c.horas_reales),
-        else_=None,
-    )
+_AYUDA_FICHA = (" Es el mismo número que la ficha de la persona (Rendimiento) y el reporte "
+                "mensual, con el tiempo EFECTIVO: dentro de la jornada y sin las pausas. Es de "
+                "la sección confidencial «Rendimiento por persona».")
 
 
 PERSONAS = Fuente(
     codigo="personas",
     nombre="Personas",
-    descripcion="Cada persona con los pasos que terminó, sus horas y sus días de ausencia en el período.",
+    descripcion="Cada persona con sus tareas, sus horas y su eficiencia (las de su ficha) y sus días de ausencia en el período.",
     icono="users",
     requisitos=POLITICAS["asistencia"].leer,
     permiso="Pide poder ver la ficha de las personas (Recursos u Operaciones).",
     origen=lambda ctx: (
-        op.outerjoin(_personas_pasos(ctx), _personas_pasos(ctx).c.id_persona == op.c.id)
-        .outerjoin(_personas_ausencias(ctx), _personas_ausencias(ctx).c.id_operario == op.c.id)
+        op.outerjoin(_personas_ausencias(ctx), _personas_ausencias(ctx).c.id_operario == op.c.id)
     ),
     clave=lambda ctx: op.c.id,
     columnas=(
@@ -824,31 +816,47 @@ PERSONAS = Fuente(
         C("categoria", "Categoría", "texto", op.c.categoria, por_defecto=True),
         C("activo", "Activo", "booleano", si_no(op.c.disponible == True),  # noqa: E712
           ayuda="Activo o Ausente en su ficha, hoy."),
-        C("pasos_terminados", "Pasos terminados", "entero",
-          lambda ctx: func.coalesce(_personas_pasos(ctx).c.pasos, 0), totaliza=True,
-          por_defecto=True, ayuda="Pasos terminados con el fin adentro del período."),
-        # Las horas de cada persona, una al lado de la otra, son el ranking de la sección
-        # confidencial «Rendimiento por persona» (estimado y real por persona): sin la
-        # sección no aparecen, igual que la eficiencia que sale de ellas. La ficha de
-        # RF-06 da esos totales de a UNA persona; lo cuidado es la comparación de todos.
-        C("horas_reales", "Horas reales", "numero", _col_pasos("horas_reales"), decimales=2,
-          totaliza=True, por_defecto=True, requisitos=REQUISITOS_RENDIMIENTO,
-          ayuda="De esos pasos, del arranque al fin, corridas (incluye noches y pausas). "
-                "Es de la sección confidencial «Rendimiento por persona»."),
-        C("horas_estimadas", "Horas estimadas", "numero", _col_pasos("horas_estimadas"),
-          decimales=2, totaliza=True, requisitos=REQUISITOS_RENDIMIENTO,
-          ayuda="Es de la sección confidencial «Rendimiento por persona»."),
-        C("eficiencia", "Eficiencia", "porcentaje", _eficiencia, decimales=0, medible=False,
-          requisitos=REQUISITOS_RENDIMIENTO,
-          ayuda="Horas estimadas sobre horas reales: más de 100 % es más rápido que lo "
-                "estimado. Es de la sección confidencial «Rendimiento por persona»."),
+        # Lo que hizo cada persona, una al lado de la otra, es el ranking de la sección
+        # confidencial «Rendimiento por persona»: sin la sección no aparece nada de esto
+        # (tampoco la CANTIDAD de tareas, que es la tarjeta /dashboard/rendimiento-operarios
+        # y las «tareas completadas» del reporte mensual). La ficha da esos números de a
+        # UNA persona; lo cuidado es la comparación de todos.
+        #
+        # Y son LOS números de la ficha (RF-07), no otra cuenta con el mismo nombre: antes
+        # las «Horas reales» de acá eran de reloj (del arranque al fin, con noches, fines de
+        # semana y pausas) y la eficiencia salía de ésas, mientras la ficha y el reporte
+        # mensual usan el tiempo efectivo. Mismo nombre, número muy distinto.
+        _de_la_ficha("pasos_terminados", "Tareas completadas", "entero", "tareas_completadas",
+                     totaliza=True, por_defecto=True,
+                     ayuda="Pasos terminados con el fin adentro del período (la atribución de "
+                           "la ficha: la persona elegida en la OT o la del último plan)."
+                           + _AYUDA_FICHA),
+        _de_la_ficha("horas_trabajadas", "Horas trabajadas", "numero", "horas_trabajadas",
+                     decimales=2, totaliza=True, por_defecto=True,
+                     ayuda="Lo trabajado ADENTRO del período en todos sus pasos, terminados o "
+                           "no, sin contar dos veces la hora en que tenía dos pasos abiertos."
+                           + _AYUDA_FICHA),
+        _de_la_ficha("horas_estimadas", "Horas estimadas", "numero", "estimado", decimales=2,
+                     totaliza=True,
+                     ayuda="Lo estimado en la OT para las tareas completadas que se pudieron "
+                           "medir: el numerador de la eficiencia." + _AYUDA_FICHA),
+        _de_la_ficha("horas_reales", "Horas reales (efectivas)", "numero", "efectivo",
+                     decimales=2, totaliza=True, por_defecto=True,
+                     ayuda="Lo que le llevaron esas mismas tareas, enteras: el denominador de la "
+                           "eficiencia." + _AYUDA_FICHA),
+        _de_la_ficha("eficiencia", "Eficiencia", "porcentaje", "eficiencia", decimales=0,
+                     medible=False,
+                     ayuda="Horas estimadas sobre horas reales (efectivas): más de 100 % es más "
+                           "rápido que lo estimado." + _AYUDA_FICHA),
         C("ausencias", "Ausencias", "entero",
           lambda ctx: func.coalesce(_personas_ausencias(ctx).c.ausencias, 0), totaliza=True),
         C("dias_ausente", "Días de ausencia", "entero",
           lambda ctx: func.coalesce(_personas_ausencias(ctx).c.dias, 0), totaliza=True,
           por_defecto=True, ayuda="Días corridos ausente dentro del período (sin período: hasta hoy)."),
     ),
-    periodo_interno="Cuenta los pasos terminados y los días de ausencia de ese período.",
+    periodo_interno=("Cuenta las tareas, las horas y los días de ausencia de ese período. "
+                     "Las tareas y las horas, como la ficha de cada persona: con período, de "
+                     "hasta un año."),
     orden_inicial=("persona", "asc"),
 )
 
@@ -970,9 +978,12 @@ USO_MAQUINAS = Fuente(
     ),
     periodo=("inicio", "fin"),
     orden_inicial=("inicio", "desc"),
-    # Las horas de uso sumadas por persona son horas de cada una: el ranking de la sección
-    # confidencial, como en «Pasos de las OT».
-    por_persona=("persona",),
+    # Agrupar o filtrar por persona (con cualquier cuenta) compara a las personas: es de la
+    # sección confidencial, como en «Pasos de las OT». Y no sólo la persona del paso:
+    # «Lo arrancó» y «Lo cerró» también nombran a una persona, y contar tramos por ellas
+    # es el mismo ranking por otra puerta.
+    por_persona=("persona", "arranco", "cerro"),
+    persona_confidencial=True,
 )
 
 

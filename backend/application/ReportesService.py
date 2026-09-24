@@ -26,6 +26,17 @@ LOS TOPES
   · 20 segundos por consulta en Postgres (statement_timeout, sólo para este pedido) y 25
     en total: un reporte de «todo, desde siempre» sobre la auditoría no puede tomar una
     conexión del pooler —15 para todo el proyecto— hasta que alguien se canse.
+
+LOS NÚMEROS DE LA FICHA (RF-07)
+
+Las tareas, las horas y la eficiencia de cada persona (fuente «Personas») no se cuentan en
+SQL: son las del reporte de su ficha (RendimientoOperarioService.reporte), con el tiempo
+EFECTIVO de RF-06 (jornada menos pausas), el mismo que usa el reporte mensual. Antes eran
+horas de reloj con el mismo nombre, y no cerraban con la ficha. Cuando un reporte las
+pide, la consulta trae las filas de la fuente (son pocas: una por persona, con tope
+TOPE_FILAS_EN_PYTHON), se completan esos valores y el orden, los totales y la agrupación
+se hacen acá, con las mismas reglas que en SQL (los vacíos al final, la suma de nada es
+vacío). Ver `_correr_con_la_ficha`.
 """
 from __future__ import annotations
 
@@ -41,6 +52,9 @@ from sqlalchemy import Date, false, func, literal, or_, select, text, true
 from sqlalchemy.exc import DBAPIError
 
 from backend.application import ReportesCatalogo as cat
+from backend.application.AusenciaService import PRIMER_DIA_DE_PERIODO, ULTIMO_DIA_DE_PERIODO
+from backend.application.RendimientoOperarioService import RendimientoOperarioService
+from backend.application.TiempoEfectivo import _CENTINELA as CENTINELA
 from backend.application.ReportesCatalogo import (
     ATAJOS,
     EJEMPLOS,
@@ -52,6 +66,7 @@ from backend.application.ReportesCatalogo import (
     OPCIONES_DE_TABLA,
     OPCIONES_FIJAS,
     OPERACION_DE_FILTRO,
+    TOPE_DIAS_DE_LA_FICHA,
     Columna,
     Contexto,
     Fuente,
@@ -64,6 +79,8 @@ from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.loggers.logger import logger
 from backend.core.permisos import PermisosUsuario
 from backend.domain.Operario import Operario
+from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+from backend.domain.Planificacion import Planificacion
 from backend.infrastructure.estado_ordenes import ahora_ar
 
 TOPE_FILAS = 20_000
@@ -74,6 +91,8 @@ TOPE_SEGUNDOS = 25
 # todo lo que el catálogo deja pedir mide ~3 KB; esto es el doble y pico.
 LARGO_MAXIMO_CONFIG = 8000
 TOPE_OPCIONES = 5000
+# Las filas que se traen enteras para completar los números de la ficha (una por persona).
+TOPE_FILAS_EN_PYTHON = 2000
 
 
 class ReporteSinPermiso(Exception):
@@ -214,6 +233,20 @@ class Plan:
     def agrupado(self) -> bool:
         return bool(self.agrupar)
 
+    def de_la_ficha(self) -> list[Columna]:
+        """Las columnas de la ficha (RF-07) que el reporte USA: las que se muestran, las
+        que se miden en una agrupación y la del orden. Una en `columnas` de un reporte
+        agrupado no se usa (la pantalla manda las dos cosas)."""
+        if self.agrupado:
+            usadas = [m.columna for m in self.medidas if m.columna is not None]
+        else:
+            usadas = [*self.columnas, self.fuente.columna(self.orden_por)]
+        salida = []
+        for c in usadas:
+            if c is not None and c.de_la_ficha and c not in salida:
+                salida.append(c)
+        return salida
+
 
 def _fuente(codigo: str, permisos: PermisosUsuario) -> Fuente:
     fuente = FUENTE_POR_CODIGO.get(codigo)
@@ -237,11 +270,23 @@ def _columna(fuente: Fuente, codigo: Optional[str], permisos: PermisosUsuario) -
 
 def _leer_dia(valor, que: str) -> date:
     if isinstance(valor, date):
-        return valor
-    try:
-        return date.fromisoformat(str(valor).strip()[:10])
-    except ValueError:
-        raise BusinessException(f"{que}: «{valor}» no es una fecha (se espera AAAA-MM-DD).")
+        dia = valor
+    else:
+        try:
+            dia = date.fromisoformat(str(valor).strip()[:10])
+        except ValueError:
+            raise BusinessException(f"{que}: «{valor}» no es una fecha (se espera AAAA-MM-DD).")
+    return _dia_en_rango(dia, que)
+
+
+def _dia_en_rango(dia: date, que: str) -> date:
+    """Un día que se puede pedir. En el borde (9999-12-31) el «día siguiente» con que se
+    cierra cada rango no existe: era un OverflowError y un 500."""
+    if not (PRIMER_DIA_DE_PERIODO <= dia <= ULTIMO_DIA_DE_PERIODO):
+        raise BusinessException(
+            f"{que}: la fecha {dia:%d/%m/%Y} está fuera de rango (entre "
+            f"{PRIMER_DIA_DE_PERIODO:%d/%m/%Y} y {ULTIMO_DIA_DE_PERIODO:%d/%m/%Y}).")
+    return dia
 
 
 def _leer_numero(valor, que: str) -> float:
@@ -337,7 +382,7 @@ def _validar_periodo(fuente: Fuente, p: Optional[PeriodoCfg], permisos, hoy: dat
     else:
         if p.desde is None or p.hasta is None:
             raise BusinessException("El período necesita las dos fechas: desde y hasta.")
-        desde, hasta = p.desde, p.hasta
+        desde, hasta = _dia_en_rango(p.desde, "Período"), _dia_en_rango(p.hasta, "Período")
         if desde > hasta:
             raise BusinessException("El período empieza después de terminar.")
         if (hasta - desde).days > 3660:
@@ -397,17 +442,21 @@ def validar(crudo: Any, permisos: PermisosUsuario, hoy: Optional[date] = None) -
             f"Medir «{de_rendimiento[0].nombre}» agrupando por «{por_persona[0].nombre}» "
             "compara a las personas entre sí: es de la sección confidencial «Rendimiento por "
             "persona». Podés agrupar por otra columna o filtrar una sola persona.")
-    # Las fuentes con `persona_confidencial` (las no conformidades, RF-12): agrupar por la
-    # persona con cualquier cuenta, o filtrar por ella, es lo mismo que /incidencias/
-    # por-persona y ?id_operario=, que piden la sección. La lista con la columna, no.
+    # Las fuentes con `persona_confidencial` (las no conformidades de RF-12, los pasos, el
+    # uso de máquinas): agrupar por la persona con CUALQUIER cuenta, o filtrar por ella,
+    # compara a las personas. También la cantidad: cuántos pasos hizo cada una es la
+    # tarjeta /dashboard/rendimiento-operarios y las «tareas completadas» del reporte
+    # mensual, y cuántas no conformidades, /incidencias/por-persona. Todas piden la
+    # sección. La lista con la columna, no: es lo que ya muestra cada OT.
     if fuente.persona_confidencial and not puede_rendimiento(permisos):
         filtrada = next((f.columna for f in filtros if f.columna.codigo in fuente.por_persona), None)
         if por_persona or filtrada is not None:
             nombre = (por_persona[0] if por_persona else filtrada).nombre
             raise ReporteSinPermiso(
-                f"{'Agrupar' if por_persona else 'Filtrar'} {fuente.nombre.lower()} por «{nombre}» "
+                f"{'Agrupar' if por_persona else 'Filtrar'} «{fuente.nombre}» por «{nombre}» "
                 "compara a las personas entre sí: es de la sección confidencial «Rendimiento "
-                "por persona», como en su pantalla. La lista con la columna sí se puede armar.")
+                "por persona», como en el resto de la app. La lista con la columna sí se "
+                "puede armar.")
 
     if not agrupar and not columnas:
         raise BusinessException("Elegí al menos una columna.")
@@ -431,7 +480,19 @@ def validar(crudo: Any, permisos: PermisosUsuario, hoy: Optional[date] = None) -
     else:
         por, desc = columnas[0].codigo, False
 
-    return Plan(fuente, cfg, columnas, filtros, periodo, agrupar, medidas, por, desc)
+    plan = Plan(fuente, cfg, columnas, filtros, periodo, agrupar, medidas, por, desc)
+    de_la_ficha = plan.de_la_ficha()
+    if de_la_ficha:
+        nombre = de_la_ficha[0].nombre
+        if periodo is None:
+            raise BusinessException(
+                f"«{nombre}» se cuenta por período, como en la ficha de cada persona: elegí "
+                "uno (de hasta un año).")
+        if (periodo.hasta - periodo.desde).days + 1 > TOPE_DIAS_DE_LA_FICHA:
+            raise BusinessException(
+                f"«{nombre}» se cuenta como en la ficha de cada persona, con un período de "
+                f"hasta un año ({TOPE_DIAS_DE_LA_FICHA} días): achicalo.")
+    return plan
 
 
 # ─────────────────────────── 3. armar y correr ───────────────────────────
@@ -503,9 +564,9 @@ def _agregado(funcion: str, expr):
     }[funcion]()
 
 
-def armar_consultas(plan: Plan, ctx: Contexto, permisos: PermisosUsuario, limite: int) -> dict:
-    """Las consultas del reporte, sin correrlas: {"filas", "cuenta"} (y "grupos" si se
-    agrupa). Separado de correrlas para poder mirarlas en un test."""
+def _base(plan: Plan, ctx: Contexto, permisos: PermisosUsuario):
+    """La consulta base (las columnas que hacen falta, con su etiqueta, y los filtros) como
+    subconsulta, y esas columnas."""
     fuente = plan.fuente
     necesarias: list[Columna] = []
 
@@ -537,6 +598,13 @@ def armar_consultas(plan: Plan, ctx: Contexto, permisos: PermisosUsuario, limite
         .where(*condiciones)
         .subquery("base")
     )
+    return base, necesarias
+
+
+def armar_consultas(plan: Plan, ctx: Contexto, permisos: PermisosUsuario, limite: int) -> dict:
+    """Las consultas del reporte, sin correrlas: {"filas", "cuenta"} (y "grupos" si se
+    agrupa). Separado de correrlas para poder mirarlas en un test."""
+    base, _ = _base(plan, ctx, permisos)
 
     if not plan.agrupado:
         orden = base.c[_etiqueta(plan.orden_por)]
@@ -585,27 +653,182 @@ def _dialecto(db) -> str:
         return ""
 
 
-async def _correr(db, consultas: dict) -> dict:
-    """Corre las consultas con el tope de tiempo. En Postgres el tope lo corta la base
+def _se_corto_por_tiempo(e: DBAPIError) -> bool:
+    """¿Es el statement_timeout? Se mira el código (57014, query_canceled) y no sólo el
+    texto: el mensaje sale en el idioma del servidor («cancelando la sentencia...» en una
+    base en castellano) y así el aviso claro se volvía un 500."""
+    orig = getattr(e, "orig", None)
+    for candidato in (orig, getattr(orig, "__cause__", None), e):
+        if candidato is not None and "57014" in (str(getattr(candidato, "sqlstate", "") or ""),
+                                                 str(getattr(candidato, "pgcode", "") or "")):
+            return True
+    texto = str(e).lower()
+    return "statement timeout" in texto or "canceling statement" in texto
+
+
+async def _con_tope(db, trabajo):
+    """Corre `trabajo()` con el tope de tiempo. En Postgres el tope lo corta la base
     (statement_timeout, sólo para esta transacción: SET LOCAL), y el wait_for es por si
     la base ni contesta."""
     async def todo():
         if _dialecto(db) == "postgresql":
             await db.execute(text(f"SET LOCAL statement_timeout = '{int(TOPE_SEGUNDOS_SQL)}s'"))
-        salida = {"filas": (await db.execute(consultas["filas"])).mappings().all(),
-                  "cuenta": (await db.execute(consultas["cuenta"])).mappings().one()}
-        if "grupos" in consultas:
-            salida["grupos"] = (await db.execute(consultas["grupos"])).scalar() or 0
-        return salida
+        return await trabajo()
 
     try:
         return await asyncio.wait_for(todo(), timeout=TOPE_SEGUNDOS)
     except asyncio.TimeoutError:
         raise BusinessException(_TARDO)
     except DBAPIError as e:
-        if "statement timeout" in str(e).lower() or "canceling statement" in str(e).lower():
+        if _se_corto_por_tiempo(e):
             raise BusinessException(_TARDO)
         raise
+
+
+async def _correr(db, consultas: dict) -> dict:
+    """Corre las consultas con el tope de tiempo."""
+    async def trabajo():
+        salida = {"filas": (await db.execute(consultas["filas"])).mappings().all(),
+                  "cuenta": (await db.execute(consultas["cuenta"])).mappings().one()}
+        if "grupos" in consultas:
+            salida["grupos"] = (await db.execute(consultas["grupos"])).scalar() or 0
+        return salida
+
+    return await _con_tope(db, trabajo)
+
+
+# ── los números de la ficha (RF-07), en Python ──
+
+def _de_la_ficha(resumen: Optional[dict]) -> dict:
+    """Los valores de VALORES_DE_LA_FICHA de un resumen de RendimientoOperarioService.
+    `None`: la persona no tiene nada en el período (lo mismo que daría su ficha)."""
+    r = resumen or {"tareas_completadas": 0, "horas_trabajadas_min": 0,
+                    "eficiencia": {"estimado_min": 0, "efectivo_min": 0, "pct": None}}
+    ef = r["eficiencia"]
+    return {
+        "tareas_completadas": r["tareas_completadas"],
+        "horas_trabajadas": (r["horas_trabajadas_min"] or 0) / 60.0,
+        "estimado": (ef["estimado_min"] or 0) / 60.0,
+        "efectivo": (ef["efectivo_min"] or 0) / 60.0,
+        "eficiencia": ef["pct"],
+    }
+
+
+async def valores_de_la_ficha(db, ids: list[int], desde: date, hasta: date) -> dict[int, dict]:
+    """{id de persona: valores de la ficha} en el período, con el MISMO servicio que la
+    ficha de cada persona (RF-07) y el reporte mensual (RF-21): el número es el mismo, no
+    una cuenta parecida.
+
+    La ficha se pide sólo para quien puede tener algo en el período (la misma regla que el
+    reporte mensual: los elegidos a mano en los pasos trabajados y los que algún plan nombró
+    en esas OT; la atribución la decide la ficha). A los demás les toca lo que daría su
+    ficha vacía: cero tareas, cero horas, sin eficiencia."""
+    ini = datetime.combine(desde, time.min)
+    fin = datetime.combine(hasta + timedelta(days=1), time.min)
+    otp = OrdenTrabajoProceso
+    pasos = (await db.execute(
+        select(otp.id_operario, otp.id_orden_trabajo)
+        .where(otp.inicio_real.isnot(None), otp.inicio_real > CENTINELA, otp.inicio_real < fin)
+        .where(or_(otp.fin_real.is_(None), otp.fin_real < CENTINELA, otp.fin_real >= ini))
+    )).all()
+    candidatos = {p.id_operario for p in pasos if p.id_operario is not None}
+    ordenes = sorted({p.id_orden_trabajo for p in pasos})
+    for i in range(0, len(ordenes), 1000):
+        candidatos |= set((await db.execute(
+            select(Planificacion.id_operario).distinct()
+            .where(Planificacion.orden_id.in_(ordenes[i:i + 1000]),
+                   Planificacion.id_operario.isnot(None))
+        )).scalars().all())
+
+    ficha = RendimientoOperarioService(db)
+    salida = {}
+    for id_persona in ids:
+        resumen = None
+        if id_persona in candidatos:
+            resumen = (await ficha.reporte(id_persona, desde, hasta)).data["resumen"]
+        salida[id_persona] = _de_la_ficha(resumen)
+    return salida
+
+
+def _ordenar(filas: list[dict], claves: list[tuple[str, bool]]) -> list[dict]:
+    """Como el ORDER BY del armador: cada clave (etiqueta, descendente) con los vacíos al
+    final. Sorts estables de la menos importante a la más."""
+    salida = list(filas)
+    for clave, desc in reversed(claves):
+        con = [f for f in salida if f[clave] is not None]
+        sin = [f for f in salida if f[clave] is None]
+        con.sort(key=lambda f: f[clave], reverse=desc)
+        salida = con + sin
+    return salida
+
+
+def _agregar(funcion: str, valores: list):
+    """Una cuenta como la de SQL: la cantidad cuenta filas; las otras no miran los vacíos
+    y, si no queda nada, dan vacío."""
+    if funcion == "conteo":
+        return len(valores)
+    hay = [float(v) if isinstance(v, Decimal) else v for v in valores if v is not None]
+    if not hay:
+        return None
+    if funcion == "suma":
+        return sum(hay)
+    if funcion == "promedio":
+        return sum(hay) / len(hay)
+    return min(hay) if funcion == "minimo" else max(hay)
+
+
+async def _correr_con_la_ficha(db, plan: Plan, ctx: Contexto, permisos: PermisosUsuario,
+                               limite: int) -> dict:
+    """Lo mismo que `_correr(armar_consultas(...))`, para un reporte con columnas de la
+    ficha: la base entera (con tope), los valores de la ficha y, acá, el orden, los
+    totales y la agrupación. Devuelve lo mismo que `_correr`."""
+    async def trabajo():
+        base, necesarias = _base(plan, ctx, permisos)
+        filas = [dict(r) for r in (await db.execute(
+            select(base).limit(TOPE_FILAS_EN_PYTHON + 1))).mappings().all()]
+        if len(filas) > TOPE_FILAS_EN_PYTHON:
+            raise BusinessException(
+                f"Hay más de {TOPE_FILAS_EN_PYTHON:,} filas para calcular los números de la "
+                f"ficha de cada persona: agregá un filtro.".replace(",", "."))
+        de_la_ficha = [c for c in necesarias if c.de_la_ficha]
+        if de_la_ficha:
+            valores = await valores_de_la_ficha(db, [f["clave_fila"] for f in filas],
+                                                plan.periodo.desde, plan.periodo.hasta)
+            for f in filas:
+                for c in de_la_ficha:
+                    f[_etiqueta(c.codigo)] = valores[f["clave_fila"]][c.de_la_ficha]
+
+        if not plan.agrupado:
+            ordenadas = _ordenar(filas, [(_etiqueta(plan.orden_por), plan.orden_desc),
+                                         ("clave_fila", False)])
+            cuenta = {"filas": len(filas)}
+            for c in plan.columnas:
+                if c.totaliza:
+                    cuenta[_etiqueta(c.codigo)] = _agregar(
+                        "suma", [f[_etiqueta(c.codigo)] for f in filas])
+            return {"filas": ordenadas[:limite], "cuenta": cuenta}
+
+        claves = [_etiqueta(c.codigo) for c in plan.agrupar]
+        grupos: dict[tuple, list[dict]] = {}
+        for f in filas:
+            grupos.setdefault(tuple(f[k] for k in claves), []).append(f)
+
+        def medir(del_grupo: list[dict]) -> dict:
+            return {f"m{i}": _agregar(m.funcion, [x[_etiqueta(m.columna.codigo)] for x in del_grupo]
+                                      if m.columna else del_grupo)
+                    for i, m in enumerate(plan.medidas)}
+
+        salida = [{**dict(zip(claves, clave)), **medir(del_grupo)}
+                  for clave, del_grupo in grupos.items()]
+        if plan.orden_por.startswith("m") and plan.orden_por[1:].isdigit():
+            por = plan.orden_por
+        else:
+            por = _etiqueta(plan.orden_por)
+        salida = _ordenar(salida, [(por, plan.orden_desc)] + [(k, False) for k in claves])
+        return {"filas": salida[:limite], "cuenta": {"filas": len(filas), **medir(filas)},
+                "grupos": len(salida)}
+
+    return await _con_tope(db, trabajo)
 
 
 _TARDO = (f"El reporte tardó más de {TOPE_SEGUNDOS_SQL} segundos y se cortó. Acotá el período o "
@@ -739,7 +962,10 @@ async def ejecutar(db, crudo: Any, permisos: PermisosUsuario, vista_previa: bool
         ctx.desde, ctx.hasta = plan.periodo.desde, plan.periodo.hasta
 
     limite = FILAS_VISTA_PREVIA if vista_previa else TOPE_FILAS
-    resultado = await _correr(db, armar_consultas(plan, ctx, permisos, limite))
+    if plan.de_la_ficha():
+        resultado = await _correr_con_la_ficha(db, plan, ctx, permisos, limite)
+    else:
+        resultado = await _correr(db, armar_consultas(plan, ctx, permisos, limite))
     cuenta = resultado["cuenta"]
     total_filas = int(cuenta["filas"] or 0)
 

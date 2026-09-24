@@ -277,6 +277,9 @@ async def base(request):
 def reloj(monkeypatch):
     monkeypatch.setattr(rs, "ahora_ar", lambda: AHORA)
     monkeypatch.setattr(guardados_mod, "ahora_ar", lambda: AHORA)
+    # Los números de la ficha (RF-07) los calcula su servicio, con su reloj.
+    from backend.application import RendimientoOperarioService as rend_mod
+    monkeypatch.setattr(rend_mod, "ahora_ar", lambda: AHORA)
 
 
 async def correr(Sesion, config, permisos=ADMIN, vista_previa=False):
@@ -311,9 +314,15 @@ def test_cada_fuente_pide_lo_de_su_pantalla_y_no_una_copia():
     assert f["maquinas"].requisitos is POLITICAS["maquinarias"].leer
     assert f["stock"].requisitos is POLITICAS["piezas"].leer
     assert f["personas"].columna("eficiencia").requisitos is POLITICAS["rendimiento_operario"].leer
-    # Las dos horas con que se calcula la eficiencia, persona por persona, también.
-    assert f["personas"].columna("horas_estimadas").requisitos is POLITICAS["rendimiento_operario"].leer
-    assert f["personas"].columna("horas_reales").requisitos is POLITICAS["rendimiento_operario"].leer
+    # Las dos horas con que se calcula la eficiencia, persona por persona, también. Y las
+    # horas trabajadas y la CANTIDAD de tareas de cada una: son la tarjeta
+    # /dashboard/rendimiento-operarios y las «tareas completadas» del reporte mensual.
+    for codigo in ("horas_estimadas", "horas_reales", "horas_trabajadas", "pasos_terminados"):
+        assert f["personas"].columna(codigo).requisitos is POLITICAS["rendimiento_operario"].leer
+    # Agrupar o filtrar por persona, con cualquier cuenta, en las fuentes de rendimiento.
+    for codigo in ("pasos", "uso_maquinas", "no_conformidades"):
+        assert f[codigo].persona_confidencial, codigo
+    assert set(f["uso_maquinas"].por_persona) == {"persona", "arranco", "cerro"}
 
 
 def test_el_catalogo_no_trae_datos_personales_ni_secretos():
@@ -448,7 +457,14 @@ def test_el_catalogo_trae_solo_lo_que_cada_uno_puede_ver():
     # /dashboard/rendimiento-operarios: estimado y real, persona por persona.
     (SUPERVISOR, _cfg("personas", ["persona", "horas_estimadas", "horas_reales", "pasos_terminados"],
                       periodo={"atajo": "mes_pasado"}), "«Horas estimadas»"),
-    (OPERARIO, _cfg("personas", ["persona", "horas_reales"]), "«Horas reales»"),
+    (OPERARIO, _cfg("personas", ["persona", "horas_reales"]), "«Horas reales (efectivas)»"),
+    # La CANTIDAD de tareas de cada persona también (la tarjeta /rendimiento-operarios).
+    (SUPERVISOR, _cfg("personas", ["persona", "pasos_terminados"], periodo={"atajo": "este_mes"}),
+     "«Tareas completadas»"),
+    (OPERARIO, _cfg("pasos", agrupar=["persona"], medidas=[{"funcion": "conteo"}]),
+     "Rendimiento por persona"),
+    (SUPERVISOR, _cfg("pasos", ["numero", "proceso"], filtros=[
+        {"columna": "persona", "op": "en", "valores": [JUAN]}]), "Rendimiento por persona"),
     # Y el mismo ranking armado desde los pasos: agrupar por persona y sumar las horas.
     (OPERARIO, _cfg("pasos", agrupar=["persona"], medidas=[
         {"funcion": "conteo"}, {"funcion": "suma", "columna": "horas_estimadas"},
@@ -464,18 +480,29 @@ def test_lo_que_no_puede_ver_es_un_403(permisos, config, mensaje):
 
 def test_sin_la_seccion_las_horas_se_miden_por_otra_cosa_que_no_sea_la_persona():
     """Lo que sí puede: la lista de pasos con persona y horas (lo que ya muestra cada OT),
-    agrupar por persona contando, sumar horas por proceso o por máquina, y las horas de
-    una persona filtrada (lo que da su ficha)."""
+    sumar horas por proceso o por máquina, y las ausencias de cada persona.
+
+    Lo que ya NO puede (antes sí, y era un agujero): agrupar por persona CONTANDO, filtrar
+    por una persona, o la cantidad de tareas de cada una en «Personas». Cuántos pasos hizo
+    cada persona, una al lado de la otra, es la tarjeta /dashboard/rendimiento-operarios y
+    las «tareas completadas» del reporte mensual, y las dos piden la sección confidencial
+    «Rendimiento por persona»: el armador no puede ser la puerta de atrás."""
     for quien in (OPERARIO, SUPERVISOR):
         rs.validar(_cfg("pasos", ["numero", "persona", "horas_estimadas", "horas_reales"]), quien, AHORA.date())
-        rs.validar(_cfg("pasos", agrupar=["persona"], medidas=[{"funcion": "conteo"}]), quien, AHORA.date())
         rs.validar(_cfg("pasos", agrupar=["proceso"], medidas=[
             {"funcion": "suma", "columna": "horas_estimadas"},
             {"funcion": "suma", "columna": "horas_reales"}]), quien, AHORA.date())
-        rs.validar(_cfg("pasos", agrupar=["proceso"], filtros=[
-            {"columna": "persona", "op": "en", "valores": [JUAN]}],
-            medidas=[{"funcion": "suma", "columna": "horas_reales"}]), quien, AHORA.date())
-        rs.validar(_cfg("personas", ["persona", "pasos_terminados", "dias_ausente"]), quien, AHORA.date())
+        rs.validar(_cfg("personas", ["persona", "dias_ausente"]), quien, AHORA.date())
+        for prohibido in (
+            _cfg("pasos", agrupar=["persona"], medidas=[{"funcion": "conteo"}]),
+            _cfg("pasos", agrupar=["proceso"], filtros=[
+                {"columna": "persona", "op": "en", "valores": [JUAN]}],
+                medidas=[{"funcion": "suma", "columna": "horas_reales"}]),
+            _cfg("personas", ["persona", "pasos_terminados", "dias_ausente"],
+                 periodo={"atajo": "este_mes"}),
+        ):
+            with pytest.raises(ReporteSinPermiso):
+                rs.validar(prohibido, quien, AHORA.date())
     # Con la sección (el admin la tiene), el ranking sale.
     rs.validar(_cfg("pasos", agrupar=["persona"], medidas=[
         {"funcion": "suma", "columna": "horas_reales"}]), ADMIN, AHORA.date())
@@ -484,8 +511,9 @@ def test_sin_la_seccion_las_horas_se_miden_por_otra_cosa_que_no_sea_la_persona()
 def test_sin_la_seccion_ni_las_horas_por_persona_ni_su_ejemplo():
     for quien in (OPERARIO, SUPERVISOR):
         columnas = {c["codigo"] for c in _fuentes(quien)["personas"]["columnas"]}
-        assert not columnas & {"eficiencia", "horas_estimadas", "horas_reales"}
-        assert "pasos_terminados" in columnas
+        assert not columnas & {"eficiencia", "horas_estimadas", "horas_reales", "horas_trabajadas",
+                               "pasos_terminados"}
+        assert {"persona", "dias_ausente"} <= columnas
         ejemplos = {e["codigo"] for e in rs.catalogo(quien)["ejemplos"]}
         assert "horas_por_persona_y_proceso" not in ejemplos
         assert "ot_entregadas_por_cliente" in ejemplos
@@ -495,10 +523,13 @@ def test_sin_la_seccion_ni_las_horas_por_persona_ni_su_ejemplo():
 
 
 async def test_la_eficiencia_con_la_seccion_confidencial(base):
+    """La eficiencia es la de la ficha: estimado sobre EFECTIVO (jornada menos pausas).
+    JUAN: 101 (08-11 del 01/09, con la OT pausada de 08 a 10: 60 min efectivos) y 103
+    (08-10 del 03/09: 105 min, el corte de las 09:00 no cuenta) → 210 / 165 = 127 %.
+    ANA: el 102 (08:00-09:30 del 02/09: 75 min) contra 60 estimados → 80 %."""
     r = await correr(base, _cfg("personas", ["persona", "eficiencia"], periodo={"atajo": "este_mes"}),
                      JEFE_CON_RENDIMIENTO)
-    assert dict(zip(_col(r, "persona"), _col(r, "eficiencia"))) == pytest.approx(
-        {"ANA GIL": 66.666667, "JUAN PEREZ": 70.0}, rel=1e-4)
+    assert dict(zip(_col(r, "persona"), _col(r, "eficiencia"))) == {"ANA GIL": 80, "JUAN PEREZ": 127}
 
 
 async def test_la_auditoria_esconde_lo_mismo_que_su_pantalla(base):
@@ -665,26 +696,98 @@ async def test_ot_entregadas_por_cliente_el_ejemplo(base):
 
 
 async def test_las_personas_con_el_periodo_adentro(base):
-    cols = ["persona", "pasos_terminados", "horas_reales", "horas_estimadas", "ausencias", "dias_ausente"]
+    """Horas EFECTIVAS (jornada menos pausas), las de la ficha. Ver la cuenta de cada paso
+    en test_la_eficiencia_con_la_seccion_confidencial."""
+    cols = ["persona", "pasos_terminados", "horas_trabajadas", "horas_reales", "horas_estimadas",
+            "ausencias", "dias_ausente"]
     r = await correr(base, _cfg("personas", cols, periodo={"atajo": "este_mes"}))
     assert {f["persona"]: [f[c] for c in cols[1:]] for f in r["filas"]} == {
-        # 101 y 103; ausente del 14 al 16 (2 días) y desde el 22 hasta hoy (2).
-        "JUAN PEREZ": [2, pytest.approx(5.0), pytest.approx(3.5), 2, 4],
-        # 102 (por el plan); las vacaciones del 30/08 al 02/09 tocan septiembre un día.
-        "ANA GIL": [1, pytest.approx(1.5), pytest.approx(1.0), 1, 1],
+        # 101 y 103 (60 + 105 min); ausente del 14 al 16 (2 días) y desde el 22 hasta hoy (2).
+        "JUAN PEREZ": [2, pytest.approx(2.75), pytest.approx(2.75), pytest.approx(3.5), 2, 4],
+        # 102 (por el plan: 08:00-09:30 del 02/09, 75 min); el 104 en curso no es de nadie.
+        # Las vacaciones del 30/08 al 02/09 (vuelve el 02) tocan septiembre un día, el 01.
+        "ANA GIL": [1, pytest.approx(1.25), pytest.approx(1.25), pytest.approx(1.0), 1, 1],
     }
+    assert r["totales"]["horas_trabajadas"] == pytest.approx(4.0)
+    assert r["totales"]["pasos_terminados"] == 3
     r = await correr(base, _cfg("personas", cols, periodo={"atajo": "mes_pasado"}))
     assert {f["persona"]: [f[c] for c in cols[1:]] for f in r["filas"]} == {
-        "JUAN PEREZ": [0, None, None, 0, 0],
-        "ANA GIL": [1, pytest.approx(4.0), pytest.approx(3.0), 1, 2],
+        "JUAN PEREZ": [0, 0, 0, 0, 0, 0],
+        # 105: 08-12 del 28/08 (viernes): 225 min efectivos (sin el corte de las 09:00)
+        # contra 180 estimados.
+        "ANA GIL": [1, pytest.approx(3.75), pytest.approx(3.75), pytest.approx(3.0), 1, 2],
     }
-    # Sin período: todo, y las ausencias hasta hoy.
-    r = await correr(base, _cfg("personas", cols))
-    assert {f["persona"]: [f[c] for c in cols[1:]] for f in r["filas"]} == {
-        "JUAN PEREZ": [2, pytest.approx(5.0), pytest.approx(3.5), 2, 4],
-        "ANA GIL": [2, pytest.approx(5.5), pytest.approx(4.0), 1, 3],
-    }
+    # Sin período: las ausencias hasta hoy sí; los números de la ficha, no (la ficha
+    # siempre es de un período).
+    r = await correr(base, _cfg("personas", ["persona", "ausencias", "dias_ausente"]))
+    assert {f["persona"]: [f["ausencias"], f["dias_ausente"]] for f in r["filas"]} == {
+        "JUAN PEREZ": [2, 4], "ANA GIL": [1, 3]}
     assert "periodo" not in r["criterios"] or r["criterios"]["periodo"] is None
+    with pytest.raises(BusinessException, match="por período"):
+        await correr(base, _cfg("personas", cols))
+    with pytest.raises(BusinessException, match="hasta un año"):
+        await correr(base, _cfg("personas", cols, periodo={"desde": "2024-01-01", "hasta": "2026-09-23"}))
+
+
+async def test_las_horas_de_la_persona_cierran_con_su_ficha_y_el_reporte_mensual(base, monkeypatch):
+    """El mismo número en las tres pantallas: el armador («Personas», con las columnas
+    efectivas), la ficha de la persona (RF-07) y el reporte mensual (RF-21). Antes el
+    armador daba horas de reloj con el mismo nombre."""
+    from backend.application import RendimientoOperarioService as rend_mod
+    from backend.application.ReporteMensualService import Alcance, ReporteMensualService
+
+    cols = ["persona", "pasos_terminados", "horas_trabajadas", "horas_estimadas", "horas_reales",
+            "eficiencia"]
+    r = await correr(base, _cfg("personas", cols, periodo={"desde": "2026-09-01", "hasta": "2026-09-23"}))
+    armador = {f["persona"]: f for f in r["filas"]}
+    async with base() as s:
+        mensual = await ReporteMensualService(s)._personas_del_mes(
+            _MesDePrueba(), [], Alcance.todo())
+        del_mensual = {f["persona"]: f for f in mensual["filas"]}
+        for id_persona, nombre in ((JUAN, "JUAN PEREZ"), (ANA, "ANA GIL")):
+            ficha = (await rend_mod.RendimientoOperarioService(s).reporte(
+                id_persona, "2026-09-01", "2026-09-23")).data["resumen"]
+            a, m = armador[nombre], del_mensual[nombre]
+            assert a["pasos_terminados"] == ficha["tareas_completadas"] == m["tareas_completadas"]
+            assert a["horas_trabajadas"] * 60 == pytest.approx(ficha["horas_trabajadas_min"])
+            assert m["horas_trabajadas_min"] == ficha["horas_trabajadas_min"]
+            assert a["horas_estimadas"] * 60 == pytest.approx(ficha["eficiencia"]["estimado_min"])
+            assert a["horas_reales"] * 60 == pytest.approx(ficha["eficiencia"]["efectivo_min"])
+            assert m["efectivo_min"] == ficha["eficiencia"]["efectivo_min"]
+            assert a["eficiencia"] == ficha["eficiencia"]["pct"] == m["eficiencia_pct"]
+    # Y no son las horas de reloj: el 101 estuvo pausado dos horas.
+    assert armador["JUAN PEREZ"]["horas_reales"] != pytest.approx(5.0)
+
+
+class _MesDePrueba:
+    """Lo que _personas_del_mes mira de un mes: septiembre hasta «ahora» (23/09 12:00)."""
+    ini = datetime(2026, 9, 1)
+    corte = datetime(2026, 9, 24)
+    ahora = AHORA
+    parcial = True
+    ultimo_dia = date(2026, 9, 30)
+
+
+async def test_personas_agrupadas_y_ordenadas_por_un_numero_de_la_ficha(base):
+    """Con los números de la ficha el orden, los totales y la agrupación se hacen en
+    Python, con las reglas de SQL: vacíos al final, la suma de nada es vacío."""
+    r = await correr(base, _cfg("personas", ["persona", "eficiencia", "dias_ausente"],
+                                periodo={"atajo": "este_mes"},
+                                orden={"por": "eficiencia", "direccion": "desc"}))
+    assert _col(r, "persona") == ["JUAN PEREZ", "ANA GIL"]
+    r = await correr(base, _cfg("personas", agrupar=["categoria"], periodo={"atajo": "este_mes"},
+                                medidas=[{"funcion": "conteo"},
+                                         {"funcion": "suma", "columna": "horas_reales"},
+                                         {"funcion": "maximo", "columna": "pasos_terminados"}],
+                                orden={"por": "m1", "direccion": "desc"}))
+    assert [(f["categoria"], f["m0"], f["m1"], f["m2"]) for f in r["filas"]] == [
+        ("OFICIAL", 1, pytest.approx(2.75), 2), ("MEDIO OFICIAL", 1, pytest.approx(1.25), 1)]
+    assert r["totales"] == {"m0": 2, "m1": pytest.approx(4.0), "m2": 2}
+    assert r["total_grupos"] == 2
+    # La vista previa recorta las filas, no los totales.
+    r = await correr(base, _cfg("personas", ["persona", "horas_reales"], periodo={"atajo": "este_mes"}),
+                     vista_previa=True)
+    assert r["totales"] == {"horas_reales": pytest.approx(4.0)}
 
 
 async def test_las_ausencias(base):
@@ -765,13 +868,15 @@ async def test_todas_las_columnas_de_todas_las_fuentes_corren(base):
     dialecto no entiende salta acá y no en la pantalla."""
     for fuente in cat.FUENTES:
         todas = [c.codigo for c in fuente.columnas]
-        await correr(base, _cfg(fuente.codigo, todas))
+        # Los números de la ficha (Personas) se cuentan por período.
+        periodo = {"periodo": {"atajo": "este_mes"}} if fuente.periodo_interno else {}
+        await correr(base, _cfg(fuente.codigo, todas, **periodo))
         for c in fuente.columnas:
             if c.agrupable:
                 medidas = [{"funcion": "conteo"}] + [
                     {"funcion": fn, "columna": m.codigo}
                     for m in fuente.columnas for fn in m.funciones()][:7]
-                await correr(base, _cfg(fuente.codigo, agrupar=[c.codigo], medidas=medidas))
+                await correr(base, _cfg(fuente.codigo, agrupar=[c.codigo], medidas=medidas, **periodo))
 
 
 async def test_los_criterios_dichos_en_castellano(base):
@@ -806,6 +911,49 @@ async def test_el_tope_de_tiempo(monkeypatch):
 
     with pytest.raises(BusinessException, match="tardó más"):
         await rs.ejecutar(_Lenta(), _cfg("maquinas", ["maquina"]), ADMIN)
+
+
+async def test_el_corte_de_la_base_es_un_aviso_aunque_hable_castellano():
+    """Postgres dice el statement_timeout en el idioma del servidor: en una base en
+    castellano, «cancelando la sentencia...». Se reconoce por el código (57014), no por el
+    texto en inglés: si no, el aviso claro era un 500."""
+    from sqlalchemy.exc import DBAPIError
+
+    class _Original(Exception):
+        sqlstate = "57014"
+
+    class _Cortada:
+        def get_bind(self):
+            raise RuntimeError("sin base")
+
+        async def execute(self, *_):
+            raise DBAPIError("SELECT ...", {}, _Original(
+                "cancelando la sentencia debido a que se agotó el tiempo de espera de sentencias"))
+
+    with pytest.raises(BusinessException, match="tardó más"):
+        await rs.ejecutar(_Cortada(), _cfg("maquinas", ["maquina"]), ADMIN)
+
+
+async def test_en_postgres_el_corte_de_verdad_es_un_aviso(base, monkeypatch):
+    if base.motor != "postgres":
+        pytest.skip("sólo Postgres tiene statement_timeout")
+    monkeypatch.setattr(rs, "TOPE_SEGUNDOS_SQL", 1)
+    async with base() as s:
+        with pytest.raises(BusinessException, match="tardó más"):
+            await rs._con_tope(s, lambda: s.execute(text("SELECT pg_sleep(3)")))
+
+
+@pytest.mark.parametrize("config", [
+    _cfg("ordenes", ["numero"], periodo={"columna": "fecha_entrada", "desde": "9999-12-30",
+                                         "hasta": "9999-12-31"}),
+    _cfg("ordenes", ["numero"], filtros=[{"columna": "fecha_entrada", "op": "entre",
+                                          "hasta": "9999-12-31"}]),
+    _cfg("ausencias", ["persona"], periodo={"desde": "0001-01-01", "hasta": "0001-01-02"}),
+])
+async def test_una_fecha_fuera_de_rango_es_un_422_y_no_un_500(base, config):
+    """9999-12-31: el día siguiente con que se cierra el rango no existe (OverflowError)."""
+    with pytest.raises(BusinessException, match="fuera de rango"):
+        await correr(base, config)
 
 
 async def test_en_postgres_el_tope_lo_pone_la_base(base):
@@ -993,7 +1141,7 @@ async def test_un_guardado_que_dejo_de_poder_correr_se_ve_marcado(api):
     """A quien le sacaron un permiso: su reporte sigue en la lista (para poder borrarlo),
     marcado como no disponible."""
     api.quien.usar(9, "jefe", JEFE_CON_RENDIMIENTO)
-    cfg = _cfg("personas", ["persona", "eficiencia"])
+    cfg = _cfg("personas", ["persona", "eficiencia"], periodo={"atajo": "este_mes"})
     r = await api.post("/reportes/personalizados/guardados", json=_guardar("Eficiencia", cfg))
     assert r.status_code == 200
     api.quien.usar(9, "jefe", _permisos("jefe", {"dashboard": "read", "recursos": "read"}, id_usuario=9))
@@ -1102,6 +1250,15 @@ async def test_uso_de_maquinas_rf10_con_su_permiso_y_sin_ranking_por_persona(bas
     with pytest.raises(ReporteSinPermiso):
         await correr(base, _cfg("uso_maquinas", ["persona"], agrupar=["persona"],
                                 medidas=[{"funcion": "suma", "columna": "horas_uso"}]), SUPERVISOR)
+    # Tampoco contando tramos por quién los arrancó o los cerró: también nombran a una
+    # persona, y es el mismo ranking por otra puerta.
+    for codigo in ("persona", "arranco", "cerro"):
+        with pytest.raises(ReporteSinPermiso, match="Rendimiento por persona"):
+            await correr(base, _cfg("uso_maquinas", agrupar=[codigo],
+                                    medidas=[{"funcion": "conteo"}]), SUPERVISOR)
+    with pytest.raises(ReporteSinPermiso, match="Rendimiento por persona"):
+        await correr(base, _cfg("uso_maquinas", ["maquina"], filtros=[
+            {"columna": "arranco", "op": "contiene", "valor": "juan"}]), SUPERVISOR)
     lista = await correr(base, _cfg("uso_maquinas", ["maquina", "persona", "horas_uso", "no_suma"],
                                     orden={"por": "inicio", "direccion": "asc"}), SUPERVISOR)
     assert _col(lista, "no_suma") == [None, "Fuera de servicio", None, None]
