@@ -27,9 +27,10 @@
  *    la ficha de la OT): la OT por su número, el paso, cuántas de cuántas, quién hizo
  *    las piezas y qué se hace con lo rechazado. Aparece al toque en la lista.
  *  · Se filtra por quién hizo las piezas, y «Por persona» las agrupa: «piezas
- *    rechazadas por persona este mes», exportable. Esa vista pide la sección
+ *    rechazadas por persona este mes», exportable. Las dos cosas piden la sección
  *    confidencial «Rendimiento por persona» (la misma del reporte de RF-07): sin ella no
- *    aparece. La lista de siempre, que ya decía quién hizo cada una, sigue igual.
+ *    aparecen, y el servidor tampoco las contesta. La lista de siempre, que ya decía
+ *    quién hizo cada una, sigue igual.
  *  · Con un servidor de antes del 23/09 nada de eso aparece: la pantalla queda como
  *    estaba (guardar un tipo nuevo fallaría y el filtro por persona no filtraría).
  */
@@ -59,6 +60,7 @@ import {
     type PersonaAgrupada,
     type Persona,
     type ResumenNC as Resumen,
+    entraEnElFiltro,
     filaProvisoria,
     mesEnCurso,
     nombreVisible,
@@ -152,6 +154,14 @@ export default function NoConformidadesPage() {
     // La lista de siempre, o agrupada por quién hizo las piezas.
     const [vista, setVista] = useState<"lista" | "persona">("lista");
     const verPorPersona = vista === "persona" && veRendimiento && sabeCargar;
+    /**
+     * Filtrar por quién hizo las piezas: con un servidor que sabe de rechazos y con la
+     * sección «Rendimiento por persona». Filtrada por una persona, la lista y su resumen
+     * son lo mismo que su ficha (piezas y porcentaje de rechazo), y el servidor lo pide
+     * con esa sección (revisión del 23/09: sin ella el supervisor lo esquivaba con el
+     * filtro). Sin la sección la lista sigue diciendo quién hizo cada una, como siempre.
+     */
+    const filtraPorPersona = sabeCargar && veRendimiento;
 
     // El formulario de carga, y lo tipeado si el servidor dijo que no.
     const [formulario, setFormulario] = useState(false);
@@ -175,9 +185,10 @@ export default function NoConformidadesPage() {
         if (hasta) p.set("hasta", hasta);
         // Con un servidor de antes se ignoraría sin decir nada y la lista parecería
         // filtrada sin estarlo: sólo se manda si el servidor sabe de rechazos.
-        if (persona && sabeCargar) p.set("id_operario", persona);
+        // Sin la sección, tampoco: el servidor contestaría 403 y la lista quedaría vacía.
+        if (persona && filtraPorPersona) p.set("id_operario", persona);
         return p.toString();
-    }, [ot, tipo, gravedad, estado, desde, hasta, persona, sabeCargar]);
+    }, [ot, tipo, gravedad, estado, desde, hasta, persona, filtraPorPersona]);
 
     const cargar = useCallback(async () => {
         setCargando(true);
@@ -267,7 +278,7 @@ export default function NoConformidadesPage() {
         ...(tipo ? [`Tipo: ${tipos[tipo] ?? tipo}`] : []),
         ...(desde ? [`Desde: ${fechaDeFiltro(desde)}`] : []),
         ...(hasta ? [`Hasta: ${fechaDeFiltro(hasta)}`] : []),
-        ...(persona && sabeCargar ? [`Hizo las piezas: ${personas.find((x) => String(x.id) === persona)?.nombre ?? persona}`] : []),
+        ...(persona && filtraPorPersona ? [`Hizo las piezas: ${personas.find((x) => String(x.id) === persona)?.nombre ?? persona}`] : []),
         ...(hayMas ? [`Sólo las ${filas.length} más nuevas: hay más que no entran en la pantalla`] : []),
     ];
 
@@ -313,7 +324,12 @@ export default function NoConformidadesPage() {
         setOt(""); setTipo(null); setGravedad(null); setEstado(null);
         setDesde(""); setHasta(""); setPersona("");
     };
-    const hayFiltros = !!(ot || tipo || gravedad || estado || desde || hasta || persona);
+    const hayFiltros = !!(ot || tipo || gravedad || estado || desde || hasta || (persona && filtraPorPersona));
+    /** Los filtros que de verdad viajan al servidor (los mismos de `queryFiltros`). */
+    const filtrosActivos = {
+        ot, tipo, gravedad, estado, desde, hasta,
+        persona: filtraPorPersona ? persona : "",
+    };
     const mes = mesEnCurso();
     const esEsteMes = desde === mes.desde && hasta === mes.hasta;
     const porPersona = usePorPersona(queryFiltros, verPorPersona);
@@ -332,12 +348,33 @@ export default function NoConformidadesPage() {
             abiertas: r.abiertas + signo,
             piezas_afectadas: r.piezas_afectadas + signo * piezas,
         } : r));
-        setFilas((l) => [temporal, ...l]);
-        mover(1);
+        // Sólo va a la lista si entra en los filtros puestos (revisión del 23/09: con
+        // «Quién hizo las piezas = Juan», un rechazo de María quedaba en la lista de Juan,
+        // descuadraba el resumen y salía en su Exportar). Los filtros se toman ahora: si
+        // alguien los cambia mientras guarda, la lista se vuelve a pedir igual.
+        const filtros = filtrosActivos;
+        const seVe = entraEnElFiltro(temporal, filtros);
+        if (seVe) {
+            setFilas((l) => [temporal, ...l]);
+            mover(1);
+        }
         try {
             const guardada = await registrarRechazo(cuerpo);
-            setFilas((l) => l.map((f) => (f.id === temporal.id ? guardada : f)));
-            toast.success(`Registrada en la OT ${guardada.nro_ot ?? vista.nro_ot ?? ""}`.trim());
+            // Lo que manda es lo que guardó el servidor (su fecha, su número de OT).
+            const entra = entraEnElFiltro(guardada, filtros);
+            if (entra) {
+                setFilas((l) => (seVe
+                    ? l.map((f) => (f.id === temporal.id ? guardada : f))
+                    : [guardada, ...l]));
+            } else if (seVe) {
+                setFilas((l) => l.filter((f) => f.id !== temporal.id));
+            }
+            const donde = `Registrada en la OT ${guardada.nro_ot ?? vista.nro_ot ?? ""}`.trim();
+            if (entra) {
+                toast.success(donde);
+            } else {
+                toast.success(donde, { description: "No entra en los filtros que están puestos, por eso no aparece en la lista." });
+            }
             if (verPorPersona) void porPersona.recargar();
             // El porcentaje de rechazo del encabezado no se puede recontar acá (sale de
             // todas las filas, no de las que se ven): se pide sólo el resumen, en silencio.
@@ -346,8 +383,10 @@ export default function NoConformidadesPage() {
                 .then((j) => { if (j?.data?.resumen) setResumen(j.data.resumen); })
                 .catch(() => { /* queda el que se recontó a mano */ });
         } catch (e) {
-            setFilas((l) => l.filter((f) => f.id !== temporal.id));
-            mover(-1);
+            if (seVe) {
+                setFilas((l) => l.filter((f) => f.id !== temporal.id));
+                mover(-1);
+            }
             toast.error("No se registró", { description: e instanceof Error ? e.message : undefined });
             setBorrador(lo);
             setFormulario(true);
@@ -464,7 +503,7 @@ export default function NoConformidadesPage() {
                               onClick={() => { if (esEsteMes) { setDesde(""); setHasta(""); } else { setDesde(mes.desde); setHasta(mes.hasta); } }}>
                             <CalendarDays className="inline h-3 w-3 mr-1 -mt-px" />Este mes
                         </Chip>
-                        {sabeCargar && (
+                        {filtraPorPersona && (
                             <SearchableSelect
                                 options={personas.map((x) => ({ value: String(x.id), label: x.nombre }))}
                                 value={persona}

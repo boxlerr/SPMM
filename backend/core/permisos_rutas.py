@@ -70,7 +70,8 @@ y como solapa de Recursos):
                      mismo.
   Clientes           /clientes
   No conformidades   /incidencias/* (el agrupado por persona, /incidencias/por-persona,
-                     con la sección confidencial «Rendimiento por persona»). La ficha
+                     y el reporte filtrado por persona, ?id_operario=, con la sección
+                     confidencial «Rendimiento por persona»). La ficha
                      de la OT lee además /incidencias/tipos y /incidencias/para-registrar
                      para cargar un rechazo.
   Auditoría          /auditoria/movimientos (también la vista Ingresos, ?tipo=ingresos,
@@ -409,8 +410,11 @@ POLITICAS: dict[str, Politica] = {
     # persona», la misma del reporte de RF-07: pone un número de piezas rechazadas al
     # lado de un nombre y sirve para evaluar a alguien («le tengo que llamar la
     # atención», Lucas, 23/09). DECISIÓN ABIERTA, tomada del lado conservador: la lista
-    # de siempre sigue diciendo quién hizo cada una (ya lo decía) y se puede filtrar por
-    # persona con el área; lo que no se abre por tener el área es el ranking. Si Lucas
+    # de siempre sigue diciendo quién hizo cada una (ya lo decía), pero FILTRARLA por
+    # persona (/incidencias/reporte y reporte.csv con ?id_operario=) pide también la
+    # sección: devuelve lo mismo que la ficha (sus filas y su porcentaje de rechazo).
+    # Ese chequeo lo hace el endpoint (IncidenciaProcesoAPI, «el filtro por persona»):
+    # este mapa sabe pedir MENOS con un parámetro (`con_parametro`), no MÁS. Si Lucas
     # quiere que el supervisor lo vea, le da la sección desde Usuarios y permisos.
     "incidencias": Politica(
         leer=(area("no_conformidades"), area("operaciones")),

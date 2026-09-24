@@ -461,9 +461,10 @@ PANTALLAS = {
     "no_conformidades": [
         "/incidencias", "/incidencias/tipos", "/incidencias/metricas",
         "/incidencias/reporte", "/incidencias/reporte.csv",
-        # RF-12: cargar un rechazo desde la pantalla (el agrupado por persona es la
-        # sección confidencial: la pantalla no lo pide sin ella)
-        "/incidencias/para-registrar?nro_ot=7010", "/incidencias/reporte?id_operario=1",
+        # RF-12: cargar un rechazo desde la pantalla (el agrupado por persona y el
+        # filtro por persona, ?id_operario=, son la sección confidencial: la pantalla no
+        # los pide sin ella; el filtro lo mira el endpoint, test_rechazos.py)
+        "/incidencias/para-registrar?nro_ot=7010",
     ],
     # (Ingresos y Actividad por persona son la sección confidencial «Ingresos y actividad
     # por persona»: con sólo el área la pantalla no muestra esas solapas ni las pide. Se

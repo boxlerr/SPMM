@@ -101,6 +101,30 @@ def test_lo_agrupado_por_persona_pide_la_seccion_confidencial_igual_que_el_backe
     assert "[401, 403, 404, 405]" in _leer("app/recursos/_components/RechazosDeLaPersona.tsx")
 
 
+def test_filtrar_por_persona_pide_la_seccion_igual_que_el_backend():
+    """Revisión del 23/09: el filtro «Quién hizo las piezas» daba, con sólo el área, lo
+    mismo que la ficha de la persona. El servidor ahora lo pide con la sección
+    (test_rechazos.py); la pantalla no lo muestra ni lo manda sin ella (si lo mandara, el
+    403 dejaría la lista vacía)."""
+    pagina = _leer("app/no-conformidades/page.tsx")
+    assert "const filtraPorPersona = sabeCargar && veRendimiento;" in pagina
+    assert 'if (persona && filtraPorPersona) p.set("id_operario", persona);' in pagina
+    assert "{filtraPorPersona && (\n                            <SearchableSelect" in pagina
+    assert "persona && sabeCargar" not in pagina, "queda un filtro por persona sin la sección"
+
+
+def test_registrar_mira_los_filtros_antes_de_poner_la_fila():
+    """Revisión del 23/09: con un filtro puesto, la fila nueva iba igual a la lista (y al
+    Exportar) aunque no lo cumpliera."""
+    pagina = _leer("app/no-conformidades/page.tsx")
+    registrar = pagina[pagina.index("const registrar = async"):]
+    registrar = registrar[:registrar.index("\n    };\n")]
+    assert "entraEnElFiltro(temporal, filtros)" in registrar
+    assert "entraEnElFiltro(guardada, filtros)" in registrar
+    assert "setFilas((l) => [temporal, ...l]);" in registrar
+    assert registrar.index("if (seVe)") < registrar.index("setFilas((l) => [temporal, ...l]);")
+
+
 def test_el_enganche_de_rf11_esta_y_lo_escucha_la_ficha():
     lib = _leer("lib/calidad.ts")
     assert "export function ofrecerRegistrarRechazos(idOrden: number)" in lib
@@ -148,6 +172,24 @@ const [nuevo, viejo] = JSON.parse(process.argv[2]);
   salida.paso = [c.pasoTexto({ paso: 2, proceso: 'TORNO CNC' }), c.pasoTexto({ paso: null, proceso: 'CORTE' }), c.pasoTexto({ paso: null, proceso: null })];
   salida.mes = [c.mesEnCurso(new Date(2026, 1, 10)), c.mesEnCurso(new Date(2028, 1, 10)), c.mesEnCurso(new Date(2026, 11, 31))];
   salida.nombre = c.nombreVisible('JUAN PEREZ');
+  const fila = { nro_ot: 7010, tipo: 'RECHAZO_CONTROL', gravedad: null, estado: 'ABIERTA',
+                 fecha_registro: '2026-09-23T22:30:00', id_operario: 2 };
+  salida.filtro = [
+    c.entraEnElFiltro(fila, {}),
+    c.entraEnElFiltro(fila, { persona: '1' }),          // Juan filtrado, la hizo María
+    c.entraEnElFiltro(fila, { persona: '2' }),
+    c.entraEnElFiltro(fila, { ot: '7010' }),
+    c.entraEnElFiltro(fila, { ot: '701' }),             // el número exacto, no un pedazo
+    c.entraEnElFiltro(fila, { tipo: 'SOLDADURA' }),
+    c.entraEnElFiltro(fila, { gravedad: 'SIN_CLASIFICAR' }),
+    c.entraEnElFiltro(fila, { gravedad: 'GRAVE' }),
+    c.entraEnElFiltro(fila, { estado: 'CERRADA' }),
+    c.entraEnElFiltro(fila, { desde: '2026-09-23', hasta: '2026-09-23' }),  // hasta inclusivo
+    c.entraEnElFiltro(fila, { desde: '2026-09-24' }),
+    c.entraEnElFiltro(fila, { hasta: '2026-09-22' }),
+    c.entraEnElFiltro({ ...fila, id_operario: null }, { persona: '2' }),
+  ];
+  salida.sin_zona = c.ahoraSinZona(new Date(2026, 8, 23, 22, 30, 5));
   c.ofrecerRegistrarRechazos(10);
   salida.eventos = eventos;
   console.log(JSON.stringify(salida));
@@ -208,3 +250,27 @@ def test_los_textos(calidad):
 
 def test_el_aviso_de_ot_controlada_lleva_la_orden(calidad):
     assert calidad["eventos"] == [{"tipo": "spmm:ot-controlada", "detalle": {"idOrden": 10}}]
+
+
+def test_la_fila_nueva_entra_en_la_lista_solo_si_cumple_los_filtros(calidad):
+    assert calidad["filtro"] == [
+        True,   # sin filtros
+        False,  # filtrada por Juan, la hizo María
+        True,
+        True,
+        False,  # «701» no es la 7010
+        False,
+        True,   # nadie la clasificó
+        False,
+        False,
+        True,   # del 23 al 23: entra lo del 23 a las 22:30
+        False,
+        False,
+        False,  # sin decir quién no entra en el filtro de una persona
+    ]
+
+
+def test_la_fila_provisoria_lleva_la_hora_del_taller_sin_zona(calidad):
+    """Con toISOString() (UTC) una cargada a las 22:30 del 23 decía 24 y el filtro de
+    fechas la dejaba afuera."""
+    assert calidad["sin_zona"] == "2026-09-23T22:30:05"

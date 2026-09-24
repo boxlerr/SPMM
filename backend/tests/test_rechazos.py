@@ -320,7 +320,8 @@ async def test_aparece_en_la_ficha_de_quien_hizo_las_piezas(session):
     with pytest.raises(NotFoundException):
         await svc.rechazos_de_persona(999)
 
-    # Y la lista de siempre se puede filtrar por la persona.
+    # Y la lista de siempre se puede filtrar por la persona (por HTTP pide la sección
+    # «Rendimiento por persona»: test_filtrar_el_reporte_por_persona_pide_la_seccion...).
     solo_juan = await svc.reporte(id_operario=JUAN)
     assert solo_juan.data["resumen"]["total"] == 2
 
@@ -417,3 +418,76 @@ def test_los_catalogos_dicen_que_este_servidor_sabe_cargar_rechazos():
     data = IncidenciaProcesoService(None).catalogos().data
     assert data["disposiciones"] == DISPOSICIONES
     assert data["tipo_del_formulario"] == "RECHAZO_CONTROL"
+
+
+# ─────────────────────── 6. el filtro por persona pide la sección ───────────────────────
+#
+# Revisión del 23/09: /operarios/{id}/rechazos y /incidencias/por-persona piden la sección
+# confidencial «Rendimiento por persona», pero el reporte de siempre con ?id_operario=
+# devolvía lo mismo (sus filas, sus piezas y su porcentaje de rechazo) con sólo el área.
+# El supervisor, sin la sección, veía «23 piezas rechazadas, 22,5 % de las controladas»
+# de Juan eligiéndolo en el filtro.
+
+def _permisos_nc(*, rendimiento: bool):
+    from backend.core.permisos import DatosDePermisos, permisos_de
+    return permisos_de(DatosDePermisos(
+        rol="supervisor", rol_areas={"no_conformidades": "write", "operaciones": "write"},
+        usuario_secciones={"dashboard_rendimiento": "read"} if rendimiento else {},
+    ), 4, "lucas")
+
+
+@pytest.fixture
+def api_nc(session):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.commons.handlers.exception_handlers import registrar_exception_handlers
+    from backend.core.security import get_current_user, get_permisos_actuales
+    from backend.presentation import IncidenciaProcesoAPI
+
+    async def _db():
+        yield session
+
+    app = FastAPI()
+    registrar_exception_handlers(app)
+    app.include_router(IncidenciaProcesoAPI.router)
+    app.dependency_overrides[IncidenciaProcesoAPI.get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: LUCAS
+    estado = {"permisos": _permisos_nc(rendimiento=False)}
+    app.dependency_overrides[get_permisos_actuales] = lambda: estado["permisos"]
+    cliente = AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+    cliente.estado = estado
+    return cliente
+
+
+async def test_filtrar_el_reporte_por_persona_pide_la_seccion_confidencial(session, api_nc):
+    await _taller(session)
+    svc = IncidenciaProcesoService(session)
+    await svc.registrar(_rechazo(id_otp=102, id_operario=JUAN, piezas_afectadas=10, piezas_controladas=50), LUCAS)
+    await svc.registrar(_rechazo(id_operario=ANA, piezas_afectadas=4), LUCAS)
+
+    async with api_nc as c:
+        # Sin la sección: filtrar por persona, no (ni la lista ni el archivo)...
+        for ruta in ("/incidencias/reporte", "/incidencias/reporte.csv"):
+            r = await c.get(ruta, params={"id_operario": JUAN})
+            assert r.status_code == 403, (ruta, r.text)
+            assert r.json()["errors"][0]["campo"] == "permiso"
+            assert "Rendimiento por persona" in r.json()["errors"][0]["message"]
+        # ...pero la lista de siempre y los demás filtros siguen andando.
+        r = await c.get("/incidencias/reporte")
+        assert r.status_code == 200 and r.json()["data"]["resumen"]["total"] == 2
+        assert (await c.get("/incidencias/reporte", params={"nro_ot": 7010})).status_code == 200
+        assert (await c.get("/incidencias/reporte.csv")).status_code == 200
+
+        # Con la sección, sí: lo mismo que la ficha de la persona.
+        c.estado["permisos"] = _permisos_nc(rendimiento=True)
+        r = await c.get("/incidencias/reporte", params={"id_operario": JUAN})
+        assert r.status_code == 200
+        assert r.json()["data"]["resumen"]["total"] == 1
+        assert r.json()["data"]["resumen"]["piezas_afectadas"] == 10
+        assert (await c.get("/incidencias/reporte.csv", params={"id_operario": JUAN})).status_code == 200
+
+        # Y el admin, como siempre.
+        from backend.core.permisos import DatosDePermisos, permisos_de
+        c.estado["permisos"] = permisos_de(DatosDePermisos(rol="admin"), 1, "julian")
+        assert (await c.get("/incidencias/reporte", params={"id_operario": ANA})).status_code == 200

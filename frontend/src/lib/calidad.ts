@@ -307,6 +307,12 @@ export function mesEnCurso(hoy: Date = new Date()): { desde: string; hasta: stri
   return { desde: `${a}-${dos(m + 1)}-01`, hasta: `${a}-${dos(m + 1)}-${dos(ultimo)}` };
 }
 
+/** «AAAA-MM-DDTHH:MM:SS» con el reloj local, sin zona (como las fechas del servidor). */
+export function ahoraSinZona(d: Date = new Date()): string {
+  const dos = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}T${dos(d.getHours())}:${dos(d.getMinutes())}:${dos(d.getSeconds())}`;
+}
+
 /** Lo que se mostró antes de que conteste el servidor, con lo que hay a mano. */
 export function filaProvisoria(
   cuerpo: CuerpoRechazo,
@@ -336,10 +342,59 @@ export function filaProvisoria(
     descripcion: cuerpo.descripcion,
     accion_correctiva: null,
     usuario: extra.usuario ?? null,
-    fecha_registro: new Date().toISOString(),
+    // La hora del taller sin zona, como las guarda el servidor: con toISOString() (UTC)
+    // una cargada después de las 21 caía en el día siguiente y el filtro de fechas
+    // (entraEnElFiltro) la dejaba afuera.
+    fecha_registro: ahoraSinZona(),
     fecha_cierre: null,
     pendiente: true,
   };
+}
+
+/** Los filtros de la lista de No conformidades, como los tiene la pantalla. */
+export interface FiltrosNC {
+  /** El número de OT que se ve (vacío = todas). */
+  ot?: string;
+  tipo?: string | null;
+  /** Una gravedad, o "SIN_CLASIFICAR" (las que nadie evaluó). */
+  gravedad?: string | null;
+  estado?: string | null;
+  /** «AAAA-MM-DD», inclusivas las dos. */
+  desde?: string;
+  hasta?: string;
+  /** Quién hizo las piezas (id, como texto), o vacío. */
+  persona?: string;
+}
+
+/**
+ * ¿Esta fila la devolvería el servidor con estos filtros? Es la misma regla que
+ * IncidenciaProcesoService._filtros: OT por su número exacto, tipo, gravedad (o sin
+ * clasificar), estado, fecha de registro entre las dos puntas (inclusive) y quién hizo
+ * las piezas.
+ *
+ * Revisión del 23/09: al registrar desde No conformidades la fila nueva se ponía arriba
+ * de la lista sin mirar los filtros. Con «Quién hizo las piezas = Juan» puesto, un
+ * rechazo de María quedaba en la lista de Juan (6 filas contra un resumen de 5) y
+ * salía en el Exportar, que dice «Hizo las piezas: Juan Pérez».
+ */
+export function entraEnElFiltro(fila: NoConformidad, f: FiltrosNC): boolean {
+  const ot = (f.ot ?? "").trim();
+  if (ot && String(fila.nro_ot ?? "") !== ot) return false;
+  if (f.tipo && fila.tipo !== f.tipo) return false;
+  if (f.gravedad) {
+    if (f.gravedad === "SIN_CLASIFICAR" ? fila.gravedad != null && fila.gravedad !== "" : fila.gravedad !== f.gravedad) return false;
+  }
+  if (f.estado && fila.estado !== f.estado) return false;
+  if (f.desde || f.hasta) {
+    // La fecha que guarda el servidor es la hora del taller, sin zona («2026-09-23T10:15:00»):
+    // el día son los diez primeros caracteres. Sin fecha no se puede decir que entra.
+    const dia = (fila.fecha_registro ?? "").slice(0, 10);
+    if (!dia) return false;
+    if (f.desde && dia < f.desde) return false;
+    if (f.hasta && dia > f.hasta) return false;
+  }
+  if (f.persona && String(fila.id_operario ?? "") !== f.persona) return false;
+  return true;
 }
 
 // ─────────────────────────── el enganche con RF-11 ───────────────────────────
