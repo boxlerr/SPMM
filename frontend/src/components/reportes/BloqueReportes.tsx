@@ -4,7 +4,7 @@
  * El bloque «Reportes» del Dashboard (RF-23): el botón «Armar un reporte» y, abajo, los
  * reportes guardados y los de ejemplo para abrir de un toque.
  *
- * ES EL LUGAR DE LOS REPORTES DEL DASHBOARD. El «Reporte mensual» (RF-21, otra rama) va
+ * ES EL LUGAR DE LOS REPORTES DEL DASHBOARD. El «Reporte mensual» (RF-21) va
  * acá, al lado del botón: se pasa como `children` y se dibuja antes de «Armar un reporte»
  * (ver app/dashboard/page.tsx). Así los dos conviven sin pelearse por la cabecera.
  *

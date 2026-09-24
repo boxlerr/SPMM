@@ -397,6 +397,17 @@ def validar(crudo: Any, permisos: PermisosUsuario, hoy: Optional[date] = None) -
             f"Medir «{de_rendimiento[0].nombre}» agrupando por «{por_persona[0].nombre}» "
             "compara a las personas entre sí: es de la sección confidencial «Rendimiento por "
             "persona». Podés agrupar por otra columna o filtrar una sola persona.")
+    # Las fuentes con `persona_confidencial` (las no conformidades, RF-12): agrupar por la
+    # persona con cualquier cuenta, o filtrar por ella, es lo mismo que /incidencias/
+    # por-persona y ?id_operario=, que piden la sección. La lista con la columna, no.
+    if fuente.persona_confidencial and not puede_rendimiento(permisos):
+        filtrada = next((f.columna for f in filtros if f.columna.codigo in fuente.por_persona), None)
+        if por_persona or filtrada is not None:
+            nombre = (por_persona[0] if por_persona else filtrada).nombre
+            raise ReporteSinPermiso(
+                f"{'Agrupar' if por_persona else 'Filtrar'} {fuente.nombre.lower()} por «{nombre}» "
+                "compara a las personas entre sí: es de la sección confidencial «Rendimiento "
+                "por persona», como en su pantalla. La lista con la columna sí se puede armar.")
 
     if not agrupar and not columnas:
         raise BusinessException("Elegí al menos una columna.")
@@ -793,15 +804,18 @@ async def ejecutar(db, crudo: Any, permisos: PermisosUsuario, vista_previa: bool
 # ─────────────────────────── el catálogo, para la pantalla ───────────────────────────
 
 
-def _columna_para_pantalla(c: Columna) -> dict:
+def _columna_para_pantalla(c: Columna, sin_persona: bool = False) -> dict:
+    """`sin_persona`: la columna es la persona de una fuente con `persona_confidencial` y
+    quien pide no tiene la sección: se muestra, pero no se ofrece agruparla ni filtrarla
+    (el servidor lo rechazaría igual, ver validar)."""
     return {
         "codigo": c.codigo,
         "nombre": c.nombre,
         "tipo": c.tipo,
         "ayuda": c.ayuda or None,
-        "filtro": c.filtro,
-        "opciones": c.opciones,
-        "agrupable": c.agrupable,
+        "filtro": None if sin_persona else c.filtro,
+        "opciones": None if sin_persona else c.opciones,
+        "agrupable": c.agrupable and not sin_persona,
         "funciones": list(c.funciones()),
         "totaliza": c.totaliza,
         "decimales": c.decimales,
@@ -830,7 +844,10 @@ def catalogo(permisos: PermisosUsuario) -> dict:
             "nombre": f.nombre,
             "descripcion": f.descripcion,
             "icono": f.icono,
-            "columnas": [_columna_para_pantalla(c) for c in columnas],
+            "columnas": [_columna_para_pantalla(
+                c, sin_persona=(f.persona_confidencial and c.codigo in f.por_persona
+                                and not puede_rendimiento(permisos)))
+                for c in columnas],
             "periodo": list(f.periodo),
             "periodo_interno": f.periodo_interno,
             "filtros_iniciales": list(f.filtros_iniciales),

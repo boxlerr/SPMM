@@ -433,8 +433,11 @@ async def test_personas_es_el_reporte_de_cada_uno_con_el_mes_como_periodo(base):
 async def test_calidad(base):
     r = await _armar(base)
     c = r["calidad"]
+    # Con RF-12 el resumen suma de cuántas controladas y cuántas OT; ninguna NC de la base
+    # dice de cuántas controladas, así que no hay porcentaje (no un 0 %).
     assert c["resumen"] == {"total": 3, "abiertas": 2, "cerradas": 1,
-                            "minutos_perdidos": 75, "piezas_afectadas": 5}
+                            "minutos_perdidos": 75, "piezas_afectadas": 5,
+                            "piezas_controladas": 0, "porcentaje_rechazo": None, "ordenes": 3}
     assert c["anterior"]["total"] == 1 and c["anterior"]["piezas_afectadas"] == 5
     for grupo in ("por_tipo", "por_persona", "por_gravedad"):
         assert sum(g["cantidad"] for g in c[grupo]) == c["resumen"]["total"], grupo
@@ -464,11 +467,56 @@ async def test_materiales(base):
     assert sum(f["cargas"] for f in m["por_ot"]) == m["resumen"]["cargas"]
 
 
-async def test_maquinas_queda_preparada_sin_inventar_nada(base):
+async def test_maquinas_sin_uso_registrado_sale_vacia_sin_inventar_nada(base):
     r = await _armar(base)
-    assert r["maquinas"]["disponible"] is False
-    assert r["maquinas"]["filas"] == [] and r["maquinas"]["resumen"] is None
-    assert "RF-10" in r["maquinas"]["texto"]
+    m = r["maquinas"]
+    assert m["disponible"] is True
+    assert m["filas"] == [] and m["mantenimientos"] == []
+    assert m["resumen"] == {"maquinas": 0, "horas_min": 0, "mantenimientos": 0, "avisos": 0}
+
+
+async def test_maquinas_con_las_horas_de_rf10_y_los_mantenimientos_del_mes(base):
+    """El cruce RF-10 × RF-21: las horas efectivas de uso_maquina recortadas al mes (la
+    misma cuenta de la solapa Uso) y los mantenimientos registrados con fecha del mes."""
+    from backend.domain.MantenimientoMaquina import MantenimientoHecho
+    from backend.domain.Maquinaria import Maquinaria
+    from backend.domain.UsoMaquina import NO_SUMA_FUERA_DE_SERVICIO, UsoMaquina
+
+    def uso(id_otp, inicio, fin, no_suma=None, maquina=7):
+        return UsoMaquina(id_maquinaria=maquina, origen_maquina="OT", id_orden_trabajo=201,
+                          numero_ot=15201, id_otp=id_otp, paso=1, nombre_proceso="TORNO CNC",
+                          inicio=inicio, fin=fin, no_suma=no_suma)
+
+    async with base() as s:
+        s.add_all([Maquinaria(id=7, nombre="TORNO CNC 1"), Maquinaria(id=8, nombre="FRESADORA 2")])
+        await s.flush()
+        s.add_all([
+            # Martes 04/08 de 08 a 10: 105 min de jornada (el corte de 09:00 a 09:15).
+            uso(9001, dt(8, 4, 8), dt(8, 4, 10)),
+            # Viernes 31/07 14:00 → lunes 03/08 09:00: 120 en julio (hasta las 16) y 420 en
+            # agosto (el sábado de 07 a 12 y el lunes de 07 a 09; el domingo no es jornada).
+            uso(9002, dt(7, 31, 14), dt(8, 3, 9)),
+            # Arrancado con la máquina fuera de servicio: no suma.
+            uso(9003, dt(8, 5, 8), dt(8, 5, 12), NO_SUMA_FUERA_DE_SERVICIO),
+            MantenimientoHecho(id_maquinaria=8, fecha=date(2026, 8, 15), hecho_por="Técnico Ruiz",
+                               nota="Cambio de aceite", cargado_en=dt(8, 15, 10)),
+            # De septiembre: no es del mes.
+            MantenimientoHecho(id_maquinaria=7, fecha=date(2026, 9, 1), cargado_en=dt(9, 1, 10)),
+        ])
+        await s.commit()
+
+    r = await _armar(base)
+    m = r["maquinas"]
+    assert m["disponible"] is True
+    assert m["resumen"] == {"maquinas": 1, "horas_min": 525, "mantenimientos": 1, "avisos": 0}
+    assert m["anterior"] == {"maquinas": 1, "horas_min": 120, "mantenimientos": 0}
+    assert m["filas"] == [{"id_maquinaria": 7, "maquina": "TORNO CNC 1", "horas_min": 525,
+                           "tareas": 2, "horas_min_anterior": 120, "mantenimientos": 0}]
+    assert [(x["maquina"], x["fecha"], x["hecho_por"]) for x in m["mantenimientos"]] == [
+        ("FRESADORA 2", "2026-08-15", "Técnico Ruiz")]
+    csv_ = csv_del_reporte(r)
+    assert "TORNO CNC 1;8,75;2;2,00;0" in csv_
+    assert "15/08/2026;FRESADORA 2;Técnico Ruiz;Cambio de aceite" in csv_
 
 
 # ─────────────────────────── permisos ───────────────────────────
@@ -507,6 +555,13 @@ def test_el_alcance_sale_del_mapa_de_permisos():
 
     nada = alcance_de(_permisos("x", areas={"dashboard": "read"}))
     assert not nada.algo
+
+    # Las máquinas piden lo mismo que la solapa de RF-10 (Recursos › Recurso maquinaria).
+    maq = alcance_de(_permisos("x", areas={"dashboard": "read"},
+                               secciones={"recursos_maquinaria": "read"}))
+    assert maq.maquinas and not maq.ordenes and not maq.personas
+    assert not alcance_de(_permisos("x", areas={"dashboard": "read", "operaciones": "read"},
+                                    secciones={"recursos_maquinaria": "none"})).maquinas
 
 
 async def test_sin_la_seccion_confidencial_las_personas_no_se_leen_ni_se_mandan(base, monkeypatch):
@@ -576,10 +631,12 @@ async def test_el_mail_lleva_solo_lo_que_el_reporte_trae_y_escapa_los_textos(bas
     mail = armar_mail_del_reporte(r, para=["x@y.com"], url_app="https://a.b")
     assert "Personas" not in mail["html"] and "Eficiencia" not in mail["html"]
     # Sin la sección confidencial no va la tabla de personas (horas y eficiencia de cada
-    # uno). La calidad por persona sí: es de No conformidades, como en su pantalla.
+    # uno) ni la calidad agrupada por persona: RF-12 pide esa misma sección para las
+    # piezas rechazadas por persona (/incidencias/por-persona).
     adjunto = mail["adjuntos"][0]["contenido"].decode("utf-8")
     assert "\r\nPersonas\r\n" not in adjunto and "Eficiencia" not in adjunto
-    assert "Calidad por persona" in adjunto
+    assert "Calidad por persona" not in adjunto and "Calidad por tipo" in adjunto
+    assert r["calidad"]["por_persona"] is None and r["calidad"]["por_tipo"]
     assert "<script>" not in mail["html"] and "&lt;script&gt;" in mail["html"]
 
 
@@ -601,6 +658,20 @@ async def test_preparar_los_mails_del_mes_va_a_los_admin_activos(base):
     assert mail["enviado"] is False
     async with base() as s:
         assert await preparar_mails_del_mes(s, para=[], ahora=AHORA) == []
+
+
+async def test_un_mail_con_destinatarios_a_mano_no_lleva_lo_confidencial(base):
+    """Con `para` puesto a mano no se sabe qué permisos tiene cada dirección: el reporte
+    sale sin la sección «Rendimiento por persona» (personas, ausencias y calidad por
+    persona). Los de por defecto son admin y les va todo."""
+    async with base() as s:
+        (mail,) = await preparar_mails_del_mes(s, para=["super@metlo.com.ar"], ahora=AHORA)
+    adjunto = mail["adjuntos"][0]["contenido"].decode("utf-8")
+    assert "Eficiencia" not in adjunto and "Calidad por persona" not in adjunto
+    assert "Órdenes entregadas" in adjunto
+    async with base() as s:
+        (mail,) = await preparar_mails_del_mes(s, ahora=AHORA)
+    assert "Calidad por persona" in mail["adjuntos"][0]["contenido"].decode("utf-8")
 
 
 # ─────────────────────────── la ruta, con los permisos de verdad ───────────────────────────
@@ -639,16 +710,17 @@ async def test_el_enganche_de_rf10_ya_lo_leen_el_mail_y_el_csv(base, monkeypatch
     la muestran sin tocarlos."""
     async def con_rf10(self, actual, anterior):
         return {"disponible": True, "texto": None,
-                "resumen": {"maquinas": 1, "horas_min": 600},
-                "anterior": {"maquinas": 1, "horas_min": 300},
+                "resumen": {"maquinas": 1, "horas_min": 600, "mantenimientos": 1, "avisos": 0},
+                "anterior": {"maquinas": 1, "horas_min": 300, "mantenimientos": 0},
                 "filas": [{"id_maquinaria": 7, "maquina": "TORNO CNC 1", "horas_min": 600,
-                           "tareas": 4, "horas_min_anterior": 300}]}
+                           "tareas": 4, "horas_min_anterior": 300, "mantenimientos": 1}],
+                "mantenimientos": []}
 
     monkeypatch.setattr(ReporteMensualService, "_maquinas", con_rf10)
     r = await _armar(base)
     mail = armar_mail_del_reporte(r, para=["x@y.com"], url_app="https://a.b")
     assert "Máquinas" in mail["html"] and "10 h" in mail["html"]
-    assert "TORNO CNC 1;10,00;4;5,00" in mail["adjuntos"][0]["contenido"].decode("utf-8")
+    assert "TORNO CNC 1;10,00;4;5,00;1" in mail["adjuntos"][0]["contenido"].decode("utf-8")
 
 
 async def test_los_pasos_de_cada_persona_se_leen_una_vez_para_los_dos_meses(base, monkeypatch):

@@ -119,6 +119,8 @@ SOLO_TABLERO = _permisos("tablero", {"dashboard": "read"}, id_usuario=6)
 AUDITOR = _permisos("auditor", {"dashboard": "read", "auditoria": "read"}, id_usuario=7)
 AUDITOR_CON_OPERACIONES = _permisos("auditor2", {"dashboard": "read", "auditoria": "read",
                                                  "operaciones": "read"}, id_usuario=8)
+JEFE_CON_RENDIMIENTO_Y_NC = _permisos("jefe_nc", {"dashboard": "read", "no_conformidades": "read"},
+                                      {"dashboard_rendimiento": "read"}, id_usuario=11)
 JEFE_CON_RENDIMIENTO = _permisos("jefe", {"dashboard": "read", "recursos": "read"},
                                  {"dashboard_rendimiento": "read"}, id_usuario=9)
 
@@ -715,9 +717,26 @@ async def test_stock_bajo_el_minimo_el_ejemplo(base):
 
 async def test_no_conformidades_por_persona_el_ejemplo(base):
     ejemplo = next(e for e in cat.EJEMPLOS if e["codigo"] == "no_conformidades_por_persona")
-    r = await correr(base, ejemplo["config"], OPERARIO)
+    r = await correr(base, ejemplo["config"], JEFE_CON_RENDIMIENTO_Y_NC)
     assert [(f["persona"], f["m0"], f["m1"], f["m2"]) for f in r["filas"]] == [
         ("JUAN PEREZ", 2, 45, 2), ("ANA GIL", 1, 45, 1), (None, 1, 10, None)]
+    # RF-12: las no conformidades agrupadas (o filtradas) por quién hizo las piezas son de
+    # la sección «Rendimiento por persona», como /incidencias/por-persona. Sin ella, ni el
+    # ejemplo ni armarlo a mano; la lista con la columna, sí.
+    with pytest.raises(ReporteSinPermiso):
+        await correr(base, ejemplo["config"], OPERARIO)
+    with pytest.raises(ReporteSinPermiso):
+        await correr(base, _cfg("no_conformidades", ["fecha"], agrupar=["persona"],
+                                medidas=[{"funcion": "conteo"}]), OPERARIO)
+    with pytest.raises(ReporteSinPermiso):
+        await correr(base, _cfg("no_conformidades", ["fecha", "persona"],
+                                filtros=[{"columna": "persona", "op": "en", "valores": [1]}]), OPERARIO)
+    lista = await correr(base, _cfg("no_conformidades", ["numero", "persona", "piezas_afectadas"]), OPERARIO)
+    assert "JUAN PEREZ" in _col(lista, "persona")
+    assert "no_conformidades_por_persona" not in {e["codigo"] for e in rs.catalogo(OPERARIO)["ejemplos"]}
+    persona = next(c for f in rs.catalogo(OPERARIO)["fuentes"] if f["codigo"] == "no_conformidades"
+                   for c in f["columnas"] if c["codigo"] == "persona")
+    assert persona["agrupable"] is False and persona["filtro"] is None
     r = await correr(base, _cfg("no_conformidades", ["gravedad", "tipo"], orden={"por": "fecha"}))
     # Por fecha: la de agosto, la GRAVE del 05/09, la del 06/09 y la del 07/09. Las viejas sin
     # gravedad salen vacías (nunca se completa por default).
@@ -1036,3 +1055,100 @@ def test_los_atajos_del_periodo_dan_lo_mismo_en_la_pantalla_y_en_el_servidor():
         for atajo in cat.ATAJOS:
             desde, hasta = cat.rango_del_atajo(atajo, hoy)
             assert del_front[iso][atajo] == {"desde": desde.isoformat(), "hasta": hasta.isoformat()}, (iso, atajo)
+
+
+# ─────────────────────────── los cruces con RF-10, RF-11 y RF-12 ───────────────────────────
+
+
+async def test_uso_de_maquinas_rf10_con_su_permiso_y_sin_ranking_por_persona(base):
+    """«Uso de máquinas» lee uso_maquina (RF-10) y pide lo mismo que su solapa (Recursos ›
+    Recurso maquinaria). Las horas sumadas por persona son el ranking confidencial."""
+    from backend.domain.UsoMaquina import NO_SUMA_FUERA_DE_SERVICIO, UsoMaquina
+
+    async with base() as s:
+        s.add_all([
+            UsoMaquina(id_maquinaria=7, origen_maquina="OT", id_orden_trabajo=10, numero_ot=15010,
+                       id_otp=101, paso=1, nombre_proceso="TORNO CNC", id_operario=JUAN,
+                       operario="JUAN PEREZ", inicio=d(9, 1, 8), fin=d(9, 1, 11),
+                       corrido_min=180, efectivo_min=165),
+            UsoMaquina(id_maquinaria=7, origen_maquina="PLAN", id_orden_trabajo=11, numero_ot=15011,
+                       id_otp=103, paso=1, nombre_proceso="TORNO CNC", id_operario=JUAN,
+                       operario="JUAN PEREZ", inicio=d(9, 3, 8), fin=d(9, 3, 10),
+                       corrido_min=120, efectivo_min=105),
+            # Fuera de servicio: está, pero no suma horas.
+            UsoMaquina(id_maquinaria=8, origen_maquina="OT", id_orden_trabajo=10, numero_ot=15010,
+                       id_otp=102, paso=2, nombre_proceso="SOLDADURA", inicio=d(9, 2, 8),
+                       fin=d(9, 2, 9, 30), corrido_min=90, efectivo_min=90,
+                       no_suma=NO_SUMA_FUERA_DE_SERVICIO),
+            # Sigue abierto: sin horas todavía.
+            UsoMaquina(id_maquinaria=7, origen_maquina="OT", id_orden_trabajo=14, numero_ot=15014,
+                       id_otp=104, paso=1, nombre_proceso="TORNO CNC", inicio=d(9, 22, 8)),
+        ])
+        await s.commit()
+
+    r = await correr(base, _cfg("uso_maquinas", ["maquina"], agrupar=["maquina"],
+                                medidas=[{"funcion": "suma", "columna": "horas_uso"},
+                                         {"funcion": "conteo"}],
+                                orden={"por": "maquina", "direccion": "asc"}))
+    assert [(f["maquina"], f["m0"], f["m1"]) for f in r["filas"]] == [
+        ("SOLDADORA", None, 1), ("TORNO 1", pytest.approx(4.5), 3)]
+
+    # El operario no tiene la solapa de máquinas: ni ve la fuente.
+    assert "uso_maquinas" not in {f["codigo"] for f in rs.catalogo(OPERARIO)["fuentes"]}
+    with pytest.raises(ReporteSinPermiso):
+        await correr(base, _cfg("uso_maquinas", ["maquina"]), OPERARIO)
+    # El supervisor la ve (Recursos en lectura), pero no las horas sumadas por persona.
+    assert "uso_maquinas" in {f["codigo"] for f in rs.catalogo(SUPERVISOR)["fuentes"]}
+    with pytest.raises(ReporteSinPermiso):
+        await correr(base, _cfg("uso_maquinas", ["persona"], agrupar=["persona"],
+                                medidas=[{"funcion": "suma", "columna": "horas_uso"}]), SUPERVISOR)
+    lista = await correr(base, _cfg("uso_maquinas", ["maquina", "persona", "horas_uso", "no_suma"],
+                                    orden={"por": "inicio", "direccion": "asc"}), SUPERVISOR)
+    assert _col(lista, "no_suma") == [None, "Fuera de servicio", None, None]
+    assert _col(lista, "horas_uso") == [pytest.approx(2.75), None, pytest.approx(1.75), None]
+
+
+async def test_ordenes_con_las_casillas_de_estado_y_control_de_rf11(base):
+    from sqlalchemy import update
+
+    async with base() as s:
+        await s.execute(update(OrdenTrabajo).where(OrdenTrabajo.id.in_([10, 12])).values(
+            controlado=1, controlado_por="Lucas", controlado_en=d(9, 5, 9)))
+        await s.execute(update(OrdenTrabajo).where(OrdenTrabajo.id == 11).values(
+            finalizado_para_pintar=1, finalizadoparcial=1, cantidad_finalizada_parcial=2))
+        await s.commit()
+
+    r = await correr(base, _cfg("ordenes", ["numero", "controlado", "controlado_por"],
+                                filtros=[{"columna": "controlado", "op": "es", "valor": True}],
+                                orden={"por": "numero", "direccion": "asc"}))
+    assert [(f["numero"], f["controlado"], f["controlado_por"]) for f in r["filas"]] == [
+        (15010, True, "Lucas"), (15012, True, "Lucas")]
+    r = await correr(base, _cfg("ordenes", ["numero"], agrupar=["finalizado_para_pintar"],
+                                medidas=[{"funcion": "conteo"},
+                                         {"funcion": "suma", "columna": "cantidad_parcial"}],
+                                orden={"por": "finalizado_para_pintar", "direccion": "asc"}))
+    assert [(f["finalizado_para_pintar"], f["m0"], f["m1"]) for f in r["filas"]] == [
+        (False, 6, None), (True, 1, 2)]
+    # El período también puede ir sobre cuándo se controló.
+    r = await correr(base, _cfg("ordenes", ["numero"], periodo={"columna": "controlado_en",
+                                                                 "desde": "2026-09-01",
+                                                                 "hasta": "2026-09-30"}))
+    assert sorted(_col(r, "numero")) == [15010, 15012]
+
+
+async def test_no_conformidades_con_paso_piezas_controladas_y_destino_de_rf12(base):
+    from sqlalchemy import update
+
+    async with base() as s:
+        await s.execute(update(IncidenciaProceso).where(IncidenciaProceso.id == 1).values(
+            id_otp=101, piezas_controladas=50, disposicion="RETRABAJO"))
+        await s.commit()
+    r = await correr(base, _cfg("no_conformidades", ["numero", "paso", "piezas_afectadas",
+                                                     "piezas_controladas", "porcentaje_rechazo",
+                                                     "disposicion"],
+                                orden={"por": "numero", "direccion": "asc"}), OPERARIO)
+    fila = r["filas"][0]
+    assert (fila["numero"], fila["paso"], fila["piezas_afectadas"], fila["piezas_controladas"],
+            fila["disposicion"]) == (15010, 1, 2, 50, "Se retrabaja")
+    assert fila["porcentaje_rechazo"] == pytest.approx(4.0)
+    assert all(f["porcentaje_rechazo"] is None for f in r["filas"][1:])

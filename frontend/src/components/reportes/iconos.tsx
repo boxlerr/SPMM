@@ -4,6 +4,7 @@ import {
     ClipboardList,
     Cog,
     FileBarChart2,
+    Gauge,
     History,
     ListChecks,
     PackageMinus,
@@ -28,6 +29,7 @@ const ICONOS: Record<string, LucideIcon> = {
     boxes: Boxes,
     "shield-alert": ShieldAlert,
     "pause-circle": PauseCircle,
+    gauge: Gauge,
     history: History,
 };
 

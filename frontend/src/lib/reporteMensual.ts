@@ -178,6 +178,11 @@ export interface ResumenCalidad {
   cerradas: number;
   minutos_perdidos: number;
   piezas_afectadas: number;
+  /** RF-12: de cuántas controladas y el % (sólo de las que dicen los dos números).
+   * Un backend sin RF-12 no los manda. */
+  piezas_controladas?: number;
+  porcentaje_rechazo?: number | null;
+  ordenes?: number;
 }
 
 export interface GrupoCalidad {
@@ -186,6 +191,7 @@ export interface GrupoCalidad {
   cantidad: number;
   piezas: number;
   minutos: number;
+  porcentaje_rechazo?: number | null;
 }
 
 export interface NoConformidadDelMes {
@@ -196,8 +202,10 @@ export interface NoConformidadDelMes {
   gravedad: string;
   estado: string;
   piezas_afectadas: number | null;
+  piezas_controladas?: number | null;
   minutos_perdidos: number | null;
   proceso: string | null;
+  paso?: number | null;
   persona: string | null;
   descripcion: string | null;
 }
@@ -208,7 +216,9 @@ export interface Calidad {
   anterior?: ResumenCalidad | null;
   por_tipo?: GrupoCalidad[];
   por_gravedad?: GrupoCalidad[];
-  por_persona?: GrupoCalidad[];
+  /** null = sin la sección «Rendimiento por persona» (la misma que pide RF-12 para
+   * las piezas rechazadas por persona). */
+  por_persona?: GrupoCalidad[] | null;
   lista?: NoConformidadDelMes[];
   recortado?: boolean;
 }
@@ -255,15 +265,34 @@ export interface MaquinaDelMes {
   horas_min: number;
   tareas: number;
   horas_min_anterior: number | null;
+  mantenimientos?: number;
 }
 
-/** RF-10 (otra rama). Hasta que esté, `disponible: false` y un texto. */
+export interface MantenimientoDelMes {
+  id: number;
+  id_maquinaria: number;
+  maquina: string;
+  fecha: string;
+  hecho_por: string | null;
+  nota: string | null;
+}
+
+interface ResumenMaquinas {
+  maquinas: number;
+  horas_min: number;
+  mantenimientos?: number;
+  avisos?: number;
+}
+
+/** RF-10: las horas de uso_maquina (las efectivas) y los mantenimientos hechos en el
+ * mes. Si el servidor no las pudo leer, `disponible: false` y un texto. */
 export interface Maquinas {
   disponible: boolean;
-  texto: string | null;
-  resumen: { maquinas: number; horas_min: number } | null;
-  anterior: { maquinas: number; horas_min: number } | null;
+  texto?: string | null;
+  resumen: ResumenMaquinas | null;
+  anterior: ResumenMaquinas | null;
   filas: MaquinaDelMes[];
+  mantenimientos?: MantenimientoDelMes[];
 }
 
 export interface ReporteMensual {
@@ -600,7 +629,9 @@ function seccionProduccion(p: Produccion): SeccionReporte {
     { titulo: "Horas trabajadas", actual: a.horas_min, anterior: b.horas_min, tipo: "horas", mejor: "sube", ayuda: ayudaHoras(a) },
     { titulo: "Pasos terminados", actual: a.pasos_terminados, anterior: b.pasos_terminados, tipo: "entero", mejor: "sube" },
     {
-      titulo: "Desvío contra lo estimado", actual: a.desvio_pct, anterior: b.desvio_pct, tipo: "porcentaje", mejor: "baja",
+      // Sin «mejor»: el desvío tiene signo y lo bueno es acercarse a 0, no bajar (de −5 %
+      // a −3 % es más preciso aunque «suba»). Se informa en tono neutro.
+      titulo: "Desvío contra lo estimado", actual: a.desvio_pct, anterior: b.desvio_pct, tipo: "porcentaje", mejor: null,
       ayuda: a.comparados ? `${fmtMinutos(a.estimado_min)} estimadas, llevaron ${fmtMinutos(a.real_min)}` : "sin pasos terminados con estimado",
     },
   ];
@@ -678,27 +709,42 @@ function seccionCalidad(c: Calidad): SeccionReporte {
   if (!c.disponible || !c.resumen) return vacia;
   const a = c.resumen;
   const b = c.anterior ?? null;
+  // Un servidor sin RF-12 no manda de cuántas controladas: sin esa columna, como antes.
+  const conRechazo = a.porcentaje_rechazo !== undefined;
   const grupo = (clave: string, titulo: string, primera: string, filas: GrupoCalidad[] | undefined): TablaReporte => ({
     clave,
     titulo,
     hoja: `No conformidades ${titulo.toLowerCase()}`,
     filas: filas ?? [],
-    columnas: [texto(primera, (f) => f.texto), entero("No conformidades", (f) => f.cantidad), entero("Piezas afectadas", (f) => f.piezas), entero("Minutos perdidos", (f) => f.minutos)],
-    total: { texto: "Total", cantidad: a.total, piezas: a.piezas_afectadas, minutos: a.minutos_perdidos },
+    columnas: [
+      texto(primera, (f) => f.texto), entero("No conformidades", (f) => f.cantidad), entero("Piezas rechazadas", (f) => f.piezas),
+      ...(conRechazo ? [porc("% de rechazo", (f) => f.porcentaje_rechazo ?? null)] : []),
+      entero("Minutos perdidos", (f) => f.minutos),
+    ],
+    total: { texto: "Total", cantidad: a.total, piezas: a.piezas_afectadas, porcentaje_rechazo: a.porcentaje_rechazo ?? null, minutos: a.minutos_perdidos },
     vacio: "No hubo no conformidades en el mes.",
   });
+  // RF-12: el agrupado por persona sólo viene con la sección «Rendimiento por persona».
+  const porPersona = c.por_persona ? [grupo("por_persona", "Por persona", "Persona", c.por_persona)] : [];
   return {
     clave: "calidad",
     titulo: "Calidad",
-    descripcion: "No conformidades registradas en el mes, por tipo y por persona.",
+    descripcion: c.por_persona ? "No conformidades registradas en el mes, por tipo y por persona." : "No conformidades registradas en el mes, por tipo y por gravedad.",
     indicadores: [
       { titulo: "No conformidades", actual: a.total, anterior: b?.total ?? null, tipo: "entero", mejor: "baja", ayuda: `${a.abiertas} ${a.abiertas === 1 ? "abierta" : "abiertas"}, ${a.cerradas} ${a.cerradas === 1 ? "cerrada" : "cerradas"}` },
-      { titulo: "Piezas afectadas", actual: a.piezas_afectadas, anterior: b?.piezas_afectadas ?? null, tipo: "entero", mejor: "baja" },
+      {
+        titulo: "Piezas rechazadas", actual: a.piezas_afectadas, anterior: b?.piezas_afectadas ?? null, tipo: "entero", mejor: "baja",
+        ...(conRechazo && a.piezas_controladas ? { ayuda: `de ${numero(a.piezas_controladas)} controladas` } : {}),
+      },
+      ...(conRechazo ? [{
+        titulo: "% de rechazo", actual: a.porcentaje_rechazo ?? null, anterior: b?.porcentaje_rechazo ?? null, tipo: "porcentaje" as const, mejor: "baja" as const,
+        ayuda: a.porcentaje_rechazo === null ? "ninguna dijo de cuántas piezas controladas" : "sólo de las que dicen de cuántas controladas",
+      }] : []),
       { titulo: "Minutos perdidos", actual: a.minutos_perdidos, anterior: b?.minutos_perdidos ?? null, tipo: "entero", mejor: "baja" },
     ],
     tablas: [
       grupo("por_tipo", "Por tipo", "Tipo", c.por_tipo),
-      grupo("por_persona", "Por persona", "Persona", c.por_persona),
+      ...porPersona,
       grupo("por_gravedad", "Por gravedad", "Gravedad", c.por_gravedad),
       {
         clave: "no_conformidades",
@@ -708,13 +754,15 @@ function seccionCalidad(c: Calidad): SeccionReporte {
         columnas: [
           id("N° OT", (f) => f.numero), { titulo: "Fecha", tipo: "fechaHora", valor: (f: any) => f.fecha },
           texto("Tipo", (f) => f.tipo), texto("Gravedad", (f) => f.gravedad), texto("Estado", (f) => f.estado),
-          entero("Piezas afectadas", (f) => f.piezas_afectadas), entero("Minutos perdidos", (f) => f.minutos_perdidos),
-          texto("Proceso", (f) => f.proceso ?? ""), texto("Persona", (f) => f.persona ?? ""), texto("Qué pasó", (f) => f.descripcion ?? ""),
+          entero("Piezas rechazadas", (f) => f.piezas_afectadas), entero("Piezas controladas", (f) => f.piezas_controladas ?? null),
+          entero("Minutos perdidos", (f) => f.minutos_perdidos),
+          entero("Paso", (f) => f.paso ?? null), texto("Proceso", (f) => f.proceso ?? ""), texto("Las hizo", (f) => f.persona ?? ""), texto("Qué pasó", (f) => f.descripcion ?? ""),
         ],
         lectura: [
           id("N° OT", (f) => f.numero), fecha("Fecha", (f) => f.fecha), texto("Tipo", (f) => f.tipo),
           texto("Gravedad", (f) => f.gravedad), texto("Estado", (f) => f.estado),
-          entero("Piezas", (f) => f.piezas_afectadas), texto("Persona", (f) => f.persona ?? "—"),
+          texto("Rechazadas", (f) => (f.piezas_afectadas === null ? "—" : f.piezas_controladas ? `${numero(f.piezas_afectadas)} de ${numero(f.piezas_controladas)}` : numero(f.piezas_afectadas))),
+          texto("Las hizo", (f) => f.persona ?? "—"),
         ],
         primeras: 10,
         vacio: "No hubo no conformidades en el mes.",
@@ -770,30 +818,53 @@ function seccionMaquinas(mq: Maquinas): SeccionReporte {
   const base: SeccionReporte = {
     clave: "maquinas",
     titulo: "Máquinas",
-    descripcion: "Horas de uso de cada máquina.",
+    descripcion: "Horas de uso de cada máquina y mantenimientos hechos en el mes.",
     indicadores: [],
     tablas: [],
   };
   if (!mq.disponible || !mq.resumen) {
     return { ...base, sinDatos: mq.texto || "Todavía no se registran las horas de uso de cada máquina." };
   }
-  // RF-10: cuando el backend lo mande, se ve sin tocar nada acá.
+  // RF-10: las horas efectivas de uso_maquina y los mantenimientos registrados en el mes.
+  const conMantenimiento = mq.resumen.mantenimientos !== undefined;
+  const mantenimientos = mq.mantenimientos ?? [];
+  const indicadores: Indicador[] = [
+    { titulo: "Máquinas con uso", actual: mq.resumen.maquinas, anterior: mq.anterior?.maquinas ?? null, tipo: "entero", mejor: null },
+    { titulo: "Horas de uso", actual: mq.resumen.horas_min, anterior: mq.anterior?.horas_min ?? null, tipo: "horas", mejor: null, ayuda: "efectivas: dentro de la jornada y sin pausas" },
+  ];
+  if (conMantenimiento) {
+    const avisos = mq.resumen.avisos ?? 0;
+    indicadores.push({
+      titulo: "Mantenimientos hechos", actual: mq.resumen.mantenimientos ?? 0, anterior: mq.anterior?.mantenimientos ?? null, tipo: "entero", mejor: null,
+      ...(avisos ? { ayuda: `${avisos} ${avisos === 1 ? "aviso de mantenimiento salió" : "avisos de mantenimiento salieron"} en el mes` } : {}),
+    });
+  }
+  const tablaMantenimientos: TablaReporte[] = conMantenimiento ? [{
+    clave: "mantenimientos",
+    hoja: "Mantenimientos",
+    titulo: "Mantenimientos hechos",
+    filas: mantenimientos,
+    columnas: [fecha("Fecha", (f) => f.fecha), texto("Máquina", (f) => f.maquina), texto("Lo hizo", (f) => f.hecho_por ?? ""), texto("Nota", (f) => f.nota ?? "")],
+    lectura: [fecha("Fecha", (f) => f.fecha), texto("Máquina", (f) => f.maquina), texto("Lo hizo", (f) => f.hecho_por ?? "—"), texto("Nota", (f) => f.nota ?? "")],
+    vacio: "No se registró ningún mantenimiento en el mes.",
+  }] : [];
   return {
     ...base,
-    indicadores: [
-      { titulo: "Máquinas con uso", actual: mq.resumen.maquinas, anterior: mq.anterior?.maquinas ?? null, tipo: "entero", mejor: null },
-      { titulo: "Horas de uso", actual: mq.resumen.horas_min, anterior: mq.anterior?.horas_min ?? null, tipo: "horas", mejor: null },
-    ],
+    indicadores,
     tablas: [{
       clave: "maquinas",
       hoja: "Máquinas",
       titulo: "Por máquina",
       filas: mq.filas,
-      columnas: [texto("Máquina", (f) => f.maquina), hs("Horas de uso", (f) => f.horas_min), entero("Tareas", (f) => f.tareas), hs("Horas del mes anterior", (f) => f.horas_min_anterior)],
+      columnas: [
+        texto("Máquina", (f) => f.maquina), hs("Horas de uso", (f) => f.horas_min), entero("Tareas", (f) => f.tareas), hs("Horas del mes anterior", (f) => f.horas_min_anterior),
+        ...(conMantenimiento ? [entero("Mantenimientos", (f) => f.mantenimientos ?? 0)] : []),
+      ],
       lectura: [texto("Máquina", (f) => f.maquina), hsLectura("Horas de uso", (f) => f.horas_min), entero("Tareas", (f) => f.tareas), hsLectura("Mes anterior", (f) => f.horas_min_anterior)],
       total: { maquina: "Total", horas_min: mq.resumen.horas_min, tareas: null, horas_min_anterior: mq.anterior?.horas_min ?? null },
       vacio: "Ninguna máquina registró uso en el mes.",
-    }],
+      nota: "Tareas = pasos que sumaron horas. No suman lo arrancado con la máquina fuera de servicio, lo que volvió a Pendiente ni lo que quedó abierto sin cierre.",
+    }, ...tablaMantenimientos],
   };
 }
 

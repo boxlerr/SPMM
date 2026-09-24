@@ -534,7 +534,7 @@ function ReporteMensualPantalla() {
           <>
             {secciones.length === 0 ? (
               <Aviso titulo="No hay partes de este reporte para mostrarte">
-                El reporte junta órdenes, producción, personas, calidad y materiales, y tu usuario no ve
+                El reporte junta órdenes, producción, personas, calidad, materiales y máquinas, y tu usuario no ve
                 ninguna de esas pantallas. Si las necesitás, pedíselas a un administrador.
               </Aviso>
             ) : (

@@ -23,9 +23,9 @@ para esa pantalla; no hay una segunda cuenta de nada.
 | Órdenes | ingresadas, entregadas, a tiempo / con atraso (y días de atraso promedio), abiertas y atrasadas al cierre, ranking de clientes | las fechas de la OT (`infrastructure/estado_ordenes.py`); «atrasada» es la regla del aviso de RF-04 |
 | Producción | horas efectivas por proceso y por OT, estimado vs. real (desvío %) de los pasos terminados en el mes, pausas y motivos | los tiempos efectivos de RF-06 (`TiempoEfectivo`, `TiemposOperarioService.medir`) y las pausas de RF-03 |
 | Personas | horas trabajadas, tareas completadas, promedio por tarea, eficiencia y ausencias de cada persona | el reporte de rendimiento de RF-07 (`RendimientoOperarioService.reporte`) con el mes como período |
-| Calidad | no conformidades del mes, piezas afectadas, minutos perdidos; por tipo, por gravedad y por persona | RF-12 (`IncidenciaProcesoRepository.buscar/resumen`) |
+| Calidad | no conformidades del mes, piezas rechazadas de cuántas controladas (% de rechazo), minutos perdidos; por tipo, por gravedad y —con la sección «Rendimiento por persona»— por persona | RF-12 (`IncidenciaProcesoRepository.buscar/resumen`) |
 | Materiales | consumo del mes por material y por OT (sin los anulados; no se suman unidades distintas) | RF-15 (`consumo_material`) |
-| Máquinas | **todavía nada**: ver sección 5 | RF-10 (otra rama) |
+| Máquinas | horas de uso efectivas por máquina y mantenimientos hechos en el mes: ver sección 5 | RF-10 (`UsoMaquinaService.horas_por_maquina`, `maquina_mantenimiento_hecho`) |
 
 El código: `backend/application/ReporteMensualService.py` (la cuenta, el CSV y el mail) y
 `GET /api/dashboard/reporte-mensual?anio=AAAA&mes=M` en `backend/presentation/DashboardAPI.py`.
@@ -151,23 +151,32 @@ cerrado que hay, porque el reporte trae la sección confidencial de personas. Ho
 usuarios son admin, así que en la práctica le llega a todo el equipo. Hay que confirmarlo con
 Lucas antes de activarlo.
 
-El reporte de cada mail se arma con los permisos del destinatario. El de un admin trae todo. Si
-mañana le tiene que llegar a un supervisor, hay que armarle el suyo con `alcance_de(sus permisos)`,
-y así no le llegan las personas.
+A los destinatarios por defecto (admin) les va todo. Con una lista `para` puesta a mano el
+reporte sale SIN lo de la sección confidencial «Rendimiento por persona» (personas, sus ausencias
+y la calidad agrupada por persona), porque no se sabe qué permisos tiene cada dirección. Si
+mañana le tiene que llegar a un supervisor con todo lo suyo, hay que armarle el reporte con
+`alcance_de(sus permisos)`.
 
-## 5. Máquinas: el enganche de RF-10
+## 5. Máquinas (RF-10)
 
-El registro de horas de uso de cada máquina (tabla `uso_maquina`) lo agrega **otra rama (RF-10)**.
-Acá no se inventa nada: la sección sale vacía y lo dice. Al integrar RF-10 hay que completar
-`ReporteMensualService._maquinas()` (el docstring dice exactamente qué devolver). La pantalla, los
-tres archivos y el mail ya leen esas claves, así que no hay que tocarlos:
+La sección lee el registro de uso de RF-10 (`uso_maquina`) con la misma cuenta que la solapa Uso
+de cada máquina (`UsoMaquinaService.horas_por_maquina`): horas EFECTIVAS (jornada del taller
+menos pausas), recortadas al mes, y una hora en que la máquina tuvo dos pasos abiertos cuenta una
+vez. No suma lo que RF-10 dice que no suma (fuera de servicio, vuelta a Pendiente, abierto sin
+cierre o abierto de más). Suma además los mantenimientos registrados con fecha del mes (la lista
+va aparte) y cuántos avisos de mantenimiento salieron.
+
+Pide lo mismo que la solapa de RF-10: la política «maquinas_uso» (Recursos › Recurso
+maquinaria). Si las tablas de RF-10 no están (la migración no se aplicó), la sección sale vacía
+con un aviso y el resto del reporte no se cae.
 
 ```python
 {"disponible": True,
- "resumen": {"maquinas": n, "horas_min": total},
- "anterior": {"maquinas": n, "horas_min": total},
+ "resumen": {"maquinas": n, "horas_min": total, "mantenimientos": n, "avisos": n},
+ "anterior": {"maquinas": n, "horas_min": total, "mantenimientos": n},
  "filas": [{"id_maquinaria": 1, "maquina": "TORNO CNC 1", "horas_min": 1234,
-            "tareas": 12, "horas_min_anterior": 1100}, ...]}
+            "tareas": 12, "horas_min_anterior": 1100, "mantenimientos": 1}, ...],
+ "mantenimientos": [{"id", "id_maquinaria", "maquina", "fecha", "hecho_por", "nota"}, ...]}
 ```
 
 ## 6. Pruebas

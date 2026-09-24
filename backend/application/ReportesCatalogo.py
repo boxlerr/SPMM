@@ -70,6 +70,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 
 from backend.application.IncidenciaProcesoService import (
+    DISPOSICIONES,
     ESTADOS as ESTADOS_NC,
     GRAVEDADES,
     TIPOS as TIPOS_NC,
@@ -93,6 +94,7 @@ from backend.domain.Planificacion import Planificacion
 from backend.domain.Prioridad import Prioridad
 from backend.domain.Proceso import Proceso
 from backend.domain.Sector import Sector
+from backend.domain.UsoMaquina import NO_SUMA_FUERA_DE_SERVICIO, NO_SUMA_VUELTA_A_PENDIENTE, UsoMaquina
 from backend.infrastructure.estado_ordenes import ESTADO_SQL, SIN_FECHA_NUEVA, SIN_FECHA_VIEJA
 
 # La sección confidencial «Rendimiento por persona» (dashboard_rendimiento): la eficiencia,
@@ -467,6 +469,10 @@ class Fuente:
     # con `rendimiento` arma el ranking de la sección confidencial «Rendimiento por
     # persona»: sin la sección, el armador lo rechaza (ver ReportesService.validar).
     por_persona: tuple[str, ...] = ()
+    # Agrupar por una columna de `por_persona` (con CUALQUIER cuenta, también la cantidad)
+    # o filtrar por ella pide la sección: es lo que hace RF-12 con las no conformidades
+    # por persona. Sin esto, sólo lo pide medir una columna con `rendimiento`.
+    persona_confidencial: bool = False
 
     def __post_init__(self):
         codigos = [c.codigo for c in self.columnas]
@@ -500,6 +506,8 @@ pz = Pieza.__table__.alias("pz")
 ic = IncidenciaProceso.__table__.alias("ic")
 pa = PausaOrden.__table__.alias("pa")
 au = AusenciaOperario.__table__.alias("au")
+um = UsoMaquina.__table__.alias("um")
+otp_ic = OrdenTrabajoProceso.__table__.alias("otp_ic")
 # La auditoría va SIN alias: las condiciones de lo que cada uno puede ver son las de la
 # pantalla de Auditoría (AuditoriaAPI) y nombran la tabla.
 am = AuditoriaMovimiento.__table__
@@ -629,9 +637,31 @@ ORDENES = Fuente(
         C("mes_prometida", "Mes prometido", "mes", mes_de(fecha_limpia(ot.c.fecha_prometida))),
         C("mes_entrega", "Mes de entrega", "mes", mes_de(fecha_limpia(ot.c.fecha_entrega))),
         C("reclamo", "Con reclamo", "booleano", si_no(func.coalesce(ot.c.reclamo, 0) == 1)),
+        # RF-11: las ocho casillas de «Estado y control» de la ficha, en su orden, como
+        # sí/no (se filtran y se agrupan). Las leen los mismos que leen la OT: son parte
+        # de su ficha, sin permiso aparte (como en la pantalla).
+        *(C(codigo, nombre, "booleano", si_no(func.coalesce(columna, 0) == 1),
+            ayuda="La casilla de «Estado y control» de la ficha de la OT.")
+          for codigo, nombre, columna in (
+              ("programada", "Programada", ot.c.programada),
+              ("en_proceso", "En proceso (casilla)", ot.c.en_proceso),
+              ("finalizado_total", "Finalizado total", ot.c.finalizadototal),
+              ("finalizado_parcial", "Finalizado parcial", ot.c.finalizadoparcial),
+              ("controlado", "Controlado", ot.c.controlado),
+              ("finalizado_para_pintar", "Finalizado para pintar", ot.c.finalizado_para_pintar),
+              ("terc_final", "Finalizado tercerización final", ot.c.finalizado_tercerizacion_final),
+              ("terc_intermedia", "Finalizado tercerización intermedia",
+               ot.c.finalizado_tercerizacion_intermedia),
+          )),
+        C("cantidad_parcial", "Cant. finalizada parcial", "entero", ot.c.cantidad_finalizada_parcial,
+          totaliza=True, ayuda="El «Cant.» al lado de Finalizado parcial: unidades terminadas. "
+                               "No es lo entregado. Vacío: no se cargó."),
+        C("controlado_por", "Controlada por", "texto", ot.c.controlado_por,
+          ayuda="Quién marcó Controlado desde SPMM. Vacío: no se registró."),
+        C("controlado_en", "Controlada el", "fechaHora", ot.c.controlado_en),
         C("observaciones", "Observaciones", "texto", ot.c.observaciones, agrupable=False),
     ),
-    periodo=("fecha_entrada", "fecha_prometida", "fecha_entrega"),
+    periodo=("fecha_entrada", "fecha_prometida", "fecha_entrega", "controlado_en"),
     orden_inicial=("numero", "desc"),
 )
 
@@ -884,12 +914,65 @@ MAQUINAS = Fuente(
         C("limitacion", "Limitación", "texto", mq.c.limitacion),
     ),
     orden_inicial=("maquina", "asc"),
-    # RF-10 (otra rama) registra las horas de uso de cada máquina. Cuando esté, van acá
-    # como columnas nuevas (horas de uso en el período, pasos hechos) con la tabla de
-    # RF-10 en el FROM. Mientras tanto, lo que se hizo en cada máquina se ve en «Pasos de
-    # las OT» agrupando por máquina.
-    nota="Las horas de uso de cada máquina se suman acá cuando se registren (RF-10). Hoy: "
-         "«Pasos de las OT» agrupado por máquina.",
+    # Las horas de uso de cada máquina (RF-10) son la fuente «Uso de máquinas», que pide su
+    # permiso (este catálogo es libre).
+    nota="Las horas de uso de cada máquina están en «Uso de máquinas», agrupando por máquina.",
+)
+
+
+# ── 5 bis. Uso de máquinas (RF-10) ──
+
+_USO_SUMA = and_(um.c.no_suma.is_(None), um.c.fin.isnot(None))
+NO_SUMA_USO = {
+    NO_SUMA_FUERA_DE_SERVICIO: "Fuera de servicio",
+    NO_SUMA_VUELTA_A_PENDIENTE: "Volvió a Pendiente",
+}
+
+USO_MAQUINAS = Fuente(
+    codigo="uso_maquinas",
+    nombre="Uso de máquinas",
+    descripcion="Cada tramo en que se usó una máquina en un paso de una OT: cuándo, cuántas horas y quién.",
+    icono="gauge",
+    requisitos=POLITICAS["maquinas_uso"].leer,
+    permiso="Pide la solapa Recurso maquinaria de Recursos (su uso y mantenimiento).",
+    origen=lambda ctx: um.outerjoin(mq, mq.c.id == um.c.id_maquinaria),
+    clave=lambda ctx: um.c.id,
+    columnas=(
+        C("maquina", "Máquina", "texto", mq.c.nombre, filtro_expr=um.c.id_maquinaria,
+          opciones="maquinas", por_defecto=True),
+        C("numero", "N° de OT", "id", um.c.numero_ot, agrupable=True, por_defecto=True),
+        C("paso", "Paso", "entero", um.c.paso, medible=False),
+        C("proceso", "Proceso", "texto", um.c.nombre_proceso, por_defecto=True),
+        C("persona", "Persona", "texto", um.c.operario, filtro_expr=um.c.id_operario,
+          opciones="personas",
+          ayuda="La elegida a mano en el paso o, si no hay, la del último plan, al arrancar."),
+        C("origen", "Máquina según", "texto", um.c.origen_maquina,
+          etiquetas={"OT": "La OT", "PLAN": "El plan"}, filtrable=False),
+        C("inicio", "Arranque", "fechaHora", um.c.inicio, por_defecto=True),
+        C("fin", "Fin", "fechaHora", um.c.fin, por_defecto=True),
+        C("mes", "Mes", "mes", mes_de(um.c.inicio)),
+        C("horas_uso", "Horas de uso", "numero",
+          case((_USO_SUMA, um.c.efectivo_min / 60.0), else_=None),
+          decimales=2, totaliza=True, por_defecto=True, rendimiento=True,
+          ayuda="Horas EFECTIVAS (dentro de la jornada y sin pausas) medidas al cerrar el tramo. "
+                "Vacío si sigue abierto o si no suma. Cada tramo entero: la solapa Uso de la "
+                "máquina recorta al período y no cuenta dos veces dos pasos a la vez."),
+        C("horas_corridas", "Horas corridas", "numero",
+          case((_USO_SUMA, um.c.corrido_min / 60.0), else_=None),
+          decimales=2, totaliza=True, rendimiento=True,
+          ayuda="Del arranque al fin, con noches y fines de semana."),
+        C("en_curso", "Sigue en uso", "booleano", si_no(um.c.fin.is_(None))),
+        C("no_suma", "No suma porque", "texto", um.c.no_suma, etiquetas=NO_SUMA_USO,
+          filtrable=False,
+          ayuda="Arrancado con la máquina fuera de servicio o el paso volvió a Pendiente."),
+        C("arranco", "Lo arrancó", "texto", um.c.usuario_inicio),
+        C("cerro", "Lo cerró", "texto", um.c.usuario_fin),
+    ),
+    periodo=("inicio", "fin"),
+    orden_inicial=("inicio", "desc"),
+    # Las horas de uso sumadas por persona son horas de cada una: el ranking de la sección
+    # confidencial, como en «Pasos de las OT».
+    por_persona=("persona",),
 )
 
 
@@ -974,12 +1057,14 @@ STOCK = Fuente(
 NO_CONFORMIDADES = Fuente(
     codigo="no_conformidades",
     nombre="No conformidades",
-    descripcion="Cada no conformidad: OT, proceso, persona, tipo, gravedad, tiempo perdido y piezas.",
+    descripcion="Cada no conformidad: OT, paso, proceso, quién hizo las piezas, tipo, gravedad, "
+                "piezas rechazadas de cuántas controladas y tiempo perdido.",
     icono="shield-alert",
     requisitos=POLITICAS["incidencias"].leer,
     permiso="Pide poder ver las no conformidades (o las órdenes de trabajo).",
     origen=lambda ctx: (
         ic.join(ot, ot.c.id == ic.c.id_orden_trabajo)
+        .outerjoin(otp_ic, otp_ic.c.id == ic.c.id_otp)
         .outerjoin(pc, pc.c.id == ic.c.id_proceso)
         .outerjoin(op, op.c.id == ic.c.id_operario)
         .outerjoin(cl, cl.c.id == ot.c.id_cliente)
@@ -990,10 +1075,15 @@ NO_CONFORMIDADES = Fuente(
         C("mes", "Mes", "mes", mes_de(ic.c.fecha_registro)),
         _numero_ot(ot),
         _cliente(),
+        C("paso", "Paso", "entero", otp_ic.c.orden, medible=False,
+          ayuda="El paso de la OT donde pasó (RF-12). Vacío: no se dijo, o el paso se sacó de la OT."),
         C("proceso", "Proceso", "texto", pc.c.nombre, filtro_expr=ic.c.id_proceso,
           opciones="procesos", por_defecto=True),
-        C("persona", "Persona", "texto", _nombre_persona(op), filtro_expr=ic.c.id_operario,
-          opciones="personas", por_defecto=True),
+        C("persona", "Las hizo", "texto", _nombre_persona(op), filtro_expr=ic.c.id_operario,
+          opciones="personas", por_defecto=True,
+          ayuda="Quién hizo las piezas, como lo eligió quien cargó la no conformidad (el "
+                "sistema no registra quién hizo cada paso). Agrupar o filtrar por esta columna "
+                "es de la sección confidencial «Rendimiento por persona», como en No conformidades."),
         C("tipo", "Tipo", "texto", ic.c.tipo, opciones="tipos_nc", etiquetas=TIPOS_NC,
           por_defecto=True),
         C("gravedad", "Gravedad", "texto", ic.c.gravedad, opciones="gravedades",
@@ -1003,7 +1093,21 @@ NO_CONFORMIDADES = Fuente(
         C("minutos_perdidos", "Minutos perdidos", "entero", ic.c.minutos_perdidos, totaliza=True,
           por_defecto=True),
         C("personas_extra", "Personas extra", "entero", ic.c.operarios_extra, totaliza=True),
-        C("piezas_afectadas", "Piezas afectadas", "entero", ic.c.piezas_afectadas, totaliza=True),
+        # El código sigue siendo «piezas_afectadas» (los reportes guardados lo nombran);
+        # RF-12 lo muestra como piezas rechazadas.
+        C("piezas_afectadas", "Piezas rechazadas", "entero", ic.c.piezas_afectadas, totaliza=True,
+          por_defecto=True, rendimiento=True),
+        C("piezas_controladas", "Piezas controladas", "entero", ic.c.piezas_controladas,
+          totaliza=True, rendimiento=True,
+          ayuda="De cuántas piezas controladas salieron las rechazadas. Vacío: no se dijo."),
+        C("porcentaje_rechazo", "% de rechazo", "porcentaje",
+          case((and_(ic.c.piezas_controladas > 0, ic.c.piezas_afectadas.isnot(None)),
+                ic.c.piezas_afectadas * 100.0 / ic.c.piezas_controladas), else_=None),
+          decimales=1, medible=False,
+          ayuda="Rechazadas sobre controladas, de esta no conformidad. Vacío si no dice de "
+                "cuántas controladas. Para el total, sumá las dos columnas."),
+        C("disposicion", "Qué se hace con lo rechazado", "texto", ic.c.disposicion,
+          opciones="disposiciones", etiquetas=DISPOSICIONES),
         C("descripcion", "Descripción", "texto", ic.c.descripcion, agrupable=False),
         C("accion_correctiva", "Acción correctiva", "texto", ic.c.accion_correctiva, agrupable=False),
         C("registrada_por", "Registrada por", "texto", ic.c.usuario),
@@ -1011,6 +1115,11 @@ NO_CONFORMIDADES = Fuente(
     ),
     periodo=("fecha", "fecha_cierre"),
     orden_inicial=("fecha", "desc"),
+    # RF-12: las no conformidades AGRUPADAS o FILTRADAS por quién hizo las piezas son de
+    # la sección confidencial «Rendimiento por persona» (/incidencias/por-persona y
+    # ?id_operario= piden esa sección). La lista con la columna, no: ya lo decía.
+    por_persona=("persona",),
+    persona_confidencial=True,
 )
 
 
@@ -1101,8 +1210,8 @@ AUDITORIA = Fuente(
 
 
 FUENTES: tuple[Fuente, ...] = (
-    ORDENES, PASOS, PERSONAS, AUSENCIAS, MAQUINAS, CONSUMOS, STOCK, NO_CONFORMIDADES, PAUSAS,
-    AUDITORIA,
+    ORDENES, PASOS, PERSONAS, AUSENCIAS, MAQUINAS, USO_MAQUINAS, CONSUMOS, STOCK,
+    NO_CONFORMIDADES, PAUSAS, AUDITORIA,
 )
 FUENTE_POR_CODIGO: dict[str, Fuente] = {f.codigo: f for f in FUENTES}
 assert len(FUENTE_POR_CODIGO) == len(FUENTES)
@@ -1132,6 +1241,7 @@ OPCIONES_FIJAS: dict[str, dict] = {
     "estados_nc": ESTADOS_NC,
     "motivos_pausa": MOTIVOS_PAUSA,
     "cierres_pausa": CIERRE_TEXTO,
+    "disposiciones": DISPOSICIONES,
 }
 
 for _f in FUENTES:

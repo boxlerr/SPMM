@@ -399,10 +399,10 @@ export function entraEnElFiltro(fila: NoConformidad, f: FiltrosNC): boolean {
 
 // ─────────────────────────── el enganche con RF-11 ───────────────────────────
 //
-// RF-11 (otra rama) agrega la casilla «Controlado» a la OT. Al tildarla, el taller
-// quiere que se le pregunte «¿hubo piezas rechazadas?». Para no tocar esa casilla desde
-// acá (es de la otra rama), el control de calidad de la ficha ESCUCHA este aviso: RF-11
-// sólo tiene que llamar, al tildarla,
+// RF-11 agrega la casilla «Controlado» a la OT. Al tildarla, el taller quiere que se le
+// pregunte «¿hubo piezas rechazadas?». El control de calidad de la ficha ESCUCHA este
+// aviso y la casilla (CreateWorkOrderModal, onCasilla de EstadoYControl) llama, al
+// tildarla en una OT que ya existe,
 //
 //     ofrecerRegistrarRechazos(idOrden)
 //

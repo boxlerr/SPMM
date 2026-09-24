@@ -39,16 +39,16 @@ export default function BotonReporteMensual() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="shrink-0 flex items-center gap-2 px-4 md:px-5 py-2.5 md:py-3 bg-white text-gray-800 border border-gray-200 rounded-lg hover:border-[#DC143C]/40 hover:text-[#DC143C] hover:shadow-sm transition-all duration-200 font-medium"
+          className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/10 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-white/20"
         >
-          <CalendarRange className="h-4 w-4 text-[#DC143C]" />
+          <CalendarRange className="h-4 w-4 text-[#ff8da1]" />
           <span>Reporte mensual</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(18rem,calc(100vw-2rem))] p-4">
         <p className="text-sm font-semibold text-gray-900">Reporte mensual</p>
         <p className="mt-0.5 text-xs leading-snug text-gray-500">
-          Órdenes, producción, personas, calidad y materiales de un mes, comparado con el anterior.
+          Órdenes, producción, personas, calidad, materiales y máquinas de un mes, comparado con el anterior.
           Se exporta a PDF, Excel y CSV.
         </p>
         <label htmlFor="mes-del-reporte" className="mt-3 block text-xs font-medium text-gray-600">

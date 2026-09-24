@@ -785,6 +785,77 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        # RF-12, los rechazos: en qué paso, de cuántas controladas y qué se hace con lo
+        # rechazado. Sin esto el primer GET de no conformidades después del deploy
+        # rompe (SQLAlchemy pide las tres columnas en cada SELECT). Todo nullable y sin
+        # default: no reescribe filas.
+        "2026-09-23_rechazos_por_paso",
+        [
+            "ALTER TABLE incidencia_proceso "
+            "ADD COLUMN IF NOT EXISTS id_otp BIGINT, "
+            "ADD COLUMN IF NOT EXISTS piezas_controladas INTEGER, "
+            "ADD COLUMN IF NOT EXISTS disposicion VARCHAR(30)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON COLUMN incidencia_proceso.id_otp IS "
+            "'En qué paso de la OT se rechazó: orden_trabajo_proceso.id, la pasada y no el "
+            "proceso (el mismo proceso puede ir varias veces en una orden). NULL = no se dijo, "
+            "o se cargó antes del 23/09/2026. Sin FK a propósito: sacar un paso de la OT no "
+            "tiene que fallar por una no conformidad vieja; id_proceso sigue diciendo qué "
+            "trabajo era.'",
+            "COMMENT ON COLUMN incidencia_proceso.piezas_controladas IS "
+            "'De cuántas piezas controladas salieron las rechazadas (piezas_afectadas). "
+            "NULL = no se dijo; nunca se completa con las unidades de la OT, porque no "
+            "siempre se controla todo.'",
+            "COMMENT ON COLUMN incidencia_proceso.disposicion IS "
+            "'Qué se hace con lo rechazado: RETRABAJO, DESCARTE, CONCESION (se acepta con "
+            "concesión) o DEVOLUCION_PROVEEDOR. NULL = todavía no se decidió. No es la acción "
+            "correctiva: ésta dice qué se hizo para que no vuelva a pasar.'",
+            "CREATE INDEX IF NOT EXISTS ix_incidencia_operario "
+            "ON incidencia_proceso (id_operario, fecha_registro DESC) "
+            "WHERE id_operario IS NOT NULL",
+        ],
+    ),
+    (
+        # RF-23. Una tabla nueva y nada más: ninguna columna de las tablas que se leen en
+        # cada pantalla. Si esto no llegara a aplicarse, el armador de reportes anda igual
+        # (armar, ver y exportar no la tocan); lo único que no anda es guardar un reporte.
+        "2026-09-23_reportes_guardados",
+        [
+            "CREATE TABLE IF NOT EXISTS reporte_guardado ("
+            "id BIGSERIAL PRIMARY KEY, "
+            "nombre VARCHAR(120) NOT NULL, "
+            "descripcion VARCHAR(500), "
+            "fuente VARCHAR(40) NOT NULL, "
+            "config TEXT NOT NULL, "
+            "id_usuario INTEGER NOT NULL, "
+            "usuario VARCHAR(120), "
+            "compartido BOOLEAN NOT NULL DEFAULT FALSE, "
+            "creado_en TIMESTAMP NOT NULL, "
+            "modificado_en TIMESTAMP)",
+            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
+            "COMMENT ON TABLE reporte_guardado IS "
+            "'Reportes personalizados guardados con nombre (RF-23). Guarda la receta (fuente, "
+            "columnas, filtros, agrupación y orden), no el resultado: se valida y se corre de nuevo "
+            "cada vez que se abre. La escribe SPMM; el sync no la mira.'",
+            "COMMENT ON COLUMN reporte_guardado.config IS "
+            "'El reporte como lo arma la pantalla: un JSON con códigos del catálogo cerrado "
+            "(backend/application/ReportesCatalogo.py). Nunca SQL ni nombres de tabla o columna.'",
+            "COMMENT ON COLUMN reporte_guardado.fuente IS "
+            "'El código de la fuente de datos (ordenes, pasos, personas...), repetido afuera del "
+            "JSON para listar sin abrirlo. Sin CHECK: las fuentes las dice el catálogo del código.'",
+            "COMMENT ON COLUMN reporte_guardado.id_usuario IS "
+            "'Quién lo guardó (usuario.id_usuario). Sólo esa persona lo cambia o lo borra.'",
+            "COMMENT ON COLUMN reporte_guardado.compartido IS "
+            "'TRUE: lo marcó un admin para que lo vean todos, pero cada uno sólo si puede leer su "
+            "fuente. FALSE: sólo lo ve quien lo guardó.'",
+            "CREATE INDEX IF NOT EXISTS ix_reporte_guardado_usuario "
+            "ON reporte_guardado (id_usuario)",
+            "CREATE INDEX IF NOT EXISTS ix_reporte_guardado_compartido "
+            "ON reporte_guardado (id) "
+            "WHERE compartido",
+        ],
+    ),
+    (
         # RF-10. Cinco tablas nuevas y nada más: ninguna columna de `maquinaria`, que se
         # lee en cada pantalla, así que si esto no llegara a aplicarse las máquinas se
         # siguen leyendo igual. Lo único que no anda es el uso y el mantenimiento; el
@@ -895,77 +966,6 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "SIN_DESTINATARIOS (nadie elegido, o nadie activo con email). No se reintenta.'",
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_mant_aviso_clave ON maquina_mantenimiento_aviso "
             "(id_maquinaria, clave)",
-        ],
-    ),
-    (
-        # RF-12, los rechazos: en qué paso, de cuántas controladas y qué se hace con lo
-        # rechazado. Sin esto el primer GET de no conformidades después del deploy
-        # rompe (SQLAlchemy pide las tres columnas en cada SELECT). Todo nullable y sin
-        # default: no reescribe filas.
-        "2026-09-23_rechazos_por_paso",
-        [
-            "ALTER TABLE incidencia_proceso "
-            "ADD COLUMN IF NOT EXISTS id_otp BIGINT, "
-            "ADD COLUMN IF NOT EXISTS piezas_controladas INTEGER, "
-            "ADD COLUMN IF NOT EXISTS disposicion VARCHAR(30)",
-            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
-            "COMMENT ON COLUMN incidencia_proceso.id_otp IS "
-            "'En qué paso de la OT se rechazó: orden_trabajo_proceso.id, la pasada y no el "
-            "proceso (el mismo proceso puede ir varias veces en una orden). NULL = no se dijo, "
-            "o se cargó antes del 23/09/2026. Sin FK a propósito: sacar un paso de la OT no "
-            "tiene que fallar por una no conformidad vieja; id_proceso sigue diciendo qué "
-            "trabajo era.'",
-            "COMMENT ON COLUMN incidencia_proceso.piezas_controladas IS "
-            "'De cuántas piezas controladas salieron las rechazadas (piezas_afectadas). "
-            "NULL = no se dijo; nunca se completa con las unidades de la OT, porque no "
-            "siempre se controla todo.'",
-            "COMMENT ON COLUMN incidencia_proceso.disposicion IS "
-            "'Qué se hace con lo rechazado: RETRABAJO, DESCARTE, CONCESION (se acepta con "
-            "concesión) o DEVOLUCION_PROVEEDOR. NULL = todavía no se decidió. No es la acción "
-            "correctiva: ésta dice qué se hizo para que no vuelva a pasar.'",
-            "CREATE INDEX IF NOT EXISTS ix_incidencia_operario "
-            "ON incidencia_proceso (id_operario, fecha_registro DESC) "
-            "WHERE id_operario IS NOT NULL",
-        ],
-    ),
-    (
-        # RF-23. Una tabla nueva y nada más: ninguna columna de las tablas que se leen en
-        # cada pantalla. Si esto no llegara a aplicarse, el armador de reportes anda igual
-        # (armar, ver y exportar no la tocan); lo único que no anda es guardar un reporte.
-        "2026-09-23_reportes_guardados",
-        [
-            "CREATE TABLE IF NOT EXISTS reporte_guardado ("
-            "id BIGSERIAL PRIMARY KEY, "
-            "nombre VARCHAR(120) NOT NULL, "
-            "descripcion VARCHAR(500), "
-            "fuente VARCHAR(40) NOT NULL, "
-            "config TEXT NOT NULL, "
-            "id_usuario INTEGER NOT NULL, "
-            "usuario VARCHAR(120), "
-            "compartido BOOLEAN NOT NULL DEFAULT FALSE, "
-            "creado_en TIMESTAMP NOT NULL, "
-            "modificado_en TIMESTAMP)",
-            # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
-            "COMMENT ON TABLE reporte_guardado IS "
-            "'Reportes personalizados guardados con nombre (RF-23). Guarda la receta (fuente, "
-            "columnas, filtros, agrupación y orden), no el resultado: se valida y se corre de nuevo "
-            "cada vez que se abre. La escribe SPMM; el sync no la mira.'",
-            "COMMENT ON COLUMN reporte_guardado.config IS "
-            "'El reporte como lo arma la pantalla: un JSON con códigos del catálogo cerrado "
-            "(backend/application/ReportesCatalogo.py). Nunca SQL ni nombres de tabla o columna.'",
-            "COMMENT ON COLUMN reporte_guardado.fuente IS "
-            "'El código de la fuente de datos (ordenes, pasos, personas...), repetido afuera del "
-            "JSON para listar sin abrirlo. Sin CHECK: las fuentes las dice el catálogo del código.'",
-            "COMMENT ON COLUMN reporte_guardado.id_usuario IS "
-            "'Quién lo guardó (usuario.id_usuario). Sólo esa persona lo cambia o lo borra.'",
-            "COMMENT ON COLUMN reporte_guardado.compartido IS "
-            "'TRUE: lo marcó un admin para que lo vean todos, pero cada uno sólo si puede leer su "
-            "fuente. FALSE: sólo lo ve quien lo guardó.'",
-            "CREATE INDEX IF NOT EXISTS ix_reporte_guardado_usuario "
-            "ON reporte_guardado (id_usuario)",
-            "CREATE INDEX IF NOT EXISTS ix_reporte_guardado_compartido "
-            "ON reporte_guardado (id) "
-            "WHERE compartido",
         ],
     ),
 ]

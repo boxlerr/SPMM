@@ -16,8 +16,8 @@
  *  · Con un servidor de antes del 23/09 no hay botón de cargar (guardar un tipo nuevo
  *    fallaría); con uno sin la ruta de la OT, la franja no aparece.
  *
- * EL ENGANCHE CON RF-11 (la casilla «Controlado», otra rama): esto escucha
- * `ofrecerRegistrarRechazos(idOrden)` de lib/calidad.ts. Al tildar «Controlado», RF-11
+ * EL ENGANCHE CON RF-11 (la casilla «Controlado»): esto escucha
+ * `ofrecerRegistrarRechazos(idOrden)` de lib/calidad.ts. Al tildar «Controlado», la ficha
  * lo llama y acá aparece «¿Hubo piezas rechazadas?» con «Sí, cargarlas» / «No».
  */
 import { useCallback, useEffect, useRef, useState } from "react";

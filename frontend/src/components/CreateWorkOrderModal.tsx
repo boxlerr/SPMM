@@ -30,6 +30,7 @@ import { descargarPlano, esFoto, esPlano, type Plano } from "@/lib/planos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { PausasDeLaOT } from "@/components/pausas/PausasDeLaOT";
 import { ControlDeCalidadOT } from "@/components/calidad/ControlDeCalidadOT";
+import { ofrecerRegistrarRechazos } from "@/lib/calidad";
 import { aNumero } from "@/lib/exportar";
 import { archivoDeOT, seccionesDeOT, type DatosDeOT } from "@/lib/exportes/ot";
 import { EstadoYControl, type ValoresDeEstado } from "@/components/common/EstadoDeControl";
@@ -1644,8 +1645,8 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                     {/* RF-12: el control de calidad de la OT (sus no conformidades, cargar
                         un rechazo y cerrarlo). Fuera del formulario por lo mismo que las
                         pausas: sus botones no guardan la OT. Con un backend de antes no
-                        dibuja nada. RF-11 engancha acá su casilla «Controlado» llamando a
-                        ofrecerRegistrarRechazos(id) de lib/calidad.ts. */}
+                        dibuja nada. La casilla «Controlado» de RF-11 (EstadoYControl, más
+                        abajo) llama a ofrecerRegistrarRechazos(id) de lib/calidad.ts. */}
                     {orderToEdit?.id ? (
                         <ControlDeCalidadOT
                             idOrden={orderToEdit.id}
@@ -1933,7 +1934,16 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                             parcial. Quién marcó Controlado y cuándo lo pone el backend. */}
                                         <EstadoYControl
                                             valores={generalData as ValoresDeEstado}
-                                            onCasilla={(clave, valor) => setGeneralData(g => ({ ...g, [clave]: valor }))}
+                                            onCasilla={(clave, valor) => {
+                                                setGeneralData(g => ({ ...g, [clave]: valor }));
+                                                // RF-11 × RF-12: al tildar «Controlado» en una OT que ya
+                                                // existe, la franja «Control de calidad» de arriba pregunta
+                                                // «¿Hubo piezas rechazadas?» y abre el formulario de rechazo
+                                                // con esta OT. Sólo se ofrece: no obliga ni frena el guardado.
+                                                if (clave === "controlado" && valor && orderToEdit?.id) {
+                                                    ofrecerRegistrarRechazos(orderToEdit.id);
+                                                }
+                                            }}
                                             onCantidad={(texto) => setGeneralData(g => ({ ...g, cantidad_finalizada_parcial: texto }))}
                                             bloqueado={camposBloqueados}
                                             conoceNuevas={conoceControl}

@@ -26,7 +26,8 @@ DE DÓNDE SALE CADA NÚMERO (no hay una segunda cuenta de nada)
                RendimientoOperarioService.reporte) con el mes como período.
   Calidad      las no conformidades (RF-12, IncidenciaProcesoRepository.buscar/resumen).
   Materiales   los consumos cargados en la OT (RF-15, consumo_material), sin los anulados.
-  Máquinas     todavía nada: ver _maquinas() (el punto de enganche de RF-10).
+  Máquinas     las horas de uso de RF-10 (UsoMaquinaService.horas_por_maquina, las
+               efectivas) y los mantenimientos registrados en el mes (ver _maquinas).
 
 EL MES
 
@@ -51,7 +52,8 @@ permiso, esa parte no se lee ni se manda (va en null):
                              el motivo puede ser una enfermedad (revisión del 23/09)
   calidad                    No conformidades (la tarjeta «Interpretación de planos»)
   materiales                 la política «consumos_material» (Operaciones)
-  máquinas                   Operaciones o Recursos (hoy no muestra datos)
+  máquinas                   la política «maquinas_uso» (Recursos › Recurso maquinaria),
+                             la de la solapa Uso y mantenimiento de RF-10
 
 Las horas POR PERSONA van en «Personas» y no en «Producción» a propósito: son de la
 misma cuenta que la eficiencia de cada uno y ponen un número al lado de un nombre.
@@ -72,9 +74,11 @@ RF-04, el plan es (docs/REPORTE_MENSUAL.md tiene el detalle y el código del end
     → preparar_mails_del_mes(db, mes anterior) → Resend (RESEND_API_KEY, FROM_EMAIL).
 
 A QUIÉN LE LLEGA es una decisión de Lucas (PENDIENTE): hoy todos los usuarios son admin,
-así que «los admin» son todos. El reporte de cada destinatario se arma con SUS permisos
-(el de un admin trae todo; si mañana le llega a un supervisor, sin la sección confidencial
-no le llegan las personas).
+así que «los admin» son todos y su reporte trae todo. Si se le pasa una lista `para` a
+mano, el reporte sale SIN las partes de la sección confidencial «Rendimiento por persona»
+(personas, sus ausencias y la calidad agrupada por persona), porque no se sabe con qué
+permisos cuenta cada dirección. Cuando se decida, armar uno por destinatario con
+alcance_de(sus permisos).
 """
 from __future__ import annotations
 
@@ -83,7 +87,7 @@ import html
 import io
 from calendar import monthrange
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
 
@@ -272,7 +276,7 @@ def alcance_de(permisos) -> Alcance:
         return Alcance()
     if getattr(permisos, "es_admin", False):
         return Alcance.todo()
-    from backend.core.permisos_rutas import POLITICAS, TARJETAS_DASHBOARD, area, permite
+    from backend.core.permisos_rutas import POLITICAS, TARJETAS_DASHBOARD, permite
 
     def puede(requisitos) -> bool:
         try:
@@ -292,9 +296,9 @@ def alcance_de(permisos) -> Alcance:
         ausencias=personas and puede(POLITICAS["asistencia"].leer),
         calidad=puede((tarjeta["incidencias_planos"],)),
         materiales=puede(POLITICAS["consumos_material"].leer),
-        # Las máquinas y lo que se hizo con ellas: Operaciones (los pasos) o Recursos (el
-        # catálogo de máquinas). Hoy la sección no trae datos (ver _maquinas).
-        maquinas=puede((area("operaciones"), area("recursos"))),
+        # Las horas de uso y los mantenimientos de cada máquina: lo mismo que pide su
+        # pantalla, la solapa Recurso maquinaria (la política «maquinas_uso» de RF-10).
+        maquinas=puede(POLITICAS["maquinas_uso"].leer),
     )
 
 
@@ -404,7 +408,7 @@ class ReporteMensualService:
             datos["personas"] = await self._personas(actual, anterior, pasos_actual,
                                                      pasos_anterior, alcance)
         if alcance.calidad:
-            datos["calidad"] = await self._calidad(actual, anterior)
+            datos["calidad"] = await self._calidad(actual, anterior, alcance)
             if actual.ini < NC_EN_HORA_LOCAL_DESDE:
                 avisos.append(
                     "Las no conformidades cargadas antes del 22/09/2026 quedaron guardadas con "
@@ -832,10 +836,17 @@ class ReporteMensualService:
 
     # ─────────────────────────── Calidad ───────────────────────────
 
-    async def _calidad(self, actual: Mes, anterior: Mes) -> dict:
+    async def _calidad(self, actual: Mes, anterior: Mes, alcance: Alcance | None = None) -> dict:
         esta = await self._calidad_del_mes(actual, detalle=True)
         antes = await self._calidad_del_mes(anterior, detalle=False)
         esta["anterior"] = antes["resumen"]
+        # Las no conformidades AGRUPADAS por quién hizo las piezas comparan a la gente con
+        # nombre y apellido: RF-12 las pide con la sección confidencial «Rendimiento por
+        # persona» (/incidencias/por-persona y los rechazos de la ficha de la persona).
+        # Acá lo mismo: sin esa sección el agrupado no se manda. La lista sí, porque la
+        # lista de No conformidades ya dice quién hizo cada una.
+        if alcance is not None and not alcance.personas and "por_persona" in esta:
+            esta["por_persona"] = None
         return esta
 
     async def _calidad_del_mes(self, m: Mes, detalle: bool) -> dict:
@@ -853,7 +864,8 @@ class ReporteMensualService:
             return salida
 
         def agrupar(clave, texto):
-            grupos: dict = defaultdict(lambda: {"cantidad": 0, "piezas": 0, "minutos": 0})
+            grupos: dict = defaultdict(lambda: {"cantidad": 0, "piezas": 0, "minutos": 0,
+                                                "_rech": 0, "_ctrl": 0})
             nombres: dict = {}
             for f in filas:
                 k = clave(f)
@@ -862,8 +874,17 @@ class ReporteMensualService:
                 g["cantidad"] += 1
                 g["piezas"] += f["piezas_afectadas"] or 0
                 g["minutos"] += f["minutos_perdidos"] or 0
-            return sorted(({"clave": k, "texto": nombres[k], **v} for k, v in grupos.items()),
-                          key=lambda x: (-x["cantidad"], -x["piezas"], x["texto"]))
+                # De cuántas controladas (RF-12). Sólo las que dijeron los dos números,
+                # como el porcentaje del resumen (IncidenciaProcesoRepository).
+                if f.get("piezas_afectadas") is not None and f.get("piezas_controladas") is not None:
+                    g["_rech"] += f["piezas_afectadas"] or 0
+                    g["_ctrl"] += f["piezas_controladas"] or 0
+            salida_ = []
+            for k, v in grupos.items():
+                rech, ctrl = v.pop("_rech"), v.pop("_ctrl")
+                salida_.append({"clave": k, "texto": nombres[k], **v,
+                                "porcentaje_rechazo": pct(rech, ctrl)})
+            return sorted(salida_, key=lambda x: (-x["cantidad"], -x["piezas"], x["texto"]))
 
         salida.update({
             "por_tipo": agrupar(lambda f: f["tipo"], lambda f: TIPOS.get(f["tipo"], f["tipo"] or "Sin tipo")),
@@ -879,8 +900,10 @@ class ReporteMensualService:
                 "gravedad": GRAVEDADES.get(f["gravedad"], "Sin clasificar"),
                 "estado": "Cerrada" if f["estado"] == "CERRADA" else "Abierta",
                 "piezas_afectadas": f["piezas_afectadas"],
+                "piezas_controladas": f.get("piezas_controladas"),
                 "minutos_perdidos": f["minutos_perdidos"],
                 "proceso": f["proceso"],
+                "paso": f.get("paso"),
                 "persona": f["operario"],
                 "descripcion": f["descripcion"],
             } for f in filas],
@@ -964,30 +987,103 @@ class ReporteMensualService:
     # ─────────────────────────── Máquinas ───────────────────────────
 
     async def _maquinas(self, actual: Mes, anterior: Mes) -> dict:
-        """PUNTO DE ENGANCHE DE RF-10 (horas de uso por máquina).
+        """Las horas de uso de cada máquina en el mes (RF-10) y los mantenimientos hechos.
 
-        El registro de horas de uso de cada máquina lo agrega OTRA rama (RF-10, tabla
-        `uso_maquina`). No se inventa acá: hasta que esté, la sección sale vacía y lo
-        dice. Al integrar RF-10, esto tiene que devolver lo mismo que las otras
-        secciones, sin tocar la pantalla ni los archivos (ya leen estas claves):
+        Las horas son las de RF-10 sin una segunda cuenta: UsoMaquinaService.
+        horas_por_maquina, que mide cada tramo de `uso_maquina` con la jornada del
+        taller menos las pausas (las EFECTIVAS), lo recorta al mes y cuenta una sola vez
+        la hora en que la máquina tuvo dos pasos abiertos. Lo que RF-10 dice que no suma
+        (fuera de servicio, vuelta a Pendiente, abierto sin cierre o abierto de más) no
+        suma tampoco acá. «Tareas» son los tramos que sí sumaron.
 
-            {"disponible": True,
-             "resumen": {"maquinas": n, "horas_min": total},
-             "anterior": {"maquinas": n, "horas_min": total},        # el mes anterior
-             "filas": [{"id_maquinaria", "maquina", "horas_min", "tareas",
-                        "horas_min_anterior"}, ...]}
-
-        con las horas de `uso_maquina` que caen en [actual.ini, actual.corte) — recortadas
-        al mes como las de los pasos— y lo mismo para `anterior`. Si RF-10 guarda tramos
-        (desde/hasta), la cuenta es minutos(interseccion(tramos, [(ini, corte)])).
+        Los mantenimientos son los registrados con «Registrar mantenimiento hecho» cuya
+        fecha cae en el mes, y los avisos, los que salieron en el mes (la campanita y el
+        mail). Sin las tablas de RF-10 (la migración no se aplicó) la sección sale vacía y
+        lo dice, como antes: el resto del reporte no se cae.
         """
+        from backend.application.UsoMaquinaService import UsoMaquinaService
+        from backend.domain.MantenimientoMaquina import MantenimientoAviso, MantenimientoHecho
+        from backend.domain.Maquinaria import Maquinaria
+
+        try:
+            async with self.db.begin_nested():
+                uso = UsoMaquinaService(self.db)
+                horas = await uso.horas_por_maquina(actual.ini, actual.corte, actual.ahora)
+                horas_antes = await uso.horas_por_maquina(anterior.ini, anterior.corte, anterior.ahora)
+                ids = sorted(set(horas) | set(horas_antes))
+                hechos = (await self.db.execute(
+                    select(MantenimientoHecho.id, MantenimientoHecho.id_maquinaria,
+                           MantenimientoHecho.fecha, MantenimientoHecho.hecho_por,
+                           MantenimientoHecho.nota)
+                    .where(MantenimientoHecho.fecha >= actual.ini.date(),
+                           MantenimientoHecho.fecha < actual.corte.date()
+                           + (timedelta(days=1) if actual.parcial else timedelta(0)))
+                    .order_by(MantenimientoHecho.fecha, MantenimientoHecho.id)
+                )).all()
+                hechos_antes = (await self.db.execute(
+                    select(func.count(MantenimientoHecho.id))
+                    .where(MantenimientoHecho.fecha >= anterior.ini.date(),
+                           MantenimientoHecho.fecha < anterior.fin.date())
+                )).scalar() or 0
+                avisos = (await self.db.execute(
+                    select(func.count(MantenimientoAviso.id))
+                    .where(MantenimientoAviso.creado_en >= actual.ini,
+                           MantenimientoAviso.creado_en < actual.corte)
+                )).scalar() or 0
+                todas = ids + [h.id_maquinaria for h in hechos]
+                nombres = {m.id: m.nombre for m in (await self.db.execute(
+                    select(Maquinaria.id, Maquinaria.nombre).where(Maquinaria.id.in_(todas))
+                )).all()} if todas else {}
+        except Exception as e:
+            logger.warning(f"Reporte mensual: no se pudo leer el uso de las máquinas: {e}")
+            return {
+                "disponible": False,
+                "texto": ("No se pudo leer el uso de las máquinas: puede que el servidor todavía "
+                          "no tenga el registro de horas (RF-10)."),
+                "resumen": None,
+                "anterior": None,
+                "filas": [],
+                "mantenimientos": [],
+            }
+
+        def nombre(id_m) -> str:
+            return nombres.get(id_m) or f"Máquina {id_m}"
+
+        filas = []
+        for id_m in ids:
+            h, a = horas.get(id_m) or {}, horas_antes.get(id_m) or {}
+            if not h.get("efectivo_min") and not a.get("efectivo_min") and not h.get("pasos"):
+                continue
+            filas.append({
+                "id_maquinaria": id_m,
+                "maquina": nombre(id_m),
+                "horas_min": int(h.get("efectivo_min") or 0),
+                "tareas": int(h.get("pasos") or 0),
+                "horas_min_anterior": int(a.get("efectivo_min") or 0),
+                "mantenimientos": sum(1 for x in hechos if x.id_maquinaria == id_m),
+            })
+        filas.sort(key=lambda f: (-f["horas_min"], f["maquina"]))
+
+        def resumen(por_maquina: dict, n_hechos: int) -> dict:
+            return {
+                "maquinas": sum(1 for v in por_maquina.values() if v.get("efectivo_min")),
+                "horas_min": sum(int(v.get("efectivo_min") or 0) for v in por_maquina.values()),
+                "mantenimientos": n_hechos,
+            }
+
         return {
-            "disponible": False,
-            "texto": ("Todavía no se registran las horas de uso de cada máquina (RF-10). "
-                      "Cuando esté, acá va a aparecer cuántas horas trabajó cada una en el mes."),
-            "resumen": None,
-            "anterior": None,
-            "filas": [],
+            "disponible": True,
+            "resumen": {**resumen(horas, len(hechos)), "avisos": int(avisos)},
+            "anterior": resumen(horas_antes, int(hechos_antes)),
+            "filas": filas,
+            "mantenimientos": [{
+                "id": x.id,
+                "id_maquinaria": x.id_maquinaria,
+                "maquina": nombre(x.id_maquinaria),
+                "fecha": x.fecha,
+                "hecho_por": x.hecho_por,
+                "nota": x.nota,
+            } for x in hechos],
         }
 
 
@@ -1019,12 +1115,24 @@ def como_se_cuenta(datos: dict) -> list[str]:
             "Personas: el reporte de rendimiento de cada una (el mismo de su ficha) con el mes "
             "como período. Cada paso se le cuenta a quien lo tiene elegido en la OT o, si no hay, "
             "a quien le dio el último plan: el sistema no registra quién lo hizo de verdad. Por "
-            "eso las horas por persona no tienen por qué sumar lo mismo que las horas por proceso "
-            "(un paso de dos personas son dos personas trabajando).")
+            "eso las horas por persona no tienen por qué sumar lo mismo que las horas por proceso: "
+            "un paso de dos personas son dos personas trabajando, pero a una persona no se le "
+            "cuentan dos veces los pasos que hizo a la vez ni lo que cayó en sus ausencias, así "
+            "que también pueden sumar menos que Producción.")
     if datos.get("calidad") is not None:
         notas.append(
-            "Calidad: las no conformidades registradas en el mes. «Piezas afectadas» es lo que se "
-            "cargó en cada una (vacío no suma).")
+            "Calidad: las no conformidades registradas en el mes. «Piezas rechazadas» es lo que se "
+            "cargó en cada una (vacío no suma). El % de rechazo sale sólo de las que dicen también "
+            "de cuántas piezas controladas: sumar rechazadas de una que no lo dice contra "
+            "controladas de otra daría un porcentaje que no es de nada.")
+    if datos.get("maquinas") is not None:
+        notas.append(
+            "Máquinas: horas de uso EFECTIVO de cada máquina (dentro de la jornada y sin las "
+            "pausas), recortadas al mes, del registro que se abre al pasar un paso a En proceso y "
+            "se cierra al terminarlo. Si una máquina tuvo dos pasos abiertos a la vez, esa hora "
+            "cuenta una vez. No suman lo arrancado con la máquina fuera de servicio, lo que volvió "
+            "a Pendiente ni lo que quedó abierto sin cierre. Mantenimientos = los registrados con "
+            "fecha del mes.")
     if datos.get("materiales") is not None:
         notas.append(
             "Materiales: los consumos cargados en las OT con fecha del mes, sin los anulados. No "
@@ -1120,14 +1228,18 @@ def tablas_del_reporte(r: dict) -> list[tuple[str, list[str], list[list[str]]]]:
         tablas.append(("Personas", encabezado, filas))
     c = r.get("calidad")
     if c and c.get("disponible"):
-        tablas.append(("Calidad por tipo", ["Tipo", "No conformidades", "Piezas afectadas",
-                                            "Minutos perdidos"],
-                       [[f["texto"], _num(f["cantidad"]), _num(f["piezas"]), _num(f["minutos"])]
+        tablas.append(("Calidad por tipo", ["Tipo", "No conformidades", "Piezas rechazadas",
+                                            "% de rechazo", "Minutos perdidos"],
+                       [[f["texto"], _num(f["cantidad"]), _num(f["piezas"]),
+                         _num(f.get("porcentaje_rechazo")), _num(f["minutos"])]
                         for f in c["por_tipo"]]))
-        tablas.append(("Calidad por persona", ["Persona", "No conformidades", "Piezas afectadas",
-                                               "Minutos perdidos"],
-                       [[_neutralizar(f["texto"]), _num(f["cantidad"]), _num(f["piezas"]),
-                         _num(f["minutos"])] for f in c["por_persona"]]))
+        # Sin la sección «Rendimiento por persona» el agrupado no viene (None).
+        if c.get("por_persona") is not None:
+            tablas.append(("Calidad por persona", ["Persona", "No conformidades", "Piezas rechazadas",
+                                                   "% de rechazo", "Minutos perdidos"],
+                           [[_neutralizar(f["texto"]), _num(f["cantidad"]), _num(f["piezas"]),
+                             _num(f.get("porcentaje_rechazo")), _num(f["minutos"])]
+                            for f in c["por_persona"]]))
     mt = r.get("materiales")
     if mt and mt.get("disponible"):
         tablas.append(("Consumo por material", ["Código", "Material", "Unidad", "Cantidad", "Cargas",
@@ -1137,10 +1249,17 @@ def tablas_del_reporte(r: dict) -> list[tuple[str, list[str], list[list[str]]]]:
                         for f in mt["por_material"]]))
     mq = r.get("maquinas")
     if mq and mq.get("disponible"):
-        # Hoy nunca: es lo que va a traer RF-10 (ver ReporteMensualService._maquinas).
-        tablas.append(("Máquinas", ["Máquina", "Horas de uso", "Tareas", "Horas del mes anterior"],
+        # Las horas de RF-10 (ver ReporteMensualService._maquinas).
+        tablas.append(("Máquinas", ["Máquina", "Horas de uso", "Tareas", "Horas del mes anterior",
+                                    "Mantenimientos"],
                        [[_neutralizar(f.get("maquina")), _hh(f.get("horas_min")), _num(f.get("tareas")),
-                         _hh(f.get("horas_min_anterior"))] for f in mq.get("filas") or []]))
+                         _hh(f.get("horas_min_anterior")), _num(f.get("mantenimientos") or 0)]
+                        for f in mq.get("filas") or []]))
+        if mq.get("mantenimientos"):
+            tablas.append(("Mantenimientos hechos", ["Fecha", "Máquina", "Lo hizo", "Nota"],
+                           [[_fecha_ar(m.get("fecha")), _neutralizar(m.get("maquina")),
+                             _neutralizar(m.get("hecho_por") or ""), _neutralizar(m.get("nota") or "")]
+                            for m in mq["mantenimientos"]]))
     return tablas
 
 
@@ -1227,7 +1346,9 @@ def indicadores_del_mail(r: dict) -> list[tuple[str, list[tuple[str, object, obj
         a, b = c["resumen"], c.get("anterior") or {}
         salida.append(("Calidad", [
             ("No conformidades", a["total"], b.get("total"), "n"),
-            ("Piezas afectadas", a["piezas_afectadas"], b.get("piezas_afectadas"), "n"),
+            ("Piezas rechazadas", a["piezas_afectadas"], b.get("piezas_afectadas"), "n"),
+            ("Piezas controladas", a.get("piezas_controladas"), b.get("piezas_controladas"), "n"),
+            ("% de rechazo", a.get("porcentaje_rechazo"), b.get("porcentaje_rechazo"), "%"),
             ("Minutos perdidos", a["minutos_perdidos"], b.get("minutos_perdidos"), "n"),
         ]))
     mt = r.get("materiales")
@@ -1244,6 +1365,7 @@ def indicadores_del_mail(r: dict) -> list[tuple[str, list[tuple[str, object, obj
         salida.append(("Máquinas", [
             ("Máquinas con uso", a.get("maquinas"), b.get("maquinas"), "n"),
             ("Horas de uso", a.get("horas_min"), b.get("horas_min"), "h"),
+            ("Mantenimientos hechos", a.get("mantenimientos"), b.get("mantenimientos"), "n"),
         ]))
     return salida
 
@@ -1370,6 +1492,13 @@ async def preparar_mails_del_mes(db, anio: int | None = None, mes: int | None = 
     destinatarios = list(para) if para is not None else await destinatarios_por_defecto(db)
     if not destinatarios:
         return []
-    reporte = await ReporteMensualService(db).armar(anio, mes, Alcance.todo(), ahora=ahora)
+    # Los destinatarios por defecto son admin: les va todo. Una lista `para` puesta a mano
+    # puede tener a alguien sin la sección CONFIDENCIAL «Rendimiento por persona» (la que
+    # piden RF-07 y los rechazos por persona de RF-12), y acá no se sabe con qué permisos:
+    # opción conservadora, sin personas, sin ausencias y sin calidad por persona. Si Lucas
+    # decide que le llegue a alguien más, se arma con alcance_de(los permisos de cada uno).
+    alcance = Alcance.todo() if para is None else replace(Alcance.todo(), personas=False,
+                                                          ausencias=False)
+    reporte = await ReporteMensualService(db).armar(anio, mes, alcance, ahora=ahora)
     return [armar_mail_del_reporte(reporte, para=destinatarios,
                                    url_app=url_app or settings.FRONTEND_URL)]
