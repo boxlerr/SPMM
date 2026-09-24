@@ -10,12 +10,17 @@ transpila con el TypeScript del repo, la corre con node y fija:
   · con el backend de producción de hoy (3422285, sin los campos) ningún filtro deja
     pasar una OT salvo «Todas», y el Exportar deja vacío en vez de decir «No»: no se sabe,
     no es «no»;
-  · quién la controló sólo sale si sigue controlada.
+  · quién la controló sólo sale si sigue controlada;
+  · el PDF de las listas lleva UNA columna «Estado y control» y el Excel / CSV las siete
+    separadas: con las siete en el PDF se partían el N° de OT y los clientes (24/09).
 """
+import base64
 import json
+import re
 import shutil
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -47,9 +52,14 @@ const filtros = {};
 for (const f of m.OPCIONES_FILTRO_CONTROL)
     filtros[f] = Object.keys(filas).filter(k => m.cumpleFiltroControl(filas[k], f));
 
-const cols = m.columnasEstadoYControl();
+// Excel y CSV: las siete columnas, una por dato. El PDF va aparte (ver abajo).
+const cols = m.columnasEstadoYControl().filter(c => !c.formatos || c.formatos.includes('xlsx'));
 const exporta = {};
 for (const k of Object.keys(filas)) exporta[k] = Object.fromEntries(cols.map(c => [c.titulo, c.valor(filas[k], 0)]));
+const todas = m.columnasEstadoYControl();
+const formatos = Object.fromEntries(['pdf', 'xlsx', 'csv'].map(f =>
+    [f, todas.filter(c => !c.formatos || c.formatos.includes(f)).map(c => c.titulo)]));
+const celdaPdf = Object.fromEntries(Object.keys(filas).map(k => [k, m.estadoYControlEnUnaCelda(filas[k])]));
 
 console.log(JSON.stringify({
     orden: m.CASILLAS_DE_ESTADO.map(c => c.clave),
@@ -59,6 +69,10 @@ console.log(JSON.stringify({
     filtros,
     chips: Object.fromEntries(Object.keys(filas).map(k => [k, m.etapasDe(filas[k]).map(e => e.corto)])),
     exporta,
+    formatos,
+    celdaPdf,
+    celdaVacia: m.estadoYControlEnUnaCelda({ controlado: 0, finalizado_para_pintar: 0,
+        finalizado_tercerizacion_final: 0, finalizado_tercerizacion_intermedia: 0 }),
     tipos: Object.fromEntries(cols.map(c => [c.titulo, c.tipo || 'texto'])),
     resumen: m.resumenEstadoYControl({ programada: true, finalizadoparcial: true, controlado: true,
         finalizado_tercerizacion_final: true, cantidad_finalizada_parcial: '3' }),
@@ -138,3 +152,113 @@ def test_la_ficha_exportada_y_las_fechas(front):
     # Sin zona: se lee tal cual, sin correrla tres horas.
     assert front["cuando"] == ["23/09/2026 14:05", "23/09/2026", ""]
     assert front["marcada"] == [True, True, True, False, False, False, False, False]
+
+
+def test_el_pdf_lleva_una_sola_columna_y_la_planilla_las_siete(front):
+    siete = ["Fin. parcial (cant.)", "Controlado", "Controlado por", "Controlado el",
+             "Fin. para pintar", "Fin. terc. final", "Fin. terc. intermedia"]
+    assert front["formatos"]["xlsx"] == siete
+    assert front["formatos"]["csv"] == siete
+    assert front["formatos"]["pdf"] == ["Estado y control"]
+
+
+def test_la_celda_del_pdf_dice_todo_junto(front):
+    assert front["celdaPdf"] == {
+        # Mismas palabras que los chips de la pantalla, y quién/cuándo en otro renglón.
+        "controlada": "Parcial: 3 · Controlada · Terc. final\npor Lucas Longchamps, 23/09/2026 14:05",
+        # Sin controlar: el «quién» que quedó de antes no sale.
+        "sinControlar": "Para pintar · Terc. intermedia",
+        # Backend viejo: vacío, no se sabe.
+        "delBackendViejo": "",
+    }
+    assert front["celdaVacia"] == ""
+
+
+# ---------------------------------------------------------------------------------
+# El PDF de verdad de una lista de 40 OT, con y sin las columnas de control
+# ---------------------------------------------------------------------------------
+
+JITI = RAIZ / "frontend" / "node_modules" / "jiti" / "lib" / "jiti.mjs"
+SRC = RAIZ / "frontend" / "src"
+
+DRIVER_PDF = r"""
+import { createJiti } from "%(jiti)s";
+const SRC = "%(src)s";
+const jiti = createJiti(import.meta.url, { alias: { "@": SRC }, interopDefault: true });
+const { construirPdf } = await jiti.import(SRC + "/lib/exportarPdf.ts");
+const { construirCsv, reporteParaFormato } = await jiti.import(SRC + "/lib/exportar.ts");
+const { columnasOrdenes } = await jiti.import(SRC + "/lib/exportes/ordenes.ts");
+
+const filas = Array.from({ length: 40 }, (_, i) => ({
+    id: 1000 + i, id_otvieja: 15000 + i, fecha_entrada: "2026-08-06T00:00:00",
+    fecha_prometida: "2026-09-05T00:00:00", unidades: 70 + i, cantidad_entregada: i %% 3,
+    cliente: { nombre: `CLIENTE ${i %% 40} S.A.` }, articulo: { cod_articulo: `A00${i %% 40}`,
+    descripcion: `EJE O'HIGGINS ${i}` }, sector: { nombre: "MECANIZADO" },
+    prioridad: { descripcion: "Urgente" }, estado_material: "sin_datos", procesos: [],
+    aprobado_por: "", requerido_por: "",
+    controlado: i %% 2, controlado_por: "Lucas Longchamps", controlado_en: "2026-09-23T14:05:00",
+    finalizado_para_pintar: 1, finalizado_tercerizacion_final: i %% 3 === 0 ? 1 : 0,
+    finalizado_tercerizacion_intermedia: 0, finalizadoparcial: 1, cantidad_finalizada_parcial: 3,
+}));
+const reporte = (conControl) => ({ titulo: "No planificadas", archivo: "x", filtros: [],
+    secciones: [{ titulo: "Órdenes", filas, columnas: columnasOrdenes({ conControl, plano: () => "sin_plano" }) }] });
+const pdf = async (r) => Buffer.from(await (await construirPdf(r)).arrayBuffer()).toString("base64");
+const columnas = (r, f) => reporteParaFormato(r, f).secciones[0].columnas.map(c => c.titulo);
+console.log(JSON.stringify({
+    pdfBase64: { sin: await pdf(reporte(false)), con: await pdf(reporte(true)) },
+    pdf: { sin: columnas(reporte(false), "pdf"), con: columnas(reporte(true), "pdf") },
+    xlsx: { sin: columnas(reporte(false), "xlsx"), con: columnas(reporte(true), "xlsx") },
+    csvTitulos: construirCsv(reporte(true)).replace(/^\uFEFF/, "").split("\r\n")[0],
+}));
+"""
+
+
+@pytest.fixture(scope="module")
+def lista():
+    if not (shutil.which("node") and JITI.exists()):
+        pytest.skip("hace falta node y las dependencias del frontend (npm install)")
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "driver.mjs").write_text(DRIVER_PDF % {"jiti": JITI, "src": SRC})
+        salida = subprocess.run(["node", "driver.mjs"], cwd=tmp, capture_output=True,
+                                text=True, timeout=180)
+        assert salida.returncode == 0, salida.stderr
+        return json.loads(salida.stdout.strip().splitlines()[-1])
+
+
+def _renglones_del_pdf(b64: str) -> list[str]:
+    """Cada texto que jsPDF escribió en la página («(15012) Tj»), en orden. Una celda
+    que no entra en su columna sale partida en dos textos: «1501» y «2»."""
+    crudo = base64.b64decode(b64)
+    contenido = b""
+    for m in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", crudo, re.S):
+        try:
+            contenido += zlib.decompress(m.group(1))
+        except zlib.error:
+            contenido += m.group(1)
+    return re.findall(r"\((.*?)\) Tj", contenido.decode("latin-1"))
+
+
+def _palabra_entera(palabra: str, textos: list[str]) -> bool:
+    """Que la palabra esté entera en algún texto del PDF. Partir en el espacio («F.» /
+    «Prometida») es lo normal de una columna angosta; partir una palabra no."""
+    return any(re.search(rf"(^|\s){re.escape(palabra)}(\s|$)", t) for t in textos)
+
+
+def test_el_pdf_de_la_lista_se_lee_entero_con_el_control(lista):
+    # Con las siete columnas en el PDF, el N° de OT salía «1519 / 8», los clientes
+    # «CLIENT / E 12 S.A.» y los títulos «Códig / o» (verificación del 24/09). Acá cada
+    # una de las 40 OT tiene algo marcado: el peor caso para el ancho de la columna.
+    textos = _renglones_del_pdf(lista["pdfBase64"]["con"])
+    partidas = [p for titulo in lista["pdf"]["con"] for p in titulo.split() if not _palabra_entera(p, textos)]
+    for i in range(40):
+        partidas += [p for p in (str(15000 + i), "CLIENTE", f"A00{i}") if not _palabra_entera(p, textos)]
+    assert partidas == []
+    assert _palabra_entera("Controlada", textos)
+    assert lista["pdf"]["con"] == lista["pdf"]["sin"] + ["Estado y control"]
+
+
+def test_la_planilla_de_la_lista_trae_las_siete(lista):
+    assert len(lista["xlsx"]["con"]) == len(lista["xlsx"]["sin"]) + 7
+    assert "Estado y control" not in lista["xlsx"]["con"]
+    titulos = lista["csvTitulos"].split(",")
+    assert "Controlado por" in titulos and "Estado y control" not in titulos

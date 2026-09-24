@@ -29,6 +29,8 @@ import { autoTable, type RowInput, type Styles } from "jspdf-autotable";
 import {
     ahoraAR,
     alineaDerecha,
+    columnasPara,
+    reporteParaFormato,
     textoParaLeer,
     type ColumnaExport,
     type ReporteExport,
@@ -257,7 +259,7 @@ export function orientacionDe(reporte: ReporteExport): Orientacion {
 
 /** La tabla de una sección, desde `y`. Devuelve dónde terminó. */
 export function dibujarTabla(doc: jsPDF, sec: SeccionExport, y: number, opciones?: { vacio?: string }): number {
-    const columnas = sec.columnas as ColumnaExport<any>[];
+    const columnas = columnasPara("pdf", sec.columnas as ColumnaExport<any>[]);
     const cuerpo: RowInput[] = sec.filas.length
         ? sec.filas.map((fila, i) => columnas.map((c) => textoPdf(textoParaLeer(c, c.valor(fila, i)))))
         : [[{ content: opciones?.vacio ?? "No hay filas para mostrar.", colSpan: Math.max(1, columnas.length), styles: { halign: "center", textColor: [150, 150, 150], fontStyle: "italic" } }]];
@@ -327,7 +329,8 @@ export function dibujarTituloDeSeccion(doc: jsPDF, titulo: string, y: number): n
     return y + 6;
 }
 
-export async function construirPdf(reporte: ReporteExport): Promise<Blob> {
+export async function construirPdf(reporteCompleto: ReporteExport): Promise<Blob> {
+    const reporte = reporteParaFormato(reporteCompleto, "pdf");
     const doc = nuevoDocumento(orientacionDe(reporte));
     doc.setProperties({ title: textoPdf(reporte.titulo), creator: "SPMM · Metalúrgica Longchamps" });
     const logo = await cargarLogo();

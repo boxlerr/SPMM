@@ -137,22 +137,53 @@ const siNo = (o: object, clave: string) =>
     conoceEstadosDeControl(o) ? marcada((o as any)[clave]) : null;
 
 /**
+ * Lo de «Estado y control» de una fila en una sola celda, para el PDF de las listas:
+ *
+ *   Parcial: 3 · Controlada · Terc. final
+ *   por Lucas Longchamps, 23/09/2026 14:05
+ *
+ * Las etapas con las mismas palabras que los chips de la pantalla. Vacío si no tiene
+ * nada marcado o si el backend no mandó los campos (no se sabe, no es «nada»).
+ */
+export function estadoYControlEnUnaCelda(o: ConEstadoDeControl): string {
+    if (!conoceEstadosDeControl(o)) return "";
+    const partes: string[] = [];
+    const cant = o.cantidad_finalizada_parcial;
+    if (marcada(o.finalizadoparcial) && cant !== null && cant !== undefined) partes.push(`Parcial: ${cant}`);
+    partes.push(...etapasDe(o).map((e) => e.corto));
+    const renglones = partes.length ? [partes.join(" · ")] : [];
+    if (marcada(o.controlado)) {
+        const quien = [o.controlado_por?.trim(), cuandoLegible(o.controlado_en)].filter(Boolean).join(", ");
+        if (quien) renglones.push(`por ${quien}`);
+    }
+    return renglones.join("\n");
+}
+
+/**
  * Las columnas de «Estado y control» para el Exportar de las listas de OT. Van al final
  * de cada archivo para no correr las columnas que ya usaba alguien en su planilla.
+ *
+ * En Excel y CSV, una columna por dato (se filtran y se suman). En el PDF, UNA sola
+ * columna con todo junto: las listas ya llegan a 17 columnas en una A4 apaisada, y con
+ * siete más el PDF partía el N° de OT («1519 / 8»), los clientes y los títulos a mitad
+ * de palabra (verificación del 24/09).
  */
 export function columnasEstadoYControl<T extends object>(): ColumnaExport<T>[] {
+    const planilla: ColumnaExport<T>["formatos"] = ["xlsx", "csv"];
     return [
         {
             titulo: "Fin. parcial (cant.)",
             tipo: "entero",
+            formatos: planilla,
             valor: (o: any) => (marcada(o.finalizadoparcial) ? o.cantidad_finalizada_parcial ?? null : null),
         },
-        { titulo: "Controlado", tipo: "booleano", valor: (o) => siNo(o, "controlado") },
-        { titulo: "Controlado por", valor: (o: any) => (marcada(o.controlado) ? o.controlado_por ?? "" : "") },
-        { titulo: "Controlado el", tipo: "fechaHora", valor: (o: any) => (marcada(o.controlado) ? o.controlado_en ?? null : null) },
-        { titulo: "Fin. para pintar", tipo: "booleano", valor: (o) => siNo(o, "finalizado_para_pintar") },
-        { titulo: "Fin. terc. final", tipo: "booleano", valor: (o) => siNo(o, "finalizado_tercerizacion_final") },
-        { titulo: "Fin. terc. intermedia", tipo: "booleano", valor: (o) => siNo(o, "finalizado_tercerizacion_intermedia") },
+        { titulo: "Controlado", tipo: "booleano", formatos: planilla, valor: (o) => siNo(o, "controlado") },
+        { titulo: "Controlado por", formatos: planilla, valor: (o: any) => (marcada(o.controlado) ? o.controlado_por ?? "" : "") },
+        { titulo: "Controlado el", tipo: "fechaHora", formatos: planilla, valor: (o: any) => (marcada(o.controlado) ? o.controlado_en ?? null : null) },
+        { titulo: "Fin. para pintar", tipo: "booleano", formatos: planilla, valor: (o) => siNo(o, "finalizado_para_pintar") },
+        { titulo: "Fin. terc. final", tipo: "booleano", formatos: planilla, valor: (o) => siNo(o, "finalizado_tercerizacion_final") },
+        { titulo: "Fin. terc. intermedia", tipo: "booleano", formatos: planilla, valor: (o) => siNo(o, "finalizado_tercerizacion_intermedia") },
+        { titulo: "Estado y control", formatos: ["pdf"], valor: (o) => estadoYControlEnUnaCelda(o as ConEstadoDeControl) },
     ];
 }
 
