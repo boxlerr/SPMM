@@ -197,6 +197,11 @@ def test_el_periodo_por_defecto_y_sus_topes():
     with pytest.raises(BusinessException):
         leer_periodo("2025-01-01", "2026-09-01", hoy)
     assert leer_periodo("2025-09-24", "2026-09-24", hoy)[0] == date(2025, 9, 24), "366 días, entra"
+    # 9999-12-31: el «día siguiente» con que se cierra el período no existe. Era un
+    # OverflowError (un 500); ahora es un aviso (422).
+    for desde, hasta in ((None, "9999-12-31"), ("0001-01-01", "0001-01-05")):
+        with pytest.raises(BusinessException, match="fuera de rango"):
+            leer_periodo(desde, hasta, hoy)
 
 
 def test_restar_tramos():

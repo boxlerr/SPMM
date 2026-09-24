@@ -33,7 +33,7 @@ from datetime import date, datetime, time, timedelta
 
 from fastapi.encoders import jsonable_encoder
 
-from backend.application.AusenciaService import leer_fecha
+from backend.application.AusenciaService import dia_en_rango, leer_fecha
 from backend.application.PausaService import ahora_ar, pausas_del_paso
 from backend.application.TiempoEfectivo import (
     MINUTOS_JORNADA,
@@ -80,7 +80,8 @@ def _al_minuto(d: datetime) -> datetime:
 
 def periodo_de(desde, hasta) -> tuple[date | None, date | None, datetime | None, datetime | None]:
     """Los días que se piden (incluidos) y el tramo de reloj [desde 00:00, hasta+1 00:00)."""
-    p_desde, p_hasta = leer_fecha(desde, "desde"), leer_fecha(hasta, "hasta")
+    p_desde = dia_en_rango(leer_fecha(desde, "desde"), "desde")
+    p_hasta = dia_en_rango(leer_fecha(hasta, "hasta"), "hasta")
     if p_desde and p_hasta and p_hasta < p_desde:
         raise BusinessException("El período termina antes de empezar.")
     ini = datetime.combine(p_desde, time()) if p_desde else None

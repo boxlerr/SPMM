@@ -687,3 +687,15 @@ def test_el_front_conoce_los_mismos_motivos_y_el_mismo_tipo_de_aviso():
     union = re.search(r"export type MotivoNoSuma = ([^;]+);", lib).group(1)
     assert set(re.findall(r'"([A-Z_]+)"', union)) == set(UMS.NO_SUMA_TEXTO)
     assert f'"{MMS.TIPO_ALERTA}"' in (front / "components" / "Topbar.tsx").read_text(encoding="utf-8")
+
+
+def test_un_periodo_hasta_9999_es_un_aviso_y_no_un_500():
+    """El período es [desde 00:00, hasta+1 00:00): con 9999-12-31 ese día siguiente no
+    existe y periodo_de tiraba OverflowError (un 500 en /maquinarias-uso)."""
+    from backend.commons.exceptions.BusinessException import BusinessException
+
+    assert UMS.periodo_de("2026-09-01", "2026-09-30")[3] == datetime(2026, 10, 1)
+    with pytest.raises(BusinessException, match="fuera de rango"):
+        UMS.periodo_de("2026-09-01", "9999-12-31")
+    with pytest.raises(BusinessException, match="fuera de rango"):
+        UMS.periodo_de("0001-01-01", None)

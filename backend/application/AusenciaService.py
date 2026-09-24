@@ -68,6 +68,22 @@ def leer_fecha(valor, campo: str) -> date | None:
         raise BusinessException(f"La fecha «{campo}» tiene que ser del tipo AAAA-MM-DD.")
 
 
+# Un período se pide entre estos dos días. Afuera no hay datos del taller y, en el borde
+# (9999-12-31), la cuenta del día siguiente que hacen todos los períodos ([desde 00:00,
+# hasta+1 00:00)) no existe: era un OverflowError y un 500 en vez de un aviso.
+PRIMER_DIA_DE_PERIODO = date(1900, 1, 1)
+ULTIMO_DIA_DE_PERIODO = date(2999, 12, 31)
+
+
+def dia_en_rango(dia: date | None, campo: str) -> date | None:
+    """El día, o BusinessException (422) si está fuera de lo que se puede pedir."""
+    if dia is not None and not (PRIMER_DIA_DE_PERIODO <= dia <= ULTIMO_DIA_DE_PERIODO):
+        raise BusinessException(
+            f"La fecha «{campo}» está fuera de rango: tiene que ser entre "
+            f"{PRIMER_DIA_DE_PERIODO:%d/%m/%Y} y {ULTIMO_DIA_DE_PERIODO:%d/%m/%Y}.")
+    return dia
+
+
 def _motivo(valor) -> str | None:
     if valor is None:
         return None

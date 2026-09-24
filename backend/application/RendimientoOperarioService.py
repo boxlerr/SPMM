@@ -73,7 +73,7 @@ from datetime import date, datetime, time, timedelta
 
 from fastapi.encoders import jsonable_encoder
 
-from backend.application.AusenciaService import AusenciaService, leer_fecha, nombre_persona
+from backend.application.AusenciaService import AusenciaService, dia_en_rango, leer_fecha, nombre_persona
 from backend.application.PausaService import ahora_ar
 from backend.application.TiempoEfectivo import (
     fecha_real,
@@ -193,7 +193,8 @@ def resumir(filas: list[dict]) -> dict:
 def leer_periodo(desde, hasta, hoy: date) -> tuple[date, date]:
     """El período pedido, con sus defectos: sin `hasta`, hoy; sin `desde`, 30 días
     antes de `hasta`."""
-    p_desde, p_hasta = leer_fecha(desde, "desde"), leer_fecha(hasta, "hasta")
+    p_desde = dia_en_rango(leer_fecha(desde, "desde"), "desde")
+    p_hasta = dia_en_rango(leer_fecha(hasta, "hasta"), "hasta")
     p_hasta = p_hasta or hoy
     p_desde = p_desde or p_hasta - timedelta(days=DIAS_POR_DEFECTO - 1)
     if p_hasta < p_desde:
