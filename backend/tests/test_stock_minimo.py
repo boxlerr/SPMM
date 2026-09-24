@@ -16,9 +16,10 @@ nadie se entere:
      (columna Material) y no se repite acá.
   4. **Que quede una marca sin su aviso.** Si el aviso no se pudo escribir y la marca
      sí, la pieza queda callada para siempre.
-  5. **Que el sync le pise el mínimo.** El mínimo es de SPMM; el stock, del viejo. Si
-     alguien cambia el upsert de piezas para que reescriba todo, el mínimo se borra
-     cada 5 minutos. Un test lee el sync (sin correrlo) y lo cuida.
+  5. **Que el sync le pise el mínimo.** El mínimo es de SPMM, y desde el 23/09/2026
+     también el stock. Si alguien vuelve a poner un upsert de piezas que reescriba
+     todo, el mínimo (y el stock) se borran en cada pasada. Un test lee el sync (sin
+     correrlo) y lo cuida.
 """
 import math
 import re
@@ -604,19 +605,41 @@ def test_los_comentarios_de_la_migracion_son_un_solo_literal():
             assert "''" not in s, s
 
 
-def test_el_sync_no_le_pisa_el_minimo_a_nadie():
-    """El mínimo es de SPMM y el sync del viejo corre cada 5 minutos.
+def _codigo_sin_comentarios(ruta: Path) -> str:
+    """El fuente sin comentarios ni docstrings: lo que el programa HACE, no lo que cuenta.
+    Los comentarios de los pasos desactivados nombran justamente lo que ya no se toca."""
+    import ast
 
-    Se LEE el sync, no se lo corre. Si alguien cambia el upsert de piezas para que al
-    machear reescriba más que el stock, o para que inserte las columnas de SPMM, esto
-    se pone en rojo antes de que el mínimo que cargó el pañol desaparezca solo.
+    arbol = ast.parse(ruta.read_text(encoding="utf-8"))
+    for nodo in ast.walk(arbol):
+        cuerpo = getattr(nodo, "body", None)
+        if (isinstance(cuerpo, list) and cuerpo and isinstance(cuerpo[0], ast.Expr)
+                and isinstance(cuerpo[0].value, ast.Constant) and isinstance(cuerpo[0].value.value, str)):
+            cuerpo[0] = ast.Pass()
+    return ast.unparse(arbol)
+
+
+def test_el_sync_no_le_pisa_el_minimo_a_nadie():
+    """El mínimo es de SPMM y el sync del viejo corre solo, una pasada tras otra.
+
+    Hasta el 23/09/2026 el sync actualizaba el stock de las piezas (paso 7) y este test
+    cuidaba que al machear no reescribiera nada más. Desde la reunión de ese día el
+    stock también es de SPMM (la suma de sus movimientos), el paso 7 está apagado y lo
+    único que el sync le trae al catálogo son los códigos nuevos y el último precio
+    (paso 7b). Se LEE el sync, no se lo corre: si alguien vuelve a escribir el mínimo,
+    la marca del aviso o el stock, esto se pone en rojo antes de que lo que cargó el
+    pañol desaparezca solo.
     """
-    fuente = (RAIZ_BACKEND / "scripts" / "sync_db.py").read_text(encoding="utf-8")
-    llamada = re.search(r'_upsert\(\s*session,\s*"pieza".*?\)\n', fuente, re.S)
-    assert llamada, "no se encontró el upsert de piezas en sync_db.py"
-    texto = llamada.group(0)
-    assert 'cols_update=["stockactual"]' in texto
-    assert "stock_minimo" not in texto and "stock_bajo_avisado_en" not in texto
+    from backend.application.materia_prima.legado import CatalogoLegado, pieza_desde_legacy
+
+    codigo = _codigo_sin_comentarios(RAIZ_BACKEND / "scripts" / "sync_db.py")
+    for prohibido in ("stock_minimo", "stock_bajo_avisado_en", "stockactual"):
+        assert prohibido not in codigo, f"el sync volvió a escribir {prohibido}"
+    # Y la conversión con la que el paso 7b da de alta un código nuevo tampoco los trae:
+    # una pieza nueva nace sin mínimo (nadie lo pidió) y sin stock inventado.
+    datos = pieza_desde_legacy({"Idpieza": "ABC001", "descripcion": "X", "insumo": 2,
+                                "stockactual": 50, "CRITICO": 3}, CatalogoLegado())
+    assert not {"stock_minimo", "stock_bajo_avisado_en", "stockactual"} & set(datos)
 
 
 def test_la_notificacion_dice_de_que_pieza_habla():

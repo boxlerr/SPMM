@@ -55,6 +55,9 @@ class OrdenTrabajoRequestDTO(BaseModel):
     email: Optional[bool] = False
     tiene_plano: Optional[bool] = False
     no_lleva_plano: Optional[bool] = False
+    # «No lleva materias primas». El modal lo manda en el alta; sin este campo pydantic
+    # lo descartaba y sólo lo guardaba la edición (OrdenTrabajoUpdateDTO).
+    no_lleva_materia_prima: Optional[bool] = False
     programada: Optional[bool] = False
     en_proceso: Optional[bool] = False
     

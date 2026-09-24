@@ -11,11 +11,15 @@
  *
  * LAS DOS «NADAS»
  *
- * El backend devuelve cuatro estados, no tres:
+ * El backend devuelve cuatro estados, no tres (contando sólo las líneas marcadas como
+ * «Utilizado»):
  *
  *   ok        → todas las piezas están disponibles.
- *   pedido    → falta alguna, pero está encargada al proveedor.
- *   sin_stock → falta alguna y NO está pedida. Esto sí es un problema de material.
+ *   pedido    → falta alguna, pero está encargada al proveedor o reservada del stock.
+ *   sin_stock → falta alguna y NO está pedida ni reservada: «Falta pedir». Esto sí es
+ *               un problema de material. (La clave se llama así desde antes; el rótulo
+ *               cambió el 24/09 porque «sin stock» hacía pensar en el depósito, y lo que
+ *               dice es que nadie lo encargó.)
  *   sin_datos → la orden no tiene NINGUNA pieza cargada.
  *
  * `sin_datos` no significa que falte material: significa que nadie cargó la lista.
@@ -44,6 +48,13 @@
  *
  * Lo único de materias primas que sí es nuestro es la casilla «no lleva»: metadato de
  * SPMM sobre la orden, que el sync no mira ni pisa.
+ *
+ * 24/09: eso cambió. Las materias primas pasaron a SPMM (pantalla Materia prima y la
+ * solapa de la OT, ahora editable), así que el rojo ya tiene salida desde acá: cargar la
+ * lista, o marcarla pedida o reservada desde Pendientes. Los cinco estados siguen
+ * siendo los mismos; lo que cambió es quién los mueve. (Durante la prueba piloto de
+ * fines de septiembre los sigue moviendo el Sistema Integral y acá se ven en espejo:
+ * ver app/materia-prima/_components/ModoEspejo.tsx.)
  */
 
 export type EstadoMaterial = "ok" | "pedido" | "sin_stock" | "sin_datos" | "no_lleva";
@@ -59,7 +70,7 @@ export type MaterialResumen = {
     /** Qué ícono le toca; el componente del chip lo traduce. */
     icono: "ok" | "reloj" | "alerta" | "interrogante" | "nada";
     /**
-     * ¿Falta material DE VERDAD? Sólo `sin_stock`.
+     * ¿Falta material DE VERDAD? Sólo `sin_stock` («Falta pedir»).
      *
      * Es lo único que puede frenar una planificación. `sin_datos` no cuenta: no saber
      * no es lo mismo que no tener, y planificar una orden de la que no cargamos el
@@ -74,7 +85,9 @@ export type MaterialResumen = {
  *  marcada como que no lleva material no tiene piezas justamente por eso, y mostrarla
  *  como «sin cargar» mandaría a alguien a buscar algo que no existe. */
 export const claveMaterial = (estado?: string | null, noLleva?: boolean | number | null): EstadoMaterial => {
-    if (noLleva === true || noLleva === 1) return "no_lleva";
+    // Desde el 23/09 el backend también lo manda como estado (materia_prima/estado.py):
+    // una respuesta que trae el estado y no la casilla no puede leerse «Sin cargar».
+    if (noLleva === true || noLleva === 1 || estado === "no_lleva") return "no_lleva";
     if (estado === "ok" || estado === "pedido" || estado === "sin_stock") return estado;
     return "sin_datos";
 };
@@ -95,15 +108,15 @@ const RESUMENES: Record<EstadoMaterial, Omit<MaterialResumen, "clave">> = {
         faltaMaterial: false,
     },
     pedido: {
-        rotulo: "Pedido",
-        titulo: "Falta material, pero ya está pedido al proveedor.",
+        rotulo: "Pedido / reservado",
+        titulo: "Falta material, pero ya está pedido al proveedor o reservado del stock.",
         clases: "bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200",
         icono: "reloj",
         faltaMaterial: false,
     },
     sin_stock: {
-        rotulo: "Sin stock",
-        titulo: "Falta material y no está pedido al proveedor. Hay que encargarlo.",
+        rotulo: "Falta pedir",
+        titulo: "Falta material y no está pedido ni reservado. Hay que encargarlo (Materia prima › Pendientes).",
         clases: "bg-red-100 text-red-700 hover:bg-red-200 border-red-200",
         icono: "alerta",
         faltaMaterial: true,

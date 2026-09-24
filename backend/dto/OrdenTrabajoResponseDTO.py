@@ -80,7 +80,9 @@ class OrdenTrabajoResponseDTO(BaseModel):
     unidades: Optional[int] = None
     cantidad_entregada: Optional[int] = 0
     reclamo: Optional[int] = 0
-    estado_material: Optional[str] = 'sin_datos'  # 'ok', 'pedido', 'sin_stock', 'sin_datos'
+    # 'ok', 'pedido', 'sin_stock' (= falta pedir), 'sin_datos' o 'no_lleva'. Lo calcula
+    # application/materia_prima/estado.py.
+    estado_material: Optional[str] = 'sin_datos'
     
     # 🔹 Nuevos campos "Pronto"
     n_ped_l: Optional[str] = None

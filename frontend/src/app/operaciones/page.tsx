@@ -2,7 +2,7 @@
 
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog"
 import PlanificacionGanttWrapper from "@/components/PlanificacionGanttWrapper"
 import WorkOrdersListWrapper from "@/components/WorkOrdersListWrapper"
@@ -14,13 +14,12 @@ import DetalleOperario from "@/app/recursos/_components/DetalleOperario"
 import CambiarEstado from "@/app/recursos/_components/CambiarEstado"
 import { Operario } from "@/app/recursos/_types"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import MateriaPrimaTab from "./_components/MateriaPrimaTab"
 import { OperatorLoadTab } from "./_components/OperatorLoadTab"
 
 
 import { getWeekDates, formatDate } from "@/lib/gantt-utils"
 import { cn, isOrderCompleted, isOrderDelivered } from "@/lib/utils"
-import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, Box, RefreshCw, Trash2, ChevronDown, CheckCircle2 } from "lucide-react"
+import { Activity, LayoutList, GanttChartSquare, Plus, CalendarClock, User, RefreshCw, Trash2, ChevronDown, CheckCircle2 } from "lucide-react"
 import { ZoomControl, usePersistedZoom } from "@/components/ui/zoom-control"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
@@ -55,7 +54,7 @@ import { API_URL } from "@/config"
 import { usePermisos } from "@/hooks/usePermisos"
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso"
 
-type SolapaOperaciones = "gantt" | "work_orders" | "operarios" | "materia_prima" | "carga"
+type SolapaOperaciones = "gantt" | "work_orders" | "operarios" | "carga"
 
 const getAuthHeaders = (): HeadersInit => {
   if (typeof window === 'undefined') return {};
@@ -122,33 +121,30 @@ function cargaPreviaEnElPeriodo(tareas: GanttTask[], periodo: PeriodoDelPlan | n
 }
 
 /**
- * Lee `?tab=materia_prima&pieza=ID` —el enlace del aviso de stock bajo en la
- * campanita (RF-14)— y abre la solapa parada en esa pieza.
+ * La solapa «Materia Prima» de Operaciones se mudó el 24/09 a su propia pantalla
+ * (/materia-prima), cuando la gestión de materias primas pasó del sistema viejo a SPMM.
+ * Su función —el stock mínimo de cada pieza (RF-14)— quedó en la solapa Insumos de allá.
  *
- * Es un componente aparte, envuelto en <Suspense>, y no un `window.location` leído al
- * montar, por dos motivos: `useSearchParams` fuera de un Suspense rompe el build
- * estático de Next 15, y leyéndolo una sola vez al montar el aviso no andaría si ya se
- * está en Operaciones (el router cambia la dirección sin volver a montar la página).
+ * Esto sólo redirige la dirección vieja, `?tab=materia_prima&pieza=ID`, a la ficha del
+ * insumo en la pantalla nueva: la usaba el aviso de stock bajo de la campanita, y puede
+ * haber quedado en un marcador o en un mensaje. `replace` y no `push`, para que «Atrás»
+ * no vuelva a caer acá y rebote otra vez.
  *
- * Después de leerlo limpia los dos parámetros sin recargar, como `?edit_ot`, para que
- * un refresh no vuelva a saltar a la pieza.
+ * Componente aparte, dentro de <Suspense>, porque `useSearchParams` fuera de un
+ * Suspense rompe el build estático de Next 15.
  */
-function EnlaceMateriaPrima({ onAbrir }: { onAbrir: (idPieza: number | null) => void }) {
+function RedireccionMateriaPrima() {
   const params = useSearchParams()
+  const router = useRouter()
   const tab = params.get("tab")
   const pieza = params.get("pieza")
   useEffect(() => {
     if (tab !== "materia_prima") return
     const id = Number(pieza)
-    onAbrir(Number.isInteger(id) && id > 0 ? id : null)
-    const url = new URL(window.location.href)
-    url.searchParams.delete("tab")
-    url.searchParams.delete("pieza")
-    window.history.replaceState({}, "", url.toString())
-    // `onAbrir` cambia en cada render de la página: si estuviera acá, esto correría en
-    // cada render. Lo que dispara el salto es el parámetro, y sólo eso.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, pieza])
+    router.replace(
+      Number.isInteger(id) && id > 0 ? `/materia-prima?tab=insumos&pieza=${id}` : "/materia-prima?tab=insumos",
+    )
+  }, [tab, pieza, router])
   return null
 }
 
@@ -160,7 +156,8 @@ type OtPedida = { id: number } | { vieja: number }
  * el «Editar OT ↗» de la vista previa del plan y el aviso de OT retrasada de la
  * campanita (RF-04).
  *
- * Mismo camino que `EnlaceMateriaPrima`, y por lo mismo. Antes esto se leía de
+ * Componente aparte y dentro de <Suspense>, como `RedireccionMateriaPrima`: fuera de
+ * un Suspense, `useSearchParams` rompe el build estático de Next 15. Antes esto se leía de
  * `window.location` en un efecto que dependía sólo de la lista de órdenes, y fallaba
  * de dos maneras cuando ya se estaba en Operaciones: tocar el aviso no abría nada (el
  * router cambia la dirección sin volver a montar la página, y la lista no cambiaba), y
@@ -184,7 +181,8 @@ function EnlaceEditarOT({ onPedir }: { onPedir: (pedido: OtPedida) => void }) {
     url.searchParams.delete("edit_ot")
     url.searchParams.delete("edit_ot_vieja")
     window.history.replaceState({}, "", url.toString())
-    // Ver la nota de `EnlaceMateriaPrima`: lo que dispara es el parámetro, no el callback.
+    // `onPedir` cambia en cada render de la página: si estuviera acá, esto correría en
+    // cada render. Lo que dispara el salto es el parámetro, y sólo eso.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editOt, editOtVieja])
   return null
@@ -205,18 +203,13 @@ export default function OperacionesPage() {
   const editaOrdenes = puedeSeccion("operaciones_ordenes", "write")
   const planifica = puedeSeccion("operaciones_planificador", "write")
   const vePersonas = puedeSeccion("operaciones_recurso_humano")
-  const veMateriaPrima = puedeSeccion("operaciones_materia_prima")
-  const veSolapa = (t: SolapaOperaciones) =>
-    t === "operarios" ? vePersonas : t === "materia_prima" ? veMateriaPrima : veOrdenes
+  const veSolapa = (t: SolapaOperaciones) => (t === "operarios" ? vePersonas : veOrdenes)
   const activeTab: SolapaOperaciones = veSolapa(solapaElegida)
     ? solapaElegida
-    : ((["work_orders", "operarios", "materia_prima"] as SolapaOperaciones[]).find(veSolapa) ?? solapaElegida)
+    : ((["work_orders", "operarios"] as SolapaOperaciones[]).find(veSolapa) ?? solapaElegida)
   // Tildar OTs del plan sólo sirve para las acciones de la barra de selección: sin
   // ninguna de ellas, las casillas no se muestran.
   const puedeSeleccionar = editaOrdenes || planifica
-  /** La pieza a la que lleva el aviso de stock bajo (RF-14). Se consume una vez: la
-   *  solapa la busca, la resalta y avisa que ya la usó. */
-  const [piezaEnlazada, setPiezaEnlazada] = useState<number | null>(null)
   /** Qué solapa de Órdenes de Trabajo está abierta. Vive acá —y no adentro de la
    *  lista— porque al confirmar un plan hay que caer en «Planificadas». */
   const [otSubTab, setOtSubTab] = useState("no_planificadas")
@@ -2863,12 +2856,7 @@ export default function OperacionesPage() {
   return (
     <div className={"flex flex-col transition-all duration-300 ease-in-out " + ((isDetailsPanelOpen && !planificadorAbierto && activeTab === 'gantt') ? 'xl:mr-[400px]' : '')}>
       <Suspense fallback={null}>
-        <EnlaceMateriaPrima
-          onAbrir={(idPieza) => {
-            setActiveTab("materia_prima")
-            setPiezaEnlazada(idPieza)
-          }}
-        />
+        <RedireccionMateriaPrima />
         <EnlaceEditarOT onPedir={setOtPedida} />
       </Suspense>
       {/* La raíz no pone ni alto ni fondo: los pone la pantalla de adentro, que
@@ -3043,14 +3031,8 @@ export default function OperacionesPage() {
               Recurso humano
             </button>}
 
-            {veMateriaPrima && <button
-              onClick={() => setActiveTab("materia_prima")}
-              className={"flex whitespace-nowrap items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors " + (activeTab === "materia_prima" ? "border-red-700 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300")}
-            >
-              <Box size={18} />
-              Materia Prima
-            </button>}
-
+            {/* «Materia Prima» ya no es una solapa de acá: es su propia pantalla, en el
+                menú de la izquierda (ver RedireccionMateriaPrima). */}
           </div>
         </div>
 
@@ -3071,13 +3053,6 @@ export default function OperacionesPage() {
                   }}
                 />
               </div>
-            )}
-
-            {activeTab === "materia_prima" && (
-              <MateriaPrimaTab
-                piezaInicial={piezaEnlazada}
-                onPiezaInicialUsada={() => setPiezaEnlazada(null)}
-              />
             )}
 
             {activeTab === "gantt" && (

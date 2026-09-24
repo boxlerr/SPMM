@@ -231,6 +231,49 @@ MATRIZ = [
     ("GET", "/consumos-material", OK, OK, OK),
     ("POST", "/consumos-material", OK, OK, NO),
     ("PUT", "/consumos-material/1/anular", OK, OK, NO),
+    # Materia prima en SPMM (23/09/2026): los tres routers de /materia-prima piden la
+    # sección «Materia prima» de Operaciones. El supervisor edita Operaciones y la hereda;
+    # el operario la ve y no la toca.
+    ("GET", "/materia-prima/catalogos", OK, OK, OK),
+    # catálogo de insumos (§2.1): leer con la sección, escribir con la sección en editar.
+    # Previsualizar es un POST que no escribe, pero sólo lo usa el alta (que ya edita).
+    ("POST", "/materia-prima/materiales", OK, OK, NO),
+    ("POST", "/materia-prima/materiales/1/calidades", OK, OK, NO),
+    ("GET", "/materia-prima/proveedores", OK, OK, OK),
+    ("POST", "/materia-prima/proveedores", OK, OK, NO),
+    ("GET", "/materia-prima/insumos", OK, OK, OK),
+    ("POST", "/materia-prima/insumos/previsualizar", OK, OK, NO),
+    ("POST", "/materia-prima/insumos", OK, OK, NO),
+    ("GET", "/materia-prima/insumos/1", OK, OK, OK),
+    ("PUT", "/materia-prima/insumos/1", OK, OK, NO),
+    ("DELETE", "/materia-prima/insumos/1", OK, OK, NO),
+    ("GET", "/materia-prima/insumos/1/movimientos", OK, OK, OK),
+    ("POST", "/materia-prima/insumos/1/movimientos", OK, OK, NO),
+    ("PUT", "/materia-prima/movimientos/1/anular", OK, OK, NO),
+    ("GET", "/materia-prima/insumos/1/recortes", OK, OK, OK),
+    ("POST", "/materia-prima/insumos/1/recortes", OK, OK, NO),
+    ("PUT", "/materia-prima/recortes/1", OK, OK, NO),
+    ("DELETE", "/materia-prima/recortes/1", OK, OK, NO),
+    ("GET", "/materia-prima/insumos/1/ots", OK, OK, OK),
+    ("GET", "/materia-prima/insumos/1/precios", OK, OK, OK),
+    ("POST", "/materia-prima/insumos/1/precios", OK, OK, NO),
+    ("PUT", "/materia-prima/ot/1/no-lleva", OK, OK, NO),
+    ("GET", "/materia-prima/canera", OK, OK, OK),
+    # materias primas de la OT (§2.2) y Pendientes / cañera (§2.3): mismo criterio.
+    ("GET", "/materia-prima/ot/1/lineas", OK, OK, OK),
+    ("GET", "/materia-prima/ot/1/historial", OK, OK, OK),
+    ("GET", "/materia-prima/historial?id_articulo=1", OK, OK, OK),
+    ("POST", "/materia-prima/ot/1/lineas", OK, OK, NO),
+    ("POST", "/materia-prima/ot/1/lineas/lote", OK, OK, NO),
+    ("PUT", "/materia-prima/lineas/lote", OK, OK, NO),
+    ("PUT", "/materia-prima/lineas/1", OK, OK, NO),
+    ("PUT", "/materia-prima/lineas/1/cortes", OK, OK, NO),
+    ("DELETE", "/materia-prima/lineas/1", OK, OK, NO),
+    ("GET", "/materia-prima/pendientes", OK, OK, OK),
+    ("POST", "/materia-prima/canera", OK, OK, NO),
+    ("PUT", "/materia-prima/canera/1/mover", OK, OK, NO),
+    ("DELETE", "/materia-prima/canera/1", OK, OK, NO),
+    ("POST", "/materia-prima/canera/liberar-terminadas", OK, OK, NO),
     # RF-03: pausar y reanudar es tocar la OT (la solapa Órdenes); las pausas se leen
     # con Operaciones.
     ("GET", "/ordenes-pausadas", OK, OK, OK),
@@ -473,6 +516,17 @@ PANTALLAS = {
         "/operarios/1/ausencias", "/operarios/1/tiempos",
         # (su solapa Rendimiento, RF-07, es la sección confidencial «Rendimiento por
         # persona»: la ficha no la pide si no se tiene)
+        # Materia prima (23/09/2026): la pantalla /materia-prima y la solapa de la OT
+        # (sección no confidencial de Operaciones: con el área alcanza)
+        "/materia-prima/catalogos", "/materia-prima/canera",
+        # el catálogo de insumos: la lista, la ficha y sus solapas, el selector de proveedor
+        "/materia-prima/insumos", "/materia-prima/insumos/1", "/materia-prima/proveedores",
+        "/materia-prima/insumos/1/movimientos", "/materia-prima/insumos/1/recortes",
+        "/materia-prima/insumos/1/ots", "/materia-prima/insumos/1/precios",
+        # la solapa Materias primas de la OT (con «Traer historial», también en el alta) y
+        # Pendientes
+        "/materia-prima/ot/1/lineas", "/materia-prima/ot/1/historial",
+        "/materia-prima/historial?id_articulo=1", "/materia-prima/pendientes",
     ],
     "planos": ["/planos/biblioteca", "/planos/1", "/planos/1/archivo", "/articulos"],
     "recursos": [

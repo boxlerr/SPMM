@@ -83,6 +83,20 @@ from backend.domain.MantenimientoMaquina import (
     MantenimientoDestinatario,
     MantenimientoHecho,
 )
+# Materia prima en SPMM (23/09/2026). `pieza` y `orden_trabajo_pieza` ahora apuntan por FK
+# a los catálogos nuevos, y borrar una OT borra sus cortes y libera su cañera: con
+# `PRAGMA foreign_keys=ON` todo eso sólo se puede probar con las tablas creadas. La
+# semilla de formatos (que en Postgres pone la migración) la carga
+# application/materia_prima/semilla.sembrar_formatos.
+from backend.domain.Material import Material
+from backend.domain.MaterialCalidad import MaterialCalidad
+from backend.domain.Formato import Formato
+from backend.domain.Proveedor import Proveedor
+from backend.domain.PiezaMovimiento import PiezaMovimiento
+from backend.domain.PiezaPrecio import PiezaPrecio
+from backend.domain.PiezaRecorte import PiezaRecorte
+from backend.domain.OrdenTrabajoPiezaCorte import OrdenTrabajoPiezaCorte
+from backend.domain.CaneraOcupacion import CaneraOcupacion
 
 # Solo las tablas que tocan las skills nativas y la composición del rango
 # (evita tipos MSSQL de otros modelos).
@@ -119,6 +133,15 @@ TEST_TABLES = [
     MantenimientoHecho.__table__,
     MantenimientoDestinatario.__table__,
     MantenimientoAviso.__table__,
+    Material.__table__,
+    MaterialCalidad.__table__,
+    Formato.__table__,
+    Proveedor.__table__,
+    PiezaMovimiento.__table__,
+    PiezaPrecio.__table__,
+    PiezaRecorte.__table__,
+    OrdenTrabajoPiezaCorte.__table__,
+    CaneraOcupacion.__table__,
 ]
 
 
@@ -159,6 +182,20 @@ def tope_de_anonimos_limpio():
     auditoria_movimientos.TOPE_ANONIMOS.reiniciar()
     yield
     auditoria_movimientos.TOPE_ANONIMOS.reiniciar()
+
+
+@pytest.fixture(autouse=True)
+def materia_prima_con_spmm_como_dueno(monkeypatch):
+    """Los tests corren con SPMM como dueño de las materias primas (MATERIA_PRIMA_DUENO=
+    spmm): es lo construido, y lo que prueban las APIs que escriben, el sync con su paso
+    7b y los permisos de cada ruta.
+
+    En producción el valor por defecto es 'integral' (la prueba piloto: SPMM refleja al
+    Sistema Integral y no escribe; application/materia_prima/dueno.py). Los tests de ese
+    modo lo piden a mano con monkeypatch.setenv(..., 'integral') o delenv, en
+    tests/test_materia_prima_dueno.py. Sin esto, cada test que escribe en /materia-prima
+    recibiría el 422 de la prueba piloto y el sync correría el espejo en vez del 7b."""
+    monkeypatch.setenv("MATERIA_PRIMA_DUENO", "spmm")
 
 
 @pytest.fixture(autouse=True)

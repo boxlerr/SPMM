@@ -106,9 +106,18 @@ export function getWorkOrderRowColor(order: any): string {
         return "bg-emerald-300/60 hover:bg-emerald-400/60"; 
     }
 
-    // 4. VERDE CLARO: Material Disponible ("ok")
-    if (order.estado_material === 'ok') {
-        return "bg-green-100 hover:bg-green-200/80"; 
+    // 4. VERDE CLARO: Material Disponible ("ok"), o la OT NO LLEVA material.
+    //    El color de fila cuenta en qué etapa está la OT, y una que no lleva ya pasó la
+    //    del material: no hay nada que pedir ni que cargar, está para programar igual
+    //    que una con todo disponible. Antes caía al gris de abajo («Completa para pedir
+    //    materiales»), que manda a comprar algo que no existe. Qué se ve en la columna
+    //    Material («No lleva», en gris pizarra) lo sigue decidiendo lib/materialOT.
+    //    La regla de «no lleva» está copiada de `claveMaterial` y no importada: este
+    //    archivo se transpila solo en backend/tests/test_pausas_en_pantalla.py.
+    const noLleva = order.estado_material === 'no_lleva'
+        || order.no_lleva_materia_prima === true || order.no_lleva_materia_prima === 1;
+    if (order.estado_material === 'ok' || noLleva) {
+        return "bg-green-100 hover:bg-green-200/80";
     }
 
     // 5. AMARILLO: Material Pedido ("pedido")

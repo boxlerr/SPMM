@@ -26,8 +26,10 @@ from backend.core.permisos import (
     MATRIZ_ROL_AREA,
     MATRIZ_ROL_SECCION,
     NIVELES,
+    PANTALLA_DE_INICIO_POR_RUTA,
     ROL_ADMIN,
     ROLES,
+    SECCION_POR_CODIGO,
     SECCIONES,
 )
 from backend.domain.Permisos import (
@@ -221,7 +223,16 @@ def test_ningun_rol_que_no_sea_admin_arranca_con_una_confidencial_abierta():
 def test_cada_item_del_menu_tiene_su_area():
     """Las áreas salen del menú. Un ítem nuevo sin área no lo gobierna nadie.
 
-    Novedades no tiene área a propósito: es de todos (ver core/permisos.py)."""
+    El área de cada ítem es la que declara su pantalla en PANTALLAS_DE_INICIO (el espejo
+    de MENU del front), no la que se lee en la ruta: Materia prima (/materia-prima) es
+    del área Operaciones desde que dejó de ser una solapa de esa pantalla. Una pantalla
+    que declara el área de otra ruta es una parte de esa área con pantalla propia, así que
+    tiene que decir qué secciones de esa área la gobiernan: si no, sólo se la podría
+    abrir o cerrar junto con la otra.
+
+    Configuración no declara área porque su pantalla la abre cualquiera («Mi cuenta» está
+    adentro), pero lo de adentro lo gobierna el área de su mismo nombre. Novedades no
+    tiene área a propósito: es de todos (ver core/permisos.py)."""
     sidebar = (RAIZ / "frontend" / "src" / "components" / "Sidebar.tsx").read_text()
     hrefs = re.findall(r'href:\s*"(/[^"]*)"', sidebar)
     assert hrefs, "no encontré los ítems del menú"
@@ -230,7 +241,15 @@ def test_cada_item_del_menu_tiene_su_area():
     for href in hrefs:
         if href in sin_area:
             continue
-        assert href.strip("/").replace("-", "_") in codigos, f"el ítem {href} no tiene área"
+        pantalla = PANTALLA_DE_INICIO_POR_RUTA.get(href)
+        assert pantalla is not None, f"el ítem {href} no está en PANTALLAS_DE_INICIO"
+        de_la_ruta = href.strip("/").replace("-", "_")
+        area = pantalla.area or de_la_ruta
+        assert area in codigos, f"el ítem {href} no tiene área"
+        if area != de_la_ruta:
+            assert pantalla.solapas, f"{href} es del área {area} y no dice qué secciones la gobiernan"
+            for s in pantalla.solapas:
+                assert SECCION_POR_CODIGO[s].area == area, (href, s)
 
 
 # ─────────────────────────── seguridad del deploy ───────────────────────────

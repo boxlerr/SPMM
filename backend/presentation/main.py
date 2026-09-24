@@ -27,6 +27,9 @@ from backend.presentation.ConfigAPI import router as config_router
 from backend.presentation.PiezaAPI import router as pieza_router
 from backend.presentation.OrdenTrabajoPiezaAPI import router as ot_pieza_router
 from backend.presentation.ConsumoMaterialAPI import router as consumo_material_router
+from backend.presentation.MateriaPrimaCatalogoAPI import router as mp_catalogo_router
+from backend.presentation.MateriaPrimaOTAPI import router as mp_ot_router
+from backend.presentation.MateriaPrimaPendientesAPI import router as mp_pendientes_router
 from backend.presentation.PausaAPI import router as pausa_router
 from backend.presentation.AsistenciaAPI import router as asistencia_router
 from backend.presentation.RendimientoOperarioAPI import router as rendimiento_operario_router
@@ -303,6 +306,13 @@ app.include_router(ot_pieza_router, tags=["ordenes_trabajo_piezas"], dependencie
 # es además de quien lo cargó o de un admin (lo decide el servicio, que es el que sabe
 # quién lo cargó).
 app.include_router(consumo_material_router, tags=["consumos_material"], dependencies=_protegido("consumos_material"))
+# Materia prima en SPMM (reunión del 23/09/2026: la gestión pasa del sistema viejo a SPMM).
+# Tres routers bajo /materia-prima, cada uno con su política: el catálogo de insumos
+# (stock, recortes, precios, proveedores), las materias primas de cada OT, y Pendientes
+# con la cañera. Los tres leen y escriben con la sección «Materia prima» de Operaciones.
+app.include_router(mp_catalogo_router, tags=["materia_prima"], dependencies=_protegido("materia_prima_catalogo"))
+app.include_router(mp_ot_router, tags=["materia_prima"], dependencies=_protegido("materia_prima_ot"))
+app.include_router(mp_pendientes_router, tags=["materia_prima"], dependencies=_protegido("materia_prima_pendientes"))
 # RF-03: pausar y reanudar una OT o un paso, con motivo y quién. Tabla propia de SPMM
 # (orden_trabajo_pausa); no le cambia el estado a ningún paso.
 app.include_router(pausa_router, tags=["pausas"], dependencies=_protegido("pausas"))

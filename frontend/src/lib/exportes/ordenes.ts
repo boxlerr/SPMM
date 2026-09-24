@@ -106,8 +106,15 @@ export function columnasOrdenes(op: OpcionesColumnasOT = {}): ColumnaExport<Work
 // Filtros
 // ---------------------------------------------------------------------------------
 
+// Las mismas palabras que el filtro en pantalla (WorkOrderFilters): los estados salen de
+// lib/materialOT, así el resumen del archivo no dice «Sin stock» cuando la pantalla ya
+// dice «Falta pedir». «Disponible» es propio del filtro, igual que allá.
 const MATERIAL: Record<string, string> = {
-    OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin stock", SIN_DATOS: "Sin cargar", NO_LLEVA: "No lleva",
+    OK: "Disponible",
+    PEDIDO: resumirMaterial("pedido").rotulo,
+    SIN_STOCK: resumirMaterial("sin_stock").rotulo,
+    SIN_DATOS: resumirMaterial("sin_datos").rotulo,
+    NO_LLEVA: resumirMaterial(null, true).rotulo,
 };
 const ENTREGA: Record<string, string> = {
     THIS_WEEK: "Esta semana", NEXT_2_WEEKS: "Próximas 2 semanas", THIS_MONTH: "Este mes",

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown, Search, Info, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { WorkOrder } from "@/lib/types";
-import { claveMaterial } from "@/lib/materialOT";
+import { claveMaterial, resumirMaterial } from "@/lib/materialOT";
 import {
     OPCIONES_FILTRO_CONTROL,
     ROTULO_FILTRO_CONTROL,
@@ -13,6 +13,17 @@ import {
     cumpleFiltroControl,
     type FiltroControl,
 } from "@/lib/estadoControlOT";
+
+/** Los rótulos del estado de material son los de lib/materialOT, los mismos que se leen
+ *  en la columna Material: si mañana cambian (como el 24/09, cuando «Sin stock» pasó a
+ *  «Falta pedir»), el filtro, su botón y la leyenda los siguen solos. «Disponible» es
+ *  propio del filtro («Material: OK» se lee peor en el botón). */
+const ROTULO_MATERIAL = {
+    PEDIDO: resumirMaterial("pedido").rotulo,
+    SIN_STOCK: resumirMaterial("sin_stock").rotulo,
+    SIN_DATOS: resumirMaterial("sin_datos").rotulo,
+    NO_LLEVA: resumirMaterial(null, true).rotulo,
+};
 
 export interface WorkOrderFilterState {
     priority: string[];
@@ -121,7 +132,7 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, accion
     );
 
     /** Diccionarios de etiquetas para mapear value → label legible. */
-    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", PEDIDO: "Pedido", SIN_STOCK: "Sin stock", SIN_DATOS: "Sin cargar", NO_LLEVA: "No lleva" };
+    const MATERIAL_LABELS: Record<string, string> = { ALL: "Todos", OK: "Disponible", ...ROTULO_MATERIAL };
     const PROMISED_LABELS: Record<string, string> = { ALL: "Todas", THIS_WEEK: "Esta semana", NEXT_2_WEEKS: "Próx. 2 semanas", THIS_MONTH: "Este mes" };
     const BATCH_LABELS: Record<string, string> = { ALL: "Todos", SMALL: "Pequeño", MEDIUM: "Mediano", LARGE: "Grande" };
 
@@ -221,9 +232,10 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, accion
                             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-purple-200 border border-purple-300"></div> <span className="text-slate-600 font-medium">Tercerizado <span className="text-slate-400 font-normal">(Total/Parcial)</span></span></div>
                             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-orange-200 border border-orange-300"></div> <span className="text-slate-600 font-medium">En Producción</span></div>
                             <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-emerald-300 border border-emerald-400"></div> <span className="text-slate-600 font-medium">Programada</span></div>
-                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-green-100 border border-green-200"></div> <span className="text-slate-600 font-medium">Material Disponible <span className="text-slate-400 font-normal">(Para Programar)</span></span></div>
-                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-yellow-100 border border-yellow-200"></div> <span className="text-slate-600 font-medium">Material pedido al Proveedor</span></div>
-                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-gray-100 border border-gray-200"></div> <span className="text-slate-600 font-medium">Completa para pedir Materiales <span className="text-slate-400 font-normal">(Sin Stock)</span></span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-green-100 border border-green-200"></div> <span className="text-slate-600 font-medium">Material Disponible <span className="text-slate-400 font-normal">(o no lleva · Para Programar)</span></span></div>
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-yellow-100 border border-yellow-200"></div> <span className="text-slate-600 font-medium">Material pedido o reservado</span></div>
+                            {/* El gris junta «Falta pedir» y «Sin cargar» (ver getWorkOrderRowColor en lib/utils). */}
+                            <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded shadow-sm bg-gray-100 border border-gray-200"></div> <span className="text-slate-600 font-medium">Completa para pedir Materiales <span className="text-slate-400 font-normal">({ROTULO_MATERIAL.SIN_STOCK} / {ROTULO_MATERIAL.SIN_DATOS})</span></span></div>
                         </div>
                     </PopoverContent>
                 </Popover>
@@ -339,13 +351,14 @@ export function WorkOrderFilters({ filters, setFilters, orders, children, accion
                     <SelectContent>
                         <SelectItem value="ALL" className="text-xs">Todos</SelectItem>
                         <SelectItem value="OK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-green-500" />Disponible</div></SelectItem>
-                        <SelectItem value="PEDIDO" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" />Pedido</div></SelectItem>
-                        <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />Sin stock</div></SelectItem>
+                        <SelectItem value="PEDIDO" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" />{ROTULO_MATERIAL.PEDIDO}</div></SelectItem>
+                        <SelectItem value="SIN_STOCK" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-red-500" />{ROTULO_MATERIAL.SIN_STOCK}</div></SelectItem>
                         {/* «Sin cargar» no es un problema de compras sino de escritorio: la orden
                             no tiene cargada la lista de material. Antes caía adentro de «Sin stock»
-                            y por eso ese filtro traía 17 órdenes de las que 0 tenían falta real. */}
-                        <SelectItem value="SIN_DATOS" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-400" />Sin cargar</div></SelectItem>
-                        <SelectItem value="NO_LLEVA" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-slate-300" />No lleva</div></SelectItem>
+                            (hoy «Falta pedir») y por eso ese filtro traía 17 órdenes de las que 0
+                            tenían falta real. */}
+                        <SelectItem value="SIN_DATOS" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-400" />{ROTULO_MATERIAL.SIN_DATOS}</div></SelectItem>
+                        <SelectItem value="NO_LLEVA" className="text-xs"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-slate-300" />{ROTULO_MATERIAL.NO_LLEVA}</div></SelectItem>
                     </SelectContent>
                 </Select>
 

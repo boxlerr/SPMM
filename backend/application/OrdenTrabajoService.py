@@ -134,6 +134,9 @@ class OrdenTrabajoService:
                 finalizado_tercerizacion_intermedia=1 if dto.finalizado_tercerizacion_intermedia else 0,
                 finalizado_tercerizacion_final=1 if dto.finalizado_tercerizacion_final else 0,
                 cantidad_finalizada_parcial=dto.cantidad_finalizada_parcial,
+                # El modal lo manda en el alta desde siempre y se perdía: el DTO no lo
+                # tenía y sólo lo guardaba la edición.
+                no_lleva_materia_prima=1 if dto.no_lleva_materia_prima else 0,
             )
 
             db.add(orden)
@@ -460,9 +463,9 @@ class OrdenTrabajoService:
 
         return ResponseDTO(status=True, data=jsonable_encoder(orden_actualizada))
 
-    async def eliminarOrden(self, id: int):
+    async def eliminarOrden(self, id: int, usuario: dict | None = None):
         logger.info(f"Service - Eliminar orden de trabajo ID: {id}")
-        ok = await self.repository.delete(id)
+        ok = await self.repository.delete(id, usuario=usuario)
 
         if not ok:
             raise NotFoundException(f"No se encontró la orden de trabajo con ID {id}")

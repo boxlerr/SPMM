@@ -55,7 +55,7 @@ TSC = RAIZ / "frontend" / "node_modules" / ".bin" / "tsc"
 # prefijo, y una que no existe.
 RUTAS = [
     "/", "/login", "/dashboard", "/operaciones", "/operaciones?tab=materia_prima",
-    "/planos", "/recursos", "/recursos/x", "/clientes", "/configuracion",
+    "/materia-prima", "/materia-prima?tab=insumos&pieza=3", "/planos", "/recursos", "/recursos/x", "/clientes", "/configuracion",
     "/no-conformidades", "/auditoria", "/novedades", "/ordenes", "/planificacion",
     "/operarios", "/procesos", "/sectores", "/prioridades", "/articulos", "/no-existe",
 ]
@@ -315,6 +315,11 @@ def test_los_requisitos_de_cada_ruta(front):
     assert req["/dashboard"] == {"area": "dashboard"}
     # Query y subrutas piden lo de la pantalla.
     assert req["/operaciones?tab=materia_prima"] == req["/operaciones"]
+    assert req["/materia-prima?tab=insumos&pieza=3"] == req["/materia-prima"]
+    # Materia prima (24/09) es la misma sección que era la solapa de Operaciones: no
+    # hubo que tocar roles. Y Operaciones ya no la lista (no tiene más esa solapa).
+    assert req["/materia-prima"] == {"area": "operaciones", "solapas": ["operaciones_materia_prima"]}
+    assert "operaciones_materia_prima" not in req["/operaciones"]["solapas"]
     assert req["/recursos/x"] == req["/recursos"]
     assert req["/planificacion"] == {"seccion": "operaciones_planificador"}
     assert req["/ordenes"] == {"seccion": "operaciones_ordenes"}
@@ -376,11 +381,12 @@ def test_la_pantalla_dice_lo_mismo_que_el_backend(front, caso, rol, extra):
 
 def test_el_menu_del_operario(front):
     """Con la matriz sembrada: el operario ve el dashboard, Operaciones (sin el
-    planificador), Planos y No conformidades, y lo que es de todos. No ve Recursos,
-    Clientes ni Auditoría."""
+    planificador), Materia prima (lee Operaciones), Planos y No conformidades, y lo que
+    es de todos. No ve Recursos, Clientes ni Auditoría."""
     r = front["casos"]["operario"]
     assert r["menu"] == [
-        "/dashboard", "/operaciones", "/planos", "/configuracion", "/no-conformidades", "/novedades",
+        "/dashboard", "/operaciones", "/materia-prima", "/planos", "/configuracion",
+        "/no-conformidades", "/novedades",
     ]
     assert r["inicio"] == "/dashboard"
     assert r["rutas"]["/recursos"] is False
@@ -395,15 +401,21 @@ def test_el_menu_del_operario(front):
     assert r["secciones"]["operaciones_planificador"]["read"] is False
     assert r["secciones"]["dashboard_rendimiento"]["read"] is False
     assert r["secciones"]["configuracion_usuarios"]["read"] is False
+    # Materia prima: la ve (lee Operaciones), no la edita.
+    assert r["rutas"]["/materia-prima"] is True
+    assert r["secciones"]["operaciones_materia_prima"]["read"] is True
+    assert r["secciones"]["operaciones_materia_prima"]["write"] is False
 
 
 def test_el_menu_del_supervisor(front):
     r = front["casos"]["supervisor"]
     assert r["menu"] == [
-        "/dashboard", "/operaciones", "/planos", "/recursos", "/clientes",
+        "/dashboard", "/operaciones", "/materia-prima", "/planos", "/recursos", "/clientes",
         "/configuracion", "/no-conformidades", "/novedades",
     ]
     assert r["secciones"]["operaciones_planificador"]["write"] is True
+    # Escribe Operaciones: edita Materia prima.
+    assert r["secciones"]["operaciones_materia_prima"]["write"] is True
     assert r["secciones"]["recursos_procesos"]["write"] is False
     assert r["areas"]["clientes"]["write"] is False
     assert r["rutas"]["/auditoria"] is False
@@ -436,7 +448,7 @@ def test_una_seccion_que_el_backend_no_mando_sigue_la_regla(front):
     assert r["secciones"]["operaciones_planificador"]["write"] is True
     assert r["secciones"]["configuracion_usuarios"]["read"] is False
     assert r["secciones"]["recursos_procesos"]["read"] is False
-    assert r["menu"] == ["/operaciones", "/configuracion", "/novedades"]
+    assert r["menu"] == ["/operaciones", "/materia-prima", "/configuracion", "/novedades"]
     assert r["inicio"] == "/operaciones"
 
 

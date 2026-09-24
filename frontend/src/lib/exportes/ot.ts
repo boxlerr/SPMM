@@ -12,6 +12,7 @@
  */
 
 import type { ColumnaExport, SeccionExport } from "@/lib/exportar";
+import { ESTADOS_LINEA, estadoLinea, type Linea, type LineaLocal } from "@/lib/materiaPrima";
 
 export interface ProcesoDeOT {
     paso: number;
@@ -24,13 +25,73 @@ export interface ProcesoDeOT {
     estado: string;
 }
 
+/**
+ * Una materia prima de la OT como sale en el archivo y en la hoja del pañol.
+ *
+ * Desde el 24/09 sale de la API de Materia prima (`GET /materia-prima/ot/{id}/lineas`,
+ * o las líneas en memoria de una OT nueva): ver `materiasDeOT`. Antes era lo que traía
+ * el sync del viejo, con un «Disponible» 0/1 crudo.
+ */
 export interface MateriaDeOT {
     codigo: string;
     descripcion: string;
     proveedor: string;
+    /** El número como texto con punto («6.5»): cada salida lo escribe a su manera. */
     cantidad: string;
     unidad: string;
-    disponible: string;
+    /** «Utilizado»: false = no va o está a confirmar. La hoja del pañol no la lista. */
+    utilizada: boolean;
+    /** Lista / Esperando / Falta pedir / No se usa (el mismo corte que Pendientes). Vacío en una OT sin guardar. */
+    estado: string;
+    observaciones: string;
+    /** «2 × 1093 mm; 1 × 1220 × 2440 mm»: lo que hay que cortar. */
+    cortes: string;
+}
+
+const numeroCorte = (v: number) => String(Number(v.toFixed(1))).replace(".", ",");
+
+function textoDeCortes(cortes: { cantidad: number; largo_mm?: number | null; ancho_mm?: number | null; texto_original?: string | null }[] | undefined): string {
+    return (cortes ?? [])
+        .map((c) =>
+            c.largo_mm === null || c.largo_mm === undefined
+                ? `${c.cantidad} × ${c.texto_original ?? "?"}`
+                : `${c.cantidad} × ${numeroCorte(c.largo_mm)}${c.ancho_mm ? ` × ${numeroCorte(c.ancho_mm)}` : ""} mm`,
+        )
+        .join("; ");
+}
+
+/**
+ * Las líneas de la solapa Materias primas (guardadas o, en una OT nueva, en memoria)
+ * como las piden el archivo y la hoja del pañol.
+ */
+export function materiasDeOT(lineas: (Linea | LineaLocal)[]): MateriaDeOT[] {
+    return lineas.map((l) => {
+        if ("clave" in l) {
+            // Línea local: todavía no existe, no tiene marcas ni estado.
+            return {
+                codigo: l.codigo,
+                descripcion: l.descripcion_mostrada,
+                proveedor: l.proveedor ?? "",
+                cantidad: String(l.cantidad),
+                unidad: l.unidad ?? "",
+                utilizada: true,
+                estado: "",
+                observaciones: l.observaciones ?? "",
+                cortes: textoDeCortes(l.cortes),
+            };
+        }
+        return {
+            codigo: l.codigo,
+            descripcion: l.descripcion,
+            proveedor: l.proveedor ?? "",
+            cantidad: String(l.cantidad),
+            unidad: l.unidad ?? "",
+            utilizada: l.usado,
+            estado: ESTADOS_LINEA[estadoLinea(l)].rotulo,
+            observaciones: l.observaciones ?? "",
+            cortes: textoDeCortes(l.cortes),
+        };
+    });
 }
 
 export interface DatosDeOT {
@@ -102,7 +163,10 @@ export const COLUMNAS_MATERIAS_OT: ColumnaExport<MateriaDeOT>[] = [
     { titulo: "Proveedor", valor: (m) => m.proveedor },
     { titulo: "Cantidad", tipo: "numero", valor: (m) => m.cantidad },
     { titulo: "Unidad", valor: (m) => m.unidad },
-    { titulo: "Disponible", tipo: "numero", valor: (m) => m.disponible },
+    { titulo: "Estado", valor: (m) => m.estado },
+    { titulo: "Utilizada", valor: (m) => (m.utilizada ? "Sí" : "No") },
+    { titulo: "Cortes", valor: (m) => m.cortes },
+    { titulo: "Observaciones", valor: (m) => m.observaciones },
 ];
 
 /** Las tres tablas del Excel y del CSV. */

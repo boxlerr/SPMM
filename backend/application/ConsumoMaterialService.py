@@ -1,17 +1,22 @@
 """El consumo de materiales de una orden (RF-15).
 
 El SRS pide «asociar consumo de materiales a cada orden de producción». La lista de lo
-que la OT lleva ya existía (`orden_trabajo_pieza`, del sistema viejo); lo que faltaba es
-poder decir cuánto se consumió de verdad, quién lo cargó y cuándo.
+que la OT lleva ya existía (`orden_trabajo_pieza`, que desde el 23/09 se carga en SPMM,
+en la solapa Materias primas); lo que faltaba es poder decir cuánto se consumió de
+verdad, quién lo cargó y cuándo.
 
 TRES COSAS QUE NO SE HACEN, A PROPÓSITO
 
-  · No se descuenta stock. `pieza.stockactual` lo reescribe el sync con el número del
-    sistema viejo, así que un descuento hecho acá volvería solo en la próxima pasada.
-    Pasar el stock a SPMM es sacarle ese dato al viejo, y de quién es cada dato lo
-    decide el cliente. Hasta entonces esto registra; no mueve el stock.
-  · No se toca `orden_trabajo_pieza`. Es del viejo y el sync la pisa (ver el docstring
-    de domain/ConsumoMaterial.py).
+  · No se descuenta stock. Desde el 23/09 el stock es de SPMM (la suma de
+    pieza_movimiento), pero el material de una OT se compra justo para esa OT: no pasa
+    por el depósito. Lo que la OT sí saca del depósito es lo que reservó, y sale una sola
+    vez, al marcar su línea «Disponible» (el `retiro_ot` de MateriaPrimaOTService).
+    Descontar acá restaría algo que nunca entró, o lo reservado dos veces. Esto registra
+    lo que se usó; no mueve el stock.
+  · No se toca `orden_trabajo_pieza`. Ni `cantusada` (quedó sin uso: el «C. usado» de
+    la línea es la suma de estos consumos) ni las marcas: la línea la edita la solapa
+    Materias primas, y un consumo no la cambia (ver el docstring de
+    domain/ConsumoMaterial.py).
   · No se borra. Una carga equivocada se ANULA: deja de sumar y queda a la vista con
     quién y cuándo. Por eso hay `anular()` y no `eliminar()`.
 
@@ -37,8 +42,9 @@ from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.exceptions.NotFoundException import NotFoundException
 from backend.commons.loggers.logger import logger
 
-# Largo de la columna `unidad`. La del viejo es texto libre ('SIN UNIDAD', 'KG'...): se
-# recorta en vez de dejar que la base rechace el renglón entero por una unidad larga.
+# Largo de la columna `unidad`. La heredada del viejo es texto libre ('SIN UNIDAD',
+# 'KG'...): se recorta en vez de dejar que la base rechace el renglón entero por una
+# unidad larga.
 LARGO_UNIDAD = 40
 
 
@@ -145,7 +151,8 @@ class ConsumoMaterialService:
         if linea is None:
             raise NotFoundException(
                 f"No existe la línea de material {dto.id_orden_trabajo_pieza}. "
-                "Puede que el sistema viejo la haya sacado: reabrí la orden y volvé a probar."
+                "Puede que la hayan borrado de la solapa Materias primas: reabrí la orden y "
+                "volvé a probar."
             )
         if linea.id_orden_trabajo != dto.id_orden_trabajo:
             raise BusinessException("Esa línea de material es de otra orden de trabajo.")

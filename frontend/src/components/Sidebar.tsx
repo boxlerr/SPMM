@@ -18,7 +18,8 @@ import {
   Briefcase,
   Ruler,
   Sparkles,
-  FileWarning
+  FileWarning,
+  Boxes
 } from "lucide-react";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "../contexts/AuthContext";
@@ -41,6 +42,16 @@ const sidebarItems: SidebarItem[] = [
     name: "Operaciones",
     href: "/operaciones",
     icon: ArrowLeftRight
+  },
+  {
+    // Materia prima: los insumos, las compras de la semana (Pendientes) y la cañera.
+    // Desde el 24/09 se manejan acá y no en el sistema viejo. Va pegado a Operaciones
+    // porque es la otra mitad de la misma orden: el material que la OT necesita para
+    // poder arrancar. Las solapas van por `?tab=`, así el resaltado exacto de abajo
+    // (pathname === href) la sigue marcando.
+    name: "Materia prima",
+    href: "/materia-prima",
+    icon: Boxes
   },
   {
     // Planos: la biblioteca completa, para el que busca un plano por código de

@@ -44,6 +44,7 @@ import { AddProcessRow } from "./planning/AddProcessRow";
 import { useOrdenesConPlano, usePlanosDisponibles, estadoPlano, rankPlano } from "@/hooks/useOrdenesConPlano";
 import { PlanoDeOrden } from "./common/PlanoDeOrden";
 import { MaterialChip } from "@/components/common/MaterialChip";
+import { rankMaterial } from "@/lib/materialOT";
 import { usePermisos } from "@/hooks/usePermisos";
 import { ExportarMenu } from "@/components/common/ExportarMenu";
 import { ChipsDeControl } from "@/components/common/EstadoDeControl";
@@ -316,9 +317,13 @@ export const UnplannedWorkOrdersList = React.memo(function UnplannedWorkOrdersLi
                 case 'prioridad':
                     return sortConfig.direction === 'asc' ? (a.id_prioridad || 0) - (b.id_prioridad || 0) : (b.id_prioridad || 0) - (a.id_prioridad || 0);
                 case 'material': {
-                    // Rango: OK (mejor) → Pedido → Sin Stock (peor). `undefined` se trata como Sin Stock.
-                    const rank = (estado?: string) => (estado === 'ok' ? 2 : estado === 'pedido' ? 1 : 0);
-                    const diff = rank(a.estado_material) - rank(b.estado_material);
+                    // El mismo orden que la columna en todas las listas (lib/materialOT):
+                    // primero lo que hay que salir a resolver. «Falta pedir» → «Sin cargar»
+                    // → «Pedido / reservado» → «OK» → «No lleva». Antes tenía su propia
+                    // cuenta de tres escalones, que juntaba «Sin cargar» y «No lleva» con
+                    // «Falta pedir» (lo que no era 'ok' ni 'pedido' caía abajo de todo).
+                    const diff = rankMaterial(a.estado_material, a.no_lleva_materia_prima)
+                        - rankMaterial(b.estado_material, b.no_lleva_materia_prima);
                     return sortConfig.direction === 'asc' ? diff : -diff;
                 }
                 case 'proceso': {

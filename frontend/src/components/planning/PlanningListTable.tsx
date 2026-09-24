@@ -224,6 +224,17 @@ type SortColumn =
  *  metía «sin stock» y «sin cargar» en el mismo cajón. */
 const materialRank = rankMaterial;
 
+/** El title de la columna Material: los rótulos de lib/materialOT (los mismos del chip)
+ *  en el orden de rankMaterial, así nunca dice una palabra que la columna ya no usa
+ *  («Sin Stock» pasó a «Falta pedir» el 24/09) ni un orden distinto del que ordena. */
+const TITULO_ORDEN_MATERIAL = `Ordenar por estado de material (primero lo que falta: ${
+    (["ok", "pedido", "sin_stock", "sin_datos"] as const)
+        .slice()
+        .sort((a, b) => rankMaterial(a) - rankMaterial(b))
+        .map((clave) => resumirMaterial(clave).rotulo)
+        .join(" → ")
+})`;
+
 /** Ranking de la columna Proceso: manda la CANTIDAD de procesos de la OT (una OT
  *  de 6 procesos antes que una de 2), y entre OTs con la misma cantidad desempata
  *  la que tiene más procesos terminados.
@@ -257,7 +268,7 @@ const getOrderStatus = (order: WorkOrder) => {
  *  me las ordene de mayor a menor"). Son las que son una cantidad: la OT más
  *  nueva, la mayor cantidad de piezas, la prioridad más alta, la OT con más
  *  procesos. Las demás arrancan al revés a propósito:
- *    - Material / Plano / Entrega: primero lo que FALTA (sin stock, sin plano,
+ *    - Material / Plano / Entrega: primero lo que FALTA (falta pedir, sin plano,
  *      sin entregar), que es lo accionable.
  *    - Fechas: la más próxima primero.
  *    - Texto: A → Z. */
@@ -1961,7 +1972,7 @@ function _PlanningListTable({
                                 <th
                                     className="px-3 py-3 font-bold text-gray-600 text-center cursor-pointer hover:bg-gray-200 transition-colors select-none group"
                                     onClick={() => handleSort('material')}
-                                    title="Ordenar por estado de material (primero lo que falta: Sin Stock → Pedido → OK)"
+                                    title={TITULO_ORDEN_MATERIAL}
                                 >
                                     <div className="flex items-center justify-center">
                                         Material

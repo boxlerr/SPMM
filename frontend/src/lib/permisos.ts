@@ -271,8 +271,14 @@ export const MENU: ItemMenu[] = [
     href: "/operaciones",
     nombre: "Operaciones",
     area: "operaciones",
-    solapas: ["operaciones_ordenes", "operaciones_planificador", "operaciones_recurso_humano", "operaciones_materia_prima"],
+    solapas: ["operaciones_ordenes", "operaciones_planificador", "operaciones_recurso_humano"],
   },
+  // La sección «Materia prima» era una solapa de Operaciones y desde el 24/09 es su
+  // propia pantalla. Se reutiliza la MISMA sección (y por eso no hubo que tocar roles
+  // ni migrar permisos): quien la leía, ve la pantalla; quien la escribía, edita.
+  // Operaciones deja de listarla porque ya no tiene esa solapa: si no, a alguien con
+  // sólo esa sección le aparecería una Operaciones vacía.
+  { href: "/materia-prima", nombre: "Materia prima", area: "operaciones", solapas: ["operaciones_materia_prima"] },
   { href: "/planos", nombre: "Planos", area: "planos" },
   {
     href: "/recursos",

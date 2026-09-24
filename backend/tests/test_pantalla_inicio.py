@@ -120,9 +120,27 @@ def test_puede_abrirla_es_lo_mismo_que_el_menu():
     todas = {p.ruta for p in PANTALLAS_DE_INICIO}
     abre = lambda permisos: {r for r in todas if puede_abrir_pantalla(permisos, r)}  # noqa: E731
     assert abre(_de("admin")) == todas
+    # Materia prima: el operario ya la veía como solapa de Operaciones (misma sección,
+    # operaciones_materia_prima); ahora es su propia pantalla y la sigue viendo.
     assert abre(_de("operario")) == {
-        "/dashboard", "/operaciones", "/planos", "/configuracion", "/no-conformidades", "/novedades"}
+        "/dashboard", "/operaciones", "/materia-prima", "/planos", "/configuracion",
+        "/no-conformidades", "/novedades"}
     assert abre(_de("supervisor")) == todas - {"/auditoria"}
+    # Materia prima es del área Operaciones pero con pantalla propia: la gobierna SU
+    # sección, y ya no es una solapa de Operaciones. Un rol al que se le cierra esa
+    # sección sigue abriendo Operaciones, y uno que sólo tiene esa sección no ve una
+    # Operaciones vacía. (Lo que cierra es el override del rol: los de la persona sólo
+    # suman.)
+    def _rol_con(**secciones):
+        return permisos_de(DatosDePermisos(
+            rol="operario", rol_areas=MATRIZ_ROL_AREA["operario"],
+            rol_secciones={**MATRIZ_ROL_SECCION.get("operario", {}), **secciones}))
+    sin_mp = _rol_con(operaciones_materia_prima="none")
+    assert not puede_abrir_pantalla(sin_mp, "/materia-prima")
+    assert puede_abrir_pantalla(sin_mp, "/operaciones")
+    solo_mp = _rol_con(operaciones_ordenes="none", operaciones_recurso_humano="none")
+    assert puede_abrir_pantalla(solo_mp, "/materia-prima")
+    assert not puede_abrir_pantalla(solo_mp, "/operaciones")
     # Un permiso de más abre lo suyo; una solapa sola alcanza para la pantalla.
     assert puede_abrir_pantalla(_de("operario", usuario_areas={"clientes": "read"}), "/clientes")
     assert puede_abrir_pantalla(

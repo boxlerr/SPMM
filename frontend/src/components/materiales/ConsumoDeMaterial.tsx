@@ -3,10 +3,12 @@
 /**
  * Lo que se consumió de cada material de una OT (RF-15).
  *
- * La solapa Materias Primas de la ficha muestra lo que la OT PIDE, y eso sigue siendo
- * del sistema viejo (decisión del 11/09: el sync lo trae y acá no se carga). Lo que se
- * CONSUME sí es de SPMM: va a una tabla propia que el sync no mira, y se carga desde la
- * misma fila del material, sin salir de la ficha.
+ * La solapa Materias primas de la ficha muestra lo que la OT PIDE. Desde el 23/09 eso
+ * se carga en SPMM (la solapa es editable y Maxi lo compra desde Materia prima ›
+ * Pendientes); durante la prueba piloto de fines de septiembre se sigue cargando en el
+ * Sistema Integral y acá se ve en espejo, sólo lectura (ver MateriasPrimasOT). Lo que se
+ * CONSUME, en cambio, es de SPMM en los dos casos: va a una tabla propia que el sync no
+ * mira, y se carga desde la misma fila del material, sin salir de la ficha.
  *
  * TRES REGLAS
  *
@@ -17,8 +19,13 @@
  *  · Si el backend todavía no tiene la ruta (se deploya a mano y puede ir atrás del
  *    front), la columna no aparece y la solapa queda exactamente como antes.
  *
- * No mueve el stock: `pieza.stockactual` lo reescribe el sync con el del viejo, y pasar
- * ese dato a SPMM lo decide el cliente.
+ * No mueve el stock, y no por falta de dueño: el stock ya es de SPMM (la suma de los
+ * movimientos del insumo), pero el material de una OT se compra JUSTO para esa OT y no
+ * pasa por el depósito. Lo único que la OT saca del depósito es lo que reservó, y sale
+ * una vez, cuando su línea se marca «Disponible» (el retiro del backend). Descontar
+ * también acá restaría algo que nunca entró, o lo reservado dos veces. Esto registra lo
+ * que se usó; el stock lo mueven los movimientos. (Mismo criterio que el backend:
+ * ConsumoMaterialService.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronUp, Plus, Undo2 } from "lucide-react";
@@ -58,7 +65,7 @@ export interface LineaDeMaterial {
     idLinea: number;
     codigo: string;
     descripcion: string;
-    /** Lo pedido, tal como vino del viejo. */
+    /** Lo que pide la línea (su cantidad), para comparar con lo consumido. */
     pedido: number;
     unidad: string;
 }

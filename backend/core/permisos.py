@@ -225,9 +225,11 @@ class PantallaDeInicio:
 PANTALLAS_DE_INICIO: tuple[PantallaDeInicio, ...] = (
     PantallaDeInicio("/dashboard", "Dashboard", "dashboard"),
     PantallaDeInicio("/operaciones", "Operaciones", "operaciones", (
-        "operaciones_ordenes", "operaciones_planificador",
-        "operaciones_recurso_humano", "operaciones_materia_prima",
+        "operaciones_ordenes", "operaciones_planificador", "operaciones_recurso_humano",
     )),
+    # Era una solapa de Operaciones; desde el 24/09 es su propia pantalla con la MISMA
+    # sección (ver MENU en frontend/src/lib/permisos.ts).
+    PantallaDeInicio("/materia-prima", "Materia prima", "operaciones", ("operaciones_materia_prima",)),
     PantallaDeInicio("/planos", "Planos", "planos"),
     PantallaDeInicio("/recursos", "Recursos", "recursos", (
         "recursos_humano", "recursos_maquinaria", "recursos_procesos",

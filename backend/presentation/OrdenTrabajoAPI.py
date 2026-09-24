@@ -155,10 +155,12 @@ async def restaurar_procesos(id_orden: int, id_version: int, db=Depends(get_db),
 
 # 🔹 Eliminar orden
 @router.delete("/ordenes/{id}")
-async def eliminar_orden(id: int, db=Depends(get_db)):
+async def eliminar_orden(id: int, db=Depends(get_db),
+                         current_user: dict = Depends(get_current_user)):
     logger.info(f"API - Inicio DELETE /ordenes/{id}")
     service = OrdenTrabajoService(db)
-    return await service.eliminarOrden(id)
+    # El usuario es para la cañera: borrar la OT libera sus casilleros y queda quién.
+    return await service.eliminarOrden(id, usuario=current_user)
 
 # 🔹 Listar órdenes por prioridad
 @router.get("/ordenes/por-prioridad/{id_prioridad}")

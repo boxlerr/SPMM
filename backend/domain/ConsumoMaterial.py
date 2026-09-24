@@ -23,11 +23,14 @@ class ConsumoMaterial(Base):
 
     POR QUÉ UNA TABLA PROPIA
 
-    `orden_trabajo_pieza` es del sistema viejo (decisión del 11/09): la escribe el sync
-    y la reescribe cada media hora. Su `cantusada`, que parece el lugar natural, el sync
-    la llena con `mp.cantstk` —la misma columna del viejo que alimenta el stock—, así
-    que un consumo guardado ahí duraría hasta la próxima pasada. Esta tabla la escribe
-    SPMM y el sync no la mira.
+    Cuando nació (22/09), `orden_trabajo_pieza` era del sistema viejo (decisión del
+    11/09): el sync la reescribía cada media hora y llenaba su `cantusada`, que parece el
+    lugar natural, con `mp.cantstk` del viejo, así que un consumo guardado ahí duraba
+    hasta la próxima pasada. Desde la reunión del 23/09 la materia prima de la OT es de
+    SPMM (se carga en la solapa Materias primas y el sync ya no la toca) y `cantusada`
+    quedó sin uso: el «C. usado» de cada línea es la suma de esta tabla. La tabla propia
+    sigue haciendo falta por lo que viene: un número en una columna no dice quién cargó
+    qué.
 
     UNA FILA = UNA CARGA, NO UN TOTAL
 
@@ -37,9 +40,14 @@ class ConsumoMaterial(Base):
 
     NO MUEVE EL STOCK
 
-    `pieza.stockactual` lo reescribe el sync con el del viejo, así que descontarlo acá
-    sería un número que vuelve solo a los minutos. Pasar el stock a SPMM es decisión del
-    cliente. Hasta entonces, esto registra; no descuenta.
+    Desde el 23/09 el stock también es de SPMM (la suma de pieza_movimiento, con
+    `pieza.stockactual` como caché), y el consumo igual no lo toca, a propósito: el
+    material de una OT se compra justo para esa OT, así que no entra al depósito ni sale
+    de él. Lo único que sale del stock para una OT es lo que se le reservó del depósito,
+    y sale una sola vez: al marcar su línea «Disponible» (el movimiento `retiro_ot`, ver
+    application/materia_prima/stock.py). Descontar también acá restaría algo que nunca
+    entró al stock, o lo reservado por segunda vez. Esto registra lo que se usó; no
+    descuenta.
 
     Migración: backend/scripts/migrations/2026-09-22_consumo_material.sql
     """
@@ -61,17 +69,19 @@ class ConsumoMaterial(Base):
     # seguir diciendo de qué material era.
     id_pieza = Column(Integer, ForeignKey("pieza.id"), nullable=False)
     # La línea de material de la OT que se consumió. Por PK y NO por el par (OT, pieza):
-    # ese par no es único (el sync deduplica en Python porque el viejo lo repite). Sin
-    # FK a propósito: la línea es del viejo, y si alguien la borra, lo consumido no se
-    # puede ir con ella. NULL = material que no estaba en la lista de la OT.
+    # ese par no es único (el viejo lo repite a propósito y SPMM lo conserva). Sin FK a
+    # propósito: la línea se puede borrar desde la solapa Materias primas (avisando que
+    # tiene consumos, ver MateriaPrimaOTService.borrar) y lo consumido no se puede ir con
+    # ella. NULL = material que no estaba en la lista de la OT.
     id_orden_trabajo_pieza = Column(Integer, nullable=True)
 
     # NUMERIC(18,3) en la base porque hay materiales por metro y por kilo, y un float
     # sumando 0,1 + 0,2 muestra 0,30000000000000004. Se lee como float (asdecimal=False)
     # para que el JSON salga igual que el `cantidad` de orden_trabajo_pieza.
     cantidad = Column(Numeric(18, 3, asdecimal=False), nullable=False)
-    # Copiada de la línea (o de la pieza) al cargar: si mañana el sync le cambia la
-    # unidad a la línea, este renglón tiene que seguir diciendo en qué se cargó.
+    # Copiada de la línea (o de la pieza) al cargar: si mañana alguien le cambia la
+    # unidad a la línea (se edita en la solapa Materias primas), este renglón tiene que
+    # seguir diciendo en qué se cargó.
     unidad = Column(String(40), nullable=True)
 
     # Hora local del taller, sin zona, como TODAS las fechas de esta base. La estampa el

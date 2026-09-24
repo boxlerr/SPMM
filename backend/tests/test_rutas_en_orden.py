@@ -28,6 +28,8 @@ def _rutas(metodo: str) -> list[str]:
 # (método, ruta con nombre, comodín que la taparía)
 TAPADAS = [
     ("PUT", "/ordenes/estado-masivo", "/ordenes/{id}"),
+    # Materia prima (23/09/2026): la barra de acciones de Pendientes cambia muchas líneas.
+    ("PUT", "/materia-prima/lineas/lote", "/materia-prima/lineas/{id_linea}"),
 ]
 
 

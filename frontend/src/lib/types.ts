@@ -68,7 +68,9 @@ export interface WorkOrder {
     fecha_prometida?: string;
     fecha_entrega?: string;
     reclamo?: number | boolean;
-    estado_material?: 'ok' | 'pedido' | 'sin_stock' | 'sin_datos';
+    /** `no_lleva` lo manda el backend desde el 23/09 (materia_prima/estado.py); uno de
+     *  antes lo deducía el front de `no_lleva_materia_prima` (lib/materialOT). */
+    estado_material?: 'ok' | 'pedido' | 'sin_stock' | 'sin_datos' | 'no_lleva';
     /** La casilla «no lleva materia prima» de la orden. Gana sobre `estado_material`:
      *  una orden marcada así no tiene piezas justamente por eso. */
     no_lleva_materia_prima?: number | boolean | null;

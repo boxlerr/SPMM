@@ -8,6 +8,17 @@ from backend.domain.Pieza import Pieza
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
 from backend.domain.ConsumoMaterial import ConsumoMaterial
+# Materia prima en SPMM (23/09/2026): los catálogos que describen un insumo, su stock,
+# precios y recortes, los cortes de cada línea de la OT y la cañera.
+from backend.domain.Material import Material
+from backend.domain.MaterialCalidad import MaterialCalidad
+from backend.domain.Formato import Formato
+from backend.domain.Proveedor import Proveedor
+from backend.domain.PiezaMovimiento import PiezaMovimiento
+from backend.domain.PiezaPrecio import PiezaPrecio
+from backend.domain.PiezaRecorte import PiezaRecorte
+from backend.domain.OrdenTrabajoPiezaCorte import OrdenTrabajoPiezaCorte
+from backend.domain.CaneraOcupacion import CaneraOcupacion
 from backend.domain.OperarioProcesoSkill import OperarioProcesoSkill
 from backend.domain.Articulo import Articulo
 from backend.domain.Maquinaria import Maquinaria

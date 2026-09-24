@@ -62,7 +62,9 @@ y como solapa de Recursos):
   Operaciones        /ordenes*, /ordenes-resumen, /ordenes-pausadas, /planificacion*, /planificar,
                      /config/availability, /ordenes-trabajo-piezas, /consumos-material,
                      /planos/orden/*, /planos/{id}/archivo, /ordenes/{id}/incidencias,
-                     /auditoria/procesos?id_orden= (historial de UNA OT) y los catálogos
+                     /auditoria/procesos?id_orden= (historial de UNA OT), los catálogos
+                     y, desde el 23/09/2026, /materia-prima/* (la pantalla Materia prima
+                     y la solapa Materias primas de la OT, con la sección de ese nombre)
   Planos             /planos/*, /articulos
   Recursos           los catálogos y /planificacion (el plan de cada persona). La solapa
                      Planos de Recursos va por el área Planos, igual que la pantalla.
@@ -354,6 +356,25 @@ POLITICAS: dict[str, Politica] = {
     # La materia prima de cada OT y lo que se consumió (RF-15): se cargan en la ficha.
     "ordenes_trabajo_piezas": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
     "consumos_material": Politica(leer=(area("operaciones"),), escribir=_OPERACIONES_ESCRIBE),
+    # Materia prima en SPMM (reunión del 23/09/2026): la gestión pasa del sistema viejo a
+    # SPMM. Tres routers bajo /materia-prima —el catálogo de insumos, las materias primas
+    # de cada OT y Pendientes con la cañera— y los tres piden la sección «Materia prima»
+    # de Operaciones, que ya existía (la solapa del stock mínimo): no se crea un área
+    # nueva. Como la sección no es confidencial, hereda el nivel del área: quien ve
+    # Operaciones la lee (la ficha de la OT muestra sus materias primas) y quien edita
+    # Operaciones la edita, salvo que el rol la restrinja.
+    "materia_prima_catalogo": Politica(
+        leer=(seccion("operaciones_materia_prima"),),
+        escribir=(seccion("operaciones_materia_prima", "write"),),
+    ),
+    "materia_prima_ot": Politica(
+        leer=(seccion("operaciones_materia_prima"),),
+        escribir=(seccion("operaciones_materia_prima", "write"),),
+    ),
+    "materia_prima_pendientes": Politica(
+        leer=(seccion("operaciones_materia_prima"),),
+        escribir=(seccion("operaciones_materia_prima", "write"),),
+    ),
     # Pausar y reanudar una OT o un paso (RF-03). Es tocar la OT —lo mismo que cambiarle
     # el estado a un paso—, así que pide la solapa Órdenes. Las pausas vigentes
     # (/ordenes-pausadas) las leen las listas de Operaciones (el cartel de «Pausada») y

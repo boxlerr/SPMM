@@ -344,13 +344,20 @@ export async function pdfDeOT(d: DatosDeOT): Promise<Blob> {
     ], y);
     y = subtitulo(doc, "Materias primas", y);
 
+    // Como la hoja impresa: sólo las que se usan (una destildada en «Utilizado» sería
+    // material retirado de más), con los cortes debajo de la descripción y las
+    // observaciones de la línea en «Obs.» (queda lugar para escribir a mano).
+    const aRetirar = d.materias.filter((m) => m.utilizada);
+    const noUsadas = d.materias.length - aRetirar.length;
     autoTable(doc, {
         startY: y,
         head: [["Código", "Descripción", "Proveedor", "Cant.", "Un.", "Retirado", "Obs."]],
-        body: d.materias.length
-            ? d.materias.map((m) => [
-                textoPdf(m.codigo), textoPdf(m.descripcion), textoPdf(m.proveedor || ""),
-                textoPdf(cifra(m.cantidad)), textoPdf(m.unidad), "", "",
+        body: aRetirar.length
+            ? aRetirar.map((m) => [
+                textoPdf(m.codigo),
+                textoPdf(m.cortes ? `${m.descripcion}\nCortes: ${m.cortes}` : m.descripcion),
+                textoPdf(m.proveedor || ""),
+                textoPdf(cifra(m.cantidad)), textoPdf(m.unidad), "", textoPdf(m.observaciones || ""),
             ])
             : [[{ content: "Sin materias primas", colSpan: 7, styles: { halign: "center", textColor: [153, 153, 153] } }]],
         theme: "grid",
@@ -381,6 +388,16 @@ export async function pdfDeOT(d: DatosDeOT): Promise<Blob> {
         },
     });
     y = finDeTabla(doc, y) + 4;
+    if (noUsadas > 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(7);
+        doc.setTextColor(...GRIS_TEXTO);
+        doc.text(
+            textoPdf(`${noUsadas === 1 ? "Hay 1 línea marcada" : `Hay ${noUsadas} líneas marcadas`} como no utilizada${noUsadas === 1 ? "" : "s"} (o a confirmar): no ${noUsadas === 1 ? "se lista" : "se listan"} acá.`),
+            MARGEN, y,
+        );
+        y += 4;
+    }
 
     y = subtitulo(doc, "Observaciones pañol", y);
     y = caja(doc, "", y);

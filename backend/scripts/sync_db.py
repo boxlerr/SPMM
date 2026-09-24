@@ -14,18 +14,37 @@ dos conexiones**:
 
 Las reglas de negocio son las mismas que tenía el MERGE: se inserta lo que no
 existe y se actualiza sólo lo que cambió.
+
+La materia prima va aparte (paso 7b / ESPEJO de run_sync): con el Sistema Integral como
+dueño (MATERIA_PRIMA_DUENO=integral, la prueba piloto) se refleja entera en cada pasada;
+con SPMM como dueño sólo llegan las altas y los precios del viejo.
 """
 
 import asyncio
 import os
 import re
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, insert, select, text, update
 
+from backend.application.materia_prima.legado import (
+    CatalogoLegado,
+    fecha_desde_texto,
+    norm_codigo,
+    pieza_desde_legacy,
+    una_fila_por_codigo,
+)
+from backend.application.materia_prima.dueno import spmm_es_dueno
 from backend.commons.loggers.logger import logger
+from backend.domain.Formato import Formato
+from backend.domain.Material import Material
+from backend.domain.MaterialCalidad import MaterialCalidad
+from backend.domain.Pieza import Pieza
+from backend.domain.PiezaPrecio import PiezaPrecio
+from backend.domain.Proveedor import Proveedor
 from backend.infrastructure.db import SessionLocal
 
 # ---------------------------------------------------------------------------
@@ -283,28 +302,19 @@ FROM dbo.otrabajoProceso op
 WHERE op.proceso IS NOT NULL AND CHARINDEX('-', op.proceso) > 0
 """
 
-Q_PIEZAS = """
-SELECT LTRIM(RTRIM(mp.idpieza)) AS cod_pieza,
-       MAX(ISNULL(mp.descripcion, '')) AS descripcion,
-       CAST(MAX(ISNULL(mp.costo, 0)) AS DECIMAL(18,2)) AS unitario,
-       MAX(ISNULL(NULLIF(LTRIM(RTRIM(mp.un)), ''), 'UN')) AS unidad,
-       CAST(MAX(ISNULL(mp.cantstk, 0)) AS DECIMAL(18,2)) AS stockactual
-FROM dbo.otrabajoMprimas mp
-WHERE mp.idpieza IS NOT NULL AND LTRIM(RTRIM(mp.idpieza)) <> ''
-GROUP BY LTRIM(RTRIM(mp.idpieza))
-"""
+# Q_PIEZAS y Q_MATERIA_PRIMA (pasos 7 y 8, ver run_sync) se SACARON el 23/09/2026 y no
+# quedan de muestra como Q_OTS: estaban mal. Armaban la pieza desde las líneas de las OT
+# (stock = cantstk, que vale 0 en las 19.504 filas del viejo) e inventaban las marcas de
+# cada línea (pedido = cantidad > 0, disponible = pendiente = 0). La lectura buena de las
+# dos tablas está en scripts/importar_materia_prima_legacy.py.
 
-Q_MATERIA_PRIMA = """
-SELECT mp.idot AS _id_otvieja,
-       LTRIM(RTRIM(mp.idpieza)) AS _cod_pieza,
-       CAST(ISNULL(mp.cantidad, 0) AS DECIMAL(18,2)) AS cantidad,
-       COALESCE(NULLIF(LTRIM(RTRIM(mp.un)), ''), 'SIN UNIDAD') AS unidad,
-       CASE WHEN ISNULL(mp.cantidad, 0) > 0 THEN 1 ELSE 0 END AS pedido,
-       CASE WHEN ISNULL(mp.pendiente, 0) = 0 THEN 1 ELSE 0 END AS disponible,
-       CAST(ISNULL(mp.cantstk, 0) AS DECIMAL(18,2)) AS cantusada
-FROM dbo.otrabajoMprimas mp
-WHERE mp.idpieza IS NOT NULL AND LTRIM(RTRIM(mp.idpieza)) <> ''
-ORDER BY mp.idot, LTRIM(RTRIM(mp.idpieza))
+# El catálogo del viejo que lee el paso 7b: sólo las columnas que usa la conversión
+# (application/materia_prima/legado.pieza_desde_legacy), la misma de la importación.
+Q_CATALOGO_VIEJO = """
+SELECT Idpieza, descripcion, unitario, unidad, fecha, insumo, material, formato,
+       t1, t2, t3, t4, t5, medida, estante, letra, nro, proveedor, obs, inactivo
+FROM dbo.pieza
+WHERE Idpieza IS NOT NULL AND LTRIM(RTRIM(Idpieza)) <> ''
 """
 
 # Semillas (se ejecutan en el destino).
@@ -388,34 +398,68 @@ async def run_sync():
             #    re-insertaba los borrados). SPMM es el ÚNICO dueño de los procesos.
             logger.info("Sync de procesos por OT DESACTIVADO — SPMM dueño de procesos (cutover 2026-07-06).")
 
-            # 7. Catálogo de piezas (antes que las MP por OT, que necesitan el id_pieza).
-            logger.info("Actualizando catálogo y stock de piezas...")
-            n, u = await _upsert(session, "pieza", await _leer(Q_PIEZAS), ["cod_pieza"],
-                                 ["cod_pieza", "descripcion", "unitario", "unidad", "stockactual"],
-                                 cols_update=["stockactual"])
-            logger.info(f"  -> piezas: {n} nuevas, {u} actualizadas")
-            await session.commit()
+            # 7. Catálogo de piezas — DESACTIVADO 23/09/2026.
+            #    Reunión con Lucas del 23/09: la gestión de materias primas PASA a SPMM y
+            #    el viejo queda para facturas y remitos. El stock de SPMM es desde ahora la
+            #    suma de sus movimientos (pieza_movimiento, la solapa Stock) y `stockactual` su
+            #    caché, que escriben el servicio y (con el Integral como dueño) el espejo.
+            #
+            #    Lo que hacía y por qué no puede seguir: un upsert por código que armaba la
+            #    pieza desde las líneas de las OT y, a toda pieza que ya estaba, le pisaba
+            #    el stock con MAX(cantstk). En el viejo cantstk vale 0 en TODAS las filas,
+            #    así que en cada pasada ponía en 0 el stock de las 5.222 piezas que alguna
+            #    vez estuvieron en una OT (y 742 de ellas tenían stock allá). Con el stock
+            #    pasando a SPMM, además borraría cada movimiento cargado acá.
+            #
+            #    Lo que sigue llegando del viejo (los códigos que se crean al facturar y el
+            #    último precio de compra) lo trae el paso 7b, que no toca el stock.
+            logger.info("Sync del catálogo y stock de piezas (paso 7) DESACTIVADO — "
+                        + ("los trae el espejo del Integral." if not spmm_es_dueno()
+                           else "SPMM dueño de la materia prima (2026-09-23)."))
 
-            # 8. Materias primas por OT
-            logger.info("Sincronizando materias primas por OT...")
-            m_ot = await _mapa(session, "orden_trabajo", "id_otvieja")
-            m_pza = await _mapa(session, "pieza", "cod_pieza")
-            mps = []
-            for r in await _leer(Q_MATERIA_PRIMA):
-                id_ot = m_ot.get(_clave(r["_id_otvieja"]))
-                id_pza = m_pza.get(_clave(r["_cod_pieza"]))
-                if id_ot is None or id_pza is None:
-                    continue  # la OT o la pieza no están en SPMM (fuera del rango del sync)
-                f = {k: v for k, v in r.items() if not k.startswith("_")}
-                f["id_orden_trabajo"], f["id_pieza"] = id_ot, id_pza
-                mps.append(f)
-            n, u = await _upsert(session, "orden_trabajo_pieza", mps,
-                                 ["id_orden_trabajo", "id_pieza"],
-                                 ["id_orden_trabajo", "id_pieza", "cantidad", "unidad",
-                                  "pedido", "disponible", "cantusada"])
-            logger.info(f"  -> materias primas: {n} nuevas, {u} actualizadas")
+            # 7b / ESPEJO. Qué se trae de la materia prima depende de quién es el dueño
+            #    (application/materia_prima/dueno.py, variable MATERIA_PRIMA_DUENO):
+            #
+            #    · 'integral' (por defecto; la prueba piloto desde el 28/09): el Integral
+            #      sigue siendo el dueño de todo y SPMM lo REFLEJA. En vez de los pasos 7 y
+            #      8, el ESPEJO corre en cada pasada la misma importación que el script
+            #      (scripts/importar_materia_prima_legacy.importar): catálogo, precios,
+            #      stock, las líneas de las OT con sus marcas reales, los cortes y la
+            #      cañera. Gana el Integral. El 7b no hace falta (el espejo trae lo mismo).
+            #    · 'spmm': SPMM es el dueño; el espejo se apaga y sólo quedan las altas y
+            #      los precios del viejo (7b).
+            #
+            #    Los dos aparte y sin tumbar el resto: un viejo que no contesta no puede
+            #    dejar sin aviso de desfasaje (paso 9).
+            if spmm_es_dueno():
+                try:
+                    n, u = await _altas_y_precios_del_viejo(session)
+                    logger.info(f"  -> catálogo del viejo: {n} códigos nuevos, {u} precios nuevos")
+                except Exception as e:
+                    await session.rollback()
+                    logger.warning(f"  -> no se pudieron traer las altas y precios del viejo: {e}")
+            else:
+                try:
+                    await _espejo_del_integral(session)
+                except Exception as e:
+                    await session.rollback()
+                    logger.warning(f"  -> espejo del Integral (materia prima): no se pudo correr: "
+                                   f"{type(e).__name__}: {e}")
 
-            await session.commit()
+            # 8. Materias primas por OT — DESACTIVADO 23/09/2026, por la misma reunión.
+            #    Este paso las reescribía en cada pasada desde el viejo, y mal: las marcas
+            #    no eran las del viejo sino inventadas (pedido = cantidad > 0, disponible =
+            #    1), por eso SPMM decía «material ok» en 118 de las 212 OT abiertas que en
+            #    el viejo estaban sin pedir o esperando. Tampoco borraba: una línea sacada
+            #    allá quedaba viva acá (239 restos). Y cualquier OT creada en SPMM con un
+            #    número que ya usa el viejo se quedaba con la materia prima de la otra.
+            #
+            #    Mientras el Integral sea el dueño, las trae el ESPEJO de arriba (marcas
+            #    reales, cortes, cañera, stock). Con SPMM como dueño, Carolina las carga en
+            #    SPMM y Maxi compra desde Pendientes: la tabla es sólo de SPMM.
+            logger.info("Sync de materias primas por OT (paso 8) DESACTIVADO — "
+                        + ("las trae el espejo del Integral." if not spmm_es_dueno()
+                           else "se cargan en SPMM (2026-09-23)."))
 
             # 9. Avisar del desfasaje con el sistema viejo. NO lo arregla: lo cuenta.
             await _avisar_desfasaje(session)
@@ -437,6 +481,176 @@ _TZ_AR = timezone(timedelta(hours=-3))
 
 def _ahora_ar():
     return datetime.now(_TZ_AR).replace(tzinfo=None)
+
+# ---------------------------------------------------------------------------
+# 7b. Altas y precios del catálogo del viejo
+# ---------------------------------------------------------------------------
+async def _catalogo_legado(session):
+    """Los catálogos de SPMM contra los que se convierte una pieza del viejo (material,
+    calidad, formato y proveedor por nombre). Sólo se leen: el sync no los crea. Una
+    calidad que el viejo estrena al facturar queda en NULL y se completa en la ficha."""
+    materiales = {nombre: id_ for id_, nombre in (await session.execute(
+        select(Material.id, Material.nombre))).all()}
+    calidades = {(id_material, nombre): id_ for id_, id_material, nombre in (await session.execute(
+        select(MaterialCalidad.id, MaterialCalidad.id_material, MaterialCalidad.nombre))).all()}
+    formatos = {nombre: id_ for id_, nombre in (await session.execute(
+        select(Formato.id, Formato.nombre))).all()}
+    proveedores = [{"id": id_, "razon_social": rs, "fantasia": fa} for id_, rs, fa in (await session.execute(
+        select(Proveedor.id, Proveedor.razon_social, Proveedor.fantasia))).all()]
+    return CatalogoLegado(materiales, calidades, formatos, proveedores)
+
+
+async def _importacion_hecha(session) -> bool:
+    """¿Ya corrió alguna vez la importación de materia prima? (alguna pieza con origen)."""
+    return (await session.execute(
+        select(Pieza.id).where(Pieza.origen.isnot(None)).limit(1))).first() is not None
+
+
+async def _espejo_del_integral(session):
+    """ESPEJO de la materia prima mientras el Sistema Integral es el dueño (la prueba
+    piloto; application/materia_prima/dueno.py). Corre la MISMA importación que el script
+    (scripts/importar_materia_prima_legacy.importar) con los pasos PASOS_ESPEJO: gana el
+    Integral, en cada pasada. Carolina y Maxi cargan allá; acá se ve a los pocos minutos,
+    con las marcas reales.
+
+    Cómo, y por qué así:
+      · con la base de la app pasada al pooler 6543 (la misma regla que el script): la
+        importación abre su propia conexión asyncpg y el 5432 admite 15 clientes para
+        todo el proyecto;
+      · sin copias de seguridad (backup_*): se acumularía una copia cada pocos minutos.
+        Salvo la PRIMERA vez (ninguna pieza con origen todavía): esa pasada es la
+        importación inicial y reescribe miles de filas, que quedan copiadas como las
+        deja el script;
+      · sólo si la migración 2026-09-23_materia_prima está aplicada: si falta, importar()
+        no toca nada y acá se loguea y se sigue (el sync no se puede caer por esto);
+      · un candado de la importación impide que dos corridas (dos pasadas, o una pasada y
+        el script a mano) escriban a la vez; la que llega segunda no hace nada;
+      · un renglón de log por pasada con lo que cambió.
+
+    Devuelve el Resultado de importar() (o None si la app no está sobre Postgres). Los
+    errores se levantan: run_sync los loguea y sigue con el resto.
+    """
+    from backend.infrastructure.db import PG_URL
+    from backend.scripts import importar_materia_prima_legacy as importacion
+
+    if not PG_URL:
+        logger.info("  -> espejo del Integral (materia prima): la app no está sobre Postgres; no se corre.")
+        return None
+    try:
+        primera = not await _importacion_hecha(session)
+    except Exception:
+        # Sin la columna pieza.origen la migración no está (importar() lo va a decir y no
+        # toca nada); ante cualquier otra duda, del lado seguro: con copias.
+        primera = True
+    finally:
+        # Que la sesión de la app no quede con una transacción abierta mientras corre el
+        # espejo, que va por su propia conexión.
+        await session.rollback()
+    resultado = await importacion.importar(
+        importacion.PASOS_ESPEJO, aplicar=True, db_url=importacion.por_el_pooler(PG_URL),
+        respaldar=primera, silencioso=True)
+    if resultado.faltan or resultado.fallo:
+        # Un paso que falló (por ejemplo, una fila tomada por la app más de 10 s) deja los
+        # anteriores escritos y la próxima pasada sigue desde ahí: se avisa, no se levanta.
+        logger.warning(f"  -> espejo del Integral (materia prima): {resultado.renglon()}")
+    else:
+        logger.info(f"  -> espejo del Integral (materia prima"
+                    f"{', primera importación, con copias' if primera else ''}): {resultado.renglon()}")
+        for aviso in resultado.avisos()[:20]:
+            logger.debug(f"     {aviso}")
+    return resultado
+
+
+async def _altas_y_precios_del_viejo(session, filas=None, hoy=None):
+    """Lo único que el sistema viejo le sigue mandando al catálogo de SPMM cuando SPMM es
+    el dueño de la materia prima (con el Integral como dueño corre el espejo, que trae
+    esto y todo lo demás; ver run_sync).
+
+    Desde el 23/09/2026 la materia prima se gestiona en SPMM, pero las facturas de
+    compra se siguen haciendo en el viejo, y ahí pasan dos cosas que SPMM necesita:
+
+      · se crean códigos nuevos (el viejo da de alta la pieza al facturarla): se
+        INSERTAN acá con la misma conversión que la importación
+        (materia_prima/legado.pieza_desde_legacy) y origen 'legacy';
+      · cambia el último precio de compra: si el del viejo (unitario > 0 con fecha que se
+        entienda) es MÁS NUEVO que el de SPMM (o SPMM no tiene fecha), se actualizan
+        `unitario` y `fecha_ultimo_precio` y queda una fila en el historial de precios
+        con origen 'compra'.
+
+    NADA MÁS. De una pieza que ya está no se toca la descripción, el tipo, las medidas,
+    la ubicación, el inactivo ni el stock: eso ahora es de SPMM. Tampoco las líneas de
+    las OT, los movimientos, los recortes ni la cañera.
+
+    SÓLO CORRE SI LA IMPORTACIÓN YA SE HIZO (alguna pieza con `origen`). Antes, SPMM
+    tiene el catálogo viejo a medias (sin tipo, sin proveedores, sin fecha de precio) y
+    cada código «nuevo» del viejo entraría con datos que la importación iba a pisar
+    igual; peor, sin `fecha_ultimo_precio` todos los precios parecerían más nuevos.
+
+    `filas` y `hoy` son para los tests; en el sync se leen del viejo y del reloj.
+    Devuelve (códigos nuevos, precios nuevos). Hace commit.
+    """
+    if not await _importacion_hecha(session):
+        logger.info("  -> catálogo del viejo: la importación de materia prima todavía no "
+                    "corrió (ninguna pieza tiene origen); no se trae nada.")
+        return 0, 0
+
+    if filas is None:
+        filas = await _leer(Q_CATALOGO_VIEJO)
+    ahora = _ahora_ar()
+    hoy = hoy or ahora.date()
+
+    # Una fila por código normalizado (el viejo repite '50%004' y '001'), elegida igual
+    # que en la importación: la del precio más nuevo.
+    viejo = {codigo: (fila, fecha_desde_texto(fila.get("fecha"), hoy))
+             for codigo, fila in una_fila_por_codigo(filas, hoy).items()}
+
+    # Los de SPMM por código normalizado: '50%004' tiene dos filas acá también y el
+    # precio nuevo vale para las dos.
+    existentes = defaultdict(list)
+    for id_pieza, codigo, fecha_ultimo in (await session.execute(
+            select(Pieza.id, Pieza.cod_pieza, Pieza.fecha_ultimo_precio))).all():
+        existentes[norm_codigo(codigo)].append((id_pieza, fecha_ultimo))
+
+    def _precio(fila, fecha):
+        try:
+            unitario = float(fila.get("unitario"))
+        except (TypeError, ValueError):
+            return None
+        return unitario if unitario > 0 and fecha is not None else None
+
+    nuevas, precios = [], []
+    for codigo, (fila, fecha) in viejo.items():
+        precio = _precio(fila, fecha)
+        if codigo not in existentes:
+            nuevas.append((fila, fecha, precio))
+            continue
+        if precio is None:
+            continue
+        for id_pieza, fecha_ultimo in existentes[codigo]:
+            if fecha_ultimo is None or fecha > fecha_ultimo:
+                await session.execute(
+                    update(Pieza).where(Pieza.id == id_pieza)
+                    .values(unitario=precio, fecha_ultimo_precio=fecha))
+                precios.append({"id_pieza": id_pieza, "fecha": fecha, "precio": precio,
+                                "origen": "compra", "creado_en": ahora})
+
+    if nuevas:
+        catalogo = await _catalogo_legado(session)
+        for fila, fecha, precio in nuevas:
+            datos = pieza_desde_legacy(fila, catalogo, hoy)
+            datos["cod_pieza"] = str(fila.get("Idpieza")).strip()
+            datos["creado_en"] = ahora
+            id_pieza = (await session.execute(
+                insert(Pieza).values(**datos).returning(Pieza.id))).scalar()
+            if precio is not None and id_pieza is not None:
+                precios.append({"id_pieza": id_pieza, "fecha": fecha, "precio": precio,
+                                "origen": "compra", "creado_en": ahora})
+
+    if precios:
+        await session.execute(insert(PiezaPrecio), precios)
+    await session.commit()
+    return len(nuevas), len(precios)
+
 
 _Q_YA_ENTREGADAS = """
 SELECT v.idot

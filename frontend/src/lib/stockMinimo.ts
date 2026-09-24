@@ -1,10 +1,11 @@
 /**
  * Stock mínimo por insumo (RF-14), del lado de la pantalla.
  *
- * El mínimo es un dato NUEVO de SPMM sobre una materia prima que sigue siendo del
- * sistema viejo (decisión del 11/09): el stock lo trae el sync y acá sólo se lee; el
- * mínimo lo carga el pañol en la solapa Materia Prima y el sync no lo toca. El aviso
- * lo escribe el backend solo (POST /internal/alertas) y llega a la campanita.
+ * El mínimo (el «Pto. crítico» del viejo) nació el 11/09 como un dato de SPMM sobre una
+ * materia prima que seguía siendo del sistema viejo. Desde el 24/09 las materias primas
+ * se manejan en SPMM (pantalla Materia prima): el stock es la suma de los movimientos de
+ * cada insumo y el mínimo se carga en su ficha, en la solapa Insumos. El aviso lo sigue
+ * escribiendo el backend solo (POST /internal/alertas) y llega a la campanita.
  */
 
 /**
@@ -26,9 +27,13 @@ export const estaBajoMinimo = (
     stock !== null && stock !== undefined &&
     stock < minimo;
 
-/** Adónde lleva el aviso de stock bajo: la solapa Materia Prima, parada en esa pieza. */
+/**
+ * Adónde lleva el aviso de stock bajo: la ficha del insumo en Materia prima › Insumos.
+ * (Hasta el 24/09 era la solapa Materia Prima de Operaciones; esa dirección vieja
+ * redirige acá, ver RedireccionMateriaPrima en app/operaciones/page.tsx.)
+ */
 export const enlaceAPieza = (idPieza: number): string =>
-    `/operaciones?tab=materia_prima&pieza=${idPieza}`;
+    `/materia-prima?tab=insumos&pieza=${idPieza}`;
 
 /**
  * Lo que escribió la persona en la celda, como número. `null` = vacío (quitar el

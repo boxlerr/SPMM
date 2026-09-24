@@ -1,4 +1,18 @@
-from sqlalchemy import Column, DateTime, Integer, String, Float, and_
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+    and_,
+    func,
+)
 from sqlalchemy.ext.hybrid import hybrid_property
 from backend.infrastructure.db import Base
 
@@ -35,10 +49,12 @@ class Pieza(Base):
 
     # El stock mínimo que el pañol quiere vigilar (RF-14). NULL = no se vigila.
     #
-    # Es un dato NUEVO de SPMM, no un dato de la materia prima que tenga el sistema
-    # viejo: el 11/09 se decidió que el viejo sigue siendo el dueño de las materias
-    # primas, y esto no se lo discute — el viejo nunca tuvo mínimo. El sync no lo pisa:
-    # al machear una pieza sólo actualiza `stockactual` (sync_db.py, paso 7).
+    # Es el «Punto crítico» de la ficha del insumo, y lo carga sólo SPMM. El viejo tenía
+    # el suyo («Pto. crítico», dbo.pieza.CRITICO), pero está en 0 en todas las filas:
+    # nunca se usó. Por eso ni la importación (scripts/importar_materia_prima_legacy.py)
+    # ni el paso 7b del sync (altas y precios) lo tocan: un 0 traído de allá sería un
+    # mínimo que nadie puso. (Nació el 22/09, cuando el viejo todavía era el dueño de la
+    # materia prima y el sync, paso 7, pisaba `stockactual`; ese paso se apagó el 23/09.)
     #
     # Arranca en NULL para TODAS las piezas y así se queda hasta que alguien lo cargue:
     # inventar un mínimo sería llenar la campanita de avisos que nadie pidió.
@@ -54,6 +70,61 @@ class Pieza(Base):
     # detector (AlertaStockService) y el cambio de mínimo; no es para mostrar.
     # Hora local AR sin zona, como todas las fechas de esta base.
     stock_bajo_avisado_en = Column(DateTime, nullable=True)
+
+    # ── Materia prima en SPMM (23/09/2026) ──
+    #
+    # Desde la reunión del 23/09 la gestión de materias primas pasa a SPMM: el viejo
+    # queda sólo para facturas y remitos. Lo de arriba sigue igual (y conserva sus ids:
+    # la referencian orden_trabajo_pieza, consumo_material y notificacion); esto es lo
+    # que faltaba para dar de alta y describir un insumo acá. Todas NULL o con default:
+    # la migración no reescribe ninguna fila.
+    #
+    # Dos columnas de arriba cambian de sentido:
+    #   · `stockactual` pasa a ser el CACHÉ del saldo de pieza_movimiento. Lo recalcula
+    #     application/materia_prima/stock.py en cada movimiento (y la importación);
+    #     nadie más lo escribe. El sync deja de pisarlo.
+    #   · `proveedor` (texto) queda como lo heredado del viejo, sólo lectura: el
+    #     proveedor preferido de SPMM es `id_proveedor`.
+    #
+    # Migración: backend/scripts/migrations/2026-09-23_materia_prima.sql
+
+    # 'insumo' (material con formato y medidas: la descripción se ARMA), 'insumo_desc'
+    # (insumo con descripción libre) o 'consumible'. Viejo `insumo`: 0→insumo,
+    # 2→insumo_desc, 1→consumible. NULL = sin clasificar, se trata como insumo_desc.
+    tipo = Column(String(12), nullable=True)
+    id_material = Column(Integer, ForeignKey("material.id"), nullable=True)
+    id_calidad = Column(Integer, ForeignKey("material_calidad.id"), nullable=True)
+    id_formato = Column(Integer, ForeignKey("formato.id"), nullable=True)
+    # En qué se CARGÓ ('mm' | 'pulgada'). Las medidas se guardan SIEMPRE en mm: esto
+    # sólo decide cómo se escriben en la descripción (1 1/4" (31.75mm)).
+    sistema_medida = Column(String(8), nullable=False, default="mm", server_default="mm")
+    medida1 = Column(Numeric(12, 3, asdecimal=False), nullable=True)
+    medida2 = Column(Numeric(12, 3, asdecimal=False), nullable=True)
+    medida3 = Column(Numeric(12, 3, asdecimal=False), nullable=True)
+    medida4 = Column(Numeric(12, 3, asdecimal=False), nullable=True)
+    medida5 = Column(Numeric(12, 3, asdecimal=False), nullable=True)
+    # Un insumo que ya no se usa no se borra (lo nombran OT, facturas y movimientos
+    # viejos): se marca inactivo y deja de ofrecerse.
+    inactivo = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    id_proveedor = Column(Integer, ForeignKey("proveedor.id"), nullable=True)
+    # De cuándo es `unitario`. Sin esto, «el último precio» no decía de qué año era.
+    fecha_ultimo_precio = Column(Date, nullable=True)
+    # 'legacy' (vino del viejo) | 'spmm' (alta acá). NULL = fila anterior a la importación.
+    origen = Column(String(10), nullable=True)
+    creado_en = Column(DateTime, nullable=True)
+    creado_por = Column(String(120), nullable=True)
+    modificado_en = Column(DateTime, nullable=True)
+    modificado_por = Column(String(120), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("tipo IN ('insumo', 'insumo_desc', 'consumible')", name="ck_pieza_tipo"),
+        CheckConstraint("sistema_medida IN ('mm', 'pulgada')", name="ck_pieza_sistema_medida"),
+        CheckConstraint("origen IN ('legacy', 'spmm')", name="ck_pieza_origen"),
+        # Los códigos se comparan SIEMPRE normalizados (el viejo no distingue mayúsculas
+        # y hay códigos con espacios adelante). NO es único: hay un duplicado heredado
+        # (50%004) y la unicidad de los nuevos la cuida el servicio.
+        Index("ix_pieza_cod_norm", func.upper(func.trim(cod_pieza))),
+    )
 
     # 🔹 La regla de «bajo mínimo», UNA sola vez y en los dos idiomas.
     #

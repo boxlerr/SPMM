@@ -1,19 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle, History, Info } from "lucide-react";
+import { Calendar as CalendarIcon, Loader2, Package, User, Settings, FileText, Plus, Trash2, ArrowRight, ArrowLeft, CheckCircle2, UploadCloud, X, Image as ImageIcon, Layers, Printer, Copy, Paperclip, ChevronLeft, ChevronRight, AlertTriangle, History } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HistorialDeProcesos } from "@/components/auditoria/HistorialDeProcesos";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/lib/toast";
 import { cn, capitalizeName, isOrderDelivered } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,7 +31,7 @@ import { PausasDeLaOT } from "@/components/pausas/PausasDeLaOT";
 import { ControlDeCalidadOT } from "@/components/calidad/ControlDeCalidadOT";
 import { ofrecerRegistrarRechazos } from "@/lib/calidad";
 import { aNumero } from "@/lib/exportar";
-import { archivoDeOT, seccionesDeOT, type DatosDeOT } from "@/lib/exportes/ot";
+import { archivoDeOT, materiasDeOT, seccionesDeOT, type DatosDeOT, type MateriaDeOT } from "@/lib/exportes/ot";
 import { EstadoYControl, type ValoresDeEstado } from "@/components/common/EstadoDeControl";
 import {
     CASILLAS_NUEVAS,
@@ -41,13 +40,9 @@ import {
     resumenEstadoYControl,
     cuandoLegible,
 } from "@/lib/estadoControlOT";
-import {
-    CeldaConsumido,
-    FilaDeConsumo,
-    ListaDeConsumos,
-    useConsumosDeOrden,
-    type LineaDeMaterial,
-} from "@/components/materiales/ConsumoDeMaterial";
+import { MateriasPrimasOT } from "@/components/materiales/MateriasPrimasOT";
+import { mandarLineasDeOTNueva } from "@/components/materiales/MateriasPrimasOTDatos";
+import { aLineaIn, mpGet, type Linea, type LineaLocal, type LineasDeOT } from "@/lib/materiaPrima";
 
 const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -76,24 +71,6 @@ interface Articulo {
     id: number;
     cod_articulo: string;
     descripcion: string;
-}
-
-interface MateriaPrimaItem {
-    id: string; // Temp ID
-    /** El id de la línea en orden_trabajo_pieza. Es contra lo que se registra el consumo. */
-    id_linea?: number;
-    codigo: string;
-    descripcion: string;
-    cantidad: string;
-    unidad: string;
-    proveedor?: string;
-    disponible: string;
-    en_produccion: string;
-    observaciones: string;
-    precio: string;
-    c_usado: string;
-    utilizado: boolean;
-    cortes: string;
 }
 
 
@@ -280,16 +257,22 @@ const formatearMomento = (iso: string) => {
  *    que React distinga las filas, así que es distinto en cada carga y compararlo
  *    daría «cambió» siempre. `id_otp` —la pasada real— sí entra. El ORDEN del array
  *    también cuenta: la posición ES el paso que se guarda.
- *  - Las MATERIAS PRIMAS no entran: esa solapa se mira, no se edita (el único
- *    `setMateriasPrimas` que no es carga ni reset no existe) y no viaja al guardar.
+ *  - Las MATERIAS PRIMAS de una OT QUE YA EXISTE no entran: desde el 24/09 la solapa
+ *    es editable, pero cada cambio se guarda solo (MateriasPrimasOT), así que no hay
+ *    nada que descartar. Lo que sí puede quedar a medias —un insumo elegido en la barra
+ *    y no agregado, o un guardado todavía en viaje— lo avisa la solapa aparte
+ *    (`mpSinGuardar`), sin pasar por la foto.
+ *  - Las de una OT NUEVA sí entran (`materiasLocales`): viven en memoria hasta que se
+ *    crea la OT, y cerrar sin crearla las pierde. Nacen vacías, así que no llegan por
+ *    red ni cambian la foto del alta.
  *  - Los ARCHIVOS EXISTENTES tampoco: el único botón que los saca escribe
  *    `deletedFileIds` en la misma línea, así que esa lista ya cuenta la historia
  *    completa. De los nuevos alcanza con nombre y tamaño.
  *
- * Que esas dos queden afuera no es un detalle de prolijidad: son justo las dos cosas
- * que llegan por red. Sin ellas la foto se saca de una, sincrónica, y desaparece la
- * ventana en la que lo que alguien tipeaba mientras cargaba se metía DENTRO de la
- * foto — y se perdía al cerrar, sin cartel y sin aviso.
+ * Que las materias guardadas y los archivos existentes queden afuera no es un detalle
+ * de prolijidad: son justo las dos cosas que llegan por red. Sin ellas la foto se saca
+ * de una, sincrónica, y desaparece la ventana en la que lo que alguien tipeaba mientras
+ * cargaba se metía DENTRO de la foto — y se perdía al cerrar, sin cartel y sin aviso.
  */
 type EstadoDelFormulario = {
     generalData: any;
@@ -297,6 +280,8 @@ type EstadoDelFormulario = {
     processes: ProcesoRow[];
     files: File[];
     deletedFileIds: number[];
+    /** OT nueva: las materias primas cargadas en memoria (en una existente, siempre []). */
+    materiasLocales?: LineaLocal[];
 };
 
 /** El formulario en blanco. Está acá, y no escrito dos veces, para que el reset y la
@@ -326,6 +311,8 @@ const huellaDelFormulario = (v: EstadoDelFormulario): string => {
         procesos: (v.processes || []).map(sinIdDeUI),
         archivosNuevos: (v.files || []).map(f => `${f.name}:${f.size}`),
         archivosBorrados: [...(v.deletedFileIds || [])].sort((a, b) => a - b),
+        // Lo que se va a mandar (sin la clave de React, que es de la pantalla).
+        materiasLocales: (v.materiasLocales || []).map(aLineaIn),
     });
 };
 
@@ -423,14 +410,22 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     const [processes, setProcesses] = useState<ProcesoRow[]>([]);
     /** Lo que el planificador asignó, por id de pasada. Lo manda GET /ordenes/{id}. */
     const [planificado, setPlanificado] = useState<Record<number, any>>({});
-    const [materiasPrimas, setMateriasPrimas] = useState<MateriaPrimaItem[]>([]);
-    /** Lo consumido de cada material (RF-15). Si el backend no tiene la ruta, `estado`
-     *  queda en "no" y la solapa se ve exactamente como antes. */
-    const consumo = useConsumosDeOrden(orderToEdit?.id, isOpen);
-    /** La línea con el alta de consumo abierta debajo. Una sola a la vez: en un
-     *  teléfono dos formularios abiertos empujan la lista fuera de la pantalla. */
-    const [consumoAbierto, setConsumoAbierto] = useState<number | null>(null);
-    useEffect(() => { setConsumoAbierto(null); }, [isOpen, orderToEdit?.id]);
+    /**
+     * Materias primas (solapa 2, editable desde el 24/09: ver MateriasPrimasOT).
+     *
+     *  · `lineasLocales`: las de una OT NUEVA, en memoria hasta que `POST /ordenes`
+     *    devuelve el id (ahí se mandan, ver `performSubmission`).
+     *  · `lineasMP`: las de una OT EXISTENTE tal como las dejó la solapa (que las guarda
+     *    sola). Las leen Exportar e Imprimir; null = todavía no llegaron.
+     *  · `mpCambio`: en esta apertura se tocó alguna (se guardó sola): al cerrar hay que
+     *    refrescar la lista de OT, que muestra el estado del material.
+     *  · `mpSinGuardar`: la barra de carga quedó a medio llenar o hay un guardado en
+     *    viaje: cerrar ahora pierde algo, y el «Descartar cambios» lo tiene que saber.
+     */
+    const [lineasLocales, setLineasLocales] = useState<LineaLocal[]>([]);
+    const [lineasMP, setLineasMP] = useState<Linea[] | null>(null);
+    const mpCambio = useRef(false);
+    const [mpSinGuardar, setMpSinGuardar] = useState(false);
     const [files, setFiles] = useState<File[]>([]);
     const [existingFiles, setExistingFiles] = useState<ExistingFile[]>([]);
     const [deletedFileIds, setDeletedFileIds] = useState<number[]>([]);
@@ -465,6 +460,10 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             // La foto de la apertura anterior no vale: el modal queda montado y su
             // estado sobrevive al cierre.
             fotoInicial.current = null;
+            // Las materias de la apertura anterior tampoco: las trae la solapa de nuevo.
+            setLineasMP(null);
+            mpCambio.current = false;
+            setMpSinGuardar(false);
 
             fetchData();
             if (activeTab !== "general") setActiveTab("general");
@@ -606,6 +605,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     processes: procesosCargados,
                     files: [],
                     deletedFileIds: [],
+                    materiasLocales: [],
                 });
 
                 // Fetch existing files
@@ -634,31 +634,9 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     .catch(err => console.error("Error fetching files:", err));
 
 
-                // Fetch existing materias primas (orden_trabajo_pieza JOIN pieza)
-                fetch(`${API_URL}/ordenes-trabajo-piezas?id_orden_trabajo=${orderToEdit.id}`, { headers: getAuthHeaders() })
-                    .then(async (res) => {
-                        if (!res.ok) return;
-                        const data = await res.json();
-                        if (!data.status || !Array.isArray(data.data)) return;
-                        const mapped: MateriaPrimaItem[] = data.data.map((p: any) => ({
-                            id: p.id?.toString() || Math.random().toString(36).substr(2, 9),
-                            id_linea: typeof p.id === "number" ? p.id : undefined,
-                            codigo: p.cod_pieza || "",
-                            descripcion: p.descripcion || "",
-                            cantidad: p.cantidad?.toString() || "0",
-                            unidad: p.unidad || "",
-                            proveedor: p.proveedor || "",
-                            disponible: p.disponible?.toString() || "0",
-                            en_produccion: "",
-                            observaciones: "",
-                            precio: p.unitario?.toString() || "0",
-                            c_usado: p.cantusada?.toString() || "0",
-                            utilizado: false,
-                            cortes: "",
-                        }));
-                        setMateriasPrimas(mapped);
-                    })
-                    .catch(err => console.error("Error fetching materias primas:", err));
+                // Las materias primas ya no se piden acá: las pide y las guarda la solapa
+                // (MateriasPrimasOT, `GET /materia-prima/ot/{id}/lineas`) y avisa cómo
+                // quedaron con `onLineasChange` (ver `lineasMP`).
 
 
             } else {
@@ -672,6 +650,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     processes: [],
                     files: [],
                     deletedFileIds: [],
+                    materiasLocales: [],
                 });
             }
         }
@@ -925,6 +904,18 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
      * avisa después si la respuesta no las trae (ver `performSubmission`).
      */
     const conoceControl = !orderToEdit || conoceEstadosDeControl(orderToEdit);
+    /**
+     * Las materias primas NO siguen al «sólo lectura» de la OT: son otra sección
+     * (`operaciones_materia_prima`), y es la que pide el backend en cada ruta de
+     * `/materia-prima/...`. Así el que compra (Materia prima en «editar») marca el
+     * material de una OT que sólo puede mirar, y el que edita OT pero no Materia prima
+     * la ve sin tocarla. En una OT NUEVA hacen falta las dos: las líneas se mandan
+     * recién cuando se crea la OT, y crearla es de Órdenes. En la prueba piloto (el
+     * dueño de las materias primas es el Sistema Integral) la solapa se traba sola,
+     * tenga el permiso que tenga: ver app/materia-prima/_components/ModoEspejo.tsx.
+     */
+    const verMP = puedeSeccion("operaciones_materia_prima", "read");
+    const editaMP = puedeSeccion("operaciones_materia_prima", "write") && (!!orderToEdit || !soloLectura);
 
     /**
      * De dónde salen los planos que muestran la solapa Planos y el panel de Procesos.
@@ -1080,7 +1071,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             email: generalData.email,
             tiene_plano: generalData.tiene_plano,
             no_lleva_plano: generalData.no_lleva_plano,
-            no_lleva_materia_prima: generalData.no_lleva_materia_prima,
+            // «No lleva materias primas» va sólo en el ALTA. En una OT existente ya lo
+            // guardó la solapa (`PUT /materia-prima/ot/{id}/no-lleva`) y mandarlo acá
+            // sólo puede pisar algo más nuevo: lo que otro marcó mientras este modal
+            // estaba abierto o, en la prueba piloto (dueño = Sistema Integral), lo que
+            // trajo el sync. El PUT no toca lo que no se manda (`exclude_unset`).
+            ...(orderToEdit ? {} : { no_lleva_materia_prima: generalData.no_lleva_materia_prima }),
             programada: generalData.programada,
             en_proceso: generalData.en_proceso,
 
@@ -1128,6 +1124,12 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     body: formData,
                 });
             }
+
+            // El alta devuelve la OT creada: su id es lo que necesitan las materias primas
+            // cargadas en memoria para mandarse (ver abajo). Se lee sólo si salió bien.
+            const creada: any = !orderToEdit && response.ok
+                ? ((await response.json().catch(() => null))?.data ?? null)
+                : null;
 
             if (!response.ok) {
                 // El cuerpo del error no siempre es JSON: un 502/504 de Cloud Run devuelve
@@ -1187,6 +1189,35 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                 }
             }
 
+            // OT NUEVA: las materias primas cargadas en memoria, ahora que hay id. Todas o
+            // ninguna (`…/lineas/lote`). Si no quedan, la OT ya está creada y NO se
+            // deshace: se avisa, y las líneas quedan guardadas en el navegador atadas a
+            // esa OT; al abrirla, la solapa ofrece «Reintentar» (MateriasPrimasOTDatos).
+            let avisoMP: { titulo: string; detalle: string } | null = null;
+            if (!orderToEdit && lineasLocales.length > 0) {
+                const idNueva = Number(creada?.id);
+                const numeroNueva = creada?.id_otvieja || idNueva;
+                const cuantas = lineasLocales.length === 1 ? "su materia prima" : `sus ${lineasLocales.length} materias primas`;
+                if (idNueva > 0) {
+                    const r = await mandarLineasDeOTNueva(idNueva, lineasLocales, (motivo) =>
+                        // El modal todavía está abierto y esperando: una pregunta del
+                        // navegador alcanza (el mismo recurso que borrar un proceso). El
+                        // motivo ya termina en «¿Cargarlo igual?».
+                        window.confirm(`La OT N° ${numeroNueva} ya quedó creada. Antes de cargarle las materias primas:\n\n${motivo}`));
+                    if (!r.ok) {
+                        avisoMP = {
+                            titulo: `La OT N° ${numeroNueva} se creó, pero ${cuantas} no se ${lineasLocales.length === 1 ? "guardó" : "guardaron"}`,
+                            detalle: `${r.cancelado ? "No se cargaron porque así lo elegiste." : (r.error ?? "").replace(/([^.!?])$/, "$1.")} Quedaron en este navegador: abrí la OT y, en Materias primas, tocá «Reintentar».`,
+                        };
+                    }
+                } else {
+                    avisoMP = {
+                        titulo: `La OT se creó, pero ${cuantas} no se ${lineasLocales.length === 1 ? "guardó" : "guardaron"}`,
+                        detalle: "El servidor no devolvió el número de la OT nueva. Abrila y cargalas en Materias primas.",
+                    };
+                }
+            }
+
             toast.success(orderToEdit ? "Orden de Trabajo actualizada correctamente" : "Orden de Trabajo creada correctamente");
 
             // RF-11: un alta con Controlado (o las otras casillas nuevas) contra un backend
@@ -1195,11 +1226,13 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             if (!orderToEdit) {
                 const cargoControl = CASILLAS_NUEVAS.some(c => generalData[c])
                     || generalData.cantidad_finalizada_parcial.trim() !== "";
-                const guardada = await response.json().then(j => j?.data ?? j).catch(() => null);
+                // El cuerpo ya lo leyó `creada` (arriba): un segundo response.json() tira.
+                const guardada = creada;
                 if (cargoControl && guardada && typeof guardada === "object" && !conoceEstadosDeControl(guardada)) {
                     toast.warning("La OT se creó, pero el servidor todavía no guarda Controlado, las etapas de pintura y tercerización ni la «Cant.» del parcial. Se van a poder cargar cuando se actualice.");
                 }
             }
+            if (avisoMP) toast.error(avisoMP.titulo, { description: avisoMP.detalle, duration: 15000 });
             onSuccess?.();
             onClose();
             resetForm();
@@ -1217,7 +1250,9 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         setGeneralData(generalVacio());
         setDetailsData(detallesVacios());
         setProcesses([]);
-        setMateriasPrimas([]);
+        setLineasLocales([]);
+        setLineasMP(null);
+        setMpSinGuardar(false);
         setFiles([]);
         setExistingFiles([]);
         setDeletedFileIds([]);
@@ -1237,8 +1272,11 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
         // escribió.
         const huellaActual = huellaDelFormulario({
             generalData, detailsData, processes, files, deletedFileIds,
+            materiasLocales: orderToEdit ? [] : lineasLocales,
         });
-        const sinCambios = fotoInicial.current !== null && huellaActual === fotoInicial.current;
+        // Materias primas a medio cargar (la barra con un insumo elegido y sin agregar, o
+        // un guardado en viaje): tampoco es «nada cambió».
+        const sinCambios = fotoInicial.current !== null && huellaActual === fotoInicial.current && !mpSinGuardar;
 
         if (sinCambios) {
             handleClose();
@@ -1248,9 +1286,61 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
     };
 
     const handleClose = () => {
+        // Si en esta apertura se tocaron materias primas (se guardan solas), la lista de
+        // atrás muestra un estado del material viejo: que se refresque, como al guardar.
+        const refrescar = !!orderToEdit && mpCambio.current;
+        mpCambio.current = false;
         resetForm();
         onClose();
         setActiveTab("general");
+        if (refrescar) onSuccess?.();
+    };
+
+    /**
+     * «No lleva materias primas», marcado desde la solapa. En una OT existente la solapa
+     * YA lo guardó (`PUT /materia-prima/ot/{id}/no-lleva`): acá se copia a `generalData`
+     * —si no, el próximo `PUT /ordenes/{id}` lo pisaría con el valor viejo— y TAMBIÉN a
+     * la foto inicial, porque ya no es un cambio para descartar. En una OT nueva es un
+     * dato más del alta: cambia `generalData` y la foto no (viaja con `POST /ordenes`).
+     */
+    const cambiarNoLlevaDesdeMP = (v: boolean) => {
+        setGeneralData((g) => ({ ...g, no_lleva_materia_prima: v }));
+        if (!orderToEdit) return;
+        mpCambio.current = true;
+        if (fotoInicial.current) {
+            try {
+                const foto = JSON.parse(fotoInicial.current);
+                foto.general.no_lleva_materia_prima = v;
+                // Mismo orden de claves: la huella se compara como texto.
+                fotoInicial.current = JSON.stringify(foto);
+            } catch {
+                // Una foto ilegible no se toca: a lo sumo pregunta de más al cerrar.
+            }
+        }
+    };
+
+    /** OT existente: las materias como quedaron en la solapa (y si se tocó alguna). */
+    const alCambiarLineasMP = (lineas: Linea[], motivo: "carga" | "cambio") => {
+        setLineasMP(lineas);
+        if (motivo === "cambio") mpCambio.current = true;
+    };
+
+    /**
+     * Las materias primas para Exportar e Imprimir: las que tiene la solapa (una OT nueva,
+     * las de memoria). Sincrónica porque el Excel y el CSV se arman en el clic.
+     */
+    const materiasParaExportar = (): MateriaDeOT[] =>
+        materiasDeOT(orderToEdit ? (lineasMP ?? []) : lineasLocales);
+
+    /**
+     * Lo mismo, pero si la solapa todavía no las trajo (se tocó Imprimir apenas abrió la
+     * OT), las pide: la hoja del pañol sin materiales sería peor que esperar un segundo.
+     * Sin permiso para leer Materia prima, sale vacía (el backend contestaría 403).
+     */
+    const materiasAlDia = async (): Promise<MateriaDeOT[]> => {
+        if (!orderToEdit || lineasMP || !verMP) return materiasParaExportar();
+        const r = await mpGet<LineasDeOT>(`${API_URL}/materia-prima/ot/${orderToEdit.id}/lineas`);
+        return r.ok && r.data ? materiasDeOT(r.data.lineas ?? []) : [];
     };
 
     // "Traer historial": trae los procesos de la última OT del mismo producto
@@ -1304,7 +1394,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
      * que «Imprimir» —sirve para una OT guardada y para un borrador—. De cada paso va la
      * preselección y, si no tiene, lo que asignó el planificador.
      */
-    const datosParaExportar = (): DatosDeOT => {
+    const datosParaExportar = (materias: MateriaDeOT[] = materiasParaExportar()): DatosDeOT => {
         const art = articulos.find(a => a.id.toString() === generalData.articulo_id);
         const procName = (id: string) => procesosOptions.find(p => p.id.toString() === id)?.nombre || "";
         const maqName = (id: string) =>
@@ -1350,21 +1440,24 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     estado: pasada(p.id_otp)?.estado_proceso?.descripcion ?? "",
                 };
             }),
-            materias: materiasPrimas.map(mp => ({
-                codigo: mp.codigo,
-                descripcion: mp.descripcion,
-                proveedor: mp.proveedor || "",
-                cantidad: mp.cantidad,
-                unidad: mp.unidad,
-                disponible: mp.disponible,
-            })),
+            // Las de la solapa (API de Materia prima). Ver `materiasParaExportar`.
+            materias,
         };
     };
 
     // "Imprimir OT": arma una vista imprimible (ventana nueva) con los datos de la
     // orden + procesos + materias primas, y dispara el diálogo de impresión del navegador.
     // Usa el estado actual del formulario, así sirve tanto para una OT existente como para un borrador.
-    const handlePrint = () => {
+    const handlePrint = async () => {
+        // La ventana se abre YA, en el clic: si se abriera después de esperar al servidor
+        // (las materias primas, si la solapa todavía no las trajo), el bloqueador de
+        // ventanas emergentes la frenaría. Se llena cuando están los datos.
+        const w = window.open("", "_blank", "width=900,height=700");
+        if (!w) {
+            toast.error("Habilitá las ventanas emergentes para poder imprimir la OT.");
+            return;
+        }
+        const materias = await materiasAlDia();
         const esc = (v: unknown) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         const fmt = (d?: string) => (d ? new Date(d).toLocaleDateString("es-AR") : "-");
         const cliente = clientes.find(c => c.id.toString() === generalData.cliente_id)?.nombre || generalData.cliente || "-";
@@ -1419,8 +1512,17 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             : `<tr><td colspan="10" class="c" style="color:#999">Sin procesos cargados</td></tr>`;
 
         // Hoja de materias primas (pañol): datos + columna "Retirado" para tildar a mano.
-        const mpRows = materiasPrimas.length
-            ? materiasPrimas.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}</td><td>${esc(mp.proveedor || "")}</td><td class="c">${esc(mp.cantidad)}</td><td class="c">${esc(mp.unidad)}</td><td class="fill c"></td><td class="fill"></td></tr>`).join("")
+        // Sólo las que se usan: una línea destildada en «Utilizado» (no va, o está a
+        // confirmar) en esta hoja sería material retirado de más. Los cortes van debajo
+        // de la descripción: es lo que el pañol tiene que cortar.
+        const aRetirar = materias.filter(m => m.utilizada);
+        const noUsadas = materias.length - aRetirar.length;
+        const cant = (v: string) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n.toLocaleString("es-AR", { maximumFractionDigits: 3 }) : v;
+        };
+        const mpRows = aRetirar.length
+            ? aRetirar.map(mp => `<tr><td>${esc(mp.codigo)}</td><td>${esc(mp.descripcion)}${mp.cortes ? `<div class="sub">Cortes: ${esc(mp.cortes)}</div>` : ""}</td><td>${esc(mp.proveedor || "")}</td><td class="c">${esc(cant(mp.cantidad))}</td><td class="c">${esc(mp.unidad)}</td><td class="fill c"></td><td class="fill">${esc(mp.observaciones)}</td></tr>`).join("")
             : `<tr><td colspan="7" class="c" style="color:#999">Sin materias primas</td></tr>`;
 
         const otNum = orderToEdit?.id_otvieja || orderToEdit?.id || "Nueva";
@@ -1473,6 +1575,7 @@ tr.cont td{border-top:1px solid #ddd}
 tr.cont td:first-child{border-top:1px solid #ddd}
 
 .ayuda{font-size:9px;color:#666;margin:4px 0 0;font-style:italic}
+.sub{font-size:9.5px;color:#444;margin-top:2px}
 .notas{white-space:pre-wrap;border:1px solid #999;padding:8px;color:#111;margin-top:4px;min-height:52px}
 .firmas{display:flex;gap:28px;margin-top:16px}
 .firma{flex:1;border-top:1px solid #111;padding-top:4px;font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px}
@@ -1517,6 +1620,7 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 </div>
 <h2>Materias Primas</h2>
 <table><thead><tr><th>Código</th><th>Descripción</th><th>Proveedor</th><th class="c">Cant.</th><th class="c">Un.</th><th class="c">Retirado</th><th>Obs.</th></tr></thead><tbody>${mpRows}</tbody></table>
+${noUsadas > 0 ? `<p class="ayuda">${noUsadas === 1 ? "Hay 1 línea marcada" : `Hay ${noUsadas} líneas marcadas`} como no utilizada${noUsadas === 1 ? "" : "s"} (o a confirmar): no ${noUsadas === 1 ? "se lista" : "se listan"} acá.</p>` : ""}
 <h2>Observaciones pañol</h2>
 <div class="notas"></div>
 <div class="pie">Hoja de MATERIAS PRIMAS — para el pañol</div>
@@ -1524,11 +1628,6 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
 
 </body></html>`;
 
-        const w = window.open("", "_blank", "width=900,height=700");
-        if (!w) {
-            toast.error("Habilitá las ventanas emergentes para poder imprimir la OT.");
-            return;
-        }
         w.document.write(html);
         w.document.close();
         w.focus();
@@ -1576,7 +1675,16 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                     95% de la pantalla, lo que sea menor— y 92vh de alto, así entra el
                     doble de pasos sin tocar la rueda del mouse. El tope sigue existiendo
                     a propósito: una tabla de 2000px de ancho se vuelve incómoda de leer. */}
-                <DialogContent className="max-w-[min(1600px,95vw)] bg-white rounded-xl shadow-2xl border-0 h-[92vh] flex flex-col p-0 gap-0 overflow-hidden">
+                <DialogContent
+                    className="max-w-[min(1600px,95vw)] bg-white rounded-xl shadow-2xl border-0 h-[92vh] flex flex-col p-0 gap-0 overflow-hidden"
+                    // Escape en un campo que lo usa para «volver a lo que había» (las celdas y
+                    // el buscador de Materias primas, marcados con `data-escape-local`) NO
+                    // cierra la OT. Radix escucha el Escape antes que el campo (en la fase de
+                    // captura del documento), así que el campo no lo puede frenar solo.
+                    onEscapeKeyDown={(e) => {
+                        if ((e.target as HTMLElement | null)?.closest?.("[data-escape-local]")) e.preventDefault();
+                    }}
+                >
                     {/* La cabecera se lleva alto que le falta a la lista de abajo. El ícono
                         baja de 24 a 20px, el título de 2xl a xl, y la bajada —"Modifica la
                         información de la OT existente"— se va: no dice nada que el título no
@@ -2149,224 +2257,29 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                     </div>
                                 </TabsContent>
 
-                                {/* Tab: Materias Primas */}
-                                <TabsContent value="materias" className="space-y-4 mt-0 animate-in fade-in-50 slide-in-from-right-2 duration-300">
-                                    <div className="flex flex-col gap-3">
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <h3 className="text-base font-semibold text-gray-900">Materias Primas</h3>
-                                                <p className="text-xs text-gray-500">Los materiales que lleva esta orden</p>
-                                            </div>
-                                        </div>
-
-                                        {/* Esta solapa se MIRA, no se carga.
-                                            Decisión de Julián (11/09): el sistema viejo sigue siendo el
-                                            dueño de las materias primas y el sync las sigue trayendo cada
-                                            media hora. Antes acá había un formulario para agregar filas
-                                            que no viajaban a ningún lado: se juntaban en pantalla, salían
-                                            en la hoja de pañol y se perdían al cerrar. Con el viejo como
-                                            dueño, agregar material acá nunca iba a ser correcto, así que
-                                            el formulario se fue y la pantalla dice dónde se carga.
-                                            Lo único que SÍ es nuestro es la casilla de abajo… y, desde
-                                            el 22/09 (RF-15), lo CONSUMIDO: va a una tabla propia que el
-                                            sync no mira, y se carga desde la fila del material. La
-                                            lista de lo que se pide sigue siendo del viejo. */}
-                                        <Alert className="border-blue-200 bg-blue-50/60">
-                                            <Info className="h-4 w-4 text-blue-600" />
-                                            <AlertDescription className="text-xs text-blue-900">
-                                                <strong>Las materias primas se cargan en el sistema viejo.</strong> Acá
-                                                se ven, y se actualizan solas cada pocos minutos. Si a esta orden le
-                                                falta un material, cargalo allá y en un rato aparece.
-                                                {/* En un solo span: AlertDescription es una grilla y
-                                                    cada nodo suelto (el <strong> incluido) caía en su
-                                                    propio renglón. */}
-                                                {consumo.estado === "si" && (
-                                                    <span>
-                                                        Lo que se <strong>consume</strong> sí se registra acá: tocá la
-                                                        columna Consumido del material. No descuenta stock.
-                                                    </span>
-                                                )}
-                                            </AlertDescription>
-                                        </Alert>
-
-                                        {/* Table */}
-                                        {/* `@container`: la fila que se abre para cargar el consumo
-                                            mide su ancho contra esta caja (100cqw), así queda a la
-                                            vista aunque la tabla se desplace de costado. */}
-                                        <div className="@container border border-gray-200 rounded-xl overflow-hidden shadow-sm overflow-x-auto bg-white">
-                                            <table className="w-full text-sm text-left relative">
-                                                <thead className="text-xs text-gray-600 bg-gray-50/80 border-b border-gray-200 uppercase whitespace-nowrap">
-                                                    <tr>
-                                                        <th className="px-3 py-2">Código</th>
-                                                        <th className="px-3 py-2">Descripción</th>
-                                                        <th className="px-3 py-2">Proveedor</th>
-                                                        <th className="px-3 py-2">Cant</th>
-                                                        <th className="px-3 py-2">UN</th>
-                                                        {consumo.estado === "si" && (
-                                                            <th className="px-3 py-2" title="Lo registrado en SPMM, carga por carga. No descuenta stock.">
-                                                                Consumido
-                                                            </th>
-                                                        )}
-                                                        <th className="px-3 py-2">Disponible</th>
-                                                        <th className="px-3 py-2">En Prod.</th>
-                                                        <th className="px-3 py-2 w-32">Obs</th>
-                                                        <th className="px-3 py-2">Precio</th>
-                                                        <th className="px-3 py-2" title="Lo que dice el sistema viejo. No es lo consumido que se registra acá.">C. Usado</th>
-                                                        <th className="px-3 py-2 text-center">Utiliz.</th>
-                                                        <th className="px-3 py-2 text-center">Cortes</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100">
-                                                    {materiasPrimas.length === 0 ? (
-                                                        <tr>
-                                                            <td colSpan={consumo.estado === "si" ? 13 : 12} className="p-0">
-                                                                {/* Del ancho de la caja y pegado a la izquierda (RF-27): la
-                                                                    tabla mide ~900px y, centrado en todo ese ancho, en el
-                                                                    teléfono el cartel quedaba cortado a la mitad y había que
-                                                                    deslizar la tabla vacía para leerlo. Mismo `100cqw` que la
-                                                                    fila de consumo. */}
-                                                                <div className="sticky left-0 w-[100cqw] px-4 py-8 text-center text-sm text-gray-500">
-                                                                    Esta orden no tiene materias primas cargadas en el sistema viejo.
-                                                                    <br />
-                                                                    <span className="text-xs text-gray-400">
-                                                                        Si no lleva material, marcalo abajo — así deja de figurar como que falta cargarla.
-                                                                    </span>
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    ) : (
-                                                        materiasPrimas.map((mp) => {
-                                                            // La línea contra la que se registra el consumo. Sin id (una
-                                                            // fila que no vino de la base) no hay contra qué cargarlo.
-                                                            const linea: LineaDeMaterial | null =
-                                                                consumo.estado === "si" && mp.id_linea != null
-                                                                    ? {
-                                                                        idLinea: mp.id_linea,
-                                                                        codigo: mp.codigo,
-                                                                        descripcion: mp.descripcion,
-                                                                        pedido: Number(mp.cantidad) || 0,
-                                                                        unidad: mp.unidad,
-                                                                    }
-                                                                    : null;
-                                                            const abierto = linea !== null && consumoAbierto === linea.idLinea;
-                                                            const totalConsumido = linea ? (consumo.totalPorLinea.get(linea.idLinea) ?? 0) : 0;
-                                                            return (
-                                                            <Fragment key={mp.id}>
-                                                            <tr className={cn("hover:bg-gray-50/50 transition-colors group", abierto && "bg-blue-50/40")}>
-                                                                <td className="px-3 py-2 font-medium">{mp.codigo}</td>
-                                                                <td className="px-3 py-2 truncate max-w-[150px]" title={mp.descripcion}>{mp.descripcion}</td>
-                                                                <td className="px-3 py-2 text-gray-600 truncate max-w-[120px]" title={mp.proveedor}>{mp.proveedor || "—"}</td>
-                                                                <td className="px-3 py-2">{mp.cantidad}</td>
-                                                                <td className="px-3 py-2">{mp.unidad}</td>
-                                                                {consumo.estado === "si" && (
-                                                                    <td className="px-2 py-1">
-                                                                        {linea ? (
-                                                                            <CeldaConsumido
-                                                                                linea={linea}
-                                                                                total={totalConsumido}
-                                                                                abierto={abierto}
-                                                                                onAlternar={() => setConsumoAbierto(abierto ? null : linea.idLinea)}
-                                                                            />
-                                                                        ) : (
-                                                                            <span className="text-gray-400">—</span>
-                                                                        )}
-                                                                    </td>
-                                                                )}
-                                                                <td className="px-3 py-2 text-gray-500">{mp.disponible}</td>
-                                                                <td className="px-3 py-2 text-gray-500">{mp.en_produccion}</td>
-                                                                <td className="px-3 py-2 truncate max-w-[100px] text-gray-500" title={mp.observaciones}>{mp.observaciones}</td>
-                                                                <td className="px-3 py-2 text-gray-500">{mp.precio}</td>
-                                                                <td className="px-3 py-2 text-gray-500">{mp.c_usado}</td>
-                                                                {/* Utilizado y Cortes eran una casilla y un campo que no
-                                                                    guardaban nada: se tildaban, se cerraba el modal y no
-                                                                    quedaba rastro. Ahora muestran lo que dice el sistema
-                                                                    viejo, que es de donde salen. */}
-                                                                <td className="px-3 py-2 text-center text-gray-500">
-                                                                    {mp.utilizado ? "Sí" : "—"}
-                                                                </td>
-                                                                <td className="px-3 py-2 text-center text-gray-500 tabular-nums">
-                                                                    {mp.cortes || "—"}
-                                                                </td>
-                                                            </tr>
-                                                            {abierto && linea && (
-                                                                <FilaDeConsumo
-                                                                    linea={linea}
-                                                                    colSpan={13}
-                                                                    consumos={consumo.consumos.filter(c => c.id_orden_trabajo_pieza === linea.idLinea)}
-                                                                    total={totalConsumido}
-                                                                    onRegistrar={(cantidad, obs) => consumo.registrar(linea, cantidad, obs)}
-                                                                    puedeAnular={consumo.puedeAnular}
-                                                                    onAnular={(id) => { void consumo.anular(id); }}
-                                                                />
-                                                            )}
-                                                            </Fragment>
-                                                            );
-                                                        })
-                                                    )}
-                                                </tbody>
-                                            </table>
-                                        </div>
-
-                                        {/* Consumos que no cuelgan de ninguna fila de arriba: cargados
-                                            por API contra un material que no está en la lista, o contra
-                                            una línea que el sistema viejo sacó después. No se pierden de
-                                            vista: siguen siendo de esta orden. */}
-                                        {consumo.estado === "si" && (() => {
-                                            const lineas = new Set(materiasPrimas.map(mp => mp.id_linea).filter((x): x is number => x != null));
-                                            const sueltos = consumo.consumos.filter(c => c.id_orden_trabajo_pieza == null || !lineas.has(c.id_orden_trabajo_pieza));
-                                            if (sueltos.length === 0) return null;
-                                            return (
-                                                <div className="rounded-xl border border-gray-200 bg-white p-3">
-                                                    <p className="text-xs font-semibold text-gray-700">Consumos de materiales que no están en la lista</p>
-                                                    <p className="mb-1 text-[11px] text-gray-500">
-                                                        Se registraron contra esta orden, pero no contra ninguna de las filas de arriba.
-                                                    </p>
-                                                    <ListaDeConsumos
-                                                        consumos={sueltos}
-                                                        puedeAnular={consumo.puedeAnular}
-                                                        onAnular={(id) => { void consumo.anular(id); }}
-                                                        mostrarMaterial
-                                                    />
-                                                </div>
-                                            );
-                                        })()}
-
-                                        {/* El backend tiene la ruta pero no pudo contestar (la tabla
-                                            todavía no se creó, la base no respondió). La columna no se
-                                            muestra para no dibujar un «—» que parezca «nada consumido». */}
-                                        {consumo.estado === "error" && materiasPrimas.length > 0 && (
-                                            <p className="text-[11px] text-amber-700">
-                                                No se pudo leer lo consumido de esta orden. La lista de materiales está
-                                                completa; volvé a abrir la orden en un rato para ver y cargar el consumo.
-                                            </p>
-                                        )}
-
-                                        {/* Lo único de esta solapa que SÍ se guarda, y es de SPMM: el
-                                            sync no lo mira ni lo pisa. Hace falta porque sin esto «no
-                                            lleva material» y «nadie cargó la lista» se ven iguales —las
-                                            dos sin piezas— y son cosas opuestas: una hay que saltearla y
-                                            la otra hay que ir a cargarla. Mismo caso que «no lleva plano».
-                                            Antes esta casilla se tildaba y no quedaba en ningún lado. */}
-                                        <label
-                                            htmlFor="no_lleva_mp"
-                                            className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50/50 p-3 hover:bg-gray-50"
-                                        >
-                                            <Checkbox
-                                                id="no_lleva_mp"
-                                                disabled={soloLectura}
-                                                className="mt-0.5"
-                                                checked={generalData.no_lleva_materia_prima}
-                                                onCheckedChange={(c) => setGeneralData({ ...generalData, no_lleva_materia_prima: !!c })}
-                                            />
-                                            <span className="text-sm">
-                                                <span className="font-semibold text-gray-800">Esta orden no lleva materia prima</span>
-                                                <span className="block text-xs text-gray-500">
-                                                    Marcala y la columna Material deja de decir «Sin cargar»: pasa a decir
-                                                    «No lleva», que es otra cosa.
-                                                </span>
-                                            </span>
-                                        </label>
-                                    </div>
+                                {/* Tab: Materias Primas
+                                    Desde el 24/09 se CARGA acá (antes se miraba y se cargaba en
+                                    el sistema viejo): ver MateriasPrimasOT. Se monta siempre que
+                                    la OT está abierta (`forceMount`, escondida cuando no es la
+                                    solapa elegida) y no recién al tocarla: así sus líneas ya están
+                                    cuando se toca Imprimir o Exportar desde otra solapa, y al
+                                    volver no se piden de nuevo ni se pierde lo escrito en la barra. */}
+                                <TabsContent value="materias" forceMount className="mt-0 data-[state=inactive]:hidden animate-in fade-in-50 slide-in-from-right-2 duration-300">
+                                    <MateriasPrimasOT
+                                        idOrden={orderToEdit?.id ?? null}
+                                        edita={editaMP}
+                                        puedeVer={verMP}
+                                        activo={isOpen}
+                                        numeroOT={orderToEdit?.id_otvieja ? Number(orderToEdit.id_otvieja) : null}
+                                        unidadesOT={parseInt(detailsData.cantidad) || null}
+                                        idArticulo={Number(generalData.articulo_id) || null}
+                                        lineasLocales={lineasLocales}
+                                        onLineasLocalesChange={setLineasLocales}
+                                        noLleva={generalData.no_lleva_materia_prima}
+                                        onNoLlevaChange={cambiarNoLlevaDesdeMP}
+                                        onLineasChange={alCambiarLineasMP}
+                                        onSinGuardarChange={setMpSinGuardar}
+                                    />
                                 </TabsContent>
 
                                 {/* Tab: Procesos */}
@@ -2555,7 +2468,11 @@ ${encabezado("Materias Primas", "Retirar en pañol")}
                                                 secciones={() => seccionesDeOT(datosParaExportar())}
                                                 filtros={null}
                                                 rotulo="Exportar esta orden, como está en pantalla"
-                                                pdf={async () => (await import("@/lib/exportes/otPdf")).pdfDeOT(datosParaExportar())}
+                                                pdf={async () => {
+                                                    // Como Imprimir: si la solapa todavía no trajo las materias, se piden.
+                                                    const materias = await materiasAlDia();
+                                                    return (await import("@/lib/exportes/otPdf")).pdfDeOT(datosParaExportar(materias));
+                                                }}
                                                 align="start"
                                                 className="h-10 px-3 sm:px-4"
                                             />

@@ -133,6 +133,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, AsyncIterator, Awaitable, BinaryIO, Callable, Iterator, Optional
 
+import anyio
 from sqlalchemy import MetaData, Table, exc as sa_exc, func, null, select, text, tuple_, update
 from sqlalchemy.sql import sqltypes
 
@@ -187,6 +188,11 @@ LIMITE_ENTRADAS = 2000
 
 # Cuántas filas por INSERT al recargar y por lectura al copiar.
 LOTE = 1000
+
+# Cuánto puede tardar UNA página de la copia antes de darla por colgada (ver _pagina).
+# Una página es una consulta corta por el índice de la clave: tarda milisegundos. Esto
+# no es un tiempo esperable sino el techo para una base que no contesta.
+TOPE_PAGINA_S = 120
 
 # Identificadores válidos. No es la defensa (la defensa es no usar nunca un nombre del
 # archivo en un SQL: se compara contra el esquema real), es para ni siquiera leer lo raro.
@@ -288,6 +294,7 @@ NOMBRE_LLANO = {
     "orden_trabajo_proceso": "Pasos de las órdenes",
     "orden_trabajo_proceso_version": "Historial para deshacer pasos",
     "orden_trabajo_pieza": "Materia prima de las órdenes",
+    "orden_trabajo_pieza_corte": "Cortes de la materia prima de las órdenes",
     "orden_trabajo_pausa": "Pausas de las órdenes",
     "consumo_material": "Consumos de material",
     "planificacion": "Plan",
@@ -308,8 +315,16 @@ NOMBRE_LLANO = {
     "estado_proceso": "Estados de los pasos",
     "cliente": "Clientes",
     "articulo": "Artículos",
-    "pieza": "Materia prima",
-    "plano": "Planos (los datos; el archivo no viaja)",
+    "pieza": "Materia prima (insumos)",
+    "pieza_movimiento": "Movimientos de stock de la materia prima",
+    "pieza_precio": "Historial de precios de la materia prima",
+    "pieza_recorte": "Recortes de la materia prima",
+    "material": "Materiales (acero, aluminio…)",
+    "material_calidad": "Calidades de cada material",
+    "formato": "Formatos de la materia prima (barra, tubo, placa…)",
+    "proveedor": "Proveedores",
+    "canera_ocupacion": "Cañera (qué OT ocupa cada casillero)",
+    "plano":"Planos (los datos; el archivo no viaja)",
     "prioridad": "Prioridades",
     "sector": "Sectores",
     "incidencia_proceso": "No conformidades",
@@ -602,6 +617,35 @@ def _texto_leeme(cuando: datetime, generado_por: Optional[dict]) -> str:
     )
 
 
+async def _pagina(conn, consulta) -> list:
+    """Una página de la copia, leída entera aunque en el medio se corte la descarga.
+
+    Cuando el navegador corta, Starlette cancela el envío. Si la cancelación cae con la
+    consulta en vuelo, el driver queda con una lectura a medias: en SQLite (aiosqlite)
+    el rollback del cierre falla («no active connection») y la transacción de lectura
+    sigue viva y traba la base («database is locked»), así que ni se puede completar la
+    fila de auditoría de esa descarga; en Postgres, asyncpg tiene que mandarle un cancel
+    al servidor y SQLAlchemy descarta la conexión. Con el shield la cancelación espera a
+    que la página termine y entra en el próximo await, con la conexión sana para cerrarla
+    (el cierre en CopiaSeguridadAPI ya va con su propio shield). Cuánto antes caía el
+    corte dependía de cuántas tablas hay: con las de materia prima fallaba siempre.
+
+    ¿Puede colgar? El shield sólo posterga la cancelación de afuera, y lo normal es que
+    la posterga milisegundos (una consulta por el índice de la clave, de a LOTE filas).
+    Pero si la base no contesta, el corte del navegador ya no destraba la espera, y acá
+    nada más le pone techo (el engine no le da command_timeout a asyncpg). Por eso el
+    shield tiene su propio tope, TOPE_PAGINA_S: pasado ese tiempo se cancela igual —lo
+    mismo que pasaba antes, pero sólo con la base colgada— y la copia falla con un error
+    que lo dice, en vez de seguir esperando o salir cortada como si nada. La copia de
+    antes de restaurar corre con las tablas bloqueadas: tampoco las retiene más que eso.
+    """
+    with anyio.move_on_after(TOPE_PAGINA_S, shield=True):
+        return (await conn.execute(consulta)).all()
+    raise TimeoutError(
+        f"La base no devolvió una página de la copia en {TOPE_PAGINA_S} segundos: se corta la copia."
+    )
+
+
 async def _por_paginas(conn, tabla: Table, columnas: list) -> AsyncIterator[list]:
     """Las filas de una tabla de a LOTE, en el orden de su clave primaria.
 
@@ -615,7 +659,7 @@ async def _por_paginas(conn, tabla: Table, columnas: list) -> AsyncIterator[list
     posiciones = [next((i for i, c in enumerate(columnas) if c.name == k.name), None) for k in clave]
     if not clave or None in posiciones:
         # Sin clave (las copias sueltas que dejaron algunas migraciones): de una vez.
-        filas = (await conn.execute(select(*columnas))).all()
+        filas = await _pagina(conn, select(*columnas))
         for i in range(0, len(filas), LOTE):
             yield filas[i:i + LOTE]
         return
@@ -627,7 +671,7 @@ async def _por_paginas(conn, tabla: Table, columnas: list) -> AsyncIterator[list
                 consulta = consulta.where(clave[0] > ultima[0])
             else:
                 consulta = consulta.where(tuple_(*clave) > tuple_(*ultima))
-        filas = (await conn.execute(consulta)).all()
+        filas = await _pagina(conn, consulta)
         if filas:
             yield filas
         if len(filas) < LOTE:

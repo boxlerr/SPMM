@@ -86,6 +86,9 @@ ENTIDAD = {
     "articulos": "artículo",
     "planos": "plano",
     "piezas": "materia prima",
+    # La sección Materia prima (23/09/2026): catálogo de insumos, materias primas de
+    # cada OT, Pendientes y cañera. El segundo tramo dice cuál (SUBENTIDAD).
+    "materia-prima": "materia prima",
     "prioridades": "prioridad",
     "planificar": "planificación",
     "planificacion": "planificación",
@@ -149,6 +152,20 @@ SUBENTIDAD = {
     "automaticas": "automática",
     # /reportes/personalizados/guardados/{id} (RF-23): «editó reporte › personalizado #3».
     "personalizados": "personalizado",
+    # /materia-prima/<esto>/...: qué parte de la sección Materia prima (23/09/2026).
+    # Sólo el SEGUNDO tramo afina la frase, así que «/materia-prima/lineas/5/cortes» dice
+    # «línea de OT» y «/materia-prima/ot/5/lineas», «de la OT»; lo que se cambió de
+    # verdad lo cuenta la frase del endpoint.
+    "insumos": "insumo",
+    "movimientos": "movimiento de stock",
+    "recortes": "recorte",
+    "precios": "precio",
+    "lineas": "línea de OT",
+    "cortes": "cortes",
+    "canera": "cañera",
+    "proveedores": "proveedor",
+    "materiales": "material",
+    "ot": "de la OT",
 }
 
 # Nombres de campo cuyo VALOR no puede terminar en el registro. Cubre los DTO de hoy
@@ -303,6 +320,13 @@ SIN_AUDITAR = (
     ("PUT", "/notificaciones/leer-todas"),
     ("PUT", "/notificaciones/"),   # /notificaciones/{id}/leida
     ("POST", "/internal/"),        # el cron del sync, cada 30 minutos
+    # La vista previa del alta de un insumo (descripción armada, código sugerido,
+    # duplicados): es un POST porque manda el formulario entero, pero no escribe nada. El
+    # front la pide mientras se tipea (a los 300 ms de soltar el teclado), así que cada
+    # alta dejaría una docena de renglones «creó materia prima › insumo» que no pasaron,
+    # y cada uno ocupa una conexión. El alta de verdad (POST /materia-prima/insumos) sí
+    # se registra.
+    ("POST", "/materia-prima/insumos/previsualizar"),
 )
 
 # Caminos donde el cuerpo NO se lee: el de un plano ES el archivo, y copiarlo al

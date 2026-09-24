@@ -333,6 +333,8 @@ def test_toda_ruta_de_escritura_de_la_app_queda_auditada():
         "POST /internal/alertas-retraso",
         # El cron de todos los avisos juntos (retraso + stock bajo, RF-14): ídem.
         "POST /internal/alertas",
+        # La vista previa del alta de un insumo: no escribe y se pide mientras se tipea.
+        "POST /materia-prima/insumos/previsualizar",
     }
     assert set(sin_auditar) <= esperadas, (
         f"estas escrituras quedaron fuera del registro sin motivo: "
@@ -362,3 +364,23 @@ def test_el_cron_del_sync_no_ensucia_el_registro():
     assert not auditoria.se_audita("POST", "/internal/sync")
     # Pero una escritura de verdad sigue entrando.
     assert auditoria.se_audita("POST", "/ordenes")
+
+
+def test_la_vista_previa_de_un_insumo_no_ensucia_el_registro():
+    """El alta de un insumo pide `POST /materia-prima/insumos/previsualizar` a los 300 ms
+    de dejar de tipear: no escribe nada, y auditarla dejaría una docena de «creó materia
+    prima › insumo» falsos por cada alta (y una conexión ocupada por cada uno).
+
+    La excepción es sólo ésa: el alta, la edición y el resto de las escrituras de la
+    sección se siguen registrando."""
+    assert not auditoria.se_audita("POST", "/materia-prima/insumos/previsualizar")
+    for metodo, ruta in (
+        ("POST", "/materia-prima/insumos"),
+        ("PUT", "/materia-prima/insumos/7"),
+        ("DELETE", "/materia-prima/insumos/7"),
+        ("POST", "/materia-prima/insumos/7/movimientos"),
+        ("POST", "/materia-prima/insumos/7/precios"),
+        ("PUT", "/materia-prima/lineas/lote"),
+        ("POST", "/materia-prima/canera"),
+    ):
+        assert auditoria.se_audita(metodo, ruta), f"{metodo} {ruta}"

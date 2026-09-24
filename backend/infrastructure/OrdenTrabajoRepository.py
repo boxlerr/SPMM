@@ -239,7 +239,60 @@ class OrdenTrabajoRepository:
                 motivo_error_db(e, "guardar los cambios de la Orden de Trabajo")
             ) from e
 
-    async def delete(self, id: int):
+    async def _borrar_materia_prima(self, id_orden: int, numero_ot, usuario: dict | None):
+        """Lo que cuelga de la OT por la materia prima, sin commit (lo hace `delete`).
+
+        · Los cortes y las líneas de materia prima se borran: son de ESTA OT. Los cortes
+          se van también por CASCADE, pero se borran a mano para no depender de que la
+          FK de la base lo tenga (SQLite de tests, una base restaurada a mano).
+        · Los consumos (consumo_material) también: son de esta OT y su FK frenaría el
+          borrado igual que las líneas.
+        · La cañera NO se borra: se LIBERA (hasta = ahora) y la fila queda con el número
+          en `ot_texto` y sin la FK, para que el historial siga diciendo qué OT estuvo
+          ahí. Soltar la FK es lo que deja borrar la OT.
+        · Los movimientos de stock NO se tocan: el material que se retiró para esta OT ya
+          salió del depósito. Quedan con su id_orden_trabajo suelto (va sin FK).
+        """
+        from sqlalchemy import delete as sql_delete, func, update as sql_update
+        from backend.domain.CaneraOcupacion import CaneraOcupacion
+        from backend.domain.ConsumoMaterial import ConsumoMaterial
+        from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
+        from backend.domain.OrdenTrabajoPiezaCorte import OrdenTrabajoPiezaCorte
+
+        lineas = select(OrdenTrabajoPieza.id).where(OrdenTrabajoPieza.id_orden_trabajo == id_orden)
+        await self.db.execute(
+            sql_delete(OrdenTrabajoPiezaCorte)
+            .where(OrdenTrabajoPiezaCorte.id_orden_trabajo_pieza.in_(lineas))
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.execute(
+            sql_delete(ConsumoMaterial).where(ConsumoMaterial.id_orden_trabajo == id_orden)
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.execute(
+            sql_delete(OrdenTrabajoPieza).where(OrdenTrabajoPieza.id_orden_trabajo == id_orden)
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.execute(
+            sql_update(CaneraOcupacion)
+            .where(CaneraOcupacion.id_orden_trabajo == id_orden, CaneraOcupacion.hasta.is_(None))
+            .values(hasta=_ahora_ar(), liberado_por=nombre_de(usuario))
+            .execution_options(synchronize_session=False)
+        )
+        await self.db.execute(
+            sql_update(CaneraOcupacion)
+            .where(CaneraOcupacion.id_orden_trabajo == id_orden)
+            .values(
+                ot_texto=func.coalesce(
+                    CaneraOcupacion.ot_texto,
+                    str(numero_ot) if numero_ot is not None else f"id {id_orden}",
+                ),
+                id_orden_trabajo=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+    async def delete(self, id: int, usuario: dict | None = None):
         try:
             logger.info(f"Repository - Eliminar orden de trabajo ID {id}.")
             result = await self.db.execute(select(OrdenTrabajo).where(OrdenTrabajo.id == id))
@@ -271,6 +324,11 @@ class OrdenTrabajoRepository:
             
             # 3. Delete from Plano
             await self.db.execute(text("DELETE FROM plano WHERE id_orden_trabajo = :id"), {"id": id})
+
+            # 3b. La materia prima de la OT (23/09/2026). Antes de esto, borrar una OT con
+            # materiales tiraba 500: la FK de orden_trabajo_pieza frenaba el borrado, y
+            # eran 1.298 OT. Va en la misma transacción que el resto: o se va todo o nada.
+            await self._borrar_materia_prima(id, orden.id_otvieja, usuario)
 
             # 4. Finally delete the Order
             await self.db.delete(orden)
@@ -1418,56 +1476,24 @@ class OrdenTrabajoRepository:
             raise InfrastructureException("Error al traer el historial de procesos.") from e
 
     async def get_material_status(self, orden_ids: list[int]) -> dict[int, str]:
-        """
-        Devuelve un dict con el estado del material para cada orden:
-        - 'ok': disponible = 1 para todas las piezas
-        - 'pedido': disponible = 0 pero pedido = 1 para alguna/s piezas
-        - 'sin_stock': disponible = 0 y pedido = 0 para alguna pieza
-        - 'sin_datos': no tiene piezas asociadas (sin información)
+        """El estado del material de cada orden (la columna Material de las listas y del
+        planificador): no_lleva, sin_datos, ok, sin_stock (= falta pedir) o pedido.
+
+        La regla vive en application/materia_prima/estado.py (una sola vez: la usan
+        también Pendientes y la cañera). Desde el 23/09/2026 mira las marcas REALES de
+        las líneas —pedido, reserva, disponible— y sólo las que se usan (usado = 1), y
+        respeta la marca «No lleva materias primas» de la OT. Antes las marcas eran las
+        que inventaba el sync y la mitad de las OT abiertas salían «ok» sin estar pedidas.
         """
         if not orden_ids:
             return {}
-            
+
         try:
-            from sqlalchemy import text, bindparam
-            
-            # Query: Get material status for each order
-            # We aggregate: if ANY piece is not available and not ordered = sin_stock
-            # If ANY piece is not available but ordered = pedido
-            # If ALL pieces are available = ok
-            query = text("""
-                SELECT 
-                    otp.id_orden_trabajo,
-                    MIN(CASE 
-                        WHEN COALESCE(otp.disponible, 0) = 0 AND COALESCE(otp.pedido, 0) = 0 THEN 1  -- sin_stock = priority 1
-                        WHEN COALESCE(otp.disponible, 0) = 0 AND COALESCE(otp.pedido, 0) = 1 THEN 2  -- pedido = priority 2
-                        ELSE 3  -- ok = priority 3
-                    END) as status_priority
-                FROM orden_trabajo_pieza otp
-                WHERE otp.id_orden_trabajo IN :orden_ids
-                GROUP BY otp.id_orden_trabajo
-            """).bindparams(bindparam('orden_ids', expanding=True))
-            
-            result = await self.db.execute(query, {"orden_ids": orden_ids})
-            rows = result.fetchall()
-            
-            # Map priority to status string
-            status_map = {1: 'sin_stock', 2: 'pedido', 3: 'ok'}
-            material_status = {}
-            
-            for row in rows:
-                oid = row[0]
-                priority = row[1]
-                material_status[oid] = status_map.get(priority, 'sin_datos')
-            
-            # Orders not in result have no pieces = sin_datos
-            for oid in orden_ids:
-                if oid not in material_status:
-                    material_status[oid] = 'sin_datos'
-            
-            return material_status
-            
+            from backend.application.materia_prima.estado import estados_de_ots
+            return await estados_de_ots(self.db, orden_ids)
         except Exception as e:
+            # La columna Material no puede tumbar la lista de órdenes: sin estado, cada
+            # OT sale «sin_datos» (que no dice que falte nada) y el error queda en el log.
             logger.error(f"Repository - Error verificando material: {e}")
             return {oid: 'sin_datos' for oid in orden_ids}
 
