@@ -7,10 +7,15 @@ emiten eventos de lifespan, y los otros se arman su propia app), así que un err
 tipeo en el DDL no lo veía nadie hasta el primer arranque en frío en producción,
 donde el único rastro es un logger.warning.
 """
+import asyncio
+import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import text
 
 from backend.infrastructure import migraciones
 
@@ -203,7 +208,7 @@ def test_se_protege_del_lock_de_la_tabla_mas_caliente():
     import inspect
     cuerpo = inspect.getsource(migraciones._aplicar_una)
     assert "lock_timeout" in cuerpo, "el ALTER puede encolar a toda la app detrás suyo"
-    assert "wait_for" in inspect.getsource(migraciones.aplicar_migraciones), (
+    assert "wait_for" in inspect.getsource(migraciones._intentar), (
         "sin tope total, un arranque puede colgarse esperando a la base"
     )
 
@@ -223,3 +228,254 @@ async def test_no_hace_nada_si_la_base_no_es_postgres():
         await migraciones.aplicar_migraciones(motor=falso)  # no levanta, no toca nada
     finally:
         await falso.dispose()
+
+
+
+# ─────────────── reintentos, «ya estaba» y /health (24/09) ───────────────
+#
+# La migración de RF-11 hace ALTER TABLE orden_trabajo con lock_timeout de 3 s. Si otra
+# conexión tiene un lock sobre la tabla al arrancar, antes se rendía con un WARNING y la
+# instancia atendía SIN las columnas: como el modelo ya las nombra, todas las lecturas de
+# OT daban 500 hasta reciclarla. Y con varias instancias a la vez, el CREATE TABLE que
+# perdía la carrera en pg_type pedía «corré el .sql a mano» con la base en orden.
+
+class _MotorPG:
+    """Sólo lo que mira aplicar_migraciones antes de ejecutar: el dialecto."""
+    class dialect:
+        name = "postgresql"
+
+
+@pytest.fixture
+def sin_migraciones_reales(monkeypatch):
+    """Dos migraciones de mentira y nada de base: _aplicar_una y _ya_aplicada se pisan
+    en cada test. Y el estado de /health vuelve a vacío al terminar."""
+    monkeypatch.setattr(migraciones, "MIGRACIONES", [("a", ["x"]), ("b", ["y"])])
+    yield
+    migraciones._PENDIENTES.clear()
+
+
+async def test_si_pierde_la_carrera_por_el_lock_la_misma_instancia_reintenta(
+        monkeypatch, sin_migraciones_reales, caplog):
+    intentos = {"a": 0, "b": 0}
+
+    async def aplicar(nombre, sentencias, motor=None):
+        intentos[nombre] += 1
+        if nombre == "a" and intentos["a"] == 1:
+            raise RuntimeError("canceling statement due to lock timeout")
+
+    async def ya_aplicada(sentencias, motor):
+        return False
+
+    monkeypatch.setattr(migraciones, "_aplicar_una", aplicar)
+    monkeypatch.setattr(migraciones, "_ya_aplicada", ya_aplicada)
+    faltan = await migraciones.aplicar_migraciones(motor=_MotorPG(), pausa_seg=0)
+
+    assert faltan == []
+    assert intentos == {"a": 2, "b": 1}
+    assert migraciones.migraciones_pendientes() == []
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+    assert not any("a mano" in r.getMessage() for r in caplog.records), (
+        "un intento que se reintenta solo no tiene por qué pedir que se corra nada a mano"
+    )
+
+
+async def test_si_no_entra_nunca_avisa_fuerte_y_lo_sigue_intentando(
+        monkeypatch, sin_migraciones_reales, caplog):
+    intentos = {"a": 0, "b": 0}
+
+    async def aplicar(nombre, sentencias, motor=None):
+        intentos[nombre] += 1
+        if nombre == "a" and intentos["a"] <= 4:  # arranque (1 + 2) y un reintento de fondo
+            raise RuntimeError("canceling statement due to lock timeout")
+
+    async def ya_aplicada(sentencias, motor):
+        return False
+
+    monkeypatch.setattr(migraciones, "_aplicar_una", aplicar)
+    monkeypatch.setattr(migraciones, "_ya_aplicada", ya_aplicada)
+    faltan = await migraciones.aplicar_migraciones(
+        motor=_MotorPG(), pausa_seg=0, esperas=(0.01,), tope_seg=1)
+
+    assert faltan == ["a"]
+    assert migraciones.migraciones_pendientes() == ["a"]
+    errores = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert errores and "backend/scripts/migrations/a.sql" in errores[0]
+
+    # El arranque no se frenó; la tarea de fondo la termina aplicando.
+    await asyncio.gather(*list(migraciones._TAREAS))
+    assert intentos["a"] == 5
+    assert migraciones.migraciones_pendientes() == []
+
+
+async def test_si_la_aplico_otra_instancia_no_asusta(monkeypatch, sin_migraciones_reales,
+                                                     caplog):
+    async def aplicar(nombre, sentencias, motor=None):
+        if nombre == "a":
+            raise RuntimeError('duplicate key value violates unique constraint '
+                               '"pg_type_typname_nsp_index"')
+
+    async def ya_aplicada(sentencias, motor):
+        return True
+
+    monkeypatch.setattr(migraciones, "_aplicar_una", aplicar)
+    monkeypatch.setattr(migraciones, "_ya_aplicada", ya_aplicada)
+    assert await migraciones.aplicar_migraciones(motor=_MotorPG(), pausa_seg=0) == []
+    assert not [r for r in caplog.records if r.levelno >= 30], (
+        "otra instancia la aplicó: ni WARNING ni ERROR"
+    )
+
+
+def test_que_se_puede_verificar_en_el_catalogo():
+    por_nombre = dict(migraciones.MIGRACIONES)
+    rf11 = migraciones._que_crea(por_nombre["2026-09-23_estados_de_control_ot"])
+    assert rf11 and {t for t, _, _ in rf11} == {"columna"} and len(rf11) == 7
+    assert {r for _, r, _ in rf11} == {"orden_trabajo"}
+    rf10 = migraciones._que_crea(por_nombre["2026-09-23_uso_y_mantenimiento_de_maquinas"])
+    assert ("tabla", "maquina_mantenimiento_aviso", None) in rf10
+    assert ("indice", "ux_mant_aviso_clave", None) in rf10
+    # Las que cargan filas no se pueden dar por aplicadas mirando el catálogo.
+    assert migraciones._que_crea(por_nombre["2026-09-22_permisos_por_rol_y_area"]) is None
+    assert migraciones._que_crea(por_nombre["2026-09-23_seccion_ingresos_confidencial"]) is None
+    # Ni un ALTER que hace otra cosa que agregar columnas.
+    assert migraciones._que_crea(["ALTER TABLE t ADD COLUMN IF NOT EXISTS a INT, "
+                                  "ADD CONSTRAINT c CHECK (a > 0)"]) is None
+
+
+def test_health_da_503_con_una_migracion_sin_aplicar(sin_migraciones_reales):
+    from fastapi.testclient import TestClient
+    from backend.presentation.main import app
+
+    cliente = TestClient(app)  # sin `with`: no dispara el startup
+    assert cliente.get("/health").status_code == 200
+
+    migraciones._PENDIENTES[:] = ["2026-09-23_estados_de_control_ot"]
+    r = cliente.get("/health")
+    assert r.status_code == 503
+    cuerpo = r.json()
+    assert cuerpo["migraciones_pendientes"] == ["2026-09-23_estados_de_control_ot"]
+    assert cuerpo["correr_a_mano"] == [
+        "backend/scripts/migrations/2026-09-23_estados_de_control_ot.sql"]
+
+
+# ─────────────── lo mismo contra un Postgres de verdad (descartable) ───────────────
+#
+# SQLite no tiene locks de tabla ni pg_type: esto sólo corre con SPMM_PG_PRUEBAS
+# apuntando a un Postgres LOCAL descartable (le borra el esquema public).
+
+PG_URL = os.getenv("SPMM_PG_PRUEBAS")
+
+
+def _pg_seguro(url) -> bool:
+    try:
+        return urlparse(url.replace("+asyncpg", "")).hostname in ("localhost", "127.0.0.1", "::1")
+    except Exception:
+        return False
+
+
+pg = pytest.mark.skipif(not (PG_URL and _pg_seguro(PG_URL)),
+                        reason="sin SPMM_PG_PRUEBAS local")
+
+
+@pytest_asyncio.fixture
+async def motor_pg():
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+    from backend.infrastructure.db import Base
+    from backend.tests.conftest import TEST_TABLES
+
+    motor = create_async_engine(PG_URL, poolclass=NullPool)
+    async with motor.begin() as conn:
+        await conn.execute(text("DROP SCHEMA public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=TEST_TABLES))
+        for col in ("controlado", "finalizado_para_pintar", "finalizado_tercerizacion_intermedia",
+                    "finalizado_tercerizacion_final", "cantidad_finalizada_parcial",
+                    "controlado_en", "controlado_por"):
+            await conn.execute(text(f"ALTER TABLE orden_trabajo DROP COLUMN IF EXISTS {col}"))
+    yield motor
+    migraciones._PENDIENTES.clear()
+    await motor.dispose()
+
+
+async def _columnas_rf11(motor) -> int:
+    async with motor.connect() as conn:
+        return await conn.scalar(text(
+            "SELECT count(*) FROM information_schema.columns WHERE table_name = 'orden_trabajo' "
+            "AND column_name IN ('controlado', 'cantidad_finalizada_parcial', 'controlado_por')"))
+
+
+@pg
+async def test_pg_una_lectura_abierta_sobre_orden_trabajo_no_deja_la_instancia_sin_columnas(
+        motor_pg, monkeypatch):
+    """El caso del hallazgo: un SELECT en una transacción abierta (el sync, el
+    planificador) tiene ACCESS SHARE sobre orden_trabajo cuando la instancia arranca.
+    El primer intento se rinde a los 3 s; cuando la lectura termina, el reintento entra."""
+    monkeypatch.setattr(migraciones, "MIGRACIONES",
+                        [m for m in migraciones.MIGRACIONES
+                         if m[0] == "2026-09-23_estados_de_control_ot"])
+    lector = await motor_pg.connect()
+    tx = await lector.begin()
+    await lector.execute(text("SELECT count(*) FROM orden_trabajo"))
+
+    async def suelta_la_lectura():
+        await asyncio.sleep(4)  # después del primer lock_timeout de 3 s
+        await tx.commit()
+        await lector.close()
+
+    soltar = asyncio.create_task(suelta_la_lectura())
+    faltan = await migraciones.aplicar_migraciones(motor=motor_pg, pausa_seg=1,
+                                                   segundo_plano=False)
+    await soltar
+    assert faltan == []
+    assert await _columnas_rf11(motor_pg) == 3
+
+
+@pg
+async def test_pg_con_el_lock_tomado_todo_el_arranque_503_y_despues_entra(motor_pg, monkeypatch):
+    monkeypatch.setattr(migraciones, "MIGRACIONES",
+                        [m for m in migraciones.MIGRACIONES
+                         if m[0] == "2026-09-23_estados_de_control_ot"])
+    monkeypatch.setattr(migraciones, "LOCK_TIMEOUT", "200ms")
+    lector = await motor_pg.connect()
+    tx = await lector.begin()
+    await lector.execute(text("SELECT count(*) FROM orden_trabajo"))
+    try:
+        faltan = await migraciones.aplicar_migraciones(
+            motor=motor_pg, pausa_seg=0, esperas=(0.5,), tope_seg=30)
+        assert faltan == ["2026-09-23_estados_de_control_ot"]
+        assert migraciones.migraciones_pendientes() == faltan
+        assert await _columnas_rf11(motor_pg) == 0
+    finally:
+        await tx.commit()
+        await lector.close()
+    await asyncio.gather(*list(migraciones._TAREAS))
+    assert migraciones.migraciones_pendientes() == []
+    assert await _columnas_rf11(motor_pg) == 3
+
+
+@pg
+async def test_pg_dos_instancias_a_la_vez_no_piden_correr_nada_a_mano(motor_pg, monkeypatch,
+                                                                       caplog):
+    """Dos CREATE TABLE IF NOT EXISTS concurrentes: el que pierde choca en pg_type. Se
+    fuerza el choque con dos transacciones: la primera crea y no confirma todavía."""
+    nombre = "2026-09-23_reportes_guardados"
+    sentencias = dict(migraciones.MIGRACIONES)[nombre]
+    monkeypatch.setattr(migraciones, "MIGRACIONES", [(nombre, sentencias)])
+
+    otra = await motor_pg.connect()
+    tx = await otra.begin()
+    for s in sentencias:
+        await otra.execute(text(s))
+
+    async def confirma_la_otra():
+        await asyncio.sleep(0.5)
+        await tx.commit()
+        await otra.close()
+
+    confirmar = asyncio.create_task(confirma_la_otra())
+    faltan = await migraciones.aplicar_migraciones(motor=motor_pg, pausa_seg=0,
+                                                   segundo_plano=False)
+    await confirmar
+    assert faltan == []
+    assert not [r for r in caplog.records if r.levelno >= 30], [
+        r.getMessage() for r in caplog.records if r.levelno >= 30]

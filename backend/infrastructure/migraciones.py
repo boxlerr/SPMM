@@ -56,6 +56,8 @@ REGLAS
   descubra el día que necesita el rollback.
 """
 import asyncio
+import re
+from typing import Optional
 
 from sqlalchemy import text
 
@@ -74,8 +76,47 @@ from backend.infrastructure.db import engine
 # Sin este timeout, una instancia fría levantando justo mientras el planificador
 # hace su lectura larga puede dejar `GET /ordenes` colgado en todo el servicio. Con
 # 3 segundos, en el peor caso la migración se rinde, loguea el warning y el
-# arranque sigue: la próxima instancia la aplica.
+# arranque sigue (ver REINTENTOS más abajo: la MISMA instancia vuelve a probar).
 LOCK_TIMEOUT = "3s"
+
+# ── Si se rinde, la misma instancia reintenta ──
+#
+# Antes, una migración que perdía la carrera por el lock (una lectura larga del
+# planificador, el sync, una transacción abierta) quedaba sin aplicar hasta que
+# ARRANCARA OTRA instancia. Y una columna del modelo que falta tumba la lectura de
+# todas las OT: verificado el 24/09 contra un Postgres descartable con un SELECT
+# abierto sobre orden_trabajo, `GET /ordenes` quedaba en 500 en esa instancia hasta
+# que se la reciclara — 18 rutas en total con la de «estado y control» (RF-11).
+#
+# Ahora hay dos rondas más:
+#   1. Al arrancar, cada migración que falló se reintenta REINTENTOS_AL_ARRANCAR veces
+#      con PAUSA_AL_ARRANCAR_SEG de por medio. Casi siempre alcanza: el lock que la
+#      frenó era una consulta que ya terminó. Peor caso por migración trabada:
+#      (1 + 2) × 3 s de lock + 2 × 2 s de pausa ≈ 13 s, lejos de los 240 s de Cloud Run.
+#   2. Si igual quedó alguna, el arranque sigue (nunca se frena por esto) y una tarea
+#      en segundo plano las reintenta, en orden, con las esperas de
+#      ESPERAS_EN_SEGUNDO_PLANO_SEG (la última se repite) hasta TOPE_SEGUNDO_PLANO_SEG.
+#      Cada intento es con el mismo lock_timeout: como mucho encola 3 s las consultas
+#      de orden_trabajo, y las esperas crecen para que eso no pase seguido.
+#   3. Lo que siga faltando al terminar el arranque sale como ERROR (con los .sql a
+#      correr, en orden) y /health contesta 503 hasta que entre: así la revisión de
+#      prueba (--set-tags) lo muestra antes de pasarle tráfico. El arranque en sí no
+#      se frena: una instancia que no levanta es peor que una que avisa.
+# Y antes de contar un intento como fallido se mira si la migración ya está (ver
+# `_ya_aplicada`): perder la carrera contra otra instancia no es un error.
+#
+# Lo que NO cambia: correr los .sql a mano ANTES de subir la imagen sigue siendo lo
+# más seguro (son idempotentes y la versión anterior de la app anda sobre la base
+# migrada), y después del deploy hay que ver en los logs «aplicada entera» por cada
+# una, o pedir /ordenes. Esto es la red por si ese paso se saltea.
+REINTENTOS_AL_ARRANCAR = 2
+PAUSA_AL_ARRANCAR_SEG = 2.0
+ESPERAS_EN_SEGUNDO_PLANO_SEG: tuple[float, ...] = (10, 20, 40, 60, 120, 300)
+TOPE_SEGUNDO_PLANO_SEG = 3600
+
+# La tarea de segundo plano, guardada: asyncio sólo guarda una referencia débil a las
+# tareas y una sin dueño la puede juntar el recolector a mitad de camino.
+_TAREAS: set[asyncio.Task] = set()
 
 # Y un tope para todo el módulo, por si la base ni siquiera contesta: Cloud Run
 # corta el arranque a los 240 s y quedarse esperando acá sería el síntoma
@@ -980,12 +1021,187 @@ async def _aplicar_una(nombre: str, sentencias: list[str], motor=None) -> None:
             await conn.execute(text(s))
 
 
-async def aplicar_migraciones(motor=None) -> None:
-    """Corre el DDL pendiente. No devuelve nada y no levanta nunca.
+# ── ¿Ya quedó aplicada? ──
+#
+# Cuando un intento falla no siempre es porque la migración falte. Dos casos comunes:
+#   - El lock: `ADD COLUMN IF NOT EXISTS` pide ACCESS EXCLUSIVE aunque la columna ya
+#     esté (ver LOCK_TIMEOUT). En todos los arranques menos el primero, perder la carrera
+#     por el lock NO significa que falte nada.
+#   - Varias instancias a la vez: dos `CREATE TABLE IF NOT EXISTS` concurrentes chocan en
+#     el índice único de pg_type/pg_class (duplicate key … pg_type_typname_nsp_index) y
+#     la que pierde da error aunque la tabla quedó creada por la otra. Lo mismo un
+#     `CREATE INDEX IF NOT EXISTS`.
+# Antes los dos casos dejaban «NO se pudo aplicar… corré el .sql a mano» en el log con
+# la base en orden. Ahora, después del error, se mira el catálogo: si está todo lo que
+# la migración crea, alguien (otra instancia, o el .sql a mano) la aplicó entera —cada
+# una va en una sola transacción, así que sus COMMENT también quedaron—.
+#
+# Sólo se afirma lo que se puede mirar: columnas, tablas e índices. Una migración que
+# además carga filas (INSERT, WITH) o tiene algo que no se reconoce acá se da por NO
+# aplicada, y sigue el camino de los reintentos: mejor un reintento de más que un
+# «ya estaba» falso.
+_RE_ALTER = re.compile(r"^alter table (\w+) ")
+_RE_COLUMNA = re.compile(r"add column if not exists (\w+)")
+_RE_TABLA = re.compile(r"^create table if not exists (\w+)")
+_RE_INDICE = re.compile(r"^create (?:unique )?index if not exists (\w+)")
+
+
+def _que_crea(sentencias: list[str]) -> Optional[list[tuple[str, str, Optional[str]]]]:
+    """[(tipo, relación, columna)] de lo que deja la migración, o None si tiene algo
+    que no se puede verificar mirando el catálogo."""
+    objetos: list[tuple[str, str, Optional[str]]] = []
+    for s in sentencias:
+        t = " ".join(s.split()).lower()
+        if t.startswith("comment on "):
+            continue  # va en la misma transacción que lo que comenta
+        if m := _RE_ALTER.match(t):
+            columnas = _RE_COLUMNA.findall(t)
+            # Un ALTER que hace otra cosa además de agregar columnas no se verifica.
+            if not columnas or len(columnas) != t.count(" add "):
+                return None
+            objetos += [("columna", m.group(1), c) for c in columnas]
+        elif m := _RE_TABLA.match(t):
+            objetos.append(("tabla", m.group(1), None))
+        elif m := _RE_INDICE.match(t):
+            objetos.append(("indice", m.group(1), None))
+        else:
+            return None
+    return objetos or None
+
+
+async def _ya_aplicada(sentencias: list[str], motor) -> bool:
+    """True si en la base está TODO lo que crea la migración. No toma locks sobre las
+    tablas (to_regclass y pg_attribute son catálogo) y nunca levanta."""
+    objetos = _que_crea(sentencias)
+    if objetos is None:
+        return False
+    try:
+        async with motor.connect() as conn:
+            for tipo, relacion, columna in objetos:
+                if tipo == "columna":
+                    hay = await conn.scalar(text(
+                        "SELECT count(*) FROM pg_attribute WHERE attrelid = to_regclass(:r) "
+                        "AND attname = :c AND NOT attisdropped"
+                    ), {"r": relacion, "c": columna})
+                else:
+                    hay = await conn.scalar(text("SELECT count(*) FROM (SELECT to_regclass(:r) "
+                                                 "AS o) x WHERE o IS NOT NULL"), {"r": relacion})
+                if not hay:
+                    return False
+    except Exception:
+        return False
+    return True
+
+
+# Lo que quedó sin aplicar, para /health (ver `migraciones_pendientes`). Lo actualizan el
+# arranque y la tarea de segundo plano.
+_PENDIENTES: list[str] = []
+
+
+def migraciones_pendientes() -> list[str]:
+    """Nombres de las migraciones que esta instancia no pudo aplicar (vacío = todo bien).
+
+    Lo mira GET /health, que con alguna pendiente contesta 503 en vez de 200: una columna
+    del modelo que falta tumba la lectura de todas las OT, y eso tiene que verse en la
+    revisión de prueba (--set-tags) ANTES de pasarle tráfico, no en la pantalla de Lucas.
+    """
+    return list(_PENDIENTES)
+
+
+def sql_a_mano(nombre: str) -> str:
+    return f"backend/scripts/migrations/{nombre}.sql"
+
+
+async def _intentar(nombre: str, sentencias: list[str], motor, cuando: str) -> bool:
+    """Un intento de una migración. True si quedó aplicada (por éste o por otro); nunca
+    levanta."""
+    try:
+        await asyncio.wait_for(_aplicar_una(nombre, sentencias, motor), timeout=TOPE_TOTAL_SEG)
+    except Exception as e:
+        # Incluye el TimeoutError del wait_for y el lock_timeout de Postgres: en los
+        # dos casos la transacción se deshizo y la base quedó como estaba.
+        if await _ya_aplicada(sentencias, motor):
+            logger.info(
+                "Migraciones: %s ya estaba aplicada (%s); este intento chocó con otro "
+                "(%s) y no hace falta nada.", nombre, cuando, type(e).__name__,
+            )
+            return True
+        # Todavía no es para correr nada a mano: se reintenta. El que avisa fuerte es
+        # el ERROR del final, si los reintentos no alcanzan.
+        logger.warning(
+            "Migraciones: %s no entró (%s): %s. Se reintenta sola.", nombre, cuando, e,
+        )
+        return False
+    logger.info(
+        "Migraciones: %s aplicada entera (o ya estaba) — %d sentencias%s.",
+        nombre, len(sentencias), "" if cuando == "al arrancar" else f", {cuando}",
+    )
+    return True
+
+
+async def _una_ronda(pendientes: list[tuple[str, list[str]]], motor,
+                     cuando: str) -> list[tuple[str, list[str]]]:
+    """Intenta cada una, EN ORDEN (una puede necesitar la anterior: una FK a una tabla
+    que crea otra). Devuelve las que siguen sin aplicar."""
+    quedan = []
+    for nombre, sentencias in pendientes:
+        if not await _intentar(nombre, sentencias, motor, cuando):
+            quedan.append((nombre, sentencias))
+    _PENDIENTES[:] = [n for n, _ in quedan]
+    return quedan
+
+
+def _avisar_fuerte(pendientes: list[tuple[str, list[str]]], cuando: str) -> None:
+    """El ERROR que se tiene que ver en los logs de Cloud Run: qué falta y qué correr."""
+    logger.error(
+        "Migraciones: %s siguen SIN aplicar: %s. En esta instancia falla todo lo que lee "
+        "esas tablas (con una columna nueva de orden_trabajo, TODAS las OT dan 500) y "
+        "/health contesta 503. Corré a mano, en este orden: %s",
+        cuando, ", ".join(n for n, _ in pendientes),
+        " ; ".join(sql_a_mano(n) for n, _ in pendientes),
+    )
+
+
+async def _reintentar_en_segundo_plano(pendientes: list[tuple[str, list[str]]], motor,
+                                       esperas: tuple[float, ...],
+                                       tope_seg: float) -> list[tuple[str, list[str]]]:
+    """Reintenta lo que quedó hasta que entre todo o se llegue al tope. Nunca levanta."""
+    esperado = 0.0
+    vuelta = 0
+    try:
+        while pendientes:
+            espera = esperas[min(vuelta, len(esperas) - 1)]
+            if esperado + espera > tope_seg:
+                break
+            await asyncio.sleep(espera)
+            esperado += espera
+            vuelta += 1
+            pendientes = await _una_ronda(pendientes, motor,
+                                          f"reintento {vuelta} en segundo plano")
+    except asyncio.CancelledError:
+        raise  # la instancia se apaga: nada que avisar
+    except Exception as e:  # pragma: no cover — _una_ronda no levanta; por las dudas
+        logger.error("Migraciones: se cortaron los reintentos en segundo plano: %s", e)
+    if pendientes:
+        _avisar_fuerte(pendientes, f"después de {vuelta} reintentos en segundo plano")
+    else:
+        logger.info("Migraciones: con los reintentos en segundo plano quedó todo aplicado.")
+    return pendientes
+
+
+async def aplicar_migraciones(motor=None, *, segundo_plano: bool = True,
+                              pausa_seg: Optional[float] = None,
+                              esperas: Optional[tuple[float, ...]] = None,
+                              tope_seg: Optional[float] = None) -> list[str]:
+    """Corre el DDL pendiente y no levanta nunca. Devuelve los nombres de las que
+    quedaron SIN aplicar al terminar el arranque (vacío = todo bien); si hay alguna y
+    `segundo_plano`, deja una tarea reintentándolas (ver REINTENTOS arriba). Lo que
+    falta queda en `migraciones_pendientes()`, que es lo que mira /health.
 
     `motor` existe para los tests y NO es un detalle menor: el engine de este módulo
     es el de producción, importado al cargar. Un test que llame a esto sin inyectar
-    nada le corre el ALTER a Supabase.
+    nada le corre el ALTER a Supabase. `pausa_seg`, `esperas` y `tope_seg` también son
+    para los tests (que no esperen minutos).
     """
     motor = motor or engine
     if motor.dialect.name != "postgresql":
@@ -993,21 +1209,28 @@ async def aplicar_migraciones(motor=None) -> None:
             "Migraciones: la base es %s y no Postgres — no se aplica nada.",
             motor.dialect.name,
         )
-        return
+        _PENDIENTES.clear()
+        return []
 
-    for nombre, sentencias in MIGRACIONES:
-        try:
-            await asyncio.wait_for(_aplicar_una(nombre, sentencias, motor), timeout=TOPE_TOTAL_SEG)
-            logger.info(
-                "Migraciones: %s aplicada entera (o ya estaba) — %d sentencias.",
-                nombre, len(sentencias),
-            )
-        except Exception as e:
-            # Incluye el TimeoutError del wait_for y el lock_timeout de Postgres: en
-            # los dos casos la base quedó como estaba y la próxima instancia
-            # reintenta. Warning y seguimos: el arranque no se frena por esto.
-            logger.warning(
-                "Migraciones: NO se pudo aplicar %s: %s. "
-                "Corré backend/scripts/migrations/%s.sql a mano.",
-                nombre, e, nombre,
-            )
+    pausa = PAUSA_AL_ARRANCAR_SEG if pausa_seg is None else pausa_seg
+    pendientes = await _una_ronda(list(MIGRACIONES), motor, "al arrancar")
+    for n in range(REINTENTOS_AL_ARRANCAR):
+        if not pendientes:
+            break
+        await asyncio.sleep(pausa)
+        pendientes = await _una_ronda(pendientes, motor, f"reintento {n + 1} al arrancar")
+
+    if pendientes:
+        # Fuerte desde ya, aunque siga reintentando: la instancia arranca y atiende
+        # así, y el que mira los logs del deploy tiene que verlo sin buscar.
+        _avisar_fuerte(pendientes, "al terminar el arranque"
+                       + (" (se siguen reintentando en segundo plano)" if segundo_plano else ""))
+    if pendientes and segundo_plano:
+        tarea = asyncio.create_task(_reintentar_en_segundo_plano(
+            pendientes, motor,
+            ESPERAS_EN_SEGUNDO_PLANO_SEG if esperas is None else esperas,
+            TOPE_SEGUNDO_PLANO_SEG if tope_seg is None else tope_seg,
+        ))
+        _TAREAS.add(tarea)
+        tarea.add_done_callback(_TAREAS.discard)
+    return [n for n, _ in pendientes]

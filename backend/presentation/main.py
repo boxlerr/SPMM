@@ -42,7 +42,9 @@ from backend.infrastructure.notifications.handlers import NotificationHandlers
 from backend.domain.events.work_order import WorkOrderCreated, WorkOrderStateChanged
 import asyncio
 from backend.scripts.sync_db import main as sync_main, run_sync as run_sync_once
-from backend.infrastructure.migraciones import aplicar_migraciones
+from backend.infrastructure.migraciones import (
+    aplicar_migraciones, migraciones_pendientes, sql_a_mano,
+)
 from backend.infrastructure import auditoria_movimientos as auditoria_mov
 from backend.infrastructure import auditoria_procesos as auditoria_proc
 from backend.infrastructure.db import SessionLocal
@@ -351,7 +353,26 @@ from fastapi import Response
 
 @app.get("/health")
 def health_check(response: Response):
+    """200 si la instancia está entera; 503 si le quedó alguna migración sin aplicar.
+
+    Una columna del modelo que falta en la base tumba la lectura de todas las OT
+    (ver backend/infrastructure/migraciones.py). El arranque no se frena por eso, así
+    que esto es lo que lo deja ver desde afuera: al probar la revisión con tag antes
+    de pasarle tráfico, /health en 503 dice que NO se le pase y qué .sql correr. Cloud
+    Run no lo mira solo (el probe por defecto es TCP): si algún día se configura un
+    startup probe HTTP acá, una revisión sin migrar ni siquiera queda lista.
+    """
     response.headers["Cache-Control"] = "no-store"
+    pendientes = migraciones_pendientes()
+    if pendientes:
+        response.status_code = 503
+        return {
+            "status": "migraciones_pendientes",
+            "timestamp": datetime.now().isoformat(),
+            "service": "SPMM Backend",
+            "migraciones_pendientes": pendientes,
+            "correr_a_mano": [sql_a_mano(n) for n in pendientes],
+        }
     return {
         "status": "ok", 
         "timestamp": datetime.now().isoformat(),

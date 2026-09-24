@@ -73,4 +73,6 @@ El backend expone `GET /health` que retorna:
 ```
 Este endpoint tiene `Cache-Control: no-store` para asegurar que la petición llegue siempre al servidor.
 
+Si al arrancar quedó alguna migración sin aplicar (ver `backend/infrastructure/migraciones.py`), contesta **503** con `"status": "migraciones_pendientes"`, la lista y los `.sql` a correr a mano. Al probar una revisión nueva con `--set-tags`, un 503 acá quiere decir: no pasarle tráfico todavía.
+
 update planificar fechas que queiras
