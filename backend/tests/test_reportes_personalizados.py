@@ -309,6 +309,9 @@ def test_cada_fuente_pide_lo_de_su_pantalla_y_no_una_copia():
     assert f["maquinas"].requisitos is POLITICAS["maquinarias"].leer
     assert f["stock"].requisitos is POLITICAS["piezas"].leer
     assert f["personas"].columna("eficiencia").requisitos is POLITICAS["rendimiento_operario"].leer
+    # Las dos horas con que se calcula la eficiencia, persona por persona, también.
+    assert f["personas"].columna("horas_estimadas").requisitos is POLITICAS["rendimiento_operario"].leer
+    assert f["personas"].columna("horas_reales").requisitos is POLITICAS["rendimiento_operario"].leer
 
 
 def test_el_catalogo_no_trae_datos_personales_ni_secretos():
@@ -439,11 +442,54 @@ def test_el_catalogo_trae_solo_lo_que_cada_uno_puede_ver():
     (SUPERVISOR, _cfg("personas", ["persona"], filtros=[
         {"columna": "eficiencia", "op": "entre", "desde": 100}]), "«Eficiencia»"),
     (SUPERVISOR, _cfg("personas", ["persona"], orden={"por": "eficiencia"}), "«Eficiencia»"),
+    # Las horas de cada persona son lo mismo que la tarjeta confidencial
+    # /dashboard/rendimiento-operarios: estimado y real, persona por persona.
+    (SUPERVISOR, _cfg("personas", ["persona", "horas_estimadas", "horas_reales", "pasos_terminados"],
+                      periodo={"atajo": "mes_pasado"}), "«Horas estimadas»"),
+    (OPERARIO, _cfg("personas", ["persona", "horas_reales"]), "«Horas reales»"),
+    # Y el mismo ranking armado desde los pasos: agrupar por persona y sumar las horas.
+    (OPERARIO, _cfg("pasos", agrupar=["persona"], medidas=[
+        {"funcion": "conteo"}, {"funcion": "suma", "columna": "horas_estimadas"},
+        {"funcion": "suma", "columna": "horas_reales"}]), "Rendimiento por persona"),
+    (SUPERVISOR, _cfg("pasos", agrupar=["proceso", "persona"], medidas=[
+        {"funcion": "promedio", "columna": "horas_reales"}]), "Rendimiento por persona"),
 ])
 def test_lo_que_no_puede_ver_es_un_403(permisos, config, mensaje):
     with pytest.raises(ReporteSinPermiso) as e:
         rs.validar(config, permisos, AHORA.date())
     assert mensaje in e.value.message
+
+
+def test_sin_la_seccion_las_horas_se_miden_por_otra_cosa_que_no_sea_la_persona():
+    """Lo que sí puede: la lista de pasos con persona y horas (lo que ya muestra cada OT),
+    agrupar por persona contando, sumar horas por proceso o por máquina, y las horas de
+    una persona filtrada (lo que da su ficha)."""
+    for quien in (OPERARIO, SUPERVISOR):
+        rs.validar(_cfg("pasos", ["numero", "persona", "horas_estimadas", "horas_reales"]), quien, AHORA.date())
+        rs.validar(_cfg("pasos", agrupar=["persona"], medidas=[{"funcion": "conteo"}]), quien, AHORA.date())
+        rs.validar(_cfg("pasos", agrupar=["proceso"], medidas=[
+            {"funcion": "suma", "columna": "horas_estimadas"},
+            {"funcion": "suma", "columna": "horas_reales"}]), quien, AHORA.date())
+        rs.validar(_cfg("pasos", agrupar=["proceso"], filtros=[
+            {"columna": "persona", "op": "en", "valores": [JUAN]}],
+            medidas=[{"funcion": "suma", "columna": "horas_reales"}]), quien, AHORA.date())
+        rs.validar(_cfg("personas", ["persona", "pasos_terminados", "dias_ausente"]), quien, AHORA.date())
+    # Con la sección (el admin la tiene), el ranking sale.
+    rs.validar(_cfg("pasos", agrupar=["persona"], medidas=[
+        {"funcion": "suma", "columna": "horas_reales"}]), ADMIN, AHORA.date())
+
+
+def test_sin_la_seccion_ni_las_horas_por_persona_ni_su_ejemplo():
+    for quien in (OPERARIO, SUPERVISOR):
+        columnas = {c["codigo"] for c in _fuentes(quien)["personas"]["columnas"]}
+        assert not columnas & {"eficiencia", "horas_estimadas", "horas_reales"}
+        assert "pasos_terminados" in columnas
+        ejemplos = {e["codigo"] for e in rs.catalogo(quien)["ejemplos"]}
+        assert "horas_por_persona_y_proceso" not in ejemplos
+        assert "ot_entregadas_por_cliente" in ejemplos
+    assert "horas_por_persona_y_proceso" in {e["codigo"] for e in rs.catalogo(ADMIN)["ejemplos"]}
+    assert {"horas_estimadas", "horas_reales", "eficiencia"} <= {
+        c["codigo"] for c in _fuentes(JEFE_CON_RENDIMIENTO)["personas"]["columnas"]}
 
 
 async def test_la_eficiencia_con_la_seccion_confidencial(base):
@@ -810,6 +856,14 @@ async def test_la_api_de_datos(api):
     api.quien.usar(4, "operario", OPERARIO)
     r = await api.get("/reportes/personalizados/datos", params=_q(_cfg("auditoria", ["cuando"])))
     assert r.status_code == 403 and r.json()["errors"][0]["campo"] == "permiso"
+    # El rendimiento por persona: ni desde Personas ni agrupando los pasos.
+    r = await api.get("/reportes/personalizados/datos", params=_q(_cfg(
+        "personas", ["persona", "horas_estimadas", "horas_reales"], periodo={"atajo": "mes_pasado"})))
+    assert r.status_code == 403 and "Rendimiento por persona" in r.json()["errors"][0]["message"]
+    r = await api.get("/reportes/personalizados/datos", params=_q(_cfg("pasos", agrupar=["persona"], medidas=[
+        {"funcion": "conteo"}, {"funcion": "suma", "columna": "horas_estimadas"},
+        {"funcion": "suma", "columna": "horas_reales"}])))
+    assert r.status_code == 403 and "Rendimiento por persona" in r.json()["errors"][0]["message"]
     # Demasiado largo para una dirección: lo corta FastAPI antes de leerlo.
     r = await api.get("/reportes/personalizados/datos", params={"config": "x" * 9000})
     assert r.status_code == 400
@@ -851,6 +905,12 @@ async def test_los_guardados_son_de_quien_los_guardo(api):
     r = await api.post("/reportes/personalizados/guardados", json=_guardar(
         "Entregas del taller", base_cfg, compartido=True))
     del_taller = r.json()["data"]
+    # Y uno compartido con el ranking de horas por persona (él tiene la sección).
+    r = await api.post("/reportes/personalizados/guardados", json=_guardar(
+        "Horas de cada uno", _cfg("pasos", agrupar=["persona"], medidas=[
+            {"funcion": "suma", "columna": "horas_reales"}]), compartido=True))
+    assert r.status_code == 200, r.text
+    ranking = r.json()["data"]
     # El mismo nombre dos veces, no.
     r = await api.post("/reportes/personalizados/guardados", json=_guardar(" mis  ENTREGAS ", base_cfg))
     assert r.status_code == 422 and "Ya tenés un reporte" in r.json()["errors"][0]["message"]
@@ -865,8 +925,11 @@ async def test_los_guardados_son_de_quien_los_guardo(api):
     vistos = {g["nombre"]: g for g in r.json()["data"]}
     assert set(vistos) == {"Entregas del taller"}
     assert not vistos["Entregas del taller"]["es_mio"] and vistos["Entregas del taller"]["disponible"]
-    # Y si igual corre la receta del de Auditoría (la sacó de algún lado), el servidor dice no.
+    # Y si igual corre la receta del de Auditoría o la del ranking (la sacó de algún lado),
+    # el servidor dice no: se valida con los permisos de quien abre, no de quien compartió.
     r = await api.get("/reportes/personalizados/datos", params=_q(auditoria["config"]))
+    assert r.status_code == 403
+    r = await api.get("/reportes/personalizados/datos", params=_q(ranking["config"]))
     assert r.status_code == 403
     # No cambia ni borra lo de otro: el compartido es 403, el no compartido ni existe.
     r = await api.put(f"/reportes/personalizados/guardados/{del_taller['id']}",
@@ -903,7 +966,8 @@ async def test_los_guardados_son_de_quien_los_guardo(api):
                       json=_guardar("Entregas del taller", base_cfg, compartido=False))
     assert r.status_code == 200 and r.json()["data"]["compartido"] is False
     r = await api.get("/reportes/personalizados/guardados")
-    assert [g["nombre"] for g in r.json()["data"]] == ["Auditoría del mes", "Entregas del taller", "Mis entregas"]
+    assert [g["nombre"] for g in r.json()["data"]] == [
+        "Auditoría del mes", "Entregas del taller", "Horas de cada uno", "Mis entregas"]
 
 
 async def test_un_guardado_que_dejo_de_poder_correr_se_ve_marcado(api):

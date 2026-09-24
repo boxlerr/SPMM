@@ -56,6 +56,7 @@ from backend.application.ReportesCatalogo import (
     Contexto,
     Fuente,
     puede_columna,
+    puede_rendimiento,
     puede_fuente,
     rango_del_atajo,
 )
@@ -384,6 +385,18 @@ def validar(crudo: Any, permisos: PermisosUsuario, hoy: Optional[date] = None) -
         if any(x.funcion == medida.funcion and x.columna is medida.columna for x in medidas):
             raise BusinessException(f"«{medida.nombre}» está dos veces.")
         medidas.append(medida)
+
+    # Sumar (o promediar, o el mínimo y máximo de) las horas agrupando por persona arma
+    # el ranking de la sección confidencial «Rendimiento por persona», aunque cada columna
+    # por separado se pueda ver. Se rechaza también en un reporte compartido: se valida
+    # con los permisos de quien lo abre.
+    por_persona = [c for c in agrupar if c.codigo in fuente.por_persona]
+    de_rendimiento = [m for m in medidas if m.columna is not None and m.columna.rendimiento]
+    if por_persona and de_rendimiento and not puede_rendimiento(permisos):
+        raise ReporteSinPermiso(
+            f"Medir «{de_rendimiento[0].nombre}» agrupando por «{por_persona[0].nombre}» "
+            "compara a las personas entre sí: es de la sección confidencial «Rendimiento por "
+            "persona». Podés agrupar por otra columna o filtrar una sola persona.")
 
     if not agrupar and not columnas:
         raise BusinessException("Elegí al menos una columna.")

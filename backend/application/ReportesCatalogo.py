@@ -95,6 +95,10 @@ from backend.domain.Proceso import Proceso
 from backend.domain.Sector import Sector
 from backend.infrastructure.estado_ordenes import ESTADO_SQL, SIN_FECHA_NUEVA, SIN_FECHA_VIEJA
 
+# La sección confidencial «Rendimiento por persona» (dashboard_rendimiento): la eficiencia,
+# las horas de cada persona y cualquier suma de horas agrupada por persona.
+REQUISITOS_RENDIMIENTO: tuple[Requisito, ...] = POLITICAS["rendimiento_operario"].leer
+
 # ─────────────────────────── vocabulario ───────────────────────────
 
 # Cómo se lee cada valor. Es el mismo vocabulario de lib/exportar.ts (TipoColumna), más
@@ -389,6 +393,9 @@ class Columna:
     requisitos: tuple[Requisito, ...] = ()
     # El tipo SQL de la columna cuando es fecha: una DATE se compara con días, no con horas.
     sql_fecha: str = "datetime"
+    # Sumada o promediada POR PERSONA es el rendimiento de cada una (las horas estimadas
+    # y reales de sus pasos): ver `Fuente.por_persona` y REQUISITOS_RENDIMIENTO.
+    rendimiento: bool = False
 
     def __post_init__(self):
         assert self.tipo in TIPOS, (self.codigo, self.tipo)
@@ -456,10 +463,16 @@ class Fuente:
     filtros_iniciales: tuple[dict, ...] = ()
     orden_inicial: Optional[tuple[str, str]] = None
     nota: str = ""
+    # Las columnas que nombran a UNA persona. Agrupar por una de ellas y medir una columna
+    # con `rendimiento` arma el ranking de la sección confidencial «Rendimiento por
+    # persona»: sin la sección, el armador lo rechaza (ver ReportesService.validar).
+    por_persona: tuple[str, ...] = ()
 
     def __post_init__(self):
         codigos = [c.codigo for c in self.columnas]
         assert len(codigos) == len(set(codigos)), f"{self.codigo}: columna repetida"
+        for p in self.por_persona:
+            assert p in codigos, (self.codigo, p)
         for p in self.periodo:
             assert p in codigos and self.columna(p).tipo in FECHAS, (self.codigo, p)
         assert not (self.periodo and self.periodo_interno), self.codigo
@@ -670,16 +683,20 @@ PASOS = Fuente(
           medible=False),
         C("mes_fin", "Mes de fin", "mes", mes_de(fecha_limpia(otp.c.fin_real))),
         C("horas_estimadas", "Horas estimadas", "numero", otp.c.tiempo_proceso / 60.0,
-          decimales=2, totaliza=True, por_defecto=True,
+          decimales=2, totaliza=True, por_defecto=True, rendimiento=True,
           ayuda="El tiempo cargado en la OT para el paso."),
         C("horas_reales", "Horas reales", "numero", horas_reales(otp.c.inicio_real, otp.c.fin_real),
-          decimales=2, totaliza=True, por_defecto=True,
+          decimales=2, totaliza=True, por_defecto=True, rendimiento=True,
           ayuda="Del arranque al fin marcados, corridas (como el cuadro «estimado vs. real» del "
                 "Dashboard): incluye noches y pausas. Vacío si el paso no tiene los dos."),
         C("personas_en_el_paso", "Personas en el paso", "entero", otp.c.cant_operarios),
     ),
     periodo=("fin", "inicio"),
     orden_inicial=("fin", "desc"),
+    # Paso por paso, persona y horas son lo que ya muestra cada OT. Lo confidencial es el
+    # ranking: las horas estimadas y reales sumadas por persona (la tarjeta
+    # /dashboard/rendimiento-operarios). Eso pide la sección.
+    por_persona=("persona",),
 )
 
 
@@ -780,13 +797,19 @@ PERSONAS = Fuente(
         C("pasos_terminados", "Pasos terminados", "entero",
           lambda ctx: func.coalesce(_personas_pasos(ctx).c.pasos, 0), totaliza=True,
           por_defecto=True, ayuda="Pasos terminados con el fin adentro del período."),
+        # Las horas de cada persona, una al lado de la otra, son el ranking de la sección
+        # confidencial «Rendimiento por persona» (estimado y real por persona): sin la
+        # sección no aparecen, igual que la eficiencia que sale de ellas. La ficha de
+        # RF-06 da esos totales de a UNA persona; lo cuidado es la comparación de todos.
         C("horas_reales", "Horas reales", "numero", _col_pasos("horas_reales"), decimales=2,
-          totaliza=True, por_defecto=True,
-          ayuda="De esos pasos, del arranque al fin, corridas (incluye noches y pausas)."),
+          totaliza=True, por_defecto=True, requisitos=REQUISITOS_RENDIMIENTO,
+          ayuda="De esos pasos, del arranque al fin, corridas (incluye noches y pausas). "
+                "Es de la sección confidencial «Rendimiento por persona»."),
         C("horas_estimadas", "Horas estimadas", "numero", _col_pasos("horas_estimadas"),
-          decimales=2, totaliza=True),
+          decimales=2, totaliza=True, requisitos=REQUISITOS_RENDIMIENTO,
+          ayuda="Es de la sección confidencial «Rendimiento por persona»."),
         C("eficiencia", "Eficiencia", "porcentaje", _eficiencia, decimales=0, medible=False,
-          requisitos=POLITICAS["rendimiento_operario"].leer,
+          requisitos=REQUISITOS_RENDIMIENTO,
           ayuda="Horas estimadas sobre horas reales: más de 100 % es más rápido que lo "
                 "estimado. Es de la sección confidencial «Rendimiento por persona»."),
         C("ausencias", "Ausencias", "entero",
@@ -1126,6 +1149,10 @@ def puede_fuente(fuente: Fuente, permisos: PermisosUsuario) -> bool:
 
 def puede_columna(columna: Columna, permisos: PermisosUsuario) -> bool:
     return permite(columna.requisitos, permisos, {})
+
+
+def puede_rendimiento(permisos: PermisosUsuario) -> bool:
+    return permite(REQUISITOS_RENDIMIENTO, permisos, {})
 
 
 # ─────────────────────────── los reportes de ejemplo ───────────────────────────
