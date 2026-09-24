@@ -98,6 +98,18 @@ export interface ReporteExport {
     secciones: SeccionExport[];
     /** «auto» (por defecto) pone el PDF horizontal cuando la tabla no entra parada. */
     orientacion?: "auto" | "vertical" | "horizontal";
+    /**
+     * Lo que dice el PDF debajo del título. Sin esto, cuántas filas tiene cada tabla. El
+     * armador de reportes (RF-23) dice «13 grupos de 17 filas»: su segunda tabla son los
+     * totales y contarla como «Totales: 1» no le dice nada a nadie.
+     */
+    subtitulo?: string;
+    /**
+     * Cómo se llama el renglón de `filtros` en el PDF y en la hoja «Datos del reporte»
+     * («Filtros» si no se dice). El armador de reportes (RF-23) dice «Criterios»: además de
+     * los filtros trae de qué son los datos, cómo se agrupó y por qué se ordenó.
+     */
+    rotuloFiltros?: string;
 }
 
 // ---------------------------------------------------------------------------------

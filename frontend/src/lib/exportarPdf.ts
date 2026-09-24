@@ -153,7 +153,15 @@ export function nuevoDocumento(orientacion: Orientacion): jsPDF {
  */
 export function dibujarEncabezado(
     doc: jsPDF,
-    opciones: { titulo: string; subtitulo?: string; derecha?: string; logo: Logo | null; filtros?: string[] | null },
+    opciones: {
+        titulo: string;
+        subtitulo?: string;
+        derecha?: string;
+        logo: Logo | null;
+        filtros?: string[] | null;
+        /** «Filtros» si no se dice (ver ReporteExport.rotuloFiltros). */
+        rotuloFiltros?: string;
+    },
 ): number {
     const ancho = doc.internal.pageSize.getWidth();
     let x = MARGEN;
@@ -201,7 +209,7 @@ export function dibujarEncabezado(
         doc.setFontSize(8);
         doc.setTextColor(...GRIS);
         const texto = filtros.length
-            ? `Filtros: ${filtros.join(" · ")}`
+            ? `${opciones.rotuloFiltros || "Filtros"}: ${filtros.join(" · ")}`
             : "Sin filtros: la lista completa de la pantalla.";
         const lineas = doc.splitTextToSize(textoPdf(texto), ancho - 2 * MARGEN) as string[];
         doc.text(lineas, MARGEN, y);
@@ -339,9 +347,10 @@ export async function construirPdf(reporte: ReporteExport): Promise<Blob> {
 
     let y = dibujarEncabezado(doc, {
         titulo: reporte.titulo,
-        subtitulo: resumenFilas,
+        subtitulo: reporte.subtitulo || resumenFilas,
         logo,
         filtros: reporte.filtros === null ? undefined : (reporte.filtros ?? []),
+        rotuloFiltros: reporte.rotuloFiltros,
     });
 
     const varias = reporte.secciones.length > 1;
