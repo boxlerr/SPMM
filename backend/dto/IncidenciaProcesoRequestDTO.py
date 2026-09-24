@@ -1,5 +1,11 @@
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from backend.dto.OrdenTrabajoRequestDTO import TOPE_CANTIDAD
+
+# Las piezas llevan techo y no piso a propósito: el negativo lo rechaza el servicio con su
+# propio mensaje (IncidenciaProcesoService._piezas), que es el que ve la pantalla. El techo
+# es para que un número enorme sea un aviso y no un error de la base (columnas INTEGER).
 
 
 class IncidenciaProcesoRequestDTO(BaseModel):
@@ -19,14 +25,14 @@ class IncidenciaProcesoRequestDTO(BaseModel):
     # quien carga no los completó: eso se guarda como «sin clasificar» y no como un
     # valor medio inventado.
     gravedad: Optional[str] = None
-    piezas_afectadas: Optional[int] = None
+    piezas_afectadas: Optional[int] = Field(default=None, le=TOPE_CANTIDAD)
     # Los rechazos (23/09). Todos opcionales: el modal viejo del planificador no los
     # manda y tiene que seguir andando igual.
     #   id_otp              en qué paso de la OT (la pasada, no el proceso).
     #   piezas_controladas  de cuántas controladas salieron las `piezas_afectadas`.
     #   disposicion         qué se hace con lo rechazado (DISPOSICIONES en el servicio).
     id_otp: Optional[int] = None
-    piezas_controladas: Optional[int] = None
+    piezas_controladas: Optional[int] = Field(default=None, le=TOPE_CANTIDAD)
     disposicion: Optional[str] = None
 
 
@@ -41,7 +47,7 @@ class IncidenciaProcesoUpdateDTO(BaseModel):
     tipo: Optional[str] = None
     gravedad: Optional[str] = None
     estado: Optional[str] = None
-    piezas_afectadas: Optional[int] = None
+    piezas_afectadas: Optional[int] = Field(default=None, le=TOPE_CANTIDAD)
     accion_correctiva: Optional[str] = None
     descripcion: Optional[str] = None
     minutos_perdidos: Optional[int] = None
@@ -49,7 +55,7 @@ class IncidenciaProcesoUpdateDTO(BaseModel):
     id_proceso: Optional[int] = None
     id_operario: Optional[int] = None
     id_otp: Optional[int] = None
-    piezas_controladas: Optional[int] = None
+    piezas_controladas: Optional[int] = Field(default=None, le=TOPE_CANTIDAD)
     disposicion: Optional[str] = None
 
 

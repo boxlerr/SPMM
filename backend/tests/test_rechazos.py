@@ -194,6 +194,21 @@ async def test_piezas_negativas_o_mas_rechazadas_que_controladas_no_entran(sessi
     assert await _filas(session) == [], "no se guardó nada"
 
 
+def test_un_numero_enorme_de_piezas_es_un_aviso_y_no_un_error_de_la_base():
+    """Las columnas son INTEGER: 10¹² no entra y antes era un 500 al guardar. El techo va
+    en el DTO (la API contesta 400 con el campo); el negativo lo sigue diciendo el servicio."""
+    from pydantic import ValidationError
+
+    from backend.dto.IncidenciaProcesoRequestDTO import IncidenciaProcesoRequestDTO
+
+    for campo in ("piezas_afectadas", "piezas_controladas"):
+        with pytest.raises(ValidationError):
+            IncidenciaProcesoRequestDTO(id_orden_trabajo=1, **{campo: 10**12})
+        with pytest.raises(ValidationError):
+            IncidenciaProcesoUpdateDTO(**{campo: 10**12})
+    assert IncidenciaProcesoRequestDTO(id_orden_trabajo=1, piezas_afectadas=1_000_000).piezas_afectadas
+
+
 async def test_cero_piezas_y_sin_decir_cuantas_son_cosas_distintas(session):
     await _taller(session)
     svc = IncidenciaProcesoService(session)

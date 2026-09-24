@@ -3,6 +3,11 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from backend.dto.fechas import FechaSinZona
 
+# El techo de una cantidad de piezas o unidades que se tipea a mano. Ninguna OT del taller
+# se acerca; está para que un número enorme (un dedo apoyado en el 9) sea un aviso y no un
+# error de la base: las columnas son INTEGER (hasta 2.147.483.647).
+TOPE_CANTIDAD = 1_000_000
+
 class OrdenTrabajoProcesoCreateDTO(BaseModel):
     proceso_id: int
     operario_id: Optional[str] = None
@@ -62,8 +67,9 @@ class OrdenTrabajoRequestDTO(BaseModel):
     finalizado_para_pintar: Optional[bool] = False
     finalizado_tercerizacion_intermedia: Optional[bool] = False
     finalizado_tercerizacion_final: Optional[bool] = False
-    # El «Cant.» de Finalizado parcial. None = no se cargó.
-    cantidad_finalizada_parcial: Optional[int] = Field(default=None, ge=0)
+    # El «Cant.» de Finalizado parcial. None = no se cargó. Con techo: la columna es
+    # INTEGER y un número enorme era un error de la base (un 500), no un aviso.
+    cantidad_finalizada_parcial: Optional[int] = Field(default=None, ge=0, le=TOPE_CANTIDAD)
 
     id_prioridad: int
     id_sector: int

@@ -2,7 +2,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 from backend.dto.fechas import FechaSinZona
-from backend.dto.OrdenTrabajoRequestDTO import OrdenTrabajoProcesoCreateDTO
+from backend.dto.OrdenTrabajoRequestDTO import TOPE_CANTIDAD, OrdenTrabajoProcesoCreateDTO
 
 class OrdenTrabajoUpdateDTO(BaseModel):
     id_otvieja: Optional[int] = None
@@ -48,8 +48,9 @@ class OrdenTrabajoUpdateDTO(BaseModel):
     finalizado_para_pintar: Optional[bool] = None
     finalizado_tercerizacion_intermedia: Optional[bool] = None
     finalizado_tercerizacion_final: Optional[bool] = None
-    # El «Cant.» de Finalizado parcial. Mandar null lo vacía (no se cargó).
-    cantidad_finalizada_parcial: Optional[int] = Field(default=None, ge=0)
+    # El «Cant.» de Finalizado parcial. Mandar null lo vacía (no se cargó). Con techo:
+    # ver TOPE_CANTIDAD.
+    cantidad_finalizada_parcial: Optional[int] = Field(default=None, ge=0, le=TOPE_CANTIDAD)
 
     id_prioridad: Optional[int] = None
     id_sector: Optional[int] = None

@@ -295,6 +295,29 @@ async def test_la_cantidad_del_parcial_va_y_vuelve_y_no_es_la_entregada(api):
     r = await api.put(f"/ordenes/{OT}", json={"cantidad_finalizada_parcial": -1})
     assert r.status_code == 400, r.text
     assert (await _ot(api))["cantidad_finalizada_parcial"] is None
+    # Ni una enorme: la columna es INTEGER y antes era un error de la base (un 500).
+    r = await api.put(f"/ordenes/{OT}", json={"cantidad_finalizada_parcial": 10**12})
+    assert r.status_code == 400, r.text
+    assert (await _ot(api))["cantidad_finalizada_parcial"] is None
+
+
+@pytest.mark.parametrize("cantidad", [-1, 10**12])
+async def test_el_alta_con_una_cantidad_invalida_es_un_aviso_y_no_un_500(api, cantidad):
+    """El alta llega como texto en un formulario (va con los planos) y el DTO se arma en el
+    servicio: un ValidationError suelto era un 500. Ahora es el mismo 400 que el PUT, con
+    el campo."""
+    payload = _payload_del_front_viejo(id_otvieja=15999, cantidad_finalizada_parcial=cantidad)
+    r = await api.post("/ordenes", data={"data": json.dumps(payload)})
+    assert r.status_code == 400, r.text
+    assert r.json()["errors"][0]["campo"] == "cantidad_finalizada_parcial"
+    async with api.sesiones() as s:
+        assert (await s.execute(select(OrdenTrabajo).where(OrdenTrabajo.id_otvieja == 15999))
+                ).scalar_one_or_none() is None
+
+
+async def test_el_alta_con_datos_ilegibles_es_un_aviso(api):
+    r = await api.post("/ordenes", data={"data": "{roto"})
+    assert r.status_code == 422, r.text
 
 
 async def test_el_front_de_produccion_no_pone_en_cero_lo_que_no_conoce(api):

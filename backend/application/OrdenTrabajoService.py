@@ -4,6 +4,8 @@ from backend.dto.OrdenTrabajoUpdateDTO import OrdenTrabajoUpdateDTO
 from backend.dto.OrdenTrabajoResponseDTO import OrdenTrabajoResponseDTO
 from backend.infrastructure.OrdenTrabajoRepository import OrdenTrabajoRepository
 from pydantic import ValidationError
+from fastapi.exceptions import RequestValidationError
+from backend.commons.exceptions.BusinessException import BusinessException
 from backend.commons.ResponseDTO import ResponseDTO
 from fastapi.encoders import jsonable_encoder
 from backend.commons.exceptions.InfrastructureException import InfrastructureException
@@ -41,8 +43,20 @@ class OrdenTrabajoService:
         from backend.infrastructure.AuditoriaRepository import nombre_de
         from backend.infrastructure.estado_ordenes import ahora_ar
 
-        data_dict = json.loads(data_json)
-        dto = OrdenTrabajoRequestDTO(**data_dict)
+        # El alta llega como texto en un formulario (va con los planos): el DTO se arma
+        # acá y no lo valida FastAPI. Un dato inválido (una cantidad negativa o enorme) era
+        # un ValidationError suelto, o sea un 500; ahora es el mismo 400 con el campo que
+        # da un PUT con el mismo dato.
+        try:
+            data_dict = json.loads(data_json)
+        except ValueError:
+            raise BusinessException("Los datos de la orden no se pudieron leer (no es un JSON válido).")
+        if not isinstance(data_dict, dict):
+            raise BusinessException("Los datos de la orden no tienen la forma esperada.")
+        try:
+            dto = OrdenTrabajoRequestDTO(**data_dict)
+        except ValidationError as e:
+            raise RequestValidationError(e.errors())
         logger.info("Service - Crear orden de trabajo completa.")
         db = self.repository.db
 
