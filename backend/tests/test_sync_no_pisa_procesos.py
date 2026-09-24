@@ -476,6 +476,7 @@ async def test_con_el_integral_corre_el_espejo_y_no_el_7b(monkeypatch, importar_
     assert llamada["pasos"] == I.PASOS_ESPEJO and "recortes" not in llamada["pasos"]
     assert llamada["aplicar"] is True and llamada["silencioso"] is True
     assert llamada["respaldar"] is respalda
+    assert llamada["frenar_en_tope"] is True, "una lectura rota del Integral no puede vaciar SPMM"
     assert llamada["db_url"] == "postgresql://u:p@db.ejemplo:6543/postgres"
     assert "INSERT INTO pieza (" not in sql and "pieza_precio" not in sql, "el 7b no corre"
     # Y el resto del sync sigue.
@@ -548,3 +549,47 @@ async def test_sin_postgres_el_espejo_no_corre(monkeypatch, importar_falso):
     monkeypatch.setattr(db, "PG_URL", None)
     await _correr_sync_capturando(importada=True)
     assert importar_falso.llamadas == []
+
+
+async def test_lo_que_hay_que_mirar_del_espejo_llega_al_log_como_warning(monkeypatch, importar_falso, caplog):
+    """El tope de borrado, una lectura vacía o una OT de SPMM que no es la del Integral no
+    pueden quedar en DEBUG (Cloud Run no lo muestra): van como WARNING, una por renglón.
+    Los demás avisos (ejemplos, conteos) siguen en DEBUG."""
+    import logging
+
+    from backend.scripts import importar_materia_prima_legacy as I
+
+    async def _importar(pasos, **kw):
+        res = I.Resultado(pasos, True)
+        res.ctx = I.Contexto(None, {}, True, 10)
+        paso = res.ctx.paso("lineas")
+        paso.alertar("se iban a borrar 900 líneas, más que el tope de 400 por pasada")
+        paso.advertir("línea 5 (ABC040) ya no está en el viejo pero tiene consumos")
+        return res
+
+    monkeypatch.setattr(I, "importar", _importar)
+    monkeypatch.setenv("MATERIA_PRIMA_DUENO", "integral")
+    with caplog.at_level(logging.DEBUG, logger="app"):
+        await _correr_sync_capturando(importada=True)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("[lineas] se iban a borrar 900 líneas" in m for m in warnings), warnings
+    assert not any("ABC040" in m for m in warnings)
+    assert any("ABC040" in r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
+
+
+def test_el_loop_local_del_sync_hay_que_pedirlo():
+    """Levantar el backend en una compu para probar algo no puede correr el sync (y con él
+    el ESPEJO, que escribe materia prima) contra la base del .env: el loop arranca sólo
+    con SYNC_LOOP_ENABLED=true. En Cloud Run la variable está en false y el sync lo
+    dispara Cloud Scheduler."""
+    import ast
+    from pathlib import Path
+
+    fuente = (Path(__file__).resolve().parents[1] / "presentation" / "main.py").read_text(encoding="utf-8")
+    arbol = ast.parse(fuente)
+    condiciones = [ast.unparse(n.test) for n in ast.walk(arbol)
+                   if isinstance(n, ast.If) and "SYNC_LOOP_ENABLED" in ast.unparse(n.test)]
+    assert len(condiciones) == 1, condiciones
+    condicion = condiciones[0]
+    assert "os.getenv('SYNC_LOOP_ENABLED', 'false')" in condicion
+    assert "== 'true'" in condicion

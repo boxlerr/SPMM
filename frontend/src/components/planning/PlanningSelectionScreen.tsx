@@ -859,10 +859,12 @@ export function PlanningSelectionScreen({
                                 const restantes = selectedIds.filter(
                                     id => !sinStockReal.some(o => o.id === id)
                                 );
+                                // «Falta pedir»: alguna línea no está ni pedida, ni reservada, ni
+                                // disponible (las demás pueden estar listas). No es «no tiene material».
                                 toast.warning(
                                     sinStockReal.length === 1
-                                        ? `La orden ${orderIds} no tiene material y no está pedido.`
-                                        : `${sinStockReal.length} órdenes no tienen material y no está pedido: ${orderIds}.`,
+                                        ? `La orden ${orderIds} tiene material sin pedir.`
+                                        : `${sinStockReal.length} órdenes tienen material sin pedir: ${orderIds}.`,
                                     {
                                         duration: 8000,
                                         description: restantes.length > 0

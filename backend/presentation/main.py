@@ -550,12 +550,18 @@ async def startup_event():
         print(f"  - {route.path} ({getattr(route, 'methods', 'WS')})")
 
     # 🔹 Sincronización de BD en segundo plano.
-    #    En hosts con proceso persistente (Render, Fly, VM) corre como loop.
-    #    En serverless (Cloud Run) se apaga con SYNC_LOOP_ENABLED=false y el sync
-    #    lo dispara Cloud Scheduler contra POST /internal/sync.
-    if (os.getenv("SYNC_LOOP_ENABLED", "true").lower() != "false"):
+    #    En producción (Cloud Run) NO corre acá: SYNC_LOOP_ENABLED=false y el sync lo
+    #    dispara Cloud Scheduler contra POST /internal/sync.
+    #    El loop hay que PEDIRLO (SYNC_LOOP_ENABLED=true). Hasta el 24/09/2026 venía
+    #    prendido si la variable faltaba, y ningún .env local la tiene: levantar el
+    #    backend en una compu para probar algo corría el sync contra Supabase cada 5
+    #    minutos, con el código de esa compu. Durante la prueba piloto eso es peor que
+    #    antes: el sync corre el ESPEJO de la materia prima (scripts/sync_db.py), que
+    #    ESCRIBE líneas, marcas, stock y cañera; con un código viejo o a medio hacer,
+    #    pisaría lo que deja el de Cloud Run.
+    if (os.getenv("SYNC_LOOP_ENABLED", "false").strip().lower() == "true"):
         logger.info("Iniciando tarea de sincronización de BD en segundo plano...")
         asyncio.create_task(sync_main())
     else:
-        logger.info("Loop de sync DESACTIVADO (SYNC_LOOP_ENABLED=false) — se espera un cron externo a POST /internal/sync.")
+        logger.info("Loop de sync DESACTIVADO (hace falta SYNC_LOOP_ENABLED=true) — se espera un cron externo a POST /internal/sync.")
 

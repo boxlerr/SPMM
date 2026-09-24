@@ -202,6 +202,10 @@ class _ConexionSQLite:
         return filas
 
 
+# El número del cliente ACME en el viejo (cliente.id_viejo): la OT de SPMM es la del viejo
+# si coinciden número, artículo, cliente y fecha (I.ots_del_viejo).
+CLIENTE_VIEJO = 4
+
 PIEZA_VIEJO = {"unitario": 0, "unidad": "UN", "fecha": "", "insumo": 2, "material": " ",
                "formato": " ", "t1": 0, "t2": 0, "t3": 0, "t4": None, "t5": None, "medida": 0,
                "estante": "A", "letra": "A", "nro": "1", "proveedor": " ", "obs": "", "inactivo": 0}
@@ -283,9 +287,12 @@ def _viejo():
             _linea_viejo(99999, "ABC040", 1),                # OT que no está en SPMM
         ],
         "otrabajo": [
-            {"idot": 15692, "idarticulo": "A-100", "NOLLEVAMP": 0},
-            {"idot": 15917, "idarticulo": "C-VIEJO", "NOLLEVAMP": 1},
-            {"idot": 14534, "idarticulo": "a-100 ", "NOLLEVAMP": 1},
+            {"idot": 15692, "idarticulo": "A-100", "idcliente": CLIENTE_VIEJO,
+             "fecha": datetime(2026, 9, 1), "NOLLEVAMP": 0},
+            {"idot": 15917, "idarticulo": "C-VIEJO", "idcliente": CLIENTE_VIEJO,
+             "fecha": datetime(2026, 9, 1), "NOLLEVAMP": 1},
+            {"idot": 14534, "idarticulo": "a-100 ", "idcliente": CLIENTE_VIEJO,
+             "fecha": datetime(2026, 9, 1, 0, 0), "NOLLEVAMP": 1},
         ],
         "cortes": [
             {"idot": 15692, "idpieza": "TOR013", "cant": 3.0, "largo": "1093"},
@@ -314,7 +321,7 @@ async def _spmm(session):
         Prioridad(id=1, descripcion="Normal"), Sector(id=1, nombre="Taller"),
         Articulo(id=1, cod_articulo="A-100", descripcion="Bandeja", abreviatura="B"),
         Articulo(id=2, cod_articulo="B-SPMM", descripcion="Alta en SPMM", abreviatura="S"),
-        Cliente(id=1, nombre="ACME"),
+        Cliente(id=1, id_viejo=CLIENTE_VIEJO, nombre="ACME"),
         Proveedor(id=5, razon_social="ELEGIDO A MANO"),
     ])
     await session.flush()  # el proveedor antes que la pieza que lo apunta (sin relationship, el ORM no ordena)
@@ -351,9 +358,19 @@ async def _spmm(session):
     await session.commit()
 
 
-async def _correr(session, viejo, estado=None, ots=None):
+def _releer_de(viejo, relecturas=None):
+    """La segunda lectura del viejo antes de borrar: por defecto, lo mismo que la primera
+    (`viejo["lineas"]`); `relecturas` anota qué OT se releyeron."""
+    async def releer(numeros):
+        if relecturas is not None:
+            relecturas.append(sorted(numeros))
+        return [l for l in viejo["lineas"] if l["Idot"] in set(numeros)]
+    return releer
+
+
+async def _correr(session, viejo, estado=None, ots=None, releer=None, **kw):
     ctx = I.Contexto(_ConexionSQLite(session), I.filtrar_ots(viejo, ots), aplicar=False,
-                     ejemplos=10, ots=ots)
+                     ejemplos=10, ots=ots, releer=releer or _releer_de(viejo), **kw)
     ctx.hoy = HOY
     ctx.estado = estado or await I.Estado().cargar(ctx.conn)
     for nombre in I.PASOS:
@@ -422,7 +439,7 @@ async def test_corrida_en_seco_de_punta_a_punta(session):
     # Líneas: las marcas REALES, en su lugar; la 2ª tanda es otra línea; lo de SPMM y la
     # OT de otro artículo no se tocan; la que tiene consumos se apaga en vez de borrarse.
     assert c["lineas"]["OT de SPMM con líneas en el viejo"] == 2
-    assert c["lineas"]["OT con otro artículo en el viejo (no se tocan)"] == 1
+    assert c["lineas"]["OT de SPMM que no son la del Integral (no se tocan)"] == 1
     assert c["lineas"]["líneas que cambian (UPDATE, conservan id)"] == 2
     assert c["lineas"]["líneas nuevas (INSERT)"] == 3
     assert c["lineas"]["líneas que ya no están en el viejo (DELETE, con copia)"] == 1
@@ -453,7 +470,7 @@ async def test_corrida_en_seco_de_punta_a_punta(session):
     assert [(x["largo_mm"], x["texto_original"]) for x in est.cortes[101]] == [(None, "CONFIRMAR")]
     assert c["cortes"]["cortes huérfanos (su OT no tiene esa línea)"] == 1
     assert c["cortes"]["cortes descartados: cantidad 0"] == 1
-    assert c["cortes"]["cortes de OT con otro artículo en el viejo (no se tocan)"] == 1
+    assert c["cortes"]["cortes de OT de SPMM que no son la del Integral (no se tocan)"] == 1
 
     # Cañera: número de columna + fila; lo que no es una OT de SPMM, como texto.
     celdas = {(o["columna"], o["fila"]): (o["id_orden_trabajo"], o["ot_texto"]) for o in est.canera}
@@ -631,7 +648,8 @@ async def test_el_renglon_del_espejo(session):
     assert cambios["lineas"] >= 5 and cambios["canera"] == 4 and "proveedores" in cambios
     assert res.renglon().startswith("catalogos ") and res.renglon().endswith("avisos; 3.2 s)")
 
-    ctx2 = I.Contexto(_ConexionSQLite(session), viejo, aplicar=False, ejemplos=10)
+    ctx2 = I.Contexto(_ConexionSQLite(session), viejo, aplicar=False, ejemplos=10,
+                      releer=_releer_de(viejo))
     ctx2.hoy, ctx2.estado = HOY, ctx.estado
     for nombre in I.PASOS:
         await I.FUNCIONES[nombre](ctx2)
@@ -676,3 +694,227 @@ def test_los_pasos_del_espejo():
     """Todos menos recortes (sólo agrega: repetido cada pocos minutos engorda, no refleja)."""
     assert I.PASOS_ESPEJO == tuple(p for p in I.PASOS if p != "recortes")
     assert set(I.CAMBIOS) == set(I.PASOS)
+
+
+# ───────────── 5. lo que enseñó el arreglo del sync para la prueba piloto ─────────────
+# (rama fix/sync-mp-marcas-reales, 24/09/2026: no se sube, esta sección lo reemplaza)
+
+def _ctx_identidad(ots_spmm, cabecera, repetidos=()):
+    est = SimpleNamespace(ots={o["id_otvieja"]: o for o in ots_spmm}, numeros_repetidos=set(repetidos))
+    return SimpleNamespace(estado=est, viejo={"otrabajo": cabecera})
+
+
+def _ot(numero, articulo="A-100", cliente=CLIENTE_VIEJO, fecha=datetime(2026, 9, 1, 0, 0)):
+    return {"id": numero - 15000, "id_otvieja": numero, "cod_articulo": articulo,
+            "cliente_viejo": cliente, "fecha_orden": fecha}
+
+
+def _cab(numero, articulo="A-100", cliente=CLIENTE_VIEJO, fecha=datetime(2026, 9, 1)):
+    return {"idot": numero, "idarticulo": articulo, "idcliente": cliente, "fecha": fecha, "NOLLEVAMP": 0}
+
+
+def test_una_ot_es_la_del_viejo_si_coinciden_articulo_cliente_y_fecha():
+    """SPMM numera sus OT nuevas con max+1 y el Integral por su lado: el 24/09 la próxima
+    OT de SPMM iba a salir 15919, que el Integral ya había usado. Con el número no
+    alcanza; con el artículo tampoco (el mismo artículo se fabrica muchas veces)."""
+    ots = [_ot(15692), _ot(15919, cliente=9), _ot(15920, fecha=datetime(2026, 9, 24, 10, 5)),
+           _ot(15921, articulo="OTRO"), _ot(15922), _ot(15923, articulo=" a-100 "), _ot(15924)]
+    cabecera = [_cab(15692), _cab(15919), _cab(15920), _cab(15921), _cab(15922),
+                _cab(15923, fecha="2026-09-01 00:00:00")]
+    iguales, distintas = I.ots_del_viejo(_ctx_identidad(ots, cabecera, repetidos={15922}))
+    assert iguales == {15692, 15923}, "el artículo se compara normalizado; la fecha, por el día"
+    assert set(distintas) == {15919, 15920, 15921, 15922}
+    assert "cliente 9 en SPMM y 4 en el Integral" in distintas[15919]
+    assert "fecha 24/09/2026 en SPMM y 01/09/2026 en el Integral" in distintas[15920]
+    assert "artículo OTRO en SPMM y A-100 en el Integral" in distintas[15921]
+    assert "más de una OT" in distintas[15922]
+    # 15924 el Integral no la tiene: no hay contra qué comparar, no se toca.
+    assert 15924 not in iguales and 15924 not in distintas
+
+
+@pytest.mark.asyncio
+async def test_una_ot_de_spmm_con_el_numero_de_otra_del_viejo_no_se_toca(session):
+    """14534 en SPMM es de otro cliente que la 14534 del viejo: sus líneas, su «no lleva» y
+    su casillero no se tocan, y el casillero del viejo queda como texto. Se avisa."""
+    await _spmm(session)
+    viejo = _viejo()
+    for o in viejo["otrabajo"]:
+        if o["idot"] == 14534:
+            o["idcliente"] = 99
+    ctx, pasos = await _correr(session, viejo)
+    c = pasos["lineas"].conteos
+    assert c["OT de SPMM que no son la del Integral (no se tocan)"] == 2   # 15917 y 14534
+    assert not [l for l in ctx.estado.lineas if l["id_orden_trabajo"] == 12], "no se trajo su línea"
+    assert ctx.estado.ots[14534]["no_lleva_materia_prima"] == 0
+    assert any("OT 14534" in a and "cliente 4 en SPMM y 99 en el Integral" in a
+               for a in pasos["lineas"].alertas)
+    celdas = {(o["columna"], o["fila"]): (o["id_orden_trabajo"], o["ot_texto"]) for o in ctx.estado.canera}
+    assert celdas[("O", 5)] == (None, "14534")
+    assert pasos["canera"].conteos["OT de SPMM que no son la del Integral (quedan como texto)"] == 1
+
+
+@pytest.mark.asyncio
+async def test_el_movimiento_de_stock_se_cuelga_solo_de_la_ot_que_es_la_del_viejo(session):
+    await _spmm(session)
+    viejo = _viejo()
+    viejo["movstock"] = [
+        {"IdPIEZA": "ABC040", "FECHA": datetime(2026, 9, 2), "COMENTARIO": "RETIRO", "DEBE": -1.0, "ot": 15692},
+        {"IdPIEZA": "ABC040", "FECHA": datetime(2026, 9, 3), "COMENTARIO": "", "DEBE": -2.0, "ot": 15917},
+    ]
+    ctx, pasos = await _correr(session, viejo)
+    assert pasos["stock"].conteos["movimientos nuevos (origen legacy)"] == 2
+    movs = {m["fecha"].day: m for m in ctx.estado.movimientos_legacy}
+    assert (movs[2]["id_orden_trabajo"], movs[2]["comentario"]) == (10, "RETIRO")
+    # 15917 en SPMM es otra OT (otro artículo): el número queda en el comentario.
+    assert (movs[3]["id_orden_trabajo"], movs[3]["comentario"]) == (None, "OT 15917 del sistema viejo")
+
+
+@pytest.mark.asyncio
+async def test_lo_que_esta_en_la_segunda_lectura_no_se_borra(session):
+    """El Integral graba la solapa de materiales borrando y volviendo a insertar, y no lee
+    con snapshot: la primera lectura puede caer en medio. Se borra sólo lo que falta en
+    las DOS lecturas, y se relee sólo lo de las OT con algo para borrar."""
+    await _spmm(session)
+    viejo = _viejo()
+    ctx, _ = await _correr(session, viejo)                        # la importación de todo
+    antes = {l["id"] for l in ctx.estado.lineas if l["id_orden_trabajo"] == 10}
+    a_medio_grabar = dict(viejo, lineas=[l for l in viejo["lineas"] if l["Idot"] != 15692])
+    relecturas = []
+    _, pasos = await _correr(session, a_medio_grabar, estado=ctx.estado,
+                             releer=_releer_de(viejo, relecturas))
+    c = pasos["lineas"].conteos
+    assert relecturas == [[15692]]
+    assert c["líneas que ya no están en el viejo (DELETE, con copia)"] == 0
+    assert c["líneas que no se borran: están en la segunda lectura del viejo"] >= 3
+    assert antes <= {l["id"] for l in ctx.estado.lineas}
+
+    # Si en la segunda lectura TAMPOCO están, se van (menos lo cargado en SPMM y lo que
+    # tiene consumos, que se apaga).
+    _, pasos = await _correr(session, a_medio_grabar, estado=ctx.estado)
+    c = pasos["lineas"].conteos
+    assert c["líneas que ya no están en el viejo (DELETE, con copia)"] >= 3
+    quedan = {l["id"]: l for l in ctx.estado.lineas if l["id_orden_trabajo"] == 10}
+    assert set(quedan) == {104, 105} and quedan[104]["usado"] == 0
+
+
+@pytest.mark.asyncio
+async def test_con_la_lectura_de_lineas_vacia_no_se_borra_nada(session):
+    """Una lectura vacía de TODAS las líneas es una lectura que falló: sin esto, cada OT
+    de la cabecera quedaba «sin ninguna línea» y se borraba todo."""
+    await _spmm(session)
+    viejo = _viejo()
+    ctx, _ = await _correr(session, viejo)
+    n_antes = len(ctx.estado.lineas)
+    vacio = dict(viejo, lineas=[])
+    _, pasos = await _correr(session, vacio, estado=ctx.estado,
+                             releer=lambda numeros: pytest.fail("no hay nada que releer"))
+    c = pasos["lineas"].conteos
+    assert c["líneas que ya no están en el viejo (DELETE, con copia)"] == 0
+    assert c["  ídem pero con consumos o stock: usado=0 en vez de borrar"] == 0
+    assert len(ctx.estado.lineas) == n_antes
+    assert any("ninguna línea" in a for a in pasos["lineas"].alertas)
+
+
+@pytest.mark.asyncio
+async def test_por_encima_del_tope_el_espejo_no_borra_ninguna_y_a_mano_sigue(session):
+    await _spmm(session)
+    viejo = _viejo()
+    ctx, _ = await _correr(session, viejo)
+    sin_15692 = dict(viejo, lineas=[l for l in viejo["lineas"] if l["Idot"] != 15692])
+    ids_antes = {l["id"] for l in ctx.estado.lineas}
+
+    # 15692 se quedó sin líneas en el viejo: se van sus 4 líneas legacy (la 104, con
+    # consumos, ya quedó apagada en la primera corrida; la 105 es de SPMM).
+    # El espejo (frena) con tope 3 → no se toca ninguna.
+    _, pasos = await _correr(session, sin_15692, estado=ctx.estado, releer=_releer_de(sin_15692),
+                             tope_borrado=3, frenar_en_tope=True)
+    c = pasos["lineas"].conteos
+    assert c["líneas que no se borran por el tope de la pasada"] == 4
+    assert c["líneas que ya no están en el viejo (DELETE, con copia)"] == 0
+    assert {l["id"] for l in ctx.estado.lineas} == ids_antes
+    assert any("tope de 3" in a for a in pasos["lineas"].alertas)
+
+    # En el tope justo, sí.
+    _, pasos = await _correr(session, sin_15692, estado=ctx.estado, releer=_releer_de(sin_15692),
+                             tope_borrado=4, frenar_en_tope=True)
+    assert pasos["lineas"].conteos["líneas que ya no están en el viejo (DELETE, con copia)"] == 4
+    assert not [a for a in pasos["lineas"].alertas if "tope" in a]
+
+
+@pytest.mark.asyncio
+async def test_a_mano_por_encima_del_tope_avisa_y_borra(session):
+    await _spmm(session)
+    viejo = _viejo()
+    ctx, _ = await _correr(session, viejo)
+    sin_15692 = dict(viejo, lineas=[l for l in viejo["lineas"] if l["Idot"] != 15692])
+    _, pasos = await _correr(session, sin_15692, estado=ctx.estado, releer=_releer_de(sin_15692),
+                             tope_borrado=1)
+    assert pasos["lineas"].conteos["líneas que ya no están en el viejo (DELETE, con copia)"] == 4
+    assert any("corrida a mano: se sigue" in a for a in pasos["lineas"].alertas)
+
+
+@pytest.mark.asyncio
+async def test_lecturas_vacias_del_catalogo_los_cortes_y_la_canera_no_borran_nada(session):
+    await _spmm(session)
+    viejo = _viejo()
+    ctx, _ = await _correr(session, viejo)
+    est = ctx.estado
+    inactivas = sum(1 for p in est.piezas if p.get("inactivo") == 1)
+    con_cortes = {i for i, c in est.cortes.items() if c}
+    vigentes = len(est.canera)
+    vacio = dict(viejo, pieza=[], cortes=[], canera=[])
+    _, pasos = await _correr(session, vacio, estado=est)
+    assert sum(1 for p in est.piezas if p.get("inactivo") == 1) == inactivas
+    assert {i for i, c in est.cortes.items() if c} == con_cortes and con_cortes
+    assert len(est.canera) == vigentes and vigentes
+    for nombre in ("insumos", "cortes", "canera"):
+        assert pasos[nombre].alertas, nombre
+
+
+def test_el_borrado_vuelve_a_mirar_los_consumos_en_el_mismo_delete():
+    """Estático (el DELETE es SQL de Postgres; se probó en el ensayo general): una línea
+    con consumos o movimientos no se borra nunca, aunque se los hayan cargado después de
+    leer SPMM (la API de consumos no la frena el dueño de la materia prima)."""
+    import inspect
+
+    fuente = " ".join(inspect.getsource(I.paso_lineas).split())
+    borrado = fuente[fuente.index('"DELETE FROM orden_trabajo_pieza'):]
+    borrado = borrado[:borrado.index("[b[")]
+    assert "NOT EXISTS (SELECT 1 FROM consumo_material" in borrado
+    assert "NOT EXISTS (SELECT 1 FROM pieza_movimiento" in borrado
+    assert I._filas_afectadas("DELETE 3") == 3 and I._filas_afectadas(None) is None
+
+
+def test_la_relectura_pide_las_mismas_columnas_solo_de_esas_ot():
+    assert I.Q_LINEAS_DE_ESTAS_OT.startswith(I.Q_LINEAS.rstrip())
+    assert I.Q_LINEAS_DE_ESTAS_OT.format(ids="1,2").rstrip().endswith("WHERE Idot IN (1,2)")
+    assert I.TOPE_BORRADO_LINEAS == 400
+
+
+def test_la_importacion_lee_los_consumos_pero_no_los_escribe():
+    """consumo_material es de SPMM (el taller carga lo consumido acá, también durante la
+    prueba piloto). La importación —y con ella el espejo del sync— la LEE para no borrar
+    una línea con consumos; escribirla, nunca. Se exige que, en el código (sin docstrings
+    ni comentarios), el nombre de la tabla aparezca sólo detrás de un FROM de lectura: el
+    SQL se arma con f-strings, así que buscar «INSERT INTO consumo_material» no alcanza.
+    (Mismo control que el arreglo del sync para la prueba piloto.)"""
+    import ast
+    import inspect
+    import re
+
+    arbol = ast.parse(inspect.getsource(I))
+    docstrings = set()
+    for nodo in ast.walk(arbol):
+        if isinstance(nodo, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            primero = nodo.body[0] if nodo.body else None
+            if (isinstance(primero, ast.Expr) and isinstance(primero.value, ast.Constant)
+                    and isinstance(primero.value.value, str)):
+                docstrings.add(id(primero.value))
+    textos = [n.value.lower() for n in ast.walk(arbol)
+              if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings
+              and "consumo_material" in n.value.lower()]
+    assert textos, "la importación lee consumo_material para no dejar consumos huérfanos"
+    for texto in textos:
+        for m in re.finditer(r"consumo_material", texto):
+            antes = texto[:m.start()].split()
+            assert antes[-1:] == ["from"] and antes[-2:-1] != ["delete"], texto.strip()

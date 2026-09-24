@@ -39,13 +39,22 @@ PASOS (en este orden; --pasos elige cuáles)
                DELETE (con copia) de las que ya no están salvo que tengan consumos. Con
                las marcas REALES. Una OT que en el viejo se quedó sin ninguna línea
                pierde también acá las que tenía. Y «no lleva materia prima» como está
-               en el viejo (se pone y se saca). Una OT de SPMM con el mismo número que
-               una del viejo pero OTRO artículo (una OT dada de alta en SPMM que pisó un
-               número del viejo) no se toca: se avisa.
+               en el viejo (se pone y se saca). Sólo en las OT de SPMM que SON la del
+               viejo con ese número: mismo artículo, cliente y fecha (ots_del_viejo). Una
+               que no coincide (una OT dada de alta en SPMM que pisó un número del viejo)
+               no se toca, ni sus cortes ni su cañera: se avisa.
+               Antes de borrar vuelve a leer esas OT del viejo y borra sólo lo que falta
+               en las dos lecturas (el viejo graba borrando y volviendo a insertar); con
+               una lectura vacía no borra nada; y por encima de TOPE_BORRADO_LINEAS el
+               espejo del sync no borra ninguna (a mano, avisa y sigue).
   cortes       otcortesmp → cortes de la primera línea de ese (OT, código).
   canera       caniera → canera_ocupacion (origen 'legacy').
 
 Cada paso imprime cuánto tardó (el día del corte el viejo está congelado mientras corre).
+
+Una lectura VACÍA del viejo (el catálogo, todas las líneas, todos los cortes, la cañera
+entera) es una lectura que falló, no un viejo vacío: ese paso no borra, no apaga, no
+inactiva ni libera nada, y lo avisa.
 
 CÓMO SE CORRE (desde la raíz del repo)
 
@@ -162,6 +171,18 @@ BACKUP_LINEA = "backup_20260923_orden_trabajo_pieza"
 # por el pooler, sin un viaje por fila.
 TANDA = 2000
 
+# Tope de líneas de OT que una corrida puede borrar (o apagar con usado=0, las que tienen
+# consumos). Un número así no es una limpieza, es una lectura rota: el Integral devolvió
+# la mitad, o una OT se leyó en medio de un «Grabar» (ver paso_lineas). En el ESPEJO del
+# sync (frenar_en_tope) una corrida por encima del tope no borra ninguna y lo avisa en el
+# log; a mano (el script) avisa y sigue: la primera importación sí puede borrar más, y ahí
+# hay alguien mirando. Mismo número que el arreglo del sync para la prueba piloto (rama
+# fix/sync-mp-marcas-reales, 24/09/2026), calibrado contra producción: su primera pasada
+# borraba 261 líneas de las OT abiertas, y las pasadas siguientes, las pocas que Maxi
+# cambia entre una y otra; las OT abiertas tienen ≈840 líneas, así que un borrado de todo
+# o de la mitad queda afuera.
+TOPE_BORRADO_LINEAS = 400
+
 # ─────────────────────────── lecturas del viejo (T-SQL, sólo SELECT) ───────────────────────────
 
 Q_MATERIAL = "SELECT idMAterial, Descripcion, calidad FROM dbo.Material"
@@ -181,10 +202,14 @@ SELECT Idot, idpieza, descripcion, cantidad, un, proveedor, observaciones, pendi
        reserva, creserva, disponible, pedido, fechaprov, usado, fechaProvE
 FROM dbo.otrabajoMprimas
 """
-# La cabecera de las OT del viejo: la marca «no lleva materia prima» y el artículo, para
-# no mezclar las líneas de una OT del viejo con otra de SPMM que tenga el mismo número
-# (una OT dada de alta en SPMM toma max+1, que el viejo puede estar usando).
-Q_OTRABAJO = "SELECT idot, LTRIM(RTRIM(idarticulo)) AS idarticulo, NOLLEVAMP FROM dbo.otrabajo"
+# La relectura de las líneas antes de borrar (ver paso_lineas): las mismas columnas, sólo
+# de unas OT. Los números los pone el script (enteros de SPMM), no un usuario.
+Q_LINEAS_DE_ESTAS_OT = Q_LINEAS.rstrip() + "\nWHERE Idot IN ({ids})\n"
+# La cabecera de las OT del viejo: la marca «no lleva materia prima», y artículo, cliente
+# y fecha para saber si una OT de SPMM ES la del viejo con ese número y no otra (una OT
+# dada de alta en SPMM toma max+1, que el viejo puede estar usando): ots_del_viejo.
+Q_OTRABAJO = ("SELECT idot, LTRIM(RTRIM(idarticulo)) AS idarticulo, idcliente, fecha, NOLLEVAMP "
+              "FROM dbo.otrabajo")
 Q_CORTES = "SELECT idot, idpieza, cant, largo FROM dbo.otcortesmp"
 Q_CANERA = "SELECT ubicacion, ot FROM dbo.caniera"
 
@@ -203,7 +228,9 @@ LECTURAS = {
     "movstock": (Q_MOVSTOCK, ("stock",)),
     "recortes": (Q_RECORTES, ("recortes",)),
     "lineas": (Q_LINEAS, ("lineas", "cortes")),
-    "otrabajo": (Q_OTRABAJO, ("lineas", "cortes")),
+    # stock y canera también: el número de OT que nombran se cuelga de la OT de SPMM sólo
+    # si ES la del viejo (ots_del_viejo).
+    "otrabajo": (Q_OTRABAJO, ("stock", "lineas", "cortes", "canera")),
     "cortes": (Q_CORTES, ("cortes",)),
     "canera": (Q_CANERA, ("canera",)),
 }
@@ -229,13 +256,17 @@ _COLUMNA_OT = {"lineas": "Idot", "cortes": "idot", "otrabajo": "idot", "canera":
 def filtrar_ots(viejo: dict[str, list[dict]], ots) -> dict[str, list[dict]]:
     """Lo leído del viejo con las lecturas de OT (líneas, cortes, cabecera y cañera)
     limitadas a esas OT (--ots). El catálogo, los precios, el stock y los recortes no son
-    de ninguna OT: quedan enteros."""
+    de ninguna OT: quedan enteros. La cabecera entera queda además en «otrabajo_todas»:
+    el stock cuelga cada movimiento de su OT, y eso no depende de --ots."""
     if not ots:
         return viejo
     ots = set(ots)
-    return {nombre: ([f for f in filas if f.get(_COLUMNA_OT[nombre]) in ots]
-                     if nombre in _COLUMNA_OT else filas)
-            for nombre, filas in viejo.items()}
+    salida = {nombre: ([f for f in filas if f.get(_COLUMNA_OT[nombre]) in ots]
+                       if nombre in _COLUMNA_OT else filas)
+              for nombre, filas in viejo.items()}
+    if "otrabajo" in viejo:
+        salida["otrabajo_todas"] = viejo["otrabajo"]
+    return salida
 
 
 # ─────────────────────────── columnas y tipos ───────────────────────────
@@ -336,6 +367,7 @@ class Paso:
         self.conteos: Counter = Counter()
         self.ejemplos: list[str] = []
         self.advertencias: list[str] = []
+        self.alertas: list[str] = []
         self._max = ejemplos
         # Cuánto tardó (lo pone main): el día del corte el viejo está congelado mientras
         # corre esto, y hay que saber de antemano cuánto va a estar parado el taller.
@@ -350,6 +382,14 @@ class Paso:
 
     def advertir(self, texto: str):
         self.advertencias.append(texto)
+
+    def alertar(self, texto: str):
+        """Una advertencia que tiene que llegar al log del sync como WARNING (el espejo
+        manda las demás a DEBUG): algo que no se hizo a propósito y alguien tiene que
+        mirar (el tope de borrado, una lectura vacía, una OT de SPMM que no es la del
+        Integral)."""
+        self.advertencias.append(texto)
+        self.alertas.append(texto)
 
     def imprimir(self):
         tiempo = f" ({self.segundos:.1f} s)" if self.segundos is not None else ""
@@ -381,10 +421,18 @@ class Estado:
             "SELECT id, id_legacy, " + ", ".join(COLS_PROVEEDOR) + " FROM proveedor")]
         self.piezas = [dict(r) for r in await f(
             "SELECT id, cod_pieza, stockactual, " + ", ".join(COLS_PIEZA) + " FROM pieza ORDER BY id")]
-        self.ots = {r["id_otvieja"]: dict(r) for r in await f(
-            "SELECT o.id, o.id_otvieja, o.no_lleva_materia_prima, a.cod_articulo "
+        # Por número visible (id_otvieja). Artículo, cliente (su número en el viejo) y
+        # fecha son para ots_del_viejo. Un número que SPMM tiene en más de una OT queda en
+        # numeros_repetidos: no se sabe cuál es la del viejo y no se toca ninguna.
+        ots = [dict(r) for r in await f(
+            "SELECT o.id, o.id_otvieja, o.no_lleva_materia_prima, a.cod_articulo, "
+            "       c.id_viejo AS cliente_viejo, o.fecha_orden "
             "FROM orden_trabajo o LEFT JOIN articulo a ON a.id = o.id_articulo "
-            "WHERE o.id_otvieja IS NOT NULL")}
+            "LEFT JOIN cliente c ON c.id = o.id_cliente "
+            "WHERE o.id_otvieja IS NOT NULL ORDER BY o.id")]
+        self.ots = {r["id_otvieja"]: r for r in ots}
+        veces = Counter(r["id_otvieja"] for r in ots)
+        self.numeros_repetidos = {n for n, v in veces.items() if v > 1}
         self.lineas = [dict(r) for r in await f(
             "SELECT id, id_orden_trabajo, id_pieza, id_movimiento_retiro, " + ", ".join(COLS_LINEA)
             + " FROM orden_trabajo_pieza")]
@@ -437,8 +485,22 @@ class Estado:
         )
 
 
+async def releer_lineas_del_viejo(numeros) -> list[dict]:
+    """La segunda lectura de paso_lineas: las líneas de esas OT, otra vez, del viejo (sólo
+    SELECT, con _leer de sync_db.py)."""
+    from backend.scripts.sync_db import _leer
+
+    numeros = sorted({int(n) for n in numeros})
+    filas = []
+    for i in range(0, len(numeros), 1000):
+        filas += await _leer(Q_LINEAS_DE_ESTAS_OT.format(
+            ids=",".join(str(n) for n in numeros[i:i + 1000])))
+    return filas
+
+
 class Contexto:
-    def __init__(self, conn, viejo, aplicar, ejemplos, respaldar=True, ots=None):
+    def __init__(self, conn, viejo, aplicar, ejemplos, respaldar=True, ots=None, releer=None,
+                 tope_borrado=TOPE_BORRADO_LINEAS, frenar_en_tope=False):
         self.conn = conn
         self.viejo = viejo
         self.aplicar = aplicar
@@ -448,6 +510,13 @@ class Contexto:
         self.respaldar = respaldar
         # Las OT a las que se limitan lineas, cortes y canera (--ots), o None = todas.
         self.ots: set[int] | None = set(ots) if ots else None
+        # La segunda lectura del viejo antes de borrar líneas: async (números de OT) →
+        # filas como las de Q_LINEAS. Los tests la reemplazan.
+        self.releer_lineas = releer or releer_lineas_del_viejo
+        # TOPE_BORRADO_LINEAS; con frenar_en_tope (el espejo del sync) una corrida por
+        # encima no borra ninguna, sin él (a mano) avisa y sigue.
+        self.tope_borrado = tope_borrado
+        self.frenar_en_tope = frenar_en_tope
         self.ahora = ahora_ar()
         self.hoy = self.ahora.date()
         self.estado: Estado | None = None
@@ -741,6 +810,11 @@ async def paso_proveedores(ctx: Contexto):
 async def paso_insumos(ctx: Contexto):
     paso = ctx.paso("insumos")
     est = ctx.estado
+    if not ctx.viejo["pieza"]:
+        # Sin esto, un catálogo que vino vacío dejaría inactivas las 17 mil piezas («sólo
+        # en SPMM»). Una lectura vacía es una lectura que falló, no un viejo sin insumos.
+        paso.alertar("el Integral no devolvió ningún insumo (dbo.pieza): no se toca el catálogo")
+        return
     catalogo = est.catalogo()
     viejo = una_fila_por_codigo(ctx.viejo["pieza"], ctx.hoy)
     spmm = est.piezas_por_codigo()
@@ -876,7 +950,10 @@ async def paso_stock(ctx: Contexto):
     paso = ctx.paso("stock")
     est = ctx.estado
     ids = est.id_por_codigo()
-    id_ot = {k: v["id"] for k, v in est.ots.items()}
+    # El movimiento se cuelga de la OT de SPMM sólo si ES la del viejo (ots_del_viejo); si
+    # no, el número queda en el comentario, como el de una OT que SPMM no tiene.
+    iguales, _ = ots_del_viejo(ctx)
+    id_ot = {k: est.ots[k]["id"] for k in iguales}
     # Los que ya se importaron (anulados incluidos: si alguien anuló uno en SPMM, re-correr
     # no lo tiene que volver a sumar). Clave + n° de aparición: dos filas iguales del viejo
     # son dos movimientos.
@@ -962,8 +1039,7 @@ async def paso_stock(ctx: Contexto):
                     WHERE p.id = q.id AND p.stockactual IS DISTINCT FROM COALESCE(s.saldo, 0)
                 """)
         else:
-            est.movimientos_legacy += [{"id_pieza": n["id_pieza"], "fecha": n["fecha"],
-                                        "cantidad": n["cantidad"]} for n in nuevos]
+            est.movimientos_legacy += [dict(n) for n in nuevos]
             est.saldos = dict(saldos)
             por_id = {p["id"]: p for p in est.piezas}
             for c in cambian:
@@ -1032,23 +1108,85 @@ def _es_de_spmm(linea) -> bool:
     return linea.get("origen") in ("spmm", "historial")
 
 
-def _ots_de_otro_articulo(ctx) -> dict[int, tuple[str, str]]:
-    """Las OT de SPMM cuyo número también existe en el viejo pero con OTRO artículo:
-    {número: (artículo en SPMM, artículo en el viejo)}.
+def _dia(v) -> date | None:
+    """La fecha sin la hora, venga como datetime, date o texto (SQLite la devuelve como
+    texto en una consulta cruda)."""
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v).strip()[:10])
+    except ValueError:
+        return None
 
-    Una OT dada de alta en SPMM toma el número siguiente al máximo (OrdenTrabajoService),
-    y el viejo puede estar usando ese número para otro trabajo. Traerle esas líneas sería
-    comprarle a Maxi el material de otra orden, así que sus líneas, cortes y marca «no
-    lleva» no se tocan y se avisa para que se revise a mano. Si falta alguno de los dos
-    artículos no se puede comparar: se trae como siempre.
+
+def _entero(v) -> int | None:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cabecera(ctx) -> list[dict]:
+    """La cabecera de las OT del viejo, ENTERA aunque se haya pedido --ots (filtrar_ots)."""
+    return ctx.viejo.get("otrabajo_todas", ctx.viejo.get("otrabajo")) or []
+
+
+def ots_del_viejo(ctx) -> tuple[set[int], dict[int, str]]:
+    """Qué OT de SPMM SON la del viejo con su mismo número: (iguales, distintas).
+
+    iguales    {número} de las OT de SPMM que coinciden con la del viejo en número,
+               artículo, cliente y fecha. Sólo a ésas se les reflejan líneas, cortes,
+               «no lleva», cañera y la OT de los movimientos de stock.
+    distintas  {número: por qué} de las que tienen el número de una OT del viejo pero
+               son OTRA OT (o SPMM tiene ese número en más de una OT). No se tocan y se
+               avisa, para revisarlas a mano.
+    Las que el viejo no tiene no van en ninguna: no hay contra qué compararlas, y no se
+    tocan.
+
+    POR QUÉ NO ALCANZA CON EL NÚMERO. SPMM numera sus OT nuevas con max(id_otvieja)+1
+    (OrdenTrabajoService) y el Integral sigue numerando por su lado (el sync de OT está
+    apagado desde el 2/9): el 24/09 SPMM iba por la 15918 y el Integral ya había creado la
+    15919 y la 15920. La próxima OT creada en SPMM iba a salir 15919 y el espejo le iba a
+    colgar el material de la 15919 del Integral (y comprárselo Maxi dos veces). Con el
+    artículo solo no alcanza: el mismo artículo se fabrica muchas veces. Mismo
+    criterio que el arreglo del sync para la prueba piloto (rama fix/sync-mp-marcas-reales,
+    _emparejar_ots): medido el 24/09/2026, las 1.327 OT de SPMM que están en el Integral
+    coinciden en las tres cosas, así que hoy no deja afuera ninguna.
+
+    El artículo se compara normalizado (sin mayúsculas ni espacios de las puntas), el
+    cliente por su número en el viejo (cliente.id_viejo), la fecha por el día (la de SPMM
+    es fecha_orden, que vino del viejo cuando el sync traía las OT). Dos vacíos son iguales.
     """
-    viejo = {f.get("idot"): norm_codigo(f.get("idarticulo")) for f in ctx.viejo.get("otrabajo", ())}
-    distintas = {}
-    for numero, ot in ctx.estado.ots.items():
-        del_viejo, de_spmm = viejo.get(numero), norm_codigo(ot.get("cod_articulo"))
-        if del_viejo and de_spmm and del_viejo != de_spmm:
-            distintas[numero] = (de_spmm, del_viejo)
-    return distintas
+    cabecera = {f.get("idot"): f for f in _cabecera(ctx)}
+    est = ctx.estado
+    iguales, distintas = set(), {}
+    for numero, ot in est.ots.items():
+        leg = cabecera.get(numero)
+        if leg is None:
+            continue
+        if numero in est.numeros_repetidos:
+            distintas[numero] = "SPMM tiene ese número en más de una OT"
+            continue
+        motivos = []
+        art_spmm, art_viejo = norm_codigo(ot.get("cod_articulo")), norm_codigo(leg.get("idarticulo"))
+        if art_spmm != art_viejo:
+            motivos.append(f"artículo {art_spmm or '(vacío)'} en SPMM y {art_viejo or '(vacío)'} en el Integral")
+        cli_spmm, cli_viejo = _entero(ot.get("cliente_viejo")), _entero(leg.get("idcliente"))
+        if cli_spmm != cli_viejo:
+            motivos.append(f"cliente {cli_spmm} en SPMM y {cli_viejo} en el Integral")
+        dia_spmm, dia_viejo = _dia(ot.get("fecha_orden")), _dia(leg.get("fecha"))
+        if dia_spmm != dia_viejo:
+            fecha = lambda d: f"{d:%d/%m/%Y}" if d else "(vacía)"
+            motivos.append(f"fecha {fecha(dia_spmm)} en SPMM y {fecha(dia_viejo)} en el Integral")
+        if motivos:
+            distintas[numero] = "; ".join(motivos)
+        else:
+            iguales.add(numero)
+    return iguales, distintas
 
 
 def _lineas_por_ot(est, codigos) -> dict[int, list[dict]]:
@@ -1074,13 +1212,22 @@ async def paso_lineas(ctx: Contexto):
     por_ot = defaultdict(list)
     for fila in ctx.viejo["lineas"]:
         por_ot[fila.get("Idot")].append(fila)
-    # Las OT que en el viejo no tienen NINGUNA línea también se miran, con la lista
-    # vacía: si allá se sacó la última, acá se tienen que ir las que quedaban (gana el
-    # Integral; sin esto el espejo mostraría para siempre una línea que Carolina borró).
-    # Sólo las de la cabecera del viejo: una OT que el viejo no tiene no se toca.
-    for fila in ctx.viejo["otrabajo"]:
-        if fila.get("idot") not in por_ot:
-            por_ot[fila.get("idot")] = []
+    # Una lectura VACÍA de todas las líneas es una lectura que falló, no un Integral sin
+    # materiales: con ella, cada OT de la cabecera quedaría «sin ninguna línea» y el
+    # espejo borraría todo. No se borra ni se apaga nada. (Con --ots sí puede venir vacía:
+    # la OT pedida se quedó sin líneas; ahí cuida la segunda lectura.)
+    lectura_vacia = not ctx.viejo["lineas"] and ctx.ots is None
+    if lectura_vacia:
+        paso.alertar("el Integral no devolvió ninguna línea de materia prima: no se borra ni se "
+                     "apaga ninguna línea en esta corrida")
+    else:
+        # Las OT que en el viejo no tienen NINGUNA línea también se miran, con la lista
+        # vacía: si allá se sacó la última, acá se tienen que ir las que quedaban (gana el
+        # Integral; sin esto el espejo mostraría para siempre una línea que Carolina borró).
+        # Sólo las de la cabecera del viejo: una OT que el viejo no tiene no se toca.
+        for fila in ctx.viejo["otrabajo"]:
+            if fila.get("idot") not in por_ot:
+                por_ot[fila.get("idot")] = []
 
     cambios, altas, borrar, apagar = [], [], [], []
     piezas_nuevas: dict[str, dict] = {}
@@ -1089,7 +1236,8 @@ async def paso_lineas(ctx: Contexto):
     ejemplos_ot = {15692, 14534, 15243}
     por_ot_spmm = _lineas_por_ot(est, codigos)
     de_spmm = Counter(l["id_orden_trabajo"] for l in est.lineas if _es_de_spmm(l))
-    otro_articulo = _ots_de_otro_articulo(ctx)
+    iguales, distintas = ots_del_viejo(ctx)
+    numero_de = {ot["id"]: numero for numero, ot in est.ots.items()}
     for id_otvieja, filas in sorted(por_ot.items(), key=lambda x: x[0] or 0):
         ot = est.ots.get(id_otvieja)
         if ot is None:
@@ -1099,12 +1247,16 @@ async def paso_lineas(ctx: Contexto):
         actuales = por_ot_spmm.get(ot["id"], [])
         if not filas and not actuales:
             continue  # nada acá y nada allá
-        if id_otvieja in otro_articulo:
-            if filas:
-                spmm_art, viejo_art = otro_articulo[id_otvieja]
-                paso.contar("OT con otro artículo en el viejo (no se tocan)")
-                paso.advertir(f"OT {id_otvieja}: en SPMM es {spmm_art} y en el viejo {viejo_art}; "
-                              f"no se traen sus {len(filas)} líneas (revisar a mano)")
+        if id_otvieja not in iguales:
+            # No es la OT del viejo con ese número (ots_del_viejo): ni se traen sus líneas
+            # ni se borran las de acá.
+            if id_otvieja in distintas:
+                paso.contar("OT de SPMM que no son la del Integral (no se tocan)")
+                paso.alertar(f"OT {id_otvieja}: la de SPMM no es la del Integral con ese número "
+                             f"({distintas[id_otvieja]}); no se tocan sus líneas, cortes, «no lleva» "
+                             f"ni cañera (revisar a mano)")
+            else:
+                paso.contar("OT sin cabecera en el Integral (no se tocan)")
             continue
         if filas:
             ots_tocadas += 1
@@ -1145,17 +1297,63 @@ async def paso_lineas(ctx: Contexto):
             if id_otvieja in ejemplos_ot:
                 paso.ejemplo(f"OT {id_otvieja} alta {codigo} {datos['cantidad']} {datos['unidad']} "
                              f"ped {datos['pedido']} disp {datos['disponible']} usado {datos['usado']}")
+        if lectura_vacia:
+            continue
         for actual in sobrantes:
+            # Lo consumido y lo retirado de stock apuntan a la línea por id: esas no se
+            # borran NUNCA, se apagan (usado=0) y se avisa.
             if (actual["id"] in est.lineas_con_consumo or actual["id"] in est.lineas_con_movimiento
                     or actual.get("id_movimiento_retiro")):
                 if actual.get("usado") != 0:
                     apagar.append(actual)
                 continue
             borrar.append(actual)
-            if id_otvieja in ejemplos_ot:
-                paso.ejemplo(f"OT {id_otvieja} se borra {actual['codigo'].strip()} "
-                             f"(ya no está en el viejo)")
 
+    # SEGUNDA LECTURA antes de borrar (o apagar): se va sólo lo que falta en LAS DOS. El
+    # Integral graba la solapa de materiales de una OT borrando y volviendo a insertar sus
+    # líneas, y su base no lee con snapshot (is_read_committed_snapshot_on = 0): una
+    # lectura que cae en medio de un «Grabar» ve la OT sin líneas o con la mitad. Sin esto
+    # esa OT perdía acá su material hasta la pasada siguiente, y volvía con otros ids (un
+    # consumo cargado sobre el id viejo quedaba colgado). Lo que en la segunda lectura sí
+    # está se deja: lo estaban grabando, y la pasada siguiente lo trae. Mismo criterio que
+    # el arreglo del sync para la prueba piloto (fix/sync-mp-marcas-reales).
+    if borrar or apagar:
+        numeros = sorted({numero_de[l["id_orden_trabajo"]] for l in borrar + apagar})
+        por_ot_2 = defaultdict(list)
+        for fila in await ctx.releer_lineas(numeros):
+            por_ot_2[fila.get("Idot")].append(fila)
+        siguen_sobrando = set()
+        for numero in numeros:
+            _, _, sobrantes_2 = emparejar_lineas(por_ot_spmm.get(est.ots[numero]["id"], []),
+                                                 por_ot_2.get(numero, []), "codigo", "idpieza")
+            siguen_sobrando |= {l["id"] for l in sobrantes_2}
+        volvieron = [l for l in borrar + apagar if l["id"] not in siguen_sobrando]
+        if volvieron:
+            paso.contar("líneas que no se borran: están en la segunda lectura del viejo", len(volvieron))
+            paso.advertir(f"{len(volvieron)} líneas faltaban en la primera lectura del viejo y "
+                          f"estaban en la segunda (lo estaban grabando): no se borran. "
+                          + _describir_lineas(volvieron, numero_de))
+            borrar = [l for l in borrar if l["id"] in siguen_sobrando]
+            apagar = [l for l in apagar if l["id"] in siguen_sobrando]
+
+    # El TOPE (TOPE_BORRADO_LINEAS): con más, es una lectura rota y no una limpieza.
+    if len(borrar) + len(apagar) > ctx.tope_borrado:
+        n = len(borrar) + len(apagar)
+        if ctx.frenar_en_tope:
+            paso.contar("líneas que no se borran por el tope de la pasada", n)
+            paso.alertar(f"se iban a borrar (o apagar) {n} líneas, más que el tope de "
+                         f"{ctx.tope_borrado} por pasada: no se borra ninguna. Revisar la lectura "
+                         f"del Integral; si está bien (la primera importación), correr a mano "
+                         f"importar_materia_prima_legacy --pasos lineas --aplicar")
+            borrar, apagar = [], []
+        else:
+            paso.alertar(f"se borran (o apagan) {n} líneas, más que el tope de {ctx.tope_borrado} "
+                         f"del espejo del sync; corrida a mano: se sigue")
+
+    for actual in borrar:
+        numero = numero_de[actual["id_orden_trabajo"]]
+        if numero in ejemplos_ot:
+            paso.ejemplo(f"OT {numero} se borra {actual['codigo'].strip()} (ya no está en el viejo)")
     paso.contar("OT de SPMM con líneas en el viejo", ots_tocadas)
     paso.contar("líneas que cambian (UPDATE, conservan id)", len(cambios))
     for col, n in por_columna.most_common():
@@ -1170,13 +1368,13 @@ async def paso_lineas(ctx: Contexto):
 
     # «No lleva materia prima» como está en el viejo: se pone y se saca (gana el Integral;
     # con SPMM como dueño la marca se pone acá y este script ya no se corre). Sólo en las
-    # OT que el viejo tiene, y con su mismo artículo.
+    # OT que SON la del viejo (ots_del_viejo).
     marcadas = {f["idot"] for f in ctx.viejo["otrabajo"] if _flag(f.get("NOLLEVAMP"))}
     sin_marcar = {f["idot"] for f in ctx.viejo["otrabajo"]} - marcadas
     no_lleva = [est.ots[i]["id"] for i in sorted(marcadas, key=lambda x: x or 0)
-                if i in est.ots and i not in otro_articulo and not est.ots[i]["no_lleva_materia_prima"]]
+                if i in iguales and not est.ots[i]["no_lleva_materia_prima"]]
     si_lleva = [est.ots[i]["id"] for i in sorted(sin_marcar, key=lambda x: x or 0)
-                if i in est.ots and i not in otro_articulo and est.ots[i]["no_lleva_materia_prima"]]
+                if i in iguales and est.ots[i]["no_lleva_materia_prima"]]
     paso.contar("OT que pasan a «no lleva materia prima»", len(no_lleva))
     paso.contar("OT que dejan de ser «no lleva materia prima»", len(si_lleva))
 
@@ -1200,9 +1398,20 @@ async def paso_lineas(ctx: Contexto):
                 await ctx.conn.execute("UPDATE orden_trabajo_pieza SET usado = 0 WHERE id = ANY($1::int[])",
                                        [a["id"] for a in apagar])
             if borrar:
-                # Los cortes se van solos (ON DELETE CASCADE).
-                await ctx.conn.execute("DELETE FROM orden_trabajo_pieza WHERE id = ANY($1::int[])",
-                                       [b["id"] for b in borrar])
+                # Los cortes se van solos (ON DELETE CASCADE). El NOT EXISTS vuelve a mirar
+                # consumos y movimientos EN el DELETE: alguien pudo cargar un consumo sobre la
+                # línea después de que se leyó SPMM (la API de consumos no la frena el
+                # dueño). Una línea con consumos no se borra nunca; la corrida siguiente la
+                # apaga.
+                resultado = await ctx.conn.execute(
+                    "DELETE FROM orden_trabajo_pieza t WHERE t.id = ANY($1::int[]) "
+                    "AND NOT EXISTS (SELECT 1 FROM consumo_material c WHERE c.id_orden_trabajo_pieza = t.id) "
+                    "AND NOT EXISTS (SELECT 1 FROM pieza_movimiento m WHERE m.id_orden_trabajo_pieza = t.id)",
+                    [b["id"] for b in borrar])
+                borradas = _filas_afectadas(resultado)
+                if borradas is not None and borradas < len(borrar):
+                    paso.alertar(f"{len(borrar) - borradas} líneas no se borraron: les cargaron consumos "
+                                 f"o movimientos mientras corría esto (la próxima corrida las apaga)")
             if altas:
                 await _insertar(ctx.conn, "orden_trabajo_pieza", altas,
                                 {"id_orden_trabajo": "int4", "id_pieza": "int4", **COLS_LINEA,
@@ -1237,6 +1446,23 @@ async def paso_lineas(ctx: Contexto):
                 next(o for o in est.ots.values() if o["id"] == i)["no_lleva_materia_prima"] = 0
 
 
+def _describir_lineas(lineas, numero_de, maximo=12) -> str:
+    """«OT 15895: ABC071, ABR362; OT 15714: RUL002» para el log (hasta `maximo` OT)."""
+    por_ot = defaultdict(list)
+    for l in lineas:
+        por_ot[numero_de.get(l["id_orden_trabajo"])].append(str(l.get("codigo") or "?").strip())
+    partes = [f"OT {n}: {', '.join(c)}" for n, c in sorted(por_ot.items(), key=lambda x: x[0] or 0)]
+    return "; ".join(partes[:maximo]) + (f"; y {len(partes) - maximo} OT más" if len(partes) > maximo else "")
+
+
+def _filas_afectadas(estado) -> int | None:
+    """Cuántas filas tocó una sentencia, del texto que devuelve asyncpg («DELETE 3»)."""
+    try:
+        return int(str(estado).split()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
 def _cortes_iguales(actuales, deseados) -> bool:
     clave = lambda c: (c["cantidad"], _comparable(c["largo_mm"]), _comparable(c["ancho_mm"]),
                        _comparable(c["texto_original"]), c["orden"])
@@ -1262,14 +1488,16 @@ async def paso_cortes(ctx: Contexto):
     sin_cantidad = 0
     ejemplos_huerfanos = Counter()
     por_ot_spmm = _lineas_por_ot(est, codigos)
-    otro_articulo = _ots_de_otro_articulo(ctx)
+    iguales, distintas = ots_del_viejo(ctx)
     for (id_otvieja, codigo), filas in grupos.items():
         ot = est.ots.get(id_otvieja)
         if ot is None:
             paso.contar("cortes de OT que no están en SPMM", len(filas))
             continue
-        if id_otvieja in otro_articulo:
-            paso.contar("cortes de OT con otro artículo en el viejo (no se tocan)", len(filas))
+        if id_otvieja not in iguales:
+            paso.contar("cortes de OT de SPMM que no son la del Integral (no se tocan)"
+                        if id_otvieja in distintas else
+                        "cortes de OT sin cabecera en el Integral (no se tocan)", len(filas))
             continue
         lineas = [l for l in por_ot_spmm.get(ot["id"], []) if norm_codigo(l["codigo"]) == codigo]
         if not lineas:
@@ -1291,14 +1519,20 @@ async def paso_cortes(ctx: Contexto):
         deseados_por_linea[linea["id"]] = cortes
 
     # Las líneas del viejo de las OT importadas que ya no tienen cortes allá, se quedan
-    # sin cortes acá también (los cortes de una línea legacy son los del viejo).
+    # sin cortes acá también (los cortes de una línea legacy son los del viejo). Salvo que
+    # la lectura de TODOS los cortes haya venido vacía: es una lectura que falló (el viejo
+    # tiene miles), y dejaría sin cortes a todas las líneas.
     numero_de = {v["id"]: k for k, v in est.ots.items()}
-    for l in est.lineas:
-        if l["id"] in deseados_por_linea or l.get("origen") != "legacy" or not est.cortes.get(l["id"]):
-            continue
-        numero = numero_de.get(l["id_orden_trabajo"])
-        if numero in ots_con_lineas_viejas and numero not in otro_articulo:
-            deseados_por_linea[l["id"]] = []
+    if not ctx.viejo["cortes"] and ctx.ots is None:
+        paso.alertar("el Integral no devolvió ningún corte (otcortesmp): no se le sacan los "
+                     "cortes a ninguna línea en esta corrida")
+    else:
+        for l in est.lineas:
+            if l["id"] in deseados_por_linea or l.get("origen") != "legacy" or not est.cortes.get(l["id"]):
+                continue
+            numero = numero_de.get(l["id_orden_trabajo"])
+            if numero in ots_con_lineas_viejas and numero in iguales:
+                deseados_por_linea[l["id"]] = []
 
     reemplazar = {i: c for i, c in deseados_por_linea.items()
                   if not _cortes_iguales(est.cortes.get(i, []), c)}
@@ -1338,7 +1572,10 @@ async def paso_cortes(ctx: Contexto):
 async def paso_canera(ctx: Contexto):
     paso = ctx.paso("canera")
     est = ctx.estado
-    ids_ot = {k: v["id"] for k, v in est.ots.items()}
+    # El casillero se cuelga de la OT de SPMM sólo si ES la del viejo (ots_del_viejo); si
+    # no, el número queda como texto, igual que el de una OT que SPMM no tiene.
+    iguales, distintas = ots_del_viejo(ctx)
+    ids_ot = {k: est.ots[k]["id"] for k in iguales}
     deseadas = {}
     for fila in ctx.viejo["canera"]:
         celda = ocupacion_desde_ubicacion(fila.get("ubicacion"))
@@ -1360,6 +1597,10 @@ async def paso_canera(ctx: Contexto):
                 paso.advertir(f"cañera {celda[0]}{celda[1]}: {ot} no existe; ¿será la OT {ot // 10}? "
                               f"(queda como texto)")
                 paso.contar("números ×10 (quedan como texto)")
+            elif ot in distintas:
+                paso.contar("OT de SPMM que no son la del Integral (quedan como texto)")
+            elif ot in est.ots:
+                paso.contar("OT sin cabecera en el Integral (quedan como texto)")
             else:
                 paso.contar("OT que no están en SPMM (quedan como texto)")
         deseadas[celda] = {"columna": celda[0], "fila": celda[1], "id_orden_trabajo": id_ot,
@@ -1380,11 +1621,17 @@ async def paso_canera(ctx: Contexto):
             numero = int(str(ocupacion["ot_texto"]).strip())
         return numero in ctx.ots
 
+    # Una lectura VACÍA de la cañera entera es una lectura que falló (el viejo tiene más de
+    # cien casilleros ocupados): no se libera ninguno. Con --ots sí puede venir vacía.
+    lectura_vacia = not ctx.viejo["canera"] and ctx.ots is None
+    if lectura_vacia:
+        paso.alertar("el Integral no devolvió ningún casillero de la cañera: no se libera ninguno "
+                     "en esta corrida")
     cerrar, crear = [], []
     for celda, actual in vigentes_legacy.items():
         d = deseadas.get(celda)
         if d is None:
-            if _de_estas_ots(actual):
+            if _de_estas_ots(actual) and not lectura_vacia:
                 cerrar.append(actual)
         elif (actual["id_orden_trabajo"], actual["ot_texto"]) != (d["id_orden_trabajo"], d["ot_texto"]):
             # Otra OT en el casillero (aunque la de antes no sea de --ots): el viejo dice
@@ -1550,6 +1797,10 @@ class Resultado:
     def avisos(self) -> list[str]:
         return [f"[{p.nombre}] {a}" for p in self.pasos for a in p.advertencias]
 
+    def alertas(self) -> list[str]:
+        """Las advertencias que el espejo del sync loguea como WARNING (Paso.alertar)."""
+        return [f"[{p.nombre}] {a}" for p in self.pasos for a in p.alertas]
+
     def renglon(self) -> str:
         """Todo en un renglón (el log del sync, una vez por pasada)."""
         if self.faltan:
@@ -1569,7 +1820,7 @@ class Resultado:
 
 async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None,
                    respaldar: bool = True, ots=None, silencioso: bool = False,
-                   ejemplos: int = 10) -> Resultado:
+                   ejemplos: int = 10, frenar_en_tope: bool = False) -> Resultado:
     """Una corrida de la importación: la usan el main de este script y el ESPEJO del sync
     (scripts/sync_db.py, en cada pasada mientras el Integral es el dueño).
 
@@ -1580,6 +1831,8 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
     respaldar   copia a backup_* lo que reescribe o borra (el sync, sólo la primera vez).
     ots         números de OT a los que se limitan lineas, cortes y canera; None = todas.
     silencioso  no imprime nada (el sync loguea el renglón del Resultado).
+    frenar_en_tope  por encima de TOPE_BORRADO_LINEAS no borra ninguna línea (el espejo
+                del sync); sin esto avisa y sigue (a mano, con alguien mirando).
 
     No termina el proceso (el main decide el código de salida), salvo que no haya base
     destino (sin db_url ni SUPABASE_DB_URL). Un paso que falla se anota en
@@ -1638,7 +1891,8 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
                       "alguien con este script). No se tocó nada; probá de nuevo en un minuto.")
                 res.segundos = time.perf_counter() - inicio_total
                 return res
-        ctx = res.ctx = Contexto(conn, viejo, aplicar, ejemplos, respaldar=respaldar, ots=ots)
+        ctx = res.ctx = Contexto(conn, viejo, aplicar, ejemplos, respaldar=respaldar, ots=ots,
+                                 frenar_en_tope=frenar_en_tope)
         ctx.estado = await Estado().cargar(conn)
         for nombre in pasos:
             inicio = time.perf_counter()

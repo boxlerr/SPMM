@@ -525,7 +525,13 @@ async def _espejo_del_integral(session):
         no toca nada y acá se loguea y se sigue (el sync no se puede caer por esto);
       · un candado de la importación impide que dos corridas (dos pasadas, o una pasada y
         el script a mano) escriban a la vez; la que llega segunda no hace nada;
-      · un renglón de log por pasada con lo que cambió.
+      · con el tope de borrado que FRENA (frenar_en_tope): si una pasada fuera a borrar
+        más de TOPE_BORRADO_LINEAS líneas de OT, no borra ninguna y lo avisa (una lectura
+        rota del Integral no puede vaciar SPMM); la primera importación, si pasa el tope,
+        se corre a mano con el script;
+      · un renglón de log por pasada con lo que cambió, y un WARNING por cada cosa que
+        alguien tiene que mirar (el tope, una lectura vacía, una OT de SPMM que no es la
+        del Integral con ese número).
 
     Devuelve el Resultado de importar() (o None si la app no está sobre Postgres). Los
     errores se levantan: run_sync los loguea y sigue con el resto.
@@ -548,7 +554,7 @@ async def _espejo_del_integral(session):
         await session.rollback()
     resultado = await importacion.importar(
         importacion.PASOS_ESPEJO, aplicar=True, db_url=importacion.por_el_pooler(PG_URL),
-        respaldar=primera, silencioso=True)
+        respaldar=primera, silencioso=True, frenar_en_tope=True)
     if resultado.faltan or resultado.fallo:
         # Un paso que falló (por ejemplo, una fila tomada por la app más de 10 s) deja los
         # anteriores escritos y la próxima pasada sigue desde ahí: se avisa, no se levanta.
@@ -556,8 +562,11 @@ async def _espejo_del_integral(session):
     else:
         logger.info(f"  -> espejo del Integral (materia prima"
                     f"{', primera importación, con copias' if primera else ''}): {resultado.renglon()}")
-        for aviso in resultado.avisos()[:20]:
-            logger.debug(f"     {aviso}")
+    for alerta in resultado.alertas()[:20]:
+        logger.warning(f"  -> espejo del Integral (materia prima): {alerta}")
+    alertas = set(resultado.alertas())
+    for aviso in [a for a in resultado.avisos() if a not in alertas][:20]:
+        logger.debug(f"     {aviso}")
     return resultado
 
 

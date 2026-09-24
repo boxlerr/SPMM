@@ -279,6 +279,27 @@ async def test_la_columna_material_con_las_marcas_de_verdad(session):
 
 
 @pytest.mark.asyncio
+async def test_la_columna_material_da_por_lista_la_linea_de_trabajo_sin_material(session):
+    """TRA011 sin tildar (como está casi siempre en el Integral) no hace «Falta pedir»:
+    la cuenta lee el código de la pieza. Sus marcas guardadas quedan como están."""
+    await _mundo(session)
+    session.add(Pieza(id=73, cod_pieza="TRA011 ", descripcion="TRABAJO SIN MATERIAL / SIN INSUMOS",
+                      unidad="UN"))
+    await session.flush()
+    session.add_all([
+        _linea(1, OT_A, 73, disponible=0, pedido=0),                    # sola: lista
+        _linea(2, OT_B, 73, disponible=0, pedido=0),
+        _linea(3, OT_B, BARRA, disponible=0, pedido=0),                 # con otra sin pedir
+    ])
+    await session.commit()
+    estados = await estado_mod.estados_de_ots(session, [OT_A, OT_B])
+    assert estados == {OT_A: "ok", OT_B: "sin_stock"}
+    assert (await OrdenTrabajoRepository(session).get_material_status([OT_A])) == {OT_A: "ok"}
+    linea = await session.get(OrdenTrabajoPieza, 1)
+    assert (linea.disponible, linea.pedido) == (0, 0)
+
+
+@pytest.mark.asyncio
 async def test_una_ot_arranco_si_algun_proceso_esta_en_curso_o_termino(session):
     await _mundo(session)
     session.add(Proceso(id=100, nombre="TORNO"))

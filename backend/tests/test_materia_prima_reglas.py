@@ -249,6 +249,22 @@ def test_las_lineas_no_usadas_no_cuentan():
     assert estado_material(0, [_l(disponible=1), _l(usado=0)]) == "ok"
 
 
+@pytest.mark.parametrize("codigo", ["TRA011", " tra011 "])
+def test_trabajo_sin_material_cuenta_como_disponible(codigo):
+    """TRA011 («TRABAJO SIN MATERIAL / SIN INSUMOS») casi nunca se tilda: sola, la OT está
+    lista (15894 y 15916 salían «Falta pedir» por no haber pedido nada); con otra línea,
+    manda la otra. Sin usar, no cuenta."""
+    tra = {**_l(), "codigo": codigo}
+    assert estado_material(0, [tra]) == "ok"
+    assert estado_material(0, [tra, {**_l(pedido=1), "codigo": "ABR117"}]) == "pedido"
+    assert estado_material(0, [tra, {**_l(), "codigo": "ABR117"}]) == "sin_stock"
+    assert estado_material(0, [{**tra, "usado": 0}]) == "sin_datos"
+    assert estado_material(1, [tra]) == "no_lleva"
+    # Otro código, u otra línea sin código, no es «sin material».
+    assert estado_material(0, [{**_l(), "codigo": "TRA012"}]) == "sin_stock"
+    assert estado_material(0, [_l()]) == "sin_stock"
+
+
 def test_las_marcas_vacias_valen_su_default():
     """Una línea de antes de la migración (usado NULL) se usa; pedido NULL es no pedido."""
     assert estado_material(0, [{"usado": None, "pedido": None, "disponible": None}]) == "sin_stock"

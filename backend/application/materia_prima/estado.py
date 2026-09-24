@@ -17,6 +17,9 @@ y el estado se calcula acá, una sola vez, sobre las líneas que se usan (usado 
 El orden importa: una OT con una línea sin pedir y otra pedida está en «sin_stock»,
 porque lo que hay que hacer con ella es pedir.
 
+«TRABAJO SIN MATERIAL» (CODIGOS_SIN_MATERIAL) cuenta como disponible: es la línea que
+Carolina carga para que una OT sin material no quede vacía, y casi nunca se tilda.
+
 `sin_stock` conserva el nombre de antes a propósito: lo leen la pantalla de Órdenes y el
 planificador (frontend/src/lib/materialOT.ts), que ahora lo rotula «Falta pedir».
 """
@@ -30,9 +33,19 @@ from sqlalchemy import or_, select
 from backend.domain.OrdenTrabajo import OrdenTrabajo
 from backend.domain.OrdenTrabajoPieza import OrdenTrabajoPieza
 from backend.domain.OrdenTrabajoProceso import OrdenTrabajoProceso
+from backend.domain.Pieza import Pieza
 from backend.application.materia_prima.stock import en_tandas
 
 ESTADOS_MATERIAL = ("no_lleva", "sin_datos", "ok", "sin_stock", "pedido")
+
+# Códigos que en el Sistema Integral quieren decir «esta OT no lleva material». TRA011 es
+# «TRABAJO SIN MATERIAL / SIN INSUMOS»: se carga como línea para que la OT no quede vacía
+# y casi siempre queda sin tildar (0/0: 206 líneas en el Integral; entre las abiertas,
+# 15894 y 15916, donde es la única línea; medido el 24/09/2026). Sin esto esas OT salían
+# «Falta pedir» por no haber pedido... nada. Para el ESTADO se la da por disponible; sus
+# marcas guardadas no se tocan (el espejo las copia del Integral tal cual y Pendientes la
+# muestra como la muestra el Integral). Se comparan normalizados (upper(trim)).
+CODIGOS_SIN_MATERIAL = frozenset({"TRA011"})
 
 # Los ids de estado_proceso (catálogo fijo del viejo: 1 Pendiente, 2 En curso,
 # 3 Completado). El resto del backend los usa como números sueltos; acá con nombre.
@@ -51,21 +64,33 @@ def _marca(linea, campo: str, por_defecto: int = 0) -> int:
     return 1 if valor else 0
 
 
+def _sin_material(linea) -> bool:
+    """¿Es una línea de «trabajo sin material» (CODIGOS_SIN_MATERIAL)? Por el código de la
+    pieza, en `codigo` (sin código, no lo es)."""
+    codigo = linea.get("codigo") if isinstance(linea, dict) else getattr(linea, "codigo", None)
+    return str(codigo or "").strip().upper() in CODIGOS_SIN_MATERIAL
+
+
+def _disponible(linea) -> bool:
+    return bool(_marca(linea, "disponible")) or _sin_material(linea)
+
+
 def estado_material(no_lleva, lineas) -> str:
     """El estado del material de UNA OT a partir de su marca y sus líneas. PURA.
 
-    `lineas`: dicts u objetos con usado, disponible, pedido y reserva (0/1 o bool). Una
-    marca vacía cuenta como su valor por defecto: `usado` 1 (las líneas de antes de la
-    migración se usan), las otras 0.
+    `lineas`: dicts u objetos con usado, disponible, pedido y reserva (0/1 o bool), y el
+    `codigo` de su pieza (opcional: sólo lo mira CODIGOS_SIN_MATERIAL). Una marca vacía
+    cuenta como su valor por defecto: `usado` 1 (las líneas de antes de la migración se
+    usan), las otras 0.
     """
     if no_lleva:
         return "no_lleva"
     usadas = [l for l in (lineas or []) if _marca(l, "usado", 1)]
     if not usadas:
         return "sin_datos"
-    if all(_marca(l, "disponible") for l in usadas):
+    if all(_disponible(l) for l in usadas):
         return "ok"
-    if any(not _marca(l, "disponible") and not _marca(l, "pedido") and not _marca(l, "reserva")
+    if any(not _disponible(l) and not _marca(l, "pedido") and not _marca(l, "reserva")
            for l in usadas):
         return "sin_stock"
     return "pedido"
@@ -73,8 +98,9 @@ def estado_material(no_lleva, lineas) -> str:
 
 async def estados_de_ots(session, ids_ot) -> dict[int, str]:
     """{id_ot: estado} con `estado_material`. Dos consultas por tanda (la marca de la OT y
-    sus líneas); la cuenta se hace en Python con la misma función pura, así la regla está
-    escrita una sola vez. Una OT que no existe sale «sin_datos», como antes."""
+    sus líneas, con el código de su pieza); la cuenta se hace en Python con la misma
+    función pura, así la regla está escrita una sola vez. Una OT que no existe sale
+    «sin_datos», como antes."""
     ids = sorted({int(i) for i in ids_ot if i is not None})
     no_lleva: dict[int, int] = {}
     lineas: dict[int, list[dict]] = defaultdict(list)
@@ -84,14 +110,15 @@ async def estados_de_ots(session, ids_ot) -> dict[int, str]:
             .where(OrdenTrabajo.id.in_(tanda))
         )).all():
             no_lleva[id_ot] = marca or 0
-        for id_ot, usado, disponible, pedido, reserva in (await session.execute(
+        for id_ot, usado, disponible, pedido, reserva, codigo in (await session.execute(
             select(OrdenTrabajoPieza.id_orden_trabajo, OrdenTrabajoPieza.usado,
                    OrdenTrabajoPieza.disponible, OrdenTrabajoPieza.pedido,
-                   OrdenTrabajoPieza.reserva)
+                   OrdenTrabajoPieza.reserva, Pieza.cod_pieza)
+            .outerjoin(Pieza, Pieza.id == OrdenTrabajoPieza.id_pieza)
             .where(OrdenTrabajoPieza.id_orden_trabajo.in_(tanda))
         )).all():
             lineas[id_ot].append({"usado": usado, "disponible": disponible,
-                                  "pedido": pedido, "reserva": reserva})
+                                  "pedido": pedido, "reserva": reserva, "codigo": codigo})
     return {i: estado_material(no_lleva.get(i, 0), lineas.get(i, [])) for i in ids}
 
 
