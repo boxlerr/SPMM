@@ -919,3 +919,56 @@ async def test_un_guardado_que_dejo_de_poder_correr_se_ve_marcado(api):
     assert g["es_mio"] and g["disponible"] is False and "Eficiencia" in g["motivo"]
     r = await api.delete(f"/reportes/personalizados/guardados/{g['id']}")
     assert r.status_code == 200
+
+
+# ─────────────────────────── 5. la pantalla dice el mismo período ───────────────────────────
+#
+# La pantalla muestra las fechas de un atajo («Este mes (01/09 al 30/09)») sin esperar al
+# servidor. Si su cuenta se separa de la del servidor, la pantalla promete un período y el
+# archivo trae otro. Se compila frontend/src/lib/reportesPeriodo.ts con el tsc del repo y
+# se corre de verdad, como test_jornada_front_y_back_no_se_separan.
+
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+FRONT_LIB = Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib"
+TSC = Path(__file__).resolve().parents[2] / "frontend" / "node_modules" / ".bin" / "tsc"
+
+DIAS_DE_PRUEBA = ["2026-09-23", "2026-01-01", "2026-01-31", "2026-03-01", "2028-02-29",
+                  "2026-12-31", "2027-03-30", "2026-07-15"]
+
+DRIVER = """
+const m = require('./reportesPeriodo.js');
+const dias = JSON.parse(process.argv[2]);
+const atajos = ['este_mes', 'mes_pasado', 'ultimos_30', 'ultimos_90', 'este_anio'];
+const salida = {};
+for (const iso of dias) {
+    const [a, mes, d] = iso.split('-').map(Number);
+    const hoy = new Date(a, mes - 1, d, 15, 30);
+    salida[iso] = Object.fromEntries(atajos.map((x) => [x, m.rangoDelAtajo(x, hoy)]));
+}
+console.log(JSON.stringify(salida));
+"""
+
+
+def test_los_atajos_del_periodo_dan_lo_mismo_en_la_pantalla_y_en_el_servidor():
+    if not (shutil.which("node") and TSC.exists()):
+        pytest.skip("hace falta node y el tsc del frontend (npm install)")
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(
+            [str(TSC), str(FRONT_LIB / "reportesPeriodo.ts"), "--outDir", tmp, "--rootDir", str(FRONT_LIB),
+             "--target", "es2020", "--module", "commonjs", "--moduleResolution", "node", "--skipLibCheck"],
+            check=True, capture_output=True, text=True, timeout=120,
+        )
+        (Path(tmp) / "driver.js").write_text(DRIVER)
+        del_front = json.loads(subprocess.run(
+            ["node", "driver.js", json.dumps(DIAS_DE_PRUEBA)], cwd=tmp, capture_output=True, text=True,
+            timeout=60, check=True,
+        ).stdout)
+    for iso in DIAS_DE_PRUEBA:
+        hoy = date.fromisoformat(iso)
+        for atajo in cat.ATAJOS:
+            desde, hasta = cat.rango_del_atajo(atajo, hoy)
+            assert del_front[iso][atajo] == {"desde": desde.isoformat(), "hasta": hasta.isoformat()}, (iso, atajo)

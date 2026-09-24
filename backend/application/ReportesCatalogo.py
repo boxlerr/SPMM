@@ -151,7 +151,8 @@ ATAJOS = {
 
 def rango_del_atajo(atajo: str, hoy: date) -> tuple[date, date]:
     """(desde, hasta) de un atajo, los dos días INCLUIDOS. Espejo de rangoDelAtajo en
-    frontend/src/lib/reportes.ts (un test compara las dos)."""
+    frontend/src/lib/reportesPeriodo.ts (test_los_atajos_del_periodo_dan_lo_mismo_en_la_
+    pantalla_y_en_el_servidor lo compila y compara las dos)."""
     if atajo == "este_mes":
         desde = hoy.replace(day=1)
         return desde, _ultimo_dia_del_mes(desde)
@@ -547,9 +548,9 @@ def _numero_ot(tabla) -> Columna:
              ayuda="El número con que el taller conoce la orden.")
 
 
-def _cliente() -> Columna:
+def _cliente(por_defecto: bool = False) -> Columna:
     return C("cliente", "Cliente", "texto", cl.c.nombre, filtro_expr=ot.c.id_cliente,
-             opciones="clientes")
+             opciones="clientes", por_defecto=por_defecto)
 
 
 def _articulo() -> Columna:
@@ -591,7 +592,7 @@ ORDENES = Fuente(
     clave=lambda ctx: ot.c.id,
     columnas=(
         _numero_ot(ot),
-        _cliente(),
+        _cliente(por_defecto=True),
         C("articulo", "Artículo", "texto", ar.c.descripcion, por_defecto=True),
         C("cod_articulo", "Código de artículo", "texto", ar.c.cod_articulo),
         C("prioridad", "Prioridad", "texto", pr.c.descripcion, filtro_expr=ot.c.id_prioridad,
