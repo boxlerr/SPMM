@@ -102,6 +102,9 @@ export function BarraDeAcciones({
                     </label>
                     <input
                         type="date"
+                        // El <label> de arriba no está atado al campo (no hay id): sin
+                        // esto el campo no tenía nombre para un lector de pantalla.
+                        aria-label="Fecha que prometió el proveedor"
                         value={fecha}
                         onChange={(e) => setFecha(e.target.value)}
                         onKeyDown={(e) => {

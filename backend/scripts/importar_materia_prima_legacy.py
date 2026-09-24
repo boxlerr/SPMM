@@ -86,8 +86,10 @@ CON --aplicar
     ese paso se cae entero en vez de quedar a medias, y los anteriores quedan escritos;
   · antes de reescribir o borrar filas de pieza y orden_trabajo_pieza las copia a
     backup_20260923_pieza / backup_20260923_orden_trabajo_pieza (con respaldado_en). El
-    espejo del sync no copia (se acumularía una copia cada pocos minutos) salvo en su
-    primera pasada;
+    espejo del sync no copia en cada pasada (se acumularía una copia por pasada): copia a
+    cada tabla hasta que su backup_* existe (SI_NO_HAY_COPIA);
+  · con tiempos (TOPE_RELECTURA_SEG, TOPE_OCIOSO_EN_TRANSACCION): un Integral colgado no
+    deja tomados los locks ni el candado;
   · aborta sin tocar nada si la migración 2026-09-23_materia_prima no está aplicada.
 
 VOLVER ATRÁS: las copias tienen la fila entera como estaba. Los INSERT de este script
@@ -166,6 +168,32 @@ CANDADO = 20260923
 
 BACKUP_PIEZA = "backup_20260923_pieza"
 BACKUP_LINEA = "backup_20260923_orden_trabajo_pieza"
+COPIAS = (BACKUP_PIEZA, BACKUP_LINEA)
+
+# `respaldar` de importar(): True copia a todas (el script a mano), False a ninguna, y
+# SI_NO_HAY_COPIA (el espejo del sync) sólo a las backup_* que todavía no existen, tabla por
+# tabla. El espejo antes decidía por «ninguna pieza con origen» (la primera pasada), y eso
+# dejaba un hueco: si esa pasada escribía los insumos y fallaba en el paso lineas (una fila
+# tomada por la app más de 10 s), la siguiente ya tenía piezas con origen y reescribía las
+# líneas SIN copia (medido en local el 24/09: 1.211 líneas reescritas y la copia de líneas
+# nunca creada). Por tabla, cada una se copia la primera vez que de verdad se reescribe.
+# Se decide al empezar la corrida, con el candado tomado: dentro de una misma corrida los
+# pasos que tocan la misma tabla (insumos y stock, las dos sobre pieza) copian todos.
+SI_NO_HAY_COPIA = "si_no_hay_copia"
+
+# Los tiempos de la corrida con --aplicar (y del espejo del sync), para que un Integral
+# colgado no deje tomados los locks de Supabase ni el candado:
+#   · la SEGUNDA lectura del Integral (releer_lineas_del_viejo) corre con la transacción de
+#     Supabase abierta: tiene TOPE_RELECTURA_SEG en total (y cada consulta el mismo tope en
+#     el driver, que la cancela del lado del SQL Server). Si no llega, el paso lineas falla
+#     sin escribir nada, los anteriores quedan y la pasada siguiente lo vuelve a intentar;
+#   · y por si igual algo deja la transacción quieta (el proceso colgado en otra cosa),
+#     Postgres corta la sesión a los TOPE_OCIOSO_EN_TRANSACCION sin actividad y suelta los
+#     locks y el candado (en producción idle_in_transaction_session_timeout vale 0: sin
+#     esto, nunca). Va con margen sobre el tope de la relectura, que es la espera más larga
+#     esperable entre dos sentencias de la corrida.
+TOPE_RELECTURA_SEG = 30
+TOPE_OCIOSO_EN_TRANSACCION = "60s"
 
 # De a cuántas filas va cada INSERT/UPDATE con unnest: sentencias de tamaño razonable
 # por el pooler, sin un viaje por fila.
@@ -487,15 +515,26 @@ class Estado:
 
 async def releer_lineas_del_viejo(numeros) -> list[dict]:
     """La segunda lectura de paso_lineas: las líneas de esas OT, otra vez, del viejo (sólo
-    SELECT, con _leer de sync_db.py)."""
+    SELECT, con _leer de sync_db.py). Con TOPE_RELECTURA_SEG en total: corre con la
+    transacción de Supabase abierta (ver ahí); si no llega, levanta TimeoutError y el paso
+    lineas falla sin escribir."""
     from backend.scripts.sync_db import _leer
 
     numeros = sorted({int(n) for n in numeros})
-    filas = []
-    for i in range(0, len(numeros), 1000):
-        filas += await _leer(Q_LINEAS_DE_ESTAS_OT.format(
-            ids=",".join(str(n) for n in numeros[i:i + 1000])))
-    return filas
+
+    async def _todas():
+        filas = []
+        for i in range(0, len(numeros), 1000):
+            filas += await _leer(Q_LINEAS_DE_ESTAS_OT.format(
+                ids=",".join(str(n) for n in numeros[i:i + 1000])), tope_seg=TOPE_RELECTURA_SEG)
+        return filas
+
+    try:
+        return await asyncio.wait_for(_todas(), TOPE_RELECTURA_SEG)
+    except asyncio.TimeoutError:
+        # Con mensaje: un TimeoutError pelado deja «falló el paso lineas (TimeoutError: )».
+        raise asyncio.TimeoutError(
+            f"la segunda lectura del Integral no contestó en {TOPE_RELECTURA_SEG} s") from None
 
 
 class Contexto:
@@ -505,9 +544,13 @@ class Contexto:
         self.viejo = viejo
         self.aplicar = aplicar
         self.ejemplos = ejemplos
-        # Copiar a backup_* lo que se reescribe o borra. El espejo del sync no copia en
-        # cada pasada: se acumularía una copia cada pocos minutos.
-        self.respaldar = respaldar
+        # A qué backup_* se copia lo que se reescribe o borra (ver COPIAS y SI_NO_HAY_COPIA):
+        # True = a todas, False = a ninguna, o el conjunto que ya decidió importar(). El
+        # espejo del sync no copia en cada pasada: se acumularía una copia por pasada.
+        if isinstance(respaldar, str):
+            raise ValueError("importar() resuelve SI_NO_HAY_COPIA antes de armar el Contexto")
+        self.respaldar: set[str] = (set(COPIAS) if respaldar is True
+                                    else set(respaldar) if respaldar else set())
         # Las OT a las que se limitan lineas, cortes y canera (--ots), o None = todas.
         self.ots: set[int] | None = set(ots) if ots else None
         # La segunda lectura del viejo antes de borrar líneas: async (números de OT) →
@@ -564,9 +607,17 @@ async def _respaldar(conn, tabla: str, backup: str, ids, ahora) -> int:
     return len(ids)
 
 
+async def copias_a_hacer(conn, respaldar) -> set[str]:
+    """A qué backup_* copia esta corrida (ver SI_NO_HAY_COPIA). Con SI_NO_HAY_COPIA mira, tabla
+    por tabla, si la copia ya existe; es sólo lectura del catálogo."""
+    if respaldar == SI_NO_HAY_COPIA:
+        return {b for b in COPIAS if await conn.fetchval("SELECT to_regclass($1::text) IS NULL", b)}
+    return set(COPIAS) if respaldar else set()
+
+
 async def _copiar(ctx, paso, tabla: str, backup: str, ids) -> None:
-    """_respaldar, si esta corrida copia (ctx.respaldar), y contarlo en el paso."""
-    if ctx.respaldar:
+    """_respaldar, si esta corrida copia a esa tabla (ctx.respaldar), y contarlo en el paso."""
+    if backup in ctx.respaldar:
         paso.contar("filas copiadas a " + backup, await _respaldar(ctx.conn, tabla, backup, ids, ctx.ahora))
 
 
@@ -1794,6 +1845,19 @@ class Resultado:
                 salida[paso.nombre] = n
         return salida
 
+    def copiadas(self) -> dict[str, int]:
+        """backup_* → filas que esta corrida copió ahí (sólo las que copiaron algo). El
+        espejo del sync lo dice en su renglón: es lo que se busca para volver atrás. Sin el
+        paso que falló: su copia se deshizo con su savepoint."""
+        salida: Counter = Counter()
+        for paso in self.pasos:
+            if self.fallo and paso.nombre == self.fallo[0]:
+                continue
+            for clave, n in paso.conteos.items():
+                if clave.startswith("filas copiadas a ") and n:
+                    salida[clave.removeprefix("filas copiadas a ")] += n
+        return dict(salida)
+
     def avisos(self) -> list[str]:
         return [f"[{p.nombre}] {a}" for p in self.pasos for a in p.advertencias]
 
@@ -1828,7 +1892,8 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
     aplicar     escribe; si no, en seco.
     db_url      la base destino; None = SUPABASE_DB_URL del entorno por el pooler 6543.
                 El sync pasa la de la app ya pasada al 6543 (por_el_pooler).
-    respaldar   copia a backup_* lo que reescribe o borra (el sync, sólo la primera vez).
+    respaldar   copia a backup_* lo que reescribe o borra: True a todas, False a ninguna,
+                SI_NO_HAY_COPIA (el sync) sólo a las que todavía no existen, tabla por tabla.
     ots         números de OT a los que se limitan lineas, cortes y canera; None = todas.
     silencioso  no imprime nada (el sync loguea el renglón del Resultado).
     frenar_en_tope  por encima de TOPE_BORRADO_LINEAS no borra ninguna línea (el espejo
@@ -1885,13 +1950,18 @@ async def importar(pasos=PASOS, aplicar: bool = False, db_url: str | None = None
             corrida = conn.transaction()
             await corrida.start()
             await conn.execute("SET LOCAL lock_timeout = '10s'")
+            # Ver TOPE_OCIOSO_EN_TRANSACCION: que un cuelgue no deje los locks tomados.
+            await conn.execute(
+                f"SET LOCAL idle_in_transaction_session_timeout = '{TOPE_OCIOSO_EN_TRANSACCION}'")
             if not await conn.fetchval("SELECT pg_try_advisory_xact_lock($1)", CANDADO):
                 res.ocupado = True
                 decir("\nHay otra importación corriendo contra esa base (el espejo del sync o "
                       "alguien con este script). No se tocó nada; probá de nuevo en un minuto.")
                 res.segundos = time.perf_counter() - inicio_total
                 return res
-        ctx = res.ctx = Contexto(conn, viejo, aplicar, ejemplos, respaldar=respaldar, ots=ots,
+        # Qué copias se hacen, con el candado ya tomado (SI_NO_HAY_COPIA mira la base).
+        copias = await copias_a_hacer(conn, respaldar)
+        ctx = res.ctx = Contexto(conn, viejo, aplicar, ejemplos, respaldar=copias, ots=ots,
                                  frenar_en_tope=frenar_en_tope)
         ctx.estado = await Estado().cargar(conn)
         for nombre in pasos:
@@ -1948,7 +2018,8 @@ def imprimir_resumen(res: Resultado):
     if not ctx.aplicar:
         print("(corrida en seco — no se escribió nada; usar --aplicar para escribir)")
     elif ctx.respaldar:
-        print(f"Copias: {BACKUP_PIEZA}, {BACKUP_LINEA} (columna respaldado_en = {ctx.ahora:%Y-%m-%d %H:%M:%S}).")
+        print(f"Copias: {', '.join(b for b in COPIAS if b in ctx.respaldar)} "
+              f"(columna respaldado_en = {ctx.ahora:%Y-%m-%d %H:%M:%S}).")
 
 
 async def main(argv=None):

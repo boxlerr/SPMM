@@ -399,7 +399,8 @@ function SolapaMateriasPrimas({
                     u.cambiarLocales(localesRef.current.map((l) => (l.clave === f.clave ? cambiarLineaLocal(l, c) : l)));
                     return;
                 }
-                if (f.id !== null && f.id > 0) void u.mp.guardar(f.id, c);
+                // El guardado vuelve a la fila: la reserva lo espera (ver CasillaReserva).
+                if (f.id !== null && f.id > 0) return u.mp.guardar(f.id, c);
             },
             borrar: (f: FilaMP) => {
                 const u = ultimo.current;
@@ -573,8 +574,12 @@ function SolapaMateriasPrimas({
 
                     {/* `@container`: la fila que se abre para cargar el consumo mide su ancho
                         contra esta caja (100cqw), así queda a la vista aunque la tabla se
-                        desplace de costado. */}
-                    <div className="@container overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+                        desplace de costado.
+                        `isolate`: el encabezado y la columna fijos (z-20 / z-10) se apilan
+                        ADENTRO de esta caja. Sin eso competían con la barra de solapas del
+                        modal (también z-10, fija arriba) y al bajar la lista la tapaban: a
+                        375 px desaparecían «General» y «Materias» (E2E del 24/09). */}
+                    <div className="@container isolate overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                         <table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left">
                             <thead className="bg-gray-50/90">
                                 <tr className="[&>th]:border-b [&>th]:border-gray-200">

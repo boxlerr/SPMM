@@ -47,6 +47,13 @@ export type Confirmar = (pedido: PedidoConfirmacion) => Promise<boolean>;
 type EnCola = PedidoConfirmacion & { resolver: (si: boolean) => void };
 
 /**
+ * Lo que dura un doble clic, con margen. Una respuesta al diálogo que llega antes de esto
+ * desde que apareció la pregunta no es una respuesta: es el segundo clic de un doble clic
+ * que cayó encima del diálogo recién abierto (ver `responder`).
+ */
+const GRACIA_MS = 500;
+
+/**
  * `const { confirmar, dialogo } = useConfirmarForzar();` y dibujar `{dialogo}` en la
  * pantalla. `confirmar` es estable: se puede pasar a hooks y a filas memorizadas.
  */
@@ -71,9 +78,22 @@ export function useConfirmarForzar(): { confirmar: Confirmar; dialogo: ReactNode
     if (cola[0]) ultimoMostrado.current = cola[0];
     const abierto = cola.length > 0;
     const actual = cola[0] ?? ultimoMostrado.current;
+
+    // Cuándo apareció la pregunta que se ve. Un doble clic en «Reservar» manda el
+    // guardado con el primer clic; si el 409 vuelve rápido, el segundo clic cae sobre el
+    // diálogo recién abierto (el fondo, o «Cancelar» si justo está ahí) y lo cerraba como
+    // «Cancelar»: la reserva se deshacía sin que nadie lo decidiera (E2E del 24/09). Lo
+    // mismo con dos avisos en fila: un doble clic en «Hacerlo igual» contestaba los dos.
+    const enPantalla = cola[0];
+    const mostradoEn = useRef(0);
+    useEffect(() => {
+        if (enPantalla) mostradoEn.current = Date.now();
+    }, [enPantalla]);
+
     const responder = (si: boolean) => {
         const primero = colaRef.current[0];
         if (!primero) return;
+        if (Date.now() - mostradoEn.current < GRACIA_MS) return;
         primero.resolver(si);
         setCola((c) => (c[0] === primero ? c.slice(1) : c));
     };
@@ -112,4 +132,54 @@ export function useConfirmarForzar(): { confirmar: Confirmar; dialogo: ReactNode
     );
 
     return { confirmar, dialogo };
+}
+
+/**
+ * Lo mínimo que queda a la vista el cartelito que mandó a guardar (la cantidad de la
+ * reserva). Más que un doble clic: si se cerrara apenas vuelve un guardado rápido, el
+ * segundo clic caería en la tabla de abajo y tildaría otra cosa de otra línea.
+ */
+const MINIMO_A_LA_VISTA_MS = 400;
+
+/**
+ * Un guardado que no se repite: el botón que lo manda (y la casilla que lo abre) no
+ * aceptan otro toque hasta que el guardado terminó, pregunta del 409 incluida.
+ *
+ *     const envio = useEnvioSinRepetir();
+ *     envio.enviar(() => onGuardar(cambios), () => setAbierto(false));
+ *
+ * `enviar` devuelve false (y no hace nada) si ya había uno en curso. `ocupado()` se lee
+ * en el momento (un ref, no el estado del último dibujo): dos clics en el mismo cuadro
+ * no pasan los dos. `alTerminar` corre cuando terminó y pasó el mínimo a la vista.
+ *
+ * Es para la reserva (Pendientes y la solapa de la OT), que es la que abre un cartelito
+ * con botón: un doble clic en «Reservar» mandaba dos guardados, o el segundo clic cerraba
+ * el aviso del 409 (ver `useConfirmarForzar`).
+ */
+export function useEnvioSinRepetir() {
+    const [enviando, setEnviando] = useState(false);
+    const enCurso = useRef(false);
+    const enviar = useCallback((tarea: () => Promise<unknown> | void, alTerminar?: () => void): boolean => {
+        if (enCurso.current) return false;
+        enCurso.current = true;
+        setEnviando(true);
+        const desde = Date.now();
+        let guardado: Promise<unknown>;
+        try {
+            guardado = Promise.resolve(tarea());
+        } catch {
+            guardado = Promise.resolve();
+        }
+        void guardado
+            .catch(() => undefined)
+            .then(() => new Promise((r) => setTimeout(r, Math.max(0, MINIMO_A_LA_VISTA_MS - (Date.now() - desde)))))
+            .then(() => {
+                enCurso.current = false;
+                setEnviando(false);
+                alTerminar?.();
+            });
+        return true;
+    }, []);
+    const ocupado = useCallback(() => enCurso.current, []);
+    return { enviando, enviar, ocupado };
 }

@@ -53,6 +53,20 @@ import { AvisoConfirmacion, CartelError, CartelSinServidor, Esqueleto, Rotulo, S
 const redondear3 = (n: number) => Math.round(n * 1000) / 1000;
 
 /**
+ * El 409 de «el stock queda en negativo», con el saldo escrito como en la pantalla.
+ *
+ * El backend arma el número con el formato de las medidas de la descripción, que va con
+ * punto («queda en -3.64»), y acá todo se lee con coma («-3,64»): en el mismo formulario
+ * decía una cosa arriba y otra en la pregunta (E2E del 24/09). Se deja el texto del
+ * backend (el saldo es el de la base, que puede no ser el que ve esta pantalla si alguien
+ * movió stock recién) y sólo se reescribe ese número. Si el texto cambia y no aparece, va
+ * tal cual. No se tocan los otros números del mensaje: una descripción («38.1mm») se
+ * escribe con punto a propósito.
+ */
+const conSaldoLegible = (motivo: string) =>
+    motivo.replace(/(queda en )(-?\d+(?:\.\d+)?)(?![\d.,])/, (_m, antes: string, n: string) => antes + fmtCantidad(Number(n)));
+
+/**
  * Vuelve a hacer la cuenta de los saldos y del físico sobre la lista (para mostrar un
  * cambio antes de que conteste el backend). Es la misma cuenta del backend: saldo
  * acumulado de los no anulados, del más viejo al más nuevo.
@@ -238,7 +252,10 @@ export function FichaStock({ ficha, edita, onCambio }: FichaStockProps) {
                         El stock es la suma de los movimientos: {edita ? "registrá un ingreso cuando entre material." : "cuando alguien registre un ingreso aparece acá."}
                     </Vacio>
                 ) : (
-                    <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    // `@container`: el renglón de «Anular» mide su ancho contra esta caja
+                    // (100cqw) y va fijo a la izquierda, así queda a la vista aunque la tabla
+                    // se desplace de costado (ver FilaMovimiento).
+                    <div className="@container overflow-x-auto rounded-lg border border-gray-200">
                         <table className="w-full min-w-[520px] text-xs">
                             <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
                                 <tr>
@@ -340,8 +357,12 @@ function FilaMovimiento({ m, edita, anulando, onPedirAnular, onCancelarAnular, o
             </tr>
             {anulando && (
                 <tr className="bg-rose-50/60">
-                    <td colSpan={8} className="px-2 py-2">
-                        <div className="flex flex-wrap items-center gap-2">
+                    <td colSpan={8} className="p-0">
+                        {/* Fijo a la izquierda y del ancho de lo que se ve: la tabla mide
+                            520 px y, con la ficha angosta (1024 px con la lista al lado), el
+                            botón «Anular» quedaba afuera, a la derecha; sólo se podía
+                            confirmar con Enter (E2E del 24/09). */}
+                        <div className="sticky left-0 flex w-[100cqw] flex-wrap items-center gap-2 px-2 py-2">
                             <span className="text-xs text-rose-900">Anular el {ROTULO_MOVIMIENTO[m.tipo]?.toLowerCase()} del {fmtFechaHora(m.fecha)}:</span>
                             <Input
                                 autoFocus
@@ -438,7 +459,7 @@ function FormMovimiento({ idPieza, datos, unidad, onCerrar, onOptimista, onRespu
         setGuardando(false);
         if (r.requiereConfirmacion) {
             onRespuesta(antes);
-            setAviso(r.error ?? "El stock quedaría en negativo.");
+            setAviso(r.error ? conSaldoLegible(r.error) : "El stock quedaría en negativo.");
             return;
         }
         if (!r.ok || !r.data) {

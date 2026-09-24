@@ -155,10 +155,18 @@ export interface Catalogos {
  */
 export type DuenoMP = "integral" | "spmm";
 
-/** El cartel del modo espejo cuando el backend no manda el suyo (`aviso_dueno`). */
+/**
+ * El cartel del modo espejo cuando el backend no manda el suyo (`aviso_dueno`, que es el
+ * que vale: lo escribe quien sabe cada cuánto corre el sync).
+ *
+ * Tiene que decir cada cuánto llega lo del Integral: el sync lo trae cada 30 minutos, y
+ * un «se actualizan solas» a secas se lee como «al instante». Carolina carga allá, mira
+ * acá, no lo ve y lo carga de nuevo; o Maxi compra algo que ya se había pedido.
+ */
 export const AVISO_ESPEJO =
     "Prueba piloto: las materias primas se siguen cargando en el Sistema Integral. " +
-    "Acá se ven con sus marcas reales y se actualizan solas.";
+    "SPMM las trae de allá cada 30 minutos, con sus marcas reales: lo que se carga allá " +
+    "puede tardar hasta media hora en verse acá.";
 
 /** `POST /materia-prima/materiales`. */
 export interface MaterialIn {

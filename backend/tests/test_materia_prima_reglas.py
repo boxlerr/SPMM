@@ -275,11 +275,14 @@ def test_las_marcas_vacias_valen_su_default():
 
 def test_la_semilla_de_formatos_es_la_misma_en_la_migracion_y_en_python():
     """La siembra la migración en Postgres; los tests la cargan con sembrar_formatos. Si
-    se agrega un formato, va en los dos lados."""
+    se agrega un formato, va en los dos lados. (Desde el 24/09 el .sql la escribe como
+    INSERT … SELECT … FROM (VALUES …) AS v WHERE NOT EXISTS, para no gastar la secuencia
+    en cada arranque; el módulo que la aplica sola lo compara
+    test_migraciones_al_arrancar.test_la_semilla_de_formato_es_la_de_semilla_py.)"""
     sql = MIGRACION.read_text()
     filas = []
     for columnas, valores in re.findall(
-            r"INSERT INTO formato \(([^)]*)\) VALUES(.*?)ON CONFLICT", sql, re.S):
+            r"INSERT INTO formato \(([^)]*)\)\s*SELECT .*? FROM \(VALUES(.*?)\) AS v ", sql, re.S):
         cols = [c.strip() for c in columnas.split(",")]
         for tupla in re.findall(r"\(([^()]*)\)", valores):
             datos = dict(zip(cols, [v.strip().strip("'") for v in tupla.split(",")]))

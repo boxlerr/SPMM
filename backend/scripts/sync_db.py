@@ -21,6 +21,7 @@ con SPMM como dueño sólo llegan las altas y los precios del viejo.
 """
 
 import asyncio
+import math
 import os
 import re
 from collections import defaultdict
@@ -75,14 +76,26 @@ def _legacy_engine():
     return _LEGACY_ENGINE
 
 
-def _leer_sync(sql, params=None):
+def _leer_sync(sql, params=None, tope_seg=None):
     with _legacy_engine().connect() as c:
+        # El tope de la consulta en el driver (pyodbc `timeout` = SQL_ATTR_QUERY_TIMEOUT):
+        # pasado ese tiempo el driver la cancela del lado del SQL Server y levanta. Se pone
+        # en CADA lectura, también el 0 (sin tope, como siempre), porque la conexión vuelve
+        # al pool con el valor que le quedó y la lectura siguiente no tiene por qué heredarlo.
+        c.connection.dbapi_connection.timeout = math.ceil(tope_seg) if tope_seg else 0
         return [dict(r) for r in c.execute(text(sql), params or {}).mappings()]
 
 
-async def _leer(sql, params=None):
-    """Lee del legacy en un thread aparte (pyodbc es sincrónico y bloquearía el loop)."""
-    return await asyncio.to_thread(_leer_sync, sql, params)
+async def _leer(sql, params=None, tope_seg=None):
+    """Lee del legacy en un thread aparte (pyodbc es sincrónico y bloquearía el loop).
+
+    `tope_seg`: para las lecturas que corren con una transacción de Supabase abierta (la
+    segunda lectura del espejo, releer_lineas_del_viejo en el script de la importación):
+    el driver corta la consulta a ese tiempo. Quien llama igual la envuelve en un
+    asyncio.wait_for, por si el driver ni siquiera puede avisar (la red caída a mitad de
+    camino): ahí el thread queda esperando solo, pero la corrida sigue y suelta sus locks.
+    Sin tope (None), como siempre: el resto del sync no tiene nada tomado mientras lee."""
+    return await asyncio.to_thread(_leer_sync, sql, params, tope_seg)
 
 
 # ---------------------------------------------------------------------------
@@ -510,17 +523,25 @@ async def _espejo_del_integral(session):
     """ESPEJO de la materia prima mientras el Sistema Integral es el dueño (la prueba
     piloto; application/materia_prima/dueno.py). Corre la MISMA importación que el script
     (scripts/importar_materia_prima_legacy.importar) con los pasos PASOS_ESPEJO: gana el
-    Integral, en cada pasada. Carolina y Maxi cargan allá; acá se ve a los pocos minutos,
-    con las marcas reales.
+    Integral, en cada pasada. Carolina y Maxi cargan allá; acá se ve en la pasada siguiente
+    del sync (Cloud Scheduler, cada dueno.FRECUENCIA_ESPEJO_MIN minutos), con las marcas
+    reales.
 
     Cómo, y por qué así:
       · con la base de la app pasada al pooler 6543 (la misma regla que el script): la
         importación abre su propia conexión asyncpg y el 5432 admite 15 clientes para
         todo el proyecto;
-      · sin copias de seguridad (backup_*): se acumularía una copia cada pocos minutos.
-        Salvo la PRIMERA vez (ninguna pieza con origen todavía): esa pasada es la
-        importación inicial y reescribe miles de filas, que quedan copiadas como las
-        deja el script;
+      · sin copias de seguridad (backup_*) en cada pasada: se acumularía una copia por
+        pasada. Salvo hasta que cada copia existe, TABLA POR TABLA (SI_NO_HAY_COPIA del
+        importador): la primera pasada es la importación inicial y reescribe miles de
+        filas, que quedan copiadas como las deja el script; y si esa pasada falla a mitad
+        de camino (escribió los insumos pero no las líneas), la siguiente todavía copia las
+        líneas. Antes se decidía por «ninguna pieza con origen», y ese caso quedaba sin
+        copia de las líneas;
+      · con tiempos: la segunda lectura del Integral, que corre con la transacción de
+        Supabase abierta, tiene tope, y Postgres corta la transacción si queda quieta
+        (TOPE_RELECTURA_SEG y TOPE_OCIOSO_EN_TRANSACCION del importador): un Integral
+        colgado no deja tomados los locks ni el candado;
       · sólo si la migración 2026-09-23_materia_prima está aplicada: si falta, importar()
         no toca nada y acá se loguea y se sigue (el sync no se puede caer por esto);
       · un candado de la importación impide que dos corridas (dos pasadas, o una pasada y
@@ -542,26 +563,22 @@ async def _espejo_del_integral(session):
     if not PG_URL:
         logger.info("  -> espejo del Integral (materia prima): la app no está sobre Postgres; no se corre.")
         return None
-    try:
-        primera = not await _importacion_hecha(session)
-    except Exception:
-        # Sin la columna pieza.origen la migración no está (importar() lo va a decir y no
-        # toca nada); ante cualquier otra duda, del lado seguro: con copias.
-        primera = True
-    finally:
-        # Que la sesión de la app no quede con una transacción abierta mientras corre el
-        # espejo, que va por su propia conexión.
-        await session.rollback()
+    # Que la sesión de la app no quede con una transacción abierta mientras corre el
+    # espejo, que va por su propia conexión.
+    await session.rollback()
     resultado = await importacion.importar(
         importacion.PASOS_ESPEJO, aplicar=True, db_url=importacion.por_el_pooler(PG_URL),
-        respaldar=primera, silencioso=True, frenar_en_tope=True)
+        respaldar=importacion.SI_NO_HAY_COPIA, silencioso=True, frenar_en_tope=True)
+    # Las copias que hizo esta pasada (la primera, o la que sigue a una primera que falló a
+    # mitad): es lo que se busca para volver atrás.
+    copias = ", ".join(f"{b} {n}" for b, n in resultado.copiadas().items())
+    donde = f"materia prima, con copias: {copias}" if copias else "materia prima"
     if resultado.faltan or resultado.fallo:
         # Un paso que falló (por ejemplo, una fila tomada por la app más de 10 s) deja los
         # anteriores escritos y la próxima pasada sigue desde ahí: se avisa, no se levanta.
-        logger.warning(f"  -> espejo del Integral (materia prima): {resultado.renglon()}")
+        logger.warning(f"  -> espejo del Integral ({donde}): {resultado.renglon()}")
     else:
-        logger.info(f"  -> espejo del Integral (materia prima"
-                    f"{', primera importación, con copias' if primera else ''}): {resultado.renglon()}")
+        logger.info(f"  -> espejo del Integral ({donde}): {resultado.renglon()}")
     for alerta in resultado.alertas()[:20]:
         logger.warning(f"  -> espejo del Integral (materia prima): {alerta}")
     alertas = set(resultado.alertas())

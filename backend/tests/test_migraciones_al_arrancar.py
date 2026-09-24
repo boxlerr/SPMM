@@ -60,6 +60,13 @@ def _firmas(sql: str) -> set[str]:
     for tabla, valores in re.findall(r"insert into (\w+) \([^)]*\) values (.*?) on conflict", t):
         for codigo in re.findall(r"\(\s*'([^']*)'", valores):
             firmas.add(f"fila:{tabla}:{codigo}")
+    # La semilla de formato (24/09) va como INSERT … SELECT … FROM (VALUES …) AS v WHERE NOT
+    # EXISTS, para no gastar la secuencia en cada arranque: mismas filas, otra forma. Sin
+    # esto sus filas se dejarían de comparar sin que nada fallara.
+    for tabla, valores in re.findall(
+            r"insert into (\w+) \([^)]*\) select .*? from \(values (.*?) ?\) as \w+ ", t):
+        for codigo in re.findall(r"\(\s*'([^']*)'", valores):
+            firmas.add(f"fila:{tabla}:{codigo}")
     return firmas
 
 
@@ -341,6 +348,64 @@ def test_que_se_puede_verificar_en_el_catalogo():
                                   "ADD CONSTRAINT c CHECK (a > 0)"]) is None
 
 
+def test_la_semilla_de_un_catalogo_nuevo_se_verifica_por_su_tabla():
+    """Hallazgo del 24/09: por los INSERT de la semilla de `formato`, la de materia prima no
+    se podía dar nunca por aplicada, y un arranque que perdía la carrera por el lock de
+    `pieza` dejaba /health en 503 con la base completa. Ahora la semilla de una tabla que
+    crea la MISMA migración la cubre la tabla (misma transacción); todo lo demás se sigue
+    mirando: las columnas nuevas de pieza y orden_trabajo_pieza, que son lo que tumba
+    lecturas si falta."""
+    mp = migraciones._que_crea(dict(migraciones.MIGRACIONES)["2026-09-23_materia_prima"])
+    assert mp is not None
+    assert ("tabla", "formato", None) in mp
+    assert ("columna", "pieza", "origen") in mp and ("columna", "orden_trabajo_pieza", "reserva") in mp
+    assert ("indice", "ux_canera_celda_vigente", None) in mp
+    assert len([o for o in mp if o[0] == "columna"]) == 18 + 21  # pieza + orden_trabajo_pieza
+
+    crea = "CREATE TABLE IF NOT EXISTS cat (id SERIAL PRIMARY KEY, nombre TEXT UNIQUE)"
+    semilla = "INSERT INTO cat (nombre) VALUES ('A') ON CONFLICT (nombre) DO NOTHING"
+    assert migraciones._que_crea([crea, semilla]) == [("tabla", "cat", None)]
+    # En una tabla que ya estaba, que la tabla exista no dice nada de sus filas.
+    assert migraciones._que_crea(["INSERT INTO otra (nombre) VALUES ('A') ON CONFLICT DO NOTHING"]) is None
+    assert migraciones._que_crea([crea, semilla.replace("cat", "otra")]) is None
+    # Ni un INSERT que puede fallar o pisar (sin DO NOTHING).
+    assert migraciones._que_crea([crea, "INSERT INTO cat (nombre) VALUES ('A')"]) is None
+    assert migraciones._que_crea([crea, "INSERT INTO cat (nombre) VALUES ('A') ON CONFLICT "
+                                        "(nombre) DO UPDATE SET nombre = 'B'"]) is None
+
+
+def _filas_de_la_semilla(sentencias) -> list[tuple[str, str, tuple[str, ...], int]]:
+    """(nombre, iniciales, etiquetas, orden) de cada fila que siembran los INSERT INTO formato."""
+    filas = []
+    for s in sentencias:
+        if not s.startswith("INSERT INTO formato"):
+            continue
+        for tupla in re.findall(r"\(('[^)]*), (\d+)\)", s):
+            literales = re.findall(r"'([^']*)'", tupla[0])
+            filas.append((literales[0], literales[1], tuple(literales[2:]), int(tupla[1])))
+    return filas
+
+
+def test_la_semilla_de_formato_es_la_de_semilla_py():
+    """Lo que se aplica solo al arrancar siembra la misma lista que semilla.py: nombre,
+    iniciales, etiquetas y orden (el de FORMATOS_SEMILLA). El .sql contra semilla.py lo
+    mira test_materia_prima_reglas; el test de firmas de arriba sólo compara los nombres."""
+    from backend.application.materia_prima.semilla import FORMATOS_SEMILLA
+
+    filas = _filas_de_la_semilla(dict(migraciones.MIGRACIONES)["2026-09-23_materia_prima"])
+    esperadas = [(n, i, e, orden) for orden, (n, i, e) in enumerate(FORMATOS_SEMILLA, start=1)]
+    assert sorted(filas, key=lambda f: f[3]) == esperadas
+
+
+def test_la_semilla_no_gasta_la_secuencia_en_cada_arranque():
+    """Con sólo ON CONFLICT DO NOTHING, Postgres pide el id a la secuencia antes de ver el
+    choque: cada arranque le sumaba 15 a formato_id_seq. El WHERE NOT EXISTS filtra antes."""
+    for s in dict(migraciones.MIGRACIONES)["2026-09-23_materia_prima"]:
+        if s.startswith("INSERT INTO formato"):
+            assert "WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre)" in s, s
+            assert s.endswith("ON CONFLICT (nombre) DO NOTHING"), "dos instancias a la vez"
+
+
 def test_health_da_503_con_una_migracion_sin_aplicar(sin_migraciones_reales):
     from fastapi.testclient import TestClient
     from backend.presentation.main import app
@@ -479,3 +544,50 @@ async def test_pg_dos_instancias_a_la_vez_no_piden_correr_nada_a_mano(motor_pg, 
     assert faltan == []
     assert not [r for r in caplog.records if r.levelno >= 30], [
         r.getMessage() for r in caplog.records if r.levelno >= 30]
+
+
+def _solo_materia_prima(monkeypatch):
+    monkeypatch.setattr(migraciones, "MIGRACIONES",
+                        [m for m in migraciones.MIGRACIONES if m[0] == "2026-09-23_materia_prima"])
+
+
+@pg
+async def test_pg_materia_prima_ya_aplicada_con_una_lectura_larga_no_da_503(motor_pg, monkeypatch,
+                                                                          caplog):
+    """El hallazgo del 24/09, en chico: con la migración ya aplicada, una lectura abierta
+    sobre `pieza` (el espejo, el planificador) le gana el lock a cada intento del ALTER.
+    Antes eso terminaba en «SIN aplicar» y /health 503; ahora el primer choque mira el
+    catálogo, ve que está todo y no hay nada pendiente."""
+    _solo_materia_prima(monkeypatch)
+    assert await migraciones.aplicar_migraciones(motor=motor_pg, segundo_plano=False) == []
+    monkeypatch.setattr(migraciones, "LOCK_TIMEOUT", "200ms")
+    lector = await motor_pg.connect()
+    tx = await lector.begin()
+    await lector.execute(text("SELECT count(*) FROM pieza"))
+    try:
+        faltan = await migraciones.aplicar_migraciones(motor=motor_pg, pausa_seg=0,
+                                                       segundo_plano=False)
+    finally:
+        await tx.commit()
+        await lector.close()
+    assert faltan == [] and migraciones.migraciones_pendientes() == []
+    assert not [r for r in caplog.records if r.levelno >= 30], [
+        r.getMessage() for r in caplog.records if r.levelno >= 30]
+    assert any("ya estaba aplicada" in r.getMessage() for r in caplog.records)
+
+
+@pg
+async def test_pg_la_semilla_no_gasta_la_secuencia_en_cada_arranque(motor_pg, monkeypatch):
+    _solo_materia_prima(monkeypatch)
+
+    async def secuencia_y_filas():
+        async with motor_pg.connect() as conn:
+            return (await conn.scalar(text("SELECT last_value FROM formato_id_seq")),
+                    await conn.scalar(text("SELECT count(*) FROM formato")))
+
+    assert await migraciones.aplicar_migraciones(motor=motor_pg, segundo_plano=False) == []
+    primera = await secuencia_y_filas()
+    assert primera[1] == 15
+    for _ in range(3):  # tres arranques más
+        assert await migraciones.aplicar_migraciones(motor=motor_pg, segundo_plano=False) == []
+    assert await secuencia_y_filas() == primera

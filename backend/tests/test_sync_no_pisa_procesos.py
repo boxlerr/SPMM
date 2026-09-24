@@ -462,11 +462,14 @@ async def test_con_spmm_el_sync_no_corre_el_espejo(monkeypatch, importar_falso):
         assert tabla not in sql
 
 
-@pytest.mark.parametrize("importada, respalda", [(False, True), (True, False)])
-async def test_con_el_integral_corre_el_espejo_y_no_el_7b(monkeypatch, importar_falso, importada, respalda):
+@pytest.mark.parametrize("importada", [False, True])
+async def test_con_el_integral_corre_el_espejo_y_no_el_7b(monkeypatch, importar_falso, importada):
     """Integral dueño (y es el valor por defecto): el espejo con los pasos del espejo,
-    escribiendo, callado, por el pooler 6543 y sin copias salvo la primera vez (ninguna
-    pieza con origen: es la importación inicial). El 7b no corre: el espejo trae lo mismo."""
+    escribiendo, callado, por el pooler 6543 y con copias sólo a las backup_* que todavía no
+    existen, tabla por tabla (lo decide importar() con el candado tomado; antes el sync
+    decidía por «ninguna pieza con origen» y se escapaba la primera pasada que fallaba a
+    mitad). Haya o no piezas con origen, se pide lo mismo. El 7b no corre: el espejo trae
+    lo mismo."""
     from backend.scripts import importar_materia_prima_legacy as I
 
     monkeypatch.delenv("MATERIA_PRIMA_DUENO", raising=False)
@@ -475,7 +478,7 @@ async def test_con_el_integral_corre_el_espejo_y_no_el_7b(monkeypatch, importar_
     llamada = importar_falso.llamadas[0]
     assert llamada["pasos"] == I.PASOS_ESPEJO and "recortes" not in llamada["pasos"]
     assert llamada["aplicar"] is True and llamada["silencioso"] is True
-    assert llamada["respaldar"] is respalda
+    assert llamada["respaldar"] == I.SI_NO_HAY_COPIA
     assert llamada["frenar_en_tope"] is True, "una lectura rota del Integral no puede vaciar SPMM"
     assert llamada["db_url"] == "postgresql://u:p@db.ejemplo:6543/postgres"
     assert "INSERT INTO pieza (" not in sql and "pieza_precio" not in sql, "el 7b no corre"
@@ -593,3 +596,73 @@ def test_el_loop_local_del_sync_hay_que_pedirlo():
     condicion = condiciones[0]
     assert "os.getenv('SYNC_LOOP_ENABLED', 'false')" in condicion
     assert "== 'true'" in condicion
+
+
+async def test_el_renglon_del_espejo_dice_las_copias_que_hizo(monkeypatch, caplog):
+    """La pasada que copia (la primera, o la que sigue a una primera que falló a mitad) lo
+    dice en su renglón, con cuántas filas fueron a cada backup_*: es lo que se busca en los
+    logs para volver atrás. Las demás, no."""
+    import logging
+
+    from backend.infrastructure import db
+    from backend.scripts import importar_materia_prima_legacy as I
+
+    copias = {}
+
+    async def _importar(pasos, **kw):
+        res = I.Resultado(pasos, True)
+        res.ctx = I.Contexto(None, {}, True, 10)
+        paso = res.ctx.paso("lineas")
+        for backup, n in copias.items():
+            paso.contar("filas copiadas a " + backup, n)
+        return res
+
+    monkeypatch.setattr(I, "importar", _importar)
+    monkeypatch.setattr(db, "PG_URL", "postgresql://u:p@db.ejemplo:5432/postgres")
+    monkeypatch.setenv("MATERIA_PRIMA_DUENO", "integral")
+    import backend.scripts.sync_db as sync_db
+
+    copias[I.BACKUP_LINEA] = 1211
+    with caplog.at_level(logging.INFO, logger="app"):
+        await sync_db._espejo_del_integral(_FakeSession([]))
+    assert any("(materia prima, con copias: backup_20260923_orden_trabajo_pieza 1211)" in r.getMessage()
+               for r in caplog.records), [r.getMessage() for r in caplog.records]
+    caplog.clear()
+    copias.clear()
+    with caplog.at_level(logging.INFO, logger="app"):
+        await sync_db._espejo_del_integral(_FakeSession([]))
+    assert any("espejo del Integral (materia prima): sin cambios" in r.getMessage() for r in caplog.records)
+
+
+def test_la_lectura_del_integral_lleva_el_tope_al_driver_y_no_lo_deja_puesto(monkeypatch):
+    """pyodbc: `timeout` de la conexión = SQL_ATTR_QUERY_TIMEOUT, el driver cancela la
+    consulta en el SQL Server. Se pone en cada lectura (0 = sin tope, como siempre) porque
+    la conexión vuelve al pool con el valor que le quedó."""
+    from types import SimpleNamespace
+
+    import backend.scripts.sync_db as sync_db
+
+    crudo = SimpleNamespace(timeout=0)
+    vistos = []
+
+    class _Resultado:
+        def mappings(self):
+            return [{"idot": 1}]
+
+    class _Conexion:
+        connection = SimpleNamespace(dbapi_connection=crudo)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            vistos.append(crudo.timeout)
+            return _Resultado()
+
+    monkeypatch.setattr(sync_db, "_legacy_engine", lambda: SimpleNamespace(connect=_Conexion))
+    assert sync_db._leer_sync("SELECT 1", tope_seg=29.2) == [{"idot": 1}]
+    assert sync_db._leer_sync("SELECT 1") == [{"idot": 1}]
+    assert vistos == [30, 0], "el tope en segundos enteros para el driver, y la siguiente sin él"

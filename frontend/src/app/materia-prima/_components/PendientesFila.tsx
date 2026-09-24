@@ -42,10 +42,12 @@ import {
 import { useCaneraDePantalla } from "./CaneraDatos";
 import { CaneraElegirCelda } from "./CaneraElegirCelda";
 import { SelectorProveedor } from "./SelectorProveedor";
+import { useEnvioSinRepetir } from "./PendientesForzar";
 
 /** Lo que una fila le pide a la pantalla. Un solo objeto que no cambia, para que `memo` sirva. */
 export interface AccionesFila {
-    guardar: (id: number, cambios: CambiosLinea) => void;
+    /** Se cumple cuando terminó (409 incluido); sólo la reserva la espera. */
+    guardar: (id: number, cambios: CambiosLinea) => Promise<void>;
     /** Tildar/destildar la fila; con Shift, todo el tramo desde la última tocada. */
     seleccionar: (id: number, conShift: boolean) => void;
     abrirOT: (idOrden: number) => void;
@@ -105,17 +107,23 @@ function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, 
                 ver las fechas no se pierde de qué OT es la fila. Una sola celda y no dos:
                 dos celdas fijas tienen que calzar al píxel (la segunda va a `left` = ancho
                 de la primera) y el navegador redondea el ancho de las columnas; por la
-                rendija se veía pasar el texto de abajo. */}
+                rendija se veía pasar el texto de abajo.
+                En el teléfono va más angosta (sin el cliente, que queda en el título del
+                número): con el cliente, un nombre largo estiraba la columna y en 375 px
+                ocupaba 242 de los 313 que se ven (E2E del 24/09). Los anchos son los del
+                encabezado (`Th` de la OT en PendientesTab). */}
             <td
                 className={cn(
                     "sticky left-0 z-10 bg-inherit",
-                    edita ? "w-[148px] min-w-[148px]" : "w-[116px] min-w-[116px]",
+                    edita
+                        ? "w-[148px] min-w-[148px] max-sm:w-[96px] max-sm:min-w-[96px]"
+                        : "w-[116px] min-w-[116px] max-sm:w-[72px] max-sm:min-w-[72px]",
                     // «Falta pedir»: la marca roja a la izquierda (ver ESTADOS_LINEA). Sombra
                     // y no borde: el borde de una celda fija se va con el scroll.
                     estado === "falta_pedir" && "shadow-[inset_4px_0_0_#ef4444]",
                 )}
             >
-                <div className="flex items-start gap-2.5">
+                <div className="flex items-start gap-2.5 max-sm:gap-1.5">
                     {edita && (
                         <input
                             type="checkbox"
@@ -149,7 +157,13 @@ function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, 
                         </button>
                         {primera && (
                             <div className="mt-0.5 space-y-px leading-tight">
-                                {ot?.cliente && <div className="truncate text-[10px] text-gray-500" title={ot.cliente}>{ot.cliente}</div>}
+                                {/* `max-w`: `truncate` solo no alcanza en una tabla; el ancho
+                                    mínimo de la celda sería el del nombre entero. */}
+                                {ot?.cliente && (
+                                    <div className="max-w-[100px] truncate text-[10px] text-gray-500 max-sm:hidden" title={ot.cliente}>
+                                        {ot.cliente}
+                                    </div>
+                                )}
                                 <div className="text-[10px] text-gray-400" title="Fecha de la OT (la «T» del sistema viejo)">
                                     T {fmtCortaConAnio(l.fecha_ot)}
                                 </div>
@@ -158,7 +172,8 @@ function FilaPendienteBase({ linea: l, ot, edita, seleccionada, primera, zebra, 
                                         className={cn("text-[10px]", vencida ? "font-semibold text-red-600" : "text-amber-700")}
                                         title="Cuándo arranca la OT según el plan: para ese día tiene que estar el material."
                                     >
-                                        se necesita {fmtFechaCorta(l.fecha_requerida)}
+                                        <span className="max-sm:hidden">se necesita</span>
+                                        <span className="sm:hidden">nec.</span> {fmtFechaCorta(l.fecha_requerida)}
                                     </div>
                                 )}
                             </div>
@@ -470,6 +485,14 @@ function CeldaFecha({
  * (lo libre, hasta la cantidad de la línea) y ya seleccionado: Enter y listo. Si lo que
  * se pide supera lo libre, avisa antes; el backend igual pregunta (409) y se puede
  * hacer igual. Destildarla la saca sin preguntar.
+ *
+ * Mientras la reserva se guarda (y mientras está abierta la pregunta del 409) no se
+ * acepta otro toque ni en «Reservar» ni en la casilla: el cartelito queda abierto con
+ * «Reservando…» hasta que termina. Un doble clic en «Reservar» mandaba dos guardados, o
+ * el segundo clic caía en la tabla de abajo o cerraba el aviso del 409 como «Cancelar»
+ * (E2E del 24/09; ver `useEnvioSinRepetir`). Lo libre que muestra queda congelado
+ * mientras tanto: si la respuesta lo cambia, el aviso de «Hay 0 libres» aparece o se va
+ * y los botones se corren un renglón justo debajo del cursor.
  */
 function CasillaReserva({
     linea: l,
@@ -478,19 +501,24 @@ function CasillaReserva({
 }: {
     linea: LineaPendiente;
     edita: boolean;
-    onGuardar: (c: CambiosLinea) => void;
+    onGuardar: (c: CambiosLinea) => Promise<unknown> | void;
 }) {
     const [abierto, setAbierto] = useState(false);
     const [texto, setTexto] = useState("");
+    const envio = useEnvioSinRepetir();
     const libre = Math.max(0, l.stock_libre ?? 0);
     const sugerida = Math.min(l.cantidad, libre) > 0 ? Math.min(l.cantidad, libre) : l.cantidad;
     const cantidad = leerCantidad(texto);
     const valida = cantidad !== null && cantidad > 0;
+    // Desde que se tocó «Reservar» (mientras se guarda y mientras se va), lo libre que se veía.
+    const [libreCongelado, setLibreCongelado] = useState<number | null>(null);
+    const libreVisto = libreCongelado ?? libre;
+    const stockLibreVisto = libreCongelado ?? l.stock_libre;
 
     const reservar = () => {
-        if (!valida) return;
-        setAbierto(false);
-        onGuardar({ reserva: true, cantidad_reservada: cantidad });
+        if (!valida || envio.ocupado()) return;
+        setLibreCongelado(libre);
+        envio.enviar(() => onGuardar({ reserva: true, cantidad_reservada: cantidad }), () => setAbierto(false));
     };
 
     const titulo = l.reserva
@@ -505,10 +533,12 @@ function CasillaReserva({
                     checked={l.reserva}
                     disabled={!edita}
                     onChange={() => {
+                        if (envio.ocupado()) return;
                         if (l.reserva) {
                             onGuardar({ reserva: false });
                             return;
                         }
+                        setLibreCongelado(null);
                         setTexto(aEditable(sugerida));
                         setAbierto(true);
                     }}
@@ -520,7 +550,7 @@ function CasillaReserva({
             <PopoverContent className="w-64 p-3" align="center" onOpenAutoFocus={(e) => e.preventDefault()}>
                 <p className="text-xs font-semibold text-gray-800">Reservar {l.codigo} del stock</p>
                 <p className="mt-0.5 text-[11px] text-gray-500">
-                    Libre: <b className="tabular-nums">{fmtCantidad(l.stock_libre)}</b> {l.unidad ?? ""} · la línea pide{" "}
+                    Libre: <b className="tabular-nums">{fmtCantidad(stockLibreVisto)}</b> {l.unidad ?? ""} · la línea pide{" "}
                     <b className="tabular-nums">{fmtCantidad(l.cantidad)}</b>
                 </p>
                 <div className="mt-2 flex items-center gap-2">
@@ -528,6 +558,7 @@ function CasillaReserva({
                         autoFocus
                         onFocus={(e) => e.currentTarget.select()}
                         value={texto}
+                        readOnly={envio.enviando}
                         onChange={(e) => setTexto(e.target.value)}
                         onKeyDown={(e) => {
                             if (e.key === "Enter") {
@@ -544,10 +575,10 @@ function CasillaReserva({
                     />
                     <span className="text-xs text-gray-500">{l.unidad ?? ""}</span>
                 </div>
-                {valida && cantidad! > libre && (
+                {valida && cantidad! > libreVisto && (
                     <p className="mt-1.5 flex items-start gap-1 text-[11px] text-amber-700">
                         <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
-                        Hay {fmtCantidad(libre)} libres: la reserva deja el stock en negativo (te va a preguntar).
+                        Hay {fmtCantidad(libreVisto)} libres: la reserva deja el stock en negativo (te va a preguntar).
                     </p>
                 )}
                 <div className="mt-2.5 flex justify-end gap-2">
@@ -560,11 +591,12 @@ function CasillaReserva({
                     </button>
                     <button
                         type="button"
-                        disabled={!valida}
+                        disabled={!valida || envio.enviando}
                         onClick={reservar}
-                        className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
                     >
-                        Reservar
+                        {envio.enviando && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {envio.enviando ? "Reservando…" : "Reservar"}
                     </button>
                 </div>
             </PopoverContent>

@@ -94,6 +94,9 @@ async def business_handler(request: Request, exc: BusinessException):
         status_code=422,  # o 400 si preferís
         content=ResponseDTO(
             status=False,
+            # Sólo la excepción que lo pide (hoy la escritura en modo espejo de materia
+            # prima, application/materia_prima/dueno.py): las demás siguen con null.
+            errorDescription=getattr(exc, "error_description", None),
             data=None,
             errors=[ErrorItemDTO(message=exc.message, campo="global")]
         ).model_dump()

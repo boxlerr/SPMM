@@ -335,14 +335,19 @@ export function InsumosTab({ edita, piezaInicial = null, nuevoInicial = false }:
 
     return (
         // Con la ficha abierta: la ficha crece hasta 560 px y la lista se queda con el resto,
-        // pero nunca menos de 15 rem (código, descripción y stock). En una pantalla de 1024 la
-        // ficha queda de ~420 px; desde ~1300, de 560.
-        <div className={cn("grid items-start gap-4", fichaAbierta && "lg:grid-cols-[minmax(15rem,1fr)_minmax(22rem,560px)]")}>
+        // pero nunca menos de 16 rem (código, descripción y stock; y «Exportar» y «Nuevo
+        // insumo» en un renglón). En una pantalla de 1024 la ficha queda de ~400 px; desde
+        // ~1300, de 560.
+        <div className={cn("grid items-start gap-4", fichaAbierta && "lg:grid-cols-[minmax(16rem,1fr)_minmax(22rem,560px)]")}>
             {/* ═════════ la lista ═════════ */}
             <section className="min-w-0 space-y-3" aria-label="Lista de insumos">
-                {/* Buscador y botones */}
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <div className="relative min-w-0 flex-1 sm:max-w-md">
+                {/* Buscador y botones. Envuelven en vez de apretarse: con la ficha abierta
+                    en 1024 la lista mide ~16 rem, y en una sola fila el buscador quedaba en
+                    66 px (no se veía lo escrito) y «Exportar» salía recortado (E2E del
+                    24/09). El buscador nunca baja de 12 rem: si no entra con los botones,
+                    va solo en su renglón y los botones abajo, a la derecha. */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative min-w-[12rem] flex-[1_1_12rem] sm:max-w-md">
                         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                         <input
                             type="search"
@@ -367,7 +372,7 @@ export function InsumosTab({ edita, piezaInicial = null, nuevoInicial = false }:
                             </button>
                         ) : null}
                     </div>
-                    <div className="flex items-center gap-2 sm:ml-auto">
+                    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                         <ExportarMenu
                             titulo="Insumos de materia prima"
                             archivo="insumos"

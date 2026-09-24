@@ -916,7 +916,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                     <table className="w-full min-w-[1780px] border-separate border-spacing-0">
                                         <thead>
                                             <tr>
-                                                <Th className={cn("left-0 z-30", edita ? "w-[148px]" : "w-[116px]")}>
+                                                {/* Los anchos, los mismos que la celda fija de cada fila (PendientesFila). */}
+                                                <Th className={cn("left-0 z-30", edita ? "w-[148px] max-sm:w-[96px]" : "w-[116px] max-sm:w-[72px]")}>
                                                     <span className="flex items-center gap-2.5">
                                                         {edita && (
                                                             <input

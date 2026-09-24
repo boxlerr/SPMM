@@ -16,7 +16,7 @@ Son dos modos de la misma sección, y se eligen con UNA variable de entorno:
                 scripts/importar_materia_prima_legacy.importar): gana el Integral;
               · las APIs de materia prima contestan 422 a toda escritura (salvo la vista
                 previa del alta, que no escribe): lo que se cargara acá lo pisaría el
-                espejo a los pocos minutos, o peor, quedaría distinto del Integral;
+                espejo en la pasada siguiente, o peor, quedaría distinto del Integral;
               · GET /materia-prima/catalogos devuelve dueno='integral' y el texto del
                 cartel (aviso_dueno) para que la pantalla lo diga.
   spmm      SPMM es el dueño (lo construido): el espejo se apaga, el sync sólo trae
@@ -49,10 +49,18 @@ VARIABLE = "MATERIA_PRIMA_DUENO"
 INTEGRAL = "integral"
 SPMM = "spmm"
 
+# Cada cuántos minutos corre el sync, y con él el espejo: el Cloud Scheduler `spmm-sync`
+# está en */30 (verificado el 24/09 con gcloud). Lo único que lo usa es el texto del aviso,
+# pero el aviso le promete a Carolina y a Maxi cuánto tarda en verse acá lo que cargan en el
+# Integral, así que tiene que decir la verdad: si el Scheduler pasa a */10, se cambia acá.
+FRECUENCIA_ESPEJO_MIN = 30
+
 # El cartel de la pantalla y el 422 de las escrituras dicen lo mismo: quien intenta
-# cargar algo tiene que saber DÓNDE se carga y que no hace falta hacer nada más.
+# cargar algo tiene que saber DÓNDE se carga, que no hace falta hacer nada más y cuánto
+# tarda en verse (no «al instante»: la pantalla se refresca sola, pero el dato llega con
+# el sync).
 AVISO_PILOTO = ("Durante la prueba piloto las materias primas se cargan en el Sistema "
-                "Integral; SPMM las muestra actualizadas solas.")
+                f"Integral; Metlosys las trae de ahí cada {FRECUENCIA_ESPEJO_MIN} minutos.")
 
 # Lo que no escribe aunque sea un POST: la vista previa del alta de un insumo (arma la
 # descripción y el código con las reglas del backend). Sin ella la ficha no se puede ni
@@ -60,6 +68,18 @@ AVISO_PILOTO = ("Durante la prueba piloto las materias primas se cargan en el Si
 _NO_ESCRIBEN = {("POST", "/materia-prima/insumos/previsualizar")}
 
 _LECTURAS = {"GET", "HEAD", "OPTIONS"}
+
+
+class EscrituraEnModoEspejo(BusinessException):
+    """El 422 de una escritura con el Integral como dueño. Es un BusinessException (el
+    mismo 422 y el mismo errors[0].message de siempre) que además pide que el aviso vaya
+    en errorDescription: el handler (commons/handlers/exception_handlers.business_handler)
+    lo copia de `error_description`. Lo pidió la prueba de punta a punta del 24/09: la
+    pantalla y quien mire la respuesta a mano leen uno u otro campo."""
+
+    def __init__(self, mensaje: str = AVISO_PILOTO):
+        super().__init__(mensaje)
+        self.error_description = mensaje
 
 
 def dueno() -> str:
@@ -98,4 +118,4 @@ async def solo_si_spmm_es_dueno(request: Request) -> None:
         return
     ruta = getattr(request.scope.get("route"), "path", None) or request.url.path
     if es_escritura(request.method, ruta):
-        raise BusinessException(AVISO_PILOTO)
+        raise EscrituraEnModoEspejo(AVISO_PILOTO)

@@ -814,6 +814,10 @@ export function FormularioInsumo({
                                                                 onChange={(e) => cambiarMedida(i, e.target.value)}
                                                                 onFocus={() => setEnFoco(i)}
                                                                 onBlur={() => setEnFoco((f) => (f === i ? null : f))}
+                                                                // El nombre explícito: el <label> de arriba junta la letra
+                                                                // de la cota y la etiqueta («ALado») y hay lectores que
+                                                                // toman el placeholder («0»). Así dice «Lado, en mm».
+                                                                aria-label={`${etiqueta}, en ${b.sistema_medida === "pulgada" ? "pulgadas" : "mm"}`}
                                                                 aria-invalid={l.error || falta}
                                                                 className={cn(
                                                                     "h-9 bg-white pr-10 tabular-nums",
@@ -972,6 +976,14 @@ export function FormularioInsumo({
                             onCambiar={(u) => cambiar("unidad", u)}
                             className={cn(intentado && esAlta && !b.unidad && "ring-rose-300")}
                         />
+                        {/* El rojo solo no alcanzaba: al tocar «Guardar» sin unidad no
+                            pasaba nada visible más que el borde (el toast se iba solo). No
+                            hay unidad por defecto a propósito (ver `enBlanco`). */}
+                        {intentado && esAlta && !b.unidad && (
+                            <p role="alert" className="mt-1 text-[11px] text-rose-600">
+                                Elegí la unidad: con ella se compra y se cuenta el stock (MTS para barras, UN para piezas sueltas…).
+                            </p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 @md:grid-cols-2">
@@ -1118,6 +1130,11 @@ export function FormularioInsumo({
                 )}
                 {errorGuardar && !aviso && (
                     <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800">{errorGuardar}</p>
+                )}
+                {/* Lo que falta, al lado del botón y mientras falte: el toast se va solo y el
+                    campo en rojo (la unidad, sobre todo) puede haber quedado fuera de vista. */}
+                {intentado && esAlta && faltanLocal.length > 0 && !aviso && !errorGuardar && (
+                    <p className="text-xs text-rose-700">Falta: {faltanLocal.join(", ")}.</p>
                 )}
                 <div className="flex flex-wrap items-center justify-end gap-2">
                     {esAlta ? (

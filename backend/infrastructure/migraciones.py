@@ -1016,7 +1016,10 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
         # (la solapa Materias primas de la OT, el estado del material en las listas, los
         # consumos, la campanita de stock bajo). Todas nullable o con DEFAULT constante:
         # no reescribe filas. La semilla de `formato` es la única escritura y es sobre un
-        # catálogo nuevo (ON CONFLICT DO NOTHING). Ver el .sql para el porqué de cada cosa.
+        # catálogo que crea esta misma migración: sólo los que faltan por nombre (WHERE NOT
+        # EXISTS, así un arranque no le suma 15 a la secuencia de ids; el ON CONFLICT
+        # queda para dos instancias a la vez). Que su tabla sea de esta migración es lo que
+        # deja verificarla en el catálogo (ver `_que_crea`). Ver el .sql para el porqué.
         "2026-09-23_materia_prima",
         [
             # Un solo literal SQL por COMMENT (ver la nota de la de máquinas).
@@ -1066,30 +1069,44 @@ MIGRACIONES: list[tuple[str, list[str]]] = [
             "COMMENT ON COLUMN formato.etiqueta1 IS 'Qué es la primera medida (Ø, Lado, "
             "Espesor...). La cantidad de medidas del formato es la cantidad de etiquetas "
             "no nulas, siempre las primeras.'",
-            "INSERT INTO formato (nombre, iniciales, etiqueta1, orden) VALUES "
+            "INSERT INTO formato (nombre, iniciales, etiqueta1, orden) "
+            "SELECT v.nombre, v.iniciales, v.etiqueta1, v.orden FROM (VALUES "
             "('BARRA REDONDO', 'BR', 'Ø', 1), "
             "('BARRA CUADRADO', 'BC', 'Lado', 2), "
-            "('BARRA HEXAGONAL', 'BH', 'Entre caras', 3) "
+            "('BARRA HEXAGONAL', 'BH', 'Entre caras', 3)"
+            ") AS v (nombre, iniciales, etiqueta1, orden) "
+            "WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre) "
             "ON CONFLICT (nombre) DO NOTHING",
-            "INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, orden) VALUES "
+            "INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, orden) "
+            "SELECT v.nombre, v.iniciales, v.etiqueta1, v.etiqueta2, v.orden FROM (VALUES "
             "('BARRA RECTANGULAR', 'BR', 'Ancho', 'Espesor', 4), "
             "('TUBO REDONDO', 'TR', 'Ø exterior', 'Ø interior', 5), "
             "('TUBO CUADRADO', 'TC', 'Lado', 'Espesor', 6), "
             "('PLANCHUELA', 'P', 'Ancho', 'Espesor', 9), "
             "('ANGULOS IGUALES', 'AI', 'Ala', 'Espesor', 10), "
-            "('CORTE PANTOGRAFO', 'CP', 'Medida', 'Espesor', 14) "
+            "('CORTE PANTOGRAFO', 'CP', 'Medida', 'Espesor', 14)"
+            ") AS v (nombre, iniciales, etiqueta1, etiqueta2, orden) "
+            "WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre) "
             "ON CONFLICT (nombre) DO NOTHING",
-            "INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, "
-            "orden) VALUES "
+            "INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, orden) "
+            "SELECT v.nombre, v.iniciales, v.etiqueta1, v.etiqueta2, v.etiqueta3, v.orden "
+            "FROM (VALUES "
             "('TUBO RECTANGULAR', 'TR', 'Lado A', 'Lado B', 'Espesor', 7), "
             "('PLACA', 'P', 'Espesor', 'Ancho', 'Largo', 8), "
             "('ANGULOS DESIGUALES', 'AD', 'Ala A', 'Ala B', 'Espesor', 11), "
             "('PERFIL U', 'PU', 'Alto', 'Ala', 'Espesor', 12), "
-            "('PERFIL T', 'PT', 'Alto', 'Ala', 'Espesor', 13) "
+            "('PERFIL T', 'PT', 'Alto', 'Ala', 'Espesor', 13)"
+            ") AS v (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, orden) "
+            "WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre) "
             "ON CONFLICT (nombre) DO NOTHING",
             "INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, "
-            "etiqueta4, etiqueta5, orden) VALUES "
-            "('CORTE LASER', 'CL', 'Medida 1', 'Medida 2', 'Medida 3', 'Medida 4', 'Medida 5', 15) "
+            "etiqueta4, etiqueta5, orden) "
+            "SELECT v.nombre, v.iniciales, v.etiqueta1, v.etiqueta2, v.etiqueta3, "
+            "v.etiqueta4, v.etiqueta5, v.orden FROM (VALUES "
+            "('CORTE LASER', 'CL', 'Medida 1', 'Medida 2', 'Medida 3', 'Medida 4', 'Medida 5', 15)"
+            ") AS v (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, etiqueta4, "
+            "etiqueta5, orden) "
+            "WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre) "
             "ON CONFLICT (nombre) DO NOTHING",
             "CREATE TABLE IF NOT EXISTS proveedor ("
             "id SERIAL PRIMARY KEY, "
@@ -1381,20 +1398,41 @@ async def _aplicar_una(nombre: str, sentencias: list[str], motor=None) -> None:
 # además carga filas (INSERT, WITH) o tiene algo que no se reconoce acá se da por NO
 # aplicada, y sigue el camino de los reintentos: mejor un reintento de más que un
 # «ya estaba» falso.
+#
+# Con UNA excepción (24/09): la semilla de un catálogo que crea la MISMA migración
+# (INSERT INTO t … ON CONFLICT … DO NOTHING, con CREATE TABLE IF NOT EXISTS t en la
+# misma lista). Ahí alcanza con que la tabla esté: la migración va entera en una
+# transacción, así que si la tabla existe es porque confirmó, con sus filas. Sin esto
+# la de materia prima (la semilla de `formato`) no se podía dar nunca por aplicada, y
+# un arranque que perdía la carrera por el lock de `pieza` contra una lectura larga (el
+# espejo, el planificador) logueaba «SIN aplicar» y dejaba /health en 503 con la base
+# completa (medido en un Postgres local: 503 entre los 25 y los 35 s del arranque). Lo
+# que /health cuida —que no falte una COLUMNA que el modelo pide en cada SELECT— se
+# sigue mirando igual. Y un INSERT en una tabla que ya estaba (las secciones, los roles)
+# sigue sin verificarse: que la tabla exista no dice nada de sus filas.
 _RE_ALTER = re.compile(r"^alter table (\w+) ")
 _RE_COLUMNA = re.compile(r"add column if not exists (\w+)")
 _RE_TABLA = re.compile(r"^create table if not exists (\w+)")
 _RE_INDICE = re.compile(r"^create (?:unique )?index if not exists (\w+)")
+_RE_INSERT = re.compile(r"^insert into (\w+) ")
+_RE_SIN_PISAR = re.compile(r" on conflict (?:\([\w, ]+\) )?do nothing$")
 
 
 def _que_crea(sentencias: list[str]) -> Optional[list[tuple[str, str, Optional[str]]]]:
     """[(tipo, relación, columna)] de lo que deja la migración, o None si tiene algo
     que no se puede verificar mirando el catálogo."""
+    normalizadas = [" ".join(s.split()).lower() for s in sentencias]
+    tablas_de_esta = {m.group(1) for t in normalizadas if (m := _RE_TABLA.match(t))}
     objetos: list[tuple[str, str, Optional[str]]] = []
-    for s in sentencias:
-        t = " ".join(s.split()).lower()
+    for t in normalizadas:
         if t.startswith("comment on "):
             continue  # va en la misma transacción que lo que comenta
+        if m := _RE_INSERT.match(t):
+            # La semilla de una tabla de esta migración: la cubre el ("tabla", t) de su
+            # CREATE (ver arriba). Cualquier otro INSERT no se puede verificar.
+            if m.group(1) in tablas_de_esta and _RE_SIN_PISAR.search(t):
+                continue
+            return None
         if m := _RE_ALTER.match(t):
             columnas = _RE_COLUMNA.findall(t)
             # Un ALTER que hace otra cosa además de agregar columnas no se verifica.

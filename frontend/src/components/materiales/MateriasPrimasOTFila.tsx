@@ -37,12 +37,14 @@ import {
     leerCantidad,
 } from "@/lib/materiaPrima";
 import { SelectorProveedor } from "@/app/materia-prima/_components/SelectorProveedor";
+import { useEnvioSinRepetir } from "@/app/materia-prima/_components/PendientesForzar";
 import { CeldaConsumido, type LineaDeMaterial } from "@/components/materiales/ConsumoDeMaterial";
 import { textoCorte, type CambiosFila, type FilaMP } from "./MateriasPrimasOTDatos";
 
 /** Lo que una fila le pide a la solapa. Un solo objeto que no cambia, para que `memo` sirva. */
 export interface AccionesFilaMP {
-    cambiar: (fila: FilaMP, cambios: CambiosFila) => void;
+    /** Una línea guardada devuelve el guardado (409 incluido): sólo la reserva lo espera. */
+    cambiar: (fila: FilaMP, cambios: CambiosFila) => Promise<unknown> | void;
     borrar: (fila: FilaMP) => void;
     abrirCortes: (fila: FilaMP) => void;
     alternarConsumo: (idLinea: number) => void;
@@ -469,15 +471,25 @@ function CeldaCantidad({ valor, onGuardar, disabled, etiqueta }: {
  * (lo libre, hasta la cantidad de la línea) y ya seleccionado: Enter y listo. Si supera
  * lo libre, avisa antes; el backend igual pregunta (409) y se puede hacer igual.
  * Destildarla la saca sin preguntar. Con la reserva puesta, tocar el número la cambia.
+ *
+ * Mientras se guarda (y mientras está la pregunta del 409) no acepta otro toque: el
+ * cartelito queda con «Guardando…» hasta que termina. Es el mismo arreglo que la
+ * reserva de Pendientes (un doble clic mandaba dos guardados o cerraba el aviso del 409
+ * como «Cancelar»; ver `useEnvioSinRepetir`). Para que el segundo clic caiga en el
+ * cartelito y no en la tabla de abajo, el cartelito no se mueve mientras tanto: lo que
+ * muestra queda congelado (la fila ya cambió: con la reserva puesta decía «Cambiar la
+ * reserva», se iba el aviso de «Hay 0 libres» y los botones subían un renglón) y se
+ * ancla a la casilla sola (el número de la reserva aparece al lado y lo corría).
  */
 function CasillaReserva({ fila: f, edita, onGuardar }: {
     fila: FilaMP;
     /** Se puede tocar: línea guardada, utilizada y todavía no disponible (lo reservado ya se retiró). */
     edita: boolean;
-    onGuardar: (c: CambiosFila) => void;
+    onGuardar: (c: CambiosFila) => Promise<unknown> | void;
 }) {
     const [abierto, setAbierto] = useState(false);
     const [texto, setTexto] = useState("");
+    const envio = useEnvioSinRepetir();
     const campoRef = useRef<HTMLInputElement>(null);
     const libre = Math.max(0, f.stock_libre ?? 0);
     // Lo libre no cuenta lo que ya reservó esta misma línea: al cambiar una reserva, lo
@@ -486,15 +498,22 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
     const sugerida = Math.min(f.cantidad, libreParaEsta) > 0 ? Math.min(f.cantidad, libreParaEsta) : f.cantidad;
     const cantidad = leerCantidad(texto);
     const valida = cantidad !== null && cantidad > 0 && cantidad <= f.cantidad + 1e-9;
+    // Lo que muestra el cartelito: lo de ahora o, desde que se tocó «Reservar» (mientras
+    // se guarda y mientras se va), lo que se veía en ese momento.
+    const [congelado, setCongelado] = useState<{ reserva: boolean; libre: number } | null>(null);
+    const vista = congelado ?? { reserva: f.reserva, libre: libreParaEsta };
 
     const abrir = (inicial: number) => {
+        if (envio.ocupado()) return;
+        setCongelado(null);
         setTexto(aEditable(inicial));
         setAbierto(true);
     };
     const reservar = () => {
-        if (!valida) return;
-        setAbierto(false);
-        onGuardar(f.reserva ? { cantidad_reservada: cantidad } : { reserva: true, cantidad_reservada: cantidad });
+        if (!valida || envio.ocupado()) return;
+        const cambios: CambiosFila = f.reserva ? { cantidad_reservada: cantidad } : { reserva: true, cantidad_reservada: cantidad };
+        setCongelado({ reserva: f.reserva, libre: libreParaEsta });
+        envio.enviar(() => onGuardar(cambios), () => setAbierto(false));
     };
 
     const titulo = f.local
@@ -505,13 +524,14 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
 
     return (
         <PopoverPrimitive.Root open={abierto} onOpenChange={setAbierto}>
-            <PopoverPrimitive.Anchor asChild>
-                <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5">
+                <PopoverPrimitive.Anchor asChild>
                     <input
                         type="checkbox"
                         checked={f.reserva}
                         disabled={!edita}
                         onChange={() => {
+                            if (envio.ocupado()) return;
                             if (f.reserva) {
                                 onGuardar({ reserva: false });
                                 return;
@@ -522,22 +542,22 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
                         aria-label={titulo}
                         className={cn("h-4 w-4 accent-amber-600", edita ? "cursor-pointer" : "cursor-not-allowed opacity-50")}
                     />
-                    {f.reserva && (
-                        <button
-                            type="button"
-                            disabled={!edita}
-                            onClick={() => abrir(f.cantidad_reservada ?? sugerida)}
-                            title={edita ? "Cambiar cuánto se reserva" : titulo}
-                            className={cn(
-                                "rounded px-1 text-[11px] font-semibold tabular-nums text-amber-800",
-                                edita ? "hover:bg-amber-100" : "cursor-default",
-                            )}
-                        >
-                            {fmtCantidad(f.cantidad_reservada)}
-                        </button>
-                    )}
-                </div>
-            </PopoverPrimitive.Anchor>
+                </PopoverPrimitive.Anchor>
+                {f.reserva && (
+                    <button
+                        type="button"
+                        disabled={!edita}
+                        onClick={() => abrir(f.cantidad_reservada ?? sugerida)}
+                        title={edita ? "Cambiar cuánto se reserva" : titulo}
+                        className={cn(
+                            "rounded px-1 text-[11px] font-semibold tabular-nums text-amber-800",
+                            edita ? "hover:bg-amber-100" : "cursor-default",
+                        )}
+                    >
+                        {fmtCantidad(f.cantidad_reservada)}
+                    </button>
+                )}
+            </div>
             <PopoverContent
                 className="w-64 p-3"
                 align="center"
@@ -551,10 +571,10 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
                 }}
             >
                 <p className="text-xs font-semibold text-gray-800">
-                    {f.reserva ? "Cambiar la reserva de" : "Reservar"} {f.codigo} del stock
+                    {vista.reserva ? "Cambiar la reserva de" : "Reservar"} {f.codigo} del stock
                 </p>
                 <p className="mt-0.5 text-[11px] text-gray-500">
-                    Libre: <b className="tabular-nums">{fmtCantidad(libreParaEsta)}</b> {f.unidad ?? ""} · la línea lleva{" "}
+                    Libre: <b className="tabular-nums">{fmtCantidad(vista.libre)}</b> {f.unidad ?? ""} · la línea lleva{" "}
                     <b className="tabular-nums">{fmtCantidad(f.cantidad)}</b>
                 </p>
                 <div className="mt-2 flex items-center gap-2">
@@ -563,6 +583,7 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
                         data-escape-local
                         onFocus={(e) => e.currentTarget.select()}
                         value={texto}
+                        readOnly={envio.enviando}
                         onChange={(e) => setTexto(e.target.value)}
                         onKeyDown={(e) => {
                             if (e.key === "Enter") {
@@ -582,10 +603,10 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
                 {cantidad !== null && cantidad > f.cantidad + 1e-9 && (
                     <p className="mt-1.5 text-[11px] text-rose-700">No se puede reservar más de lo que lleva la línea.</p>
                 )}
-                {valida && cantidad! > libreParaEsta + 1e-9 && (
+                {valida && cantidad! > vista.libre + 1e-9 && (
                     <p className="mt-1.5 flex items-start gap-1 text-[11px] text-amber-700">
                         <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
-                        Hay {fmtCantidad(libreParaEsta)} libres: la reserva deja el stock en negativo (te va a preguntar).
+                        Hay {fmtCantidad(vista.libre)} libres: la reserva deja el stock en negativo (te va a preguntar).
                     </p>
                 )}
                 <div className="mt-2.5 flex justify-end gap-2">
@@ -598,11 +619,12 @@ function CasillaReserva({ fila: f, edita, onGuardar }: {
                     </button>
                     <button
                         type="button"
-                        disabled={!valida}
+                        disabled={!valida || envio.enviando}
                         onClick={reservar}
-                        className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
                     >
-                        {f.reserva ? "Cambiar" : "Reservar"}
+                        {envio.enviando && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {envio.enviando ? "Guardando…" : vista.reserva ? "Cambiar" : "Reservar"}
                     </button>
                 </div>
             </PopoverContent>

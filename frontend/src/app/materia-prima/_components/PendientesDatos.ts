@@ -244,14 +244,16 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
     };
 
     /**
-     * Guardar un cambio de UNA línea. No devuelve nada que haya que esperar: lo que se
-     * ve ya cambió, y si falla vuelve solo.
+     * Guardar un cambio de UNA línea. Casi nadie lo tiene que esperar: lo que se ve ya
+     * cambió, y si falla vuelve solo. La promesa se cumple cuando terminó, con la
+     * pregunta del 409 incluida: la espera la casilla de la reserva, para no aceptar un
+     * segundo clic mientras tanto (ver `useEnvioSinRepetir`).
      */
     const guardar = useCallback(
-        (id: number, cambios: CambiosLinea) => {
+        (id: number, cambios: CambiosLinea): Promise<void> => {
             const n = ++contador.current;
             ponerParche([id], n, cambios);
-            void encolar([id], async () => {
+            return encolar([id], async () => {
                 setEnVuelo((v) => v + 1);
                 try {
                     const url = `${API_URL}/materia-prima/lineas/${id}`;
@@ -276,7 +278,7 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
                 } finally {
                     setEnVuelo((v) => v - 1);
                 }
-            });
+            }).then(() => undefined);
         },
         // eslint-disable-next-line react-hooks/exhaustive-deps -- ponerParche/sacarParche/nombreDe sólo usan setters y refs
         [encolar, aplicarRespuesta],

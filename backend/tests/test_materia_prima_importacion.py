@@ -918,3 +918,201 @@ def test_la_importacion_lee_los_consumos_pero_no_los_escribe():
         for m in re.finditer(r"consumo_material", texto):
             antes = texto[:m.start()].split()
             assert antes[-1:] == ["from"] and antes[-2:-1] != ["delete"], texto.strip()
+
+
+# ─────────────────── copias por tabla y tiempos del Integral (24/09) ───────────────────
+#
+# Dos hallazgos de la revisión de seguridad del 24/09, antes de subir el espejo:
+#   · la copia de la primera pasada se decidía por «ninguna pieza con origen», y si esa
+#     pasada escribía los insumos y fallaba en las líneas, la siguiente reescribía las
+#     líneas sin copia (medido: 1.211 líneas, y backup_…_orden_trabajo_pieza nunca creada);
+#   · la segunda lectura del Integral corre con la transacción de Supabase abierta y sin
+#     tope: un Integral colgado ahí dejaba tomados los locks y el candado del espejo.
+
+class _Catalogo:
+    """asyncpg de mentira que sólo contesta to_regclass; `hay` = las backup_* que existen."""
+
+    def __init__(self, hay=()):
+        self.hay = set(hay)
+        self.consultas = []
+
+    async def fetchval(self, sql, *args):
+        self.consultas.append(sql)
+        assert "to_regclass" in sql, sql
+        return args[0] not in self.hay
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hay, copia", [
+    ((), {I.BACKUP_PIEZA, I.BACKUP_LINEA}),                 # la primera pasada
+    ((I.BACKUP_PIEZA,), {I.BACKUP_LINEA}),                  # la primera falló en las líneas
+    ((I.BACKUP_PIEZA, I.BACKUP_LINEA), set()),              # las de siempre
+])
+async def test_el_espejo_decide_la_copia_tabla_por_tabla(hay, copia):
+    assert await I.copias_a_hacer(_Catalogo(hay), I.SI_NO_HAY_COPIA) == copia
+
+
+@pytest.mark.asyncio
+async def test_a_mano_copia_siempre_y_sin_respaldar_nunca():
+    conn = _Catalogo((I.BACKUP_PIEZA, I.BACKUP_LINEA))
+    assert await I.copias_a_hacer(conn, True) == set(I.COPIAS)
+    assert await I.copias_a_hacer(conn, False) == set()
+    assert conn.consultas == [], "sólo el espejo mira la base"
+
+
+@pytest.mark.asyncio
+async def test_cada_paso_copia_solo_a_las_tablas_que_le_tocan(monkeypatch):
+    copiadas = []
+
+    async def _respaldar(conn, tabla, backup, ids, ahora):
+        copiadas.append(backup)
+        return len(ids)
+
+    monkeypatch.setattr(I, "_respaldar", _respaldar)
+    ctx = I.Contexto(None, {}, True, 10, respaldar={I.BACKUP_LINEA})
+    paso = ctx.paso("lineas")
+    await I._copiar(ctx, paso, "pieza", I.BACKUP_PIEZA, [1, 2])
+    await I._copiar(ctx, paso, "orden_trabajo_pieza", I.BACKUP_LINEA, [3])
+    assert copiadas == [I.BACKUP_LINEA]
+    res = I.Resultado(["lineas"], True)
+    res.ctx = ctx
+    assert res.copiadas() == {I.BACKUP_LINEA: 1}
+    # Si ese paso falló, su copia se deshizo con su savepoint: no se cuenta.
+    res.fallo = ("lineas", "LockNotAvailableError: canceling statement due to lock timeout")
+    assert res.copiadas() == {}
+    assert I.Contexto(None, {}, True, 10).respaldar == set(I.COPIAS), "a mano, como siempre"
+    with pytest.raises(ValueError):
+        I.Contexto(None, {}, True, 10, respaldar=I.SI_NO_HAY_COPIA)
+
+
+class _ConexionCorrida:
+    """asyncpg de mentira para la corrida con --aplicar: anota cada sentencia."""
+
+    def __init__(self, sql, hay=(), candado=True):
+        self.sql = sql
+        self.hay = set(hay)
+        self.candado = candado
+
+    def transaction(self):
+        sql = self.sql
+
+        class _Tx:
+            async def start(self):
+                sql.append("BEGIN")
+
+            async def commit(self):
+                sql.append("COMMIT")
+
+            async def rollback(self):
+                sql.append("ROLLBACK")
+        return _Tx()
+
+    async def execute(self, sql, *args):
+        self.sql.append(sql)
+
+    async def fetchval(self, sql, *args):
+        self.sql.append(sql)
+        if "pg_try_advisory_xact_lock" in sql:
+            return self.candado
+        if "to_regclass" in sql:
+            return args[0] not in self.hay
+        raise AssertionError(sql)
+
+    async def close(self):
+        pass
+
+
+async def _importar_de_mentira(monkeypatch, hay=(), candado=True):
+    import asyncpg
+
+    sql = []
+
+    async def _conectar(url, **kw):
+        assert url.startswith("postgresql://postgres@127.0.0.1"), url
+        return _ConexionCorrida(sql, hay, candado)
+
+    class _Estado:
+        async def cargar(self, conn):
+            return self
+
+    async def _sin_faltantes(conn):
+        return []
+
+    async def _viejo_vacio(pasos, silencioso=False):
+        return {}
+
+    monkeypatch.setattr(asyncpg, "connect", _conectar)
+    monkeypatch.setattr(I, "verificar_migracion", _sin_faltantes)
+    monkeypatch.setattr(I, "leer_viejo", _viejo_vacio)
+    monkeypatch.setattr(I, "Estado", _Estado)
+    res = await I.importar([], aplicar=True, db_url="postgresql://postgres@127.0.0.1:1/x",
+                           respaldar=I.SI_NO_HAY_COPIA, silencioso=True)
+    return res, sql
+
+
+@pytest.mark.asyncio
+async def test_la_corrida_suelta_los_locks_si_queda_quieta_y_decide_las_copias_con_el_candado(monkeypatch):
+    res, sql = await _importar_de_mentira(monkeypatch, hay=(I.BACKUP_PIEZA,))
+    assert sql[:4] == ["BEGIN", "SET LOCAL lock_timeout = '10s'",
+                       "SET LOCAL idle_in_transaction_session_timeout = '60s'",
+                       "SELECT pg_try_advisory_xact_lock($1)"]
+    assert [s for s in sql if "to_regclass" in s] == ["SELECT to_regclass($1::text) IS NULL"] * 2
+    assert sql[-1] == "COMMIT"
+    assert res.ctx.respaldar == {I.BACKUP_LINEA}
+    # Con el candado de otra corrida, ni se mira: no se hace nada.
+    res, sql = await _importar_de_mentira(monkeypatch, candado=False)
+    assert res.ocupado and not [s for s in sql if "to_regclass" in s]
+
+
+def test_el_tope_de_la_relectura_entra_en_el_de_la_transaccion_quieta():
+    """La relectura es la espera más larga entre dos sentencias de la corrida: si su tope
+    no entrara con margen en el de Postgres, la sesión se cortaría antes de que el paso
+    lineas pueda fallar solo, y se perderían también los pasos anteriores."""
+    ocioso = int(I.TOPE_OCIOSO_EN_TRANSACCION.removesuffix("s"))
+    assert I.TOPE_RELECTURA_SEG * 1.5 <= ocioso
+
+
+@pytest.mark.asyncio
+async def test_la_segunda_lectura_del_integral_tiene_tope(monkeypatch):
+    """Un Integral que no contesta en la segunda lectura: el driver lleva el tope (lo corta
+    del lado del SQL Server) y, por si ni eso contesta, un wait_for lo corta igual. Acá el
+    thread de pyodbc queda dormido de verdad: la corrida sigue igual."""
+    import asyncio
+    import time as reloj
+
+    import backend.scripts.sync_db as sync_db
+
+    topes = []
+
+    def _colgado(sql, params=None, tope_seg=None):
+        topes.append(tope_seg)
+        reloj.sleep(0.5)  # bloquea el thread, como pyodbc esperando al servidor
+        return []
+
+    monkeypatch.setattr(sync_db, "_leer_sync", _colgado)
+    monkeypatch.setattr(I, "TOPE_RELECTURA_SEG", 0.05)
+    inicio = reloj.perf_counter()
+    with pytest.raises(asyncio.TimeoutError, match="segunda lectura del Integral no contestó"):
+        await I.releer_lineas_del_viejo([15692, 14534])
+    assert reloj.perf_counter() - inicio < 0.4
+    assert topes == [0.05]
+
+
+@pytest.mark.asyncio
+async def test_si_la_relectura_no_llega_el_paso_lineas_falla_sin_escribir(session):
+    """El TimeoutError sale de paso_lineas (importar() lo anota como el paso que falló y
+    confirma los anteriores); las líneas no se tocan."""
+    import asyncio
+
+    await _spmm(session)
+    viejo = _viejo()
+    ctx, _ = await _correr(session, viejo)
+    antes = [dict(l) for l in ctx.estado.lineas]
+    sin_15692 = dict(viejo, lineas=[l for l in viejo["lineas"] if l["Idot"] != 15692])
+
+    async def _no_contesta(numeros):
+        raise asyncio.TimeoutError("la segunda lectura del Integral no contestó en 30 s")
+
+    with pytest.raises(asyncio.TimeoutError):
+        await _correr(session, sin_15692, estado=ctx.estado, releer=_no_contesta)
+    assert [dict(l) for l in ctx.estado.lineas] == antes

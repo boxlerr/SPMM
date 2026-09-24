@@ -27,8 +27,8 @@
 -- No toca ninguna fila existente: todas las columnas nuevas son NULL o tienen DEFAULT
 -- (en Postgres 11+ un DEFAULT constante no reescribe la tabla). Los datos del viejo los
 -- trae backend/scripts/importar_materia_prima_legacy.py, aparte y con --aplicar. La única
--- escritura es la semilla de formato, que es un catálogo nuevo (ON CONFLICT DO NOTHING:
--- si alguien renombró o desactivó un formato, queda como está).
+-- escritura es la semilla de formato, que es un catálogo nuevo (sólo los que faltan por
+-- nombre: si alguien desactivó o cambió un formato, queda como está).
 --
 -- No le agrega UNIQUE a pieza.cod_pieza: hay un duplicado heredado (50%004, ids 4117 y
 -- 4124). El índice sobre upper(trim(cod_pieza)) es para buscar; la unicidad de los
@@ -128,35 +128,54 @@ COMMENT ON COLUMN formato.etiqueta1 IS
     'Qué es la primera medida (Ø, Lado, Espesor...). La cantidad de medidas del formato '
     'es la cantidad de etiquetas no nulas, siempre las primeras.';
 
--- La semilla. Misma lista que application/materia_prima/semilla.py (un test las compara).
--- ON CONFLICT DO NOTHING: si alguien cambió un formato desde la pantalla, no se pisa.
+-- La semilla. Misma lista que application/materia_prima/semilla.py (la comparan
+-- tests/test_materia_prima_reglas.py con este archivo y tests/test_migraciones_al_arrancar.py
+-- con infrastructure/migraciones.py).
+-- Sólo los que faltan por nombre: si alguien cambió un formato desde la pantalla, no se
+-- pisa. Con WHERE NOT EXISTS y no sólo ON CONFLICT porque esto se repite en CADA arranque
+-- del backend (infrastructure/migraciones.py) y el ON CONFLICT pide el id a la secuencia
+-- antes de ver el choque: le sumaba 15 a formato_id_seq por arranque. El ON CONFLICT queda
+-- para dos instancias arrancando a la vez.
 -- Va en un INSERT por cantidad de medidas para no escribir NULL en las etiquetas que
 -- el formato no usa (la columna ya queda NULL sola).
-INSERT INTO formato (nombre, iniciales, etiqueta1, orden) VALUES
+INSERT INTO formato (nombre, iniciales, etiqueta1, orden)
+SELECT v.nombre, v.iniciales, v.etiqueta1, v.orden FROM (VALUES
     ('BARRA REDONDO', 'BR', 'Ø', 1),
     ('BARRA CUADRADO', 'BC', 'Lado', 2),
     ('BARRA HEXAGONAL', 'BH', 'Entre caras', 3)
+) AS v (nombre, iniciales, etiqueta1, orden)
+WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre)
 ON CONFLICT (nombre) DO NOTHING;
 
-INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, orden) VALUES
+INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, orden)
+SELECT v.nombre, v.iniciales, v.etiqueta1, v.etiqueta2, v.orden FROM (VALUES
     ('BARRA RECTANGULAR', 'BR', 'Ancho', 'Espesor', 4),
     ('TUBO REDONDO', 'TR', 'Ø exterior', 'Ø interior', 5),
     ('TUBO CUADRADO', 'TC', 'Lado', 'Espesor', 6),
     ('PLANCHUELA', 'P', 'Ancho', 'Espesor', 9),
     ('ANGULOS IGUALES', 'AI', 'Ala', 'Espesor', 10),
     ('CORTE PANTOGRAFO', 'CP', 'Medida', 'Espesor', 14)
+) AS v (nombre, iniciales, etiqueta1, etiqueta2, orden)
+WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre)
 ON CONFLICT (nombre) DO NOTHING;
 
-INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, orden) VALUES
+INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, orden)
+SELECT v.nombre, v.iniciales, v.etiqueta1, v.etiqueta2, v.etiqueta3, v.orden FROM (VALUES
     ('TUBO RECTANGULAR', 'TR', 'Lado A', 'Lado B', 'Espesor', 7),
     ('PLACA', 'P', 'Espesor', 'Ancho', 'Largo', 8),
     ('ANGULOS DESIGUALES', 'AD', 'Ala A', 'Ala B', 'Espesor', 11),
     ('PERFIL U', 'PU', 'Alto', 'Ala', 'Espesor', 12),
     ('PERFIL T', 'PT', 'Alto', 'Ala', 'Espesor', 13)
+) AS v (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, orden)
+WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre)
 ON CONFLICT (nombre) DO NOTHING;
 
-INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, etiqueta4, etiqueta5, orden) VALUES
+INSERT INTO formato (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, etiqueta4, etiqueta5, orden)
+SELECT v.nombre, v.iniciales, v.etiqueta1, v.etiqueta2, v.etiqueta3, v.etiqueta4, v.etiqueta5,
+       v.orden FROM (VALUES
     ('CORTE LASER', 'CL', 'Medida 1', 'Medida 2', 'Medida 3', 'Medida 4', 'Medida 5', 15)
+) AS v (nombre, iniciales, etiqueta1, etiqueta2, etiqueta3, etiqueta4, etiqueta5, orden)
+WHERE NOT EXISTS (SELECT 1 FROM formato f WHERE f.nombre = v.nombre)
 ON CONFLICT (nombre) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS proveedor (

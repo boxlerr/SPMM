@@ -69,7 +69,12 @@ async def _conteos(session) -> dict[str, int]:
 
 
 def _mensaje(r) -> str:
-    return r.json()["errors"][0]["message"]
+    """El aviso del 422, que tiene que llegar igual en los dos campos donde lo busca quien
+    lee la respuesta: errors[0].message (lib/utils.parseApiError) y errorDescription (lo
+    que la prueba de punta a punta del 24/09 encontró en null)."""
+    cuerpo = r.json()
+    assert cuerpo["errorDescription"] == cuerpo["errors"][0]["message"], cuerpo
+    return cuerpo["errors"][0]["message"]
 
 
 # ─────────────────────────── 1. la variable ───────────────────────────
@@ -91,6 +96,32 @@ def test_lo_que_no_es_spmm_es_integral(monkeypatch, valor, esperado):
     monkeypatch.setenv("MATERIA_PRIMA_DUENO", valor)
     assert D.dueno() == esperado
     assert D.aviso_dueno() == (None if esperado == "spmm" else D.AVISO_PILOTO)
+
+
+def test_el_aviso_dice_cada_cuanto_llega_lo_del_integral():
+    """El Scheduler del sync corre cada 30 minutos (*/30): el aviso no puede prometer que
+    se ve «al instante» ni «solo». La frecuencia vive en una constante (si el Scheduler
+    cambia, se cambia ahí) y el texto la usa."""
+    assert D.FRECUENCIA_ESPEJO_MIN == 30
+    assert D.AVISO_PILOTO == ("Durante la prueba piloto las materias primas se cargan en el "
+                              "Sistema Integral; Metlosys las trae de ahí cada 30 minutos.")
+    for promesa in ("al instante", "solas", "a los pocos minutos"):
+        assert promesa not in D.AVISO_PILOTO
+
+
+def test_otro_422_de_negocio_sigue_sin_error_description():
+    """El errorDescription lo pide sólo la escritura en modo espejo: los demás 422 de
+    negocio quedan como estaban (errors[0].message y errorDescription en null)."""
+    import asyncio
+    import json
+
+    from backend.commons.exceptions.BusinessException import BusinessException
+    from backend.commons.handlers.exception_handlers import business_handler
+
+    otro = json.loads(asyncio.run(business_handler(None, BusinessException("otra cosa"))).body)
+    assert otro["errorDescription"] is None and otro["errors"][0]["message"] == "otra cosa"
+    espejo = json.loads(asyncio.run(business_handler(None, D.EscrituraEnModoEspejo())).body)
+    assert espejo["errorDescription"] == espejo["errors"][0]["message"] == D.AVISO_PILOTO
 
 
 def test_se_lee_en_cada_llamada(monkeypatch):

@@ -31,14 +31,16 @@
  *    inservible después de la prueba. Un error se vuelve a probar solo cada tanto, así
  *    un tropiezo al entrar no deja la pantalla editable durante la prueba.
  *
- * «SE ACTUALIZAN SOLAS»
+ * «SE ACTUALIZAN SOLAS», CADA 30 MINUTOS
  *
- * Lo dice el cartel y tiene que ser cierto también con la pantalla abierta: en modo
- * espejo `useRefrescoEspejo` vuelve a pedir lo que se ve cada 90 segundos (si la
- * pestaña está a la vista) y al volver a la pestaña, que es lo que pasa cuando alguien
- * carga en el Integral y vuelve a mirar SPMM. Sin spinner ni pantalla en blanco: los
- * datos nuevos reemplazan a los viejos cuando llegan. De paso se vuelven a pedir los
- * catálogos, así al terminar la prueba las pantallas abiertas se destraban solas.
+ * Lo del Integral lo trae el sync cada 30 minutos: el cartel lo dice con esas palabras
+ * (el texto es el del backend, `aviso_dueno`; el de la pantalla, `AVISO_ESPEJO`, dice lo
+ * mismo), para que nadie espere verlo al instante y lo cargue dos veces. Lo que sí tiene
+ * que ser cierto es que, cuando llega, se vea sin recargar: en modo espejo
+ * `useRefrescoEspejo` vuelve a pedir lo que se ve cada 90 segundos (si la pestaña está a
+ * la vista) y al volver a la pestaña. Sin spinner ni pantalla en blanco: los datos nuevos
+ * reemplazan a los viejos cuando llegan. De paso se vuelven a pedir los catálogos, así al
+ * terminar la prueba las pantallas abiertas se destraban solas.
  */
 
 import { useEffect, useRef } from "react";
