@@ -174,6 +174,8 @@ export function SelectorProveedor({
         const cuerpo: ProveedorIn = { razon_social: nombre };
         const r = await mpPost<Proveedor>(`${API_URL}/materia-prima/proveedores`, cuerpo, { forzar });
         setCreando(false);
+        // Modo práctica: el cartelito ya salió; la lista queda abierta con lo escrito.
+        if (r.practica) return;
         if (r.requiereConfirmacion) {
             setAvisoAlta({ nombre, motivo: r.error ?? "Ya hay un proveedor con ese nombre." });
             return;

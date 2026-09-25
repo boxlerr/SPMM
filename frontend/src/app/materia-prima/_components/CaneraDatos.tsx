@@ -199,7 +199,8 @@ export function useCanera({ activo = true, confirmar }: { activo?: boolean; conf
                     return r.data;
                 }
                 quitar(n);
-                toast.error(r.error ?? o.error);
+                // Modo práctica: lo optimista ya volvió atrás y el cartelito lo explica.
+                if (!r.practica) toast.error(r.error ?? o.error);
                 return null;
             };
             const p = fila.current.then(correr, correr);

@@ -31,6 +31,7 @@ import {
     fmtFechaCorta,
     fmtFechaHora,
     fmtMm,
+    frenarPorPractica,
     hoyISO,
     leerCantidad,
     mpGet,
@@ -724,6 +725,7 @@ function CasillaDisponible({
                             canera={canera}
                             titulo={`Ubicar la OT ${l.numero_ot} en la cañera`}
                             onElegir={(c) => {
+                                if (frenarPorPractica()) return;
                                 setPreguntar(false);
                                 onUbicar(l, c);
                             }}
@@ -814,6 +816,8 @@ function CeldaCanera({
                                 canera={ctx?.estado.canera ?? null}
                                 titulo={`Ubicar la OT ${l.numero_ot} en la cañera`}
                                 onElegir={(c) => {
+                                    // Modo práctica: el globo queda abierto (y sale el cartelito).
+                                    if (frenarPorPractica()) return;
                                     setAbierto(false);
                                     onUbicar(l, c);
                                 }}

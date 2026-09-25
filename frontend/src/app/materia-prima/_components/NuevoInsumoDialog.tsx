@@ -25,6 +25,7 @@
  * aparece la próxima vez.
  */
 
+import type { ReactNode } from "react";
 import type { InsumoFicha, TipoInsumo } from "@/lib/materiaPrima";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormularioInsumo } from "./FormularioInsumo";
@@ -35,9 +36,14 @@ export interface NuevoInsumoDialogProps {
     onCreado: (insumo: InsumoFicha) => void;
     tipoInicial?: TipoInsumo;
     descripcionInicial?: string;
+    /**
+     * El texto de debajo del título. Por defecto el de la OT («…y elegido para esta
+     * OT»); el botón «Nuevo» de la sección lo abre sin OT y trae el suyo.
+     */
+    descripcion?: ReactNode;
 }
 
-export function NuevoInsumoDialog({ open, onClose, onCreado, tipoInicial, descripcionInicial }: NuevoInsumoDialogProps) {
+export function NuevoInsumoDialog({ open, onClose, onCreado, tipoInicial, descripcionInicial, descripcion }: NuevoInsumoDialogProps) {
     return (
         <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
             <DialogContent
@@ -50,8 +56,12 @@ export function NuevoInsumoDialog({ open, onClose, onCreado, tipoInicial, descri
                 <DialogHeader className="shrink-0 border-b border-gray-100 px-5 py-3 text-left">
                     <DialogTitle className="text-base">Nuevo insumo</DialogTitle>
                     <DialogDescription className="text-xs">
-                        Queda en el catálogo de materia prima y elegido para esta OT. El código y la
-                        descripción se arman solos con la regla del sistema viejo.
+                        {descripcion ?? (
+                            <>
+                                Queda en el catálogo de materia prima y elegido para esta OT. El código y la
+                                descripción se arman solos con la regla del sistema viejo.
+                            </>
+                        )}
                     </DialogDescription>
                 </DialogHeader>
                 <div className="min-h-0 flex-1 overflow-y-auto">

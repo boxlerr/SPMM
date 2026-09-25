@@ -95,6 +95,7 @@ import { cn } from "@/lib/utils";
 import {
     AVISO_SIN_SERVIDOR,
     estadoLinea,
+    frenarPorPractica,
     hoyISO,
     lunesDe,
     rotuloSemana,
@@ -113,7 +114,8 @@ import { GrillaCanera } from "./GrillaCanera";
 import { useConfirmarForzar } from "./PendientesForzar";
 import { usePendientes, type CambiosVista } from "./PendientesDatos";
 import { useCatalogosMP } from "./InsumoCatalogos";
-import { useRefrescoEspejo } from "./ModoEspejo";
+import { CartelitoPractica, useRefrescoEspejo } from "./ModoEspejo";
+import { useAlCargarMP } from "./NuevoAvisos";
 import { casilleroPreguntado, FilaPendiente, Th, type AccionesFila } from "./PendientesFila";
 import { AvisoCasilleros, BarraDeAcciones, type OTSinCasillero } from "./PendientesAcciones";
 import { COLUMNAS_EXPORT, imprimirGrilla, imprimirPorProveedor, type FilaSalida } from "./PendientesImprimir";
@@ -220,6 +222,13 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
     const origenSemana = p.datos || fuenteSemana ? (semanaDelIntegral ? "Plan semanal del Integral" : "Planificador de Metlosys") : null;
     // Modo espejo: lo que marcan en el Integral aparece solo (lo mismo que «Actualizar»).
     useRefrescoEspejo(espejo && activo, () => {
+        void p.recargar();
+        void canera.recargar();
+    });
+    // Una carga del botón «Nuevo» (un pedido marcado, materia prima de una OT, un ingreso
+    // de stock) cambió lo que se ve: se pide de nuevo en silencio, sin perder la semana ni
+    // los filtros (ver NuevoAvisos.ts).
+    useAlCargarMP("pendientes", () => {
         void p.recargar();
         void canera.recargar();
     });
@@ -468,6 +477,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
     const filaCortes = useMemo(() => (lineaCortes ? filaDeLinea(lineaCortes) : null), [lineaCortes]);
     const guardarCortes = (cortes: CambiosVista["cortes"] | null, cantidad: { cantidad: number; unidad: string } | null) => {
         if (idCortes === null) return;
+        // Modo práctica: el diálogo queda abierto con los cortes escritos (y sale el cartelito).
+        if (frenarPorPractica()) return false;
         const cambios: CambiosVista = {};
         if (cortes) {
             cambios.cortes = cortes;
@@ -1220,7 +1231,14 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                                     </table>
                                     <PieDeTandas {...tandas} />
                                 </div>
-                                {edita ? (
+                                {edita && espejo ? (
+                                    // Modo práctica (ver ModoEspejo.tsx): se toca todo, no se guarda nada.
+                                    <p className="text-[11px] text-gray-400">
+                                        Modo práctica: podés tildar, elegir proveedores y cargar cortes para ver cómo es, pero no se guarda
+                                        nada (las marcas vuelven a su lugar). En la prueba piloto se cargan en el Sistema Integral y aparecen
+                                        acá solas.
+                                    </p>
+                                ) : edita ? (
                                     <p className="text-[11px] text-gray-400">
                                         Cada cambio se guarda solo. Las filas que dejan de entrar en el filtro (por ejemplo, las que marcás
                                         disponibles) se quedan a la vista hasta que cambies el filtro o toques «Actualizar».
@@ -1271,6 +1289,8 @@ export function PendientesTab({ edita, otInicial, espejo = false, activo = true 
                 )}
 
                 {dialogo}
+                {/* El «Esto no se guarda» del modo práctica (uno solo aunque se monte en cada solapa). */}
+                <CartelitoPractica />
             </div>
         </CaneraContexto.Provider>
     );

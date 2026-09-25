@@ -33,6 +33,7 @@ import {
     ahoraISO,
     fmtCantidad,
     fmtFecha,
+    frenarPorPractica,
     leerCantidad,
     mpDelete,
     mpGet,
@@ -143,7 +144,8 @@ export function FichaRecortes({ ficha, edita, onCambio }: FichaRecortesProps) {
         const r = await mpPost<Recorte>(`${API_URL}/materia-prima/insumos/${ficha.id}/recortes`, cuerpo);
         if (!r.ok || !r.data) {
             poner(antes);
-            toast.error(`No se agregó el recorte: ${r.error ?? "error desconocido"}`);
+            // Modo práctica: el cartelito ya salió y lo escrito vuelve a los campos (`false`).
+            if (!r.practica) toast.error(`No se agregó el recorte: ${r.error ?? "error desconocido"}`);
             return false;
         }
         const creado = r.data;
@@ -164,7 +166,7 @@ export function FichaRecortes({ ficha, edita, onCambio }: FichaRecortesProps) {
         const r = await mpPut<Recorte>(`${API_URL}/materia-prima/recortes/${rec.id}`, cambios);
         if (!r.ok || !r.data) {
             poner(antes);
-            toast.error(`No se cambió el recorte: ${r.error ?? "error desconocido"}`);
+            if (!r.practica) toast.error(`No se cambió el recorte: ${r.error ?? "error desconocido"}`);
             return;
         }
         const nuevo = r.data;
@@ -179,7 +181,7 @@ export function FichaRecortes({ ficha, edita, onCambio }: FichaRecortesProps) {
         const r = await mpDelete(`${API_URL}/materia-prima/recortes/${rec.id}`);
         if (!r.ok) {
             poner(antes);
-            toast.error(`No se eliminó el recorte: ${r.error ?? "error desconocido"}`);
+            if (!r.practica) toast.error(`No se eliminó el recorte: ${r.error ?? "error desconocido"}`);
             return;
         }
         toast.success("Recorte eliminado");
@@ -358,6 +360,8 @@ function FilaRecorte({ r, edita, onUsar, onDescartar, onVolver, onEliminar }: {
     const anotado = r.creado_en || r.creado_por;
 
     const confirmarUso = () => {
+        // Modo práctica: la pregunta queda abierta con la OT escrita (y sale el cartelito).
+        if (frenarPorPractica()) return;
         const n = ot.trim() ? Number(ot.trim()) : null;
         setPidiendo(null);
         setOt("");
@@ -491,6 +495,9 @@ function FilaRecorte({ r, edita, onUsar, onDescartar, onVolver, onEliminar }: {
                         size="sm"
                         className="h-8 bg-rose-600 text-white hover:bg-rose-700"
                         onClick={() => {
+                            // Modo práctica: sin esto el renglón se iba y volvía (optimista) y la
+                            // pregunta se cerraba; así queda abierta y sale el cartelito.
+                            if (frenarPorPractica()) return;
                             setPidiendo(null);
                             onEliminar();
                         }}

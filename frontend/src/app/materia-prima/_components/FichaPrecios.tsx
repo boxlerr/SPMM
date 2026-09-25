@@ -105,7 +105,8 @@ export function FichaPrecios({ ficha, edita, onPrecioVigente }: FichaPreciosProp
         if (!r.ok) {
             setLista(antes);
             if (pasaAVigente) alVigente.current(vigenteAntes.unitario, vigenteAntes.fecha);
-            toast.error(`No se cargó el precio: ${r.error ?? "error desconocido"}`);
+            // Modo práctica: el cartelito ya lo dijo; el formulario queda abierto (`false`).
+            if (!r.practica) toast.error(`No se cargó el precio: ${r.error ?? "error desconocido"}`);
             return false;
         }
         if (Array.isArray(r.data)) setLista([...r.data].sort(masNuevoPrimero));

@@ -32,9 +32,20 @@
  * no hizo falta tocar roles ni permisos para mudarla.
  *
  * PRUEBA PILOTO (24/09): mientras el dueño de las materias primas sea el Sistema
- * Integral (`dueno = "integral"` en los catálogos), NADIE edita, tenga el permiso que
+ * Integral (`dueno = "integral"` en los catálogos), NADA se guarda, tenga el permiso que
  * tenga: todo se ve con las marcas que trae el sync, hay un cartel arriba que lo dice y
- * lo que se ve se refresca solo. Ver ModoEspejo.tsx.
+ * lo que se ve se refresca solo. Ver ModoEspejo.tsx. Desde el 25/09 quien PUEDE escribir
+ * la sección la usa en MODO PRÁCTICA (Julián: «que lo habilites para ver cómo está
+ * adentro… pero al final no me deje guardarlo con un cartelito»): las solapas le llegan
+ * editables, el chip de la cabecera dice «Modo práctica» y cada guardado lo frena el
+ * candado de `mpFetch` con su cartelito. El resto sigue en «Solo lectura».
+ *
+ * EL BOTÓN «NUEVO» (25/09)
+ *
+ * A la izquierda del chip, para quien puede escribir (también en modo práctica): las
+ * cargas del sistema viejo a un clic —materia prima de una OT, pedido a proveedor,
+ * insumo, movimiento de stock, recorte—, cada una en un diálogo sobre la solapa que se
+ * esté mirando. Ver NuevoMenu.tsx.
  */
 
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -44,7 +55,9 @@ import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollableTabsBar } from "@/components/planning/ScrollableTabsBar";
 import { MarcaSoloLectura } from "@/components/permisos/SinAcceso";
 import { usePermisos } from "@/hooks/usePermisos";
-import { CartelEspejo, MarcaEspejo, useDuenoMP } from "./_components/ModoEspejo";
+import { CartelEspejo, MarcaEspejo, useDuenoMP, useModoMP } from "./_components/ModoEspejo";
+import { BotonNuevo } from "./_components/NuevoMenu";
+import { MarcaPractica } from "./_components/NuevoComun";
 import { PendientesTab } from "./_components/PendientesTab";
 import { InsumosTab } from "./_components/InsumosTab";
 import { CaneraTab } from "./_components/CaneraTab";
@@ -121,10 +134,14 @@ function EnlaceMateriaPrima({ onPedido }: { onPedido: (p: Pedido | null) => void
 export default function MateriaPrimaPage() {
     const { puedeSeccion } = usePermisos();
     const puedeEscribir = puedeSeccion("operaciones_materia_prima", "write");
-    // Con el Integral como dueño (prueba piloto) nadie escribe; mientras no se sabe
-    // quién es el dueño, tampoco (es un instante: ver ModoEspejo.tsx).
-    const { espejo, sabido, aviso } = useDuenoMP();
-    const edita = puedeEscribir && sabido && !espejo;
+    // Con el Integral como dueño (prueba piloto) nada se guarda, pero quien puede escribir
+    // la sección la recorre entera en MODO PRÁCTICA: le llega editable y el candado de
+    // `mpFetch` frena cada guardado con su cartelito. Mientras no se sabe quién es el
+    // dueño, nadie edita (es un instante: ver ModoEspejo.tsx).
+    const { espejo, aviso } = useDuenoMP();
+    const modo = useModoMP(puedeEscribir);
+    const edita = modo !== "lectura";
+    const practica = modo === "practica";
 
     const [solapa, setSolapa] = useState<Solapa>("pendientes");
     /** Hasta que el enlace no se leyó una vez no se monta ninguna solapa (ver EnlaceMateriaPrima). */
@@ -140,10 +157,13 @@ export default function MateriaPrimaPage() {
     const [nInsumos, setNInsumos] = useState(0);
     const [otInicial, setOtInicial] = useState<number | null>(null);
     const [nPendientes, setNPendientes] = useState(0);
+    /** Cuántos enlaces se siguieron: cierra el diálogo de «Nuevo» que esté abierto (ver BotonNuevo). */
+    const [nEnlaces, setNEnlaces] = useState(0);
 
     const alPedido = useCallback((p: Pedido | null) => {
         setLeido(true);
         if (!p) return;
+        setNEnlaces((n) => n + 1);
         // La solapa: la que dice el enlace o, si no dice, la que se deduce de lo que pide.
         const destino: Solapa | null =
             p.solapa ?? (p.pieza !== null || p.nuevo ? "insumos" : p.ot !== null ? "pendientes" : null);
@@ -188,16 +208,20 @@ export default function MateriaPrimaPage() {
                                 <p className="text-gray-500 text-xs truncate">Insumos, compras por semana y cañera</p>
                             </div>
                         </div>
-                        {espejo ? (
+                        {/* El botón «Nuevo» y, a su derecha, el chip del estado: «Modo práctica»
+                            (piloto, con permiso), «Solo lectura» (sin permiso) o nada (SPMM dueño
+                            y con permiso). */}
+                        {(edita || espejo || !puedeEscribir) && (
                             <div className="flex items-center gap-2">
-                                <MarcaEspejo aviso={aviso} />
+                                {edita && <BotonNuevo practica={practica} cerrarCon={nEnlaces} />}
+                                {practica ? (
+                                    <MarcaPractica />
+                                ) : espejo ? (
+                                    <MarcaEspejo aviso={aviso} practica={false} />
+                                ) : (
+                                    !puedeEscribir && <MarcaSoloLectura que="los insumos, las compras y la cañera" />
+                                )}
                             </div>
-                        ) : (
-                            !puedeEscribir && (
-                                <div className="flex items-center gap-2">
-                                    <MarcaSoloLectura que="los insumos, las compras y la cañera" />
-                                </div>
-                            )
                         )}
                     </div>
                     <div className="px-2 sm:px-3 pb-2">

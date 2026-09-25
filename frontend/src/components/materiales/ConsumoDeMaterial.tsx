@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronUp, Plus, Undo2 } from "lucide-react";
 import { toast } from "@/lib/toast";
+import { frenarPorPractica } from "@/lib/materiaPrima";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -206,6 +207,10 @@ export function useConsumosDeOrden(idOrden: number | undefined, activo: boolean)
         const antes = ultimos.current.find((c) => c.id === id);
         // Un doble toque en «Anular» no manda dos pedidos.
         if (antes?.anulado) return true;
+        // Modo práctica (prueba piloto): el cartel dice «no se guarda nada», y el consumo
+        // no pasa por el candado de mpFetch (va directo a /consumos-material). Se frena
+        // acá, antes de tocar la lista, para que lo que se ve siga siendo lo guardado.
+        if (frenarPorPractica()) return false;
         if (antes) {
             const quien = yo();
             setConsumos((prev) => prev.map((c) => (c.id === id
@@ -239,6 +244,8 @@ export function useConsumosDeOrden(idOrden: number | undefined, activo: boolean)
         linea: LineaDeMaterial, cantidad: number, observaciones: string,
     ): Promise<boolean> => {
         if (!idOrden) return false;
+        // Modo práctica: ver `anular`. Devuelve false y el formulario queda con lo cargado.
+        if (frenarPorPractica()) return false;
         const quien = yo();
         const temporal: ConsumoMaterial = {
             id: proximoTemporal--,

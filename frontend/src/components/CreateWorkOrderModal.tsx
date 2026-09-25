@@ -1193,7 +1193,7 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
             // ninguna (`…/lineas/lote`). Si no quedan, la OT ya está creada y NO se
             // deshace: se avisa, y las líneas quedan guardadas en el navegador atadas a
             // esa OT; al abrirla, la solapa ofrece «Reintentar» (MateriasPrimasOTDatos).
-            let avisoMP: { titulo: string; detalle: string } | null = null;
+            let avisoMP: { titulo: string; detalle: string; practica?: boolean } | null = null;
             if (!orderToEdit && lineasLocales.length > 0) {
                 const idNueva = Number(creada?.id);
                 const numeroNueva = creada?.id_otvieja || idNueva;
@@ -1204,7 +1204,15 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                         // navegador alcanza (el mismo recurso que borrar un proceso). El
                         // motivo ya termina en «¿Cargarlo igual?».
                         window.confirm(`La OT N° ${numeroNueva} ya quedó creada. Antes de cargarle las materias primas:\n\n${motivo}`));
-                    if (!r.ok) {
+                    if (r.practica) {
+                        // Modo práctica de materia prima (prueba piloto, ver ModoEspejo.tsx):
+                        // no es un error, y no quedan para «Reintentar».
+                        avisoMP = {
+                            titulo: `La OT N° ${numeroNueva} se creó; ${cuantas} no se ${lineasLocales.length === 1 ? "guardó" : "guardaron"} (modo práctica)`,
+                            detalle: "Durante la prueba piloto las materias primas se cargan en el Sistema Integral.",
+                            practica: true,
+                        };
+                    } else if (!r.ok) {
                         avisoMP = {
                             titulo: `La OT N° ${numeroNueva} se creó, pero ${cuantas} no se ${lineasLocales.length === 1 ? "guardó" : "guardaron"}`,
                             detalle: `${r.cancelado ? "No se cargaron porque así lo elegiste." : (r.error ?? "").replace(/([^.!?])$/, "$1.")} Quedaron en este navegador: abrí la OT y, en Materias primas, tocá «Reintentar».`,
@@ -1232,7 +1240,8 @@ export default function CreateWorkOrderModal({ isOpen, onClose, onSuccess, order
                     toast.warning("La OT se creó, pero el servidor todavía no guarda Controlado, las etapas de pintura y tercerización ni la «Cant.» del parcial. Se van a poder cargar cuando se actualice.");
                 }
             }
-            if (avisoMP) toast.error(avisoMP.titulo, { description: avisoMP.detalle, duration: 15000 });
+            if (avisoMP?.practica) toast(avisoMP.titulo, { description: avisoMP.detalle, duration: 10000 });
+            else if (avisoMP) toast.error(avisoMP.titulo, { description: avisoMP.detalle, duration: 15000 });
             onSuccess?.();
             onClose();
             resetForm();

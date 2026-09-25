@@ -226,6 +226,8 @@ export function FichaInsumo({
         setBorrando(true);
         const r = await mpDelete(`${API_URL}/materia-prima/insumos/${ficha.id}`);
         setBorrando(false);
+        // Modo práctica: el cartelito ya salió; la pregunta de borrar queda abierta.
+        if (r.practica) return;
         setConfirmarBorrado(false);
         if (!r.ok) {
             // El 422 de siempre: se usó en alguna OT, tiene movimientos o precios. El

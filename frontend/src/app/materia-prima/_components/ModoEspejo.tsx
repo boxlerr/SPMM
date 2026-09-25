@@ -11,10 +11,30 @@
  * reales (pedido, reserva, disponible…) y SPMM lo MUESTRA. Recién después de la prueba
  * SPMM pasa a ser el dueño (la sección editable que se armó para eso).
  *
- * Si durante la prueba se pudiera escribir acá, lo escrito duraría hasta la próxima
- * pasada del sync (que lo pisa con lo del Integral) y, mientras tanto, habría dos
- * verdades. Por eso con el dueño en «integral» la sección entera y la solapa de la OT
- * quedan en sólo lectura, con un cartel que dice por qué y dónde se carga.
+ * Si durante la prueba se GUARDARA algo acá, duraría hasta la próxima pasada del sync
+ * (que lo pisa con lo del Integral) y, mientras tanto, habría dos verdades. Por eso con
+ * el dueño en «integral» no sale ninguna escritura (el candado de `mpFetch`, en
+ * lib/materiaPrima.ts) y hay un cartel arriba que dice por qué y dónde se carga.
+ *
+ * MODO PRÁCTICA (25/09)
+ *
+ * Hasta el 25/09 eso además dejaba la sección en «Solo lectura». Ese día Julián pidió
+ * poder recorrerla: «quiero que lo habilites para ver cómo está adentro o cómo es el
+ * proceso de carga en pañol o en materia o lo que sea, todo completo, pero al final no
+ * me deje guardarlo con un cartelito». Desde entonces hay tres modos (`useModoMP`):
+ *
+ *  · «dueno»    → SPMM es el dueño y se puede escribir: todo se guarda, como siempre.
+ *  · «practica» → el dueño es el Integral y quien mira PUEDE escribir la sección: ve y
+ *                 usa todo igual que con «dueno» (barras de carga, tildes, cortes,
+ *                 cañera, stock…), pero cada guardado lo frena el candado y, en vez de
+ *                 un error, sale SIEMPRE el mismo cartelito (`CartelitoPractica`): «Esto
+ *                 no se guarda». Lo optimista vuelve a su lugar en silencio y los
+ *                 formularios quedan abiertos con lo cargado, así se ve completo.
+ *  · «lectura»  → no puede escribir (o todavía no se sabe quién es el dueño): sólo mira.
+ *
+ * El cartelito sale desde el candado (`frenarPorPractica`), no desde cada pantalla: así
+ * no hay una pantalla que se olvide de avisar ni dos que avisen distinto. Cada pantalla
+ * sólo tiene que tratar la respuesta `practica` (no toastear, deshacer, dejar abierto).
  *
  * QUIÉN LO DECIDE
  *
@@ -22,7 +42,7 @@
  * prueba a la operación normal no pide un deploy del front. Se lee del MISMO almacén que
  * los catálogos (InsumoCatalogos.ts): un pedido para todas las pantallas, y cuando llega
  * prende también el candado de los pedidos de escritura (`fijarModoEspejoMP` en
- * lib/materiaPrima.ts), la red de abajo por si algún camino quedó sin tapar.
+ * lib/materiaPrima.ts).
  *
  *  · Mientras no llegó (`sabido = false`) nadie edita: es un instante (los catálogos se
  *    piden una vez por sesión) y es mejor que mostrar casillas que después se traban.
@@ -43,16 +63,18 @@
  * terminar la prueba las pantallas abiertas se destraban solas.
  */
 
-import { useEffect, useRef } from "react";
-import { Eye, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { Eye, FlaskConical, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AVISO_ESPEJO, type DuenoMP } from "@/lib/materiaPrima";
+import { usePermisos } from "@/hooks/usePermisos";
+import { AVISO_ESPEJO, escucharFrenosDePractica, type DuenoMP } from "@/lib/materiaPrima";
 import { cargarCatalogos, useCatalogosMP } from "./InsumoCatalogos";
 
 export interface EstadoDueno {
     /** Null = todavía no se sabe (los catálogos no llegaron). */
     dueno: DuenoMP | null;
-    /** El dueño es el Integral: sólo lectura, con el cartel. */
+    /** El dueño es el Integral: nada se guarda (práctica o sólo lectura), con el cartel. */
     espejo: boolean;
     /** Ya se sabe quién es el dueño. Mientras no, nadie edita. */
     sabido: boolean;
@@ -87,14 +109,66 @@ export function useDuenoMP(): EstadoDueno {
     };
 }
 
+/** Cómo se usa la sección (ver el comentario de arriba). */
+export type ModoMP = "dueno" | "practica" | "lectura";
+
+/**
+ * El modo de la sección para quien la mira: `edita = modo !== "lectura"` y, si es
+ * «practica», el chip y el cartel lo dicen.
+ *
+ * `puedeEscribir` es el permiso de escribir Materia prima. Por defecto se lee de la
+ * sesión (`operaciones_materia_prima` en «editar»); la solapa de la OT pasa el suyo,
+ * que además pide poder crear la OT cuando es nueva.
+ */
+export function useModoMP(puedeEscribir?: boolean): ModoMP {
+    const { puedeSeccion } = usePermisos();
+    const { dueno } = useDuenoMP();
+    const escribe = puedeEscribir ?? puedeSeccion("operaciones_materia_prima", "write");
+    if (!escribe || dueno === null) return "lectura";
+    return dueno === "integral" ? "practica" : "dueno";
+}
+
+/** Lo que el front le suma al cartel en modo práctica (el backend no sabe de pantallas). */
+const AGREGADO_PRACTICA = "Acá podés recorrer la carga completa, pero no se guarda nada.";
+
+/**
+ * El texto del cartel en modo práctica: «Prueba piloto — modo práctica:» y lo que dice el
+ * backend (dónde se carga y cada cuánto llega), sin el «Durante la prueba piloto» /
+ * «Prueba piloto:» con que arranca (ya lo dice el título), más el agregado de acá.
+ */
+function textoPractica(aviso: string): { titulo: string; resto: string } {
+    // Sin texto del backend (`AVISO_ESPEJO` es el de la pantalla, largo para un cartel que
+    // ahora dice más cosas), el corto.
+    let cuerpo = aviso === AVISO_ESPEJO
+        ? ""
+        : aviso.trim().replace(/^prueba piloto\s*:\s*/i, "").replace(/^durante la prueba piloto,?\s*/i, "");
+    if (!cuerpo) cuerpo = "las materias primas se siguen cargando en el Sistema Integral y Metlosys las trae de ahí cada 10 minutos.";
+    cuerpo = cuerpo.charAt(0).toLowerCase() + cuerpo.slice(1);
+    if (!/[.!?]$/.test(cuerpo)) cuerpo += ".";
+    return { titulo: "Prueba piloto — modo práctica:", resto: `${cuerpo} ${AGREGADO_PRACTICA}` };
+}
+
 /**
  * El cartel de arriba de la sección y de la solapa de la OT. Si el texto arranca con un
  * «algo:» (el «Prueba piloto:» de siempre), ese pedazo va en negrita.
+ *
+ * En modo práctica dice que se puede recorrer todo pero que no se guarda nada. `practica`
+ * sin pasar = el modo de la sesión (`useModoMP`): así la cabecera de la sección no tiene
+ * que saberlo. De paso monta el cartelito (ver `CartelitoPractica`): donde está este
+ * cartel, puede frenarse un guardado.
  */
-export function CartelEspejo({ aviso, className }: { aviso: string; className?: string }) {
-    const dosPuntos = aviso.indexOf(":");
-    const titulo = dosPuntos > 0 && dosPuntos <= 40 ? aviso.slice(0, dosPuntos + 1) : null;
-    const resto = titulo ? aviso.slice(dosPuntos + 1).trim() : aviso;
+export function CartelEspejo({ aviso, className, practica }: { aviso: string; className?: string; practica?: boolean }) {
+    const modo = useModoMP();
+    const enPractica = practica ?? modo === "practica";
+    let titulo: string | null;
+    let resto: string;
+    if (enPractica) {
+        ({ titulo, resto } = textoPractica(aviso));
+    } else {
+        const dosPuntos = aviso.indexOf(":");
+        titulo = dosPuntos > 0 && dosPuntos <= 40 ? aviso.slice(0, dosPuntos + 1) : null;
+        resto = titulo ? aviso.slice(dosPuntos + 1).trim() : aviso;
+    }
     return (
         <div
             role="status"
@@ -104,30 +178,174 @@ export function CartelEspejo({ aviso, className }: { aviso: string; className?: 
             )}
         >
             <span className="mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 ring-1 ring-sky-200">
-                <RefreshCw className="h-3.5 w-3.5" />
+                {enPractica ? <FlaskConical className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
             </span>
             <p className="min-w-0 flex-1 leading-relaxed">
                 {titulo && <b className="font-semibold text-sky-900">{titulo} </b>}
                 {resto}
             </p>
+            <CartelitoPractica />
         </div>
     );
 }
 
 /**
- * La marca chica de «sólo lectura» del modo espejo, al lado del título. Es la hermana de
+ * La marca chica del modo espejo, al lado del título. Es la hermana de
  * `MarcaSoloLectura`, pero ésa dice «pedíselo a un administrador» y acá no es un tema de
- * permisos: nadie puede escribir, ni el administrador.
+ * permisos. Para quien no puede escribir dice «Solo lectura»; en modo práctica, «Modo
+ * práctica» (la misma píldora que la de los diálogos de «Nuevo», NuevoComun.tsx).
+ * `practica` sin pasar = el modo de la sesión.
  */
-export function MarcaEspejo({ aviso }: { aviso: string }) {
+export function MarcaEspejo({ aviso, practica }: { aviso: string; practica?: boolean }) {
+    const modo = useModoMP();
+    const enPractica = practica ?? modo === "practica";
     return (
         <span
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800 ring-1 ring-sky-200"
-            title={aviso}
+            title={enPractica ? textoPractica(aviso).resto : aviso}
         >
-            <Eye className="h-3 w-3" />
-            Solo lectura
+            {enPractica ? <FlaskConical className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            {enPractica ? "Modo práctica" : "Solo lectura"}
         </span>
+    );
+}
+
+// ═══════════════════════════ el cartelito del modo práctica ═══════════════════════════
+
+/**
+ * Lo mínimo entre dos cartelitos. Un lote frena varias escrituras en el mismo instante y
+ * las tildes de Pendientes se guardan solas, una por clic: sin esto serían un cartel por
+ * pedido. Con esto, uno; y las tildes que se tocan enseguida vuelven a su lugar calladas.
+ */
+const ENTRE_CARTELES_MS = 600;
+
+let cartelAbierto = false;
+// Desde cuándo se cuenta la espera: desde que se CERRÓ el anterior. Contando desde que se
+// abrió (2,5 s, hasta el 25/09), un segundo «Guardar» enseguida de «Entendido» no hacía
+// nada y el botón parecía muerto. Mientras está abierto no se abre otro (cartelAbierto),
+// así que un lote sigue dando un solo cartel.
+let ultimoCartel = 0;
+/** Los cartelitos montados. Dibuja sólo el primero: hay uno en cada solapa y en cada cartel. */
+const lugares: number[] = [];
+let proximoLugar = 1;
+const oyentesCartel = new Set<() => void>();
+const avisarCartel = () => oyentesCartel.forEach((o) => o());
+const suscribirCartel = (o: () => void) => {
+    oyentesCartel.add(o);
+    return () => {
+        oyentesCartel.delete(o);
+    };
+};
+
+function abrirCartelito() {
+    // Sin pantalla que lo dibuje no se abre: si no, aparecería más tarde, fuera de lugar.
+    if (cartelAbierto || !lugares.length) return;
+    const ahora = Date.now();
+    if (ahora - ultimoCartel < ENTRE_CARTELES_MS) return;
+    cartelAbierto = true;
+    avisarCartel();
+}
+
+function cerrarCartelito() {
+    if (!cartelAbierto) return;
+    cartelAbierto = false;
+    ultimoCartel = Date.now();
+    avisarCartel();
+}
+
+// El candado (lib/materiaPrima.ts) avisa acá cada escritura que frena. Una vez, al cargar
+// el módulo: lo importa toda pantalla de la sección (y la solapa de la OT).
+if (typeof window !== "undefined") escucharFrenosDePractica(abrirCartelito);
+
+/**
+ * «Esto no se guarda»: el cartelito que sale cada vez que el modo práctica frena un
+ * guardado. Es UNO para toda la app —el mismo texto en todas las pantallas— aunque se
+ * monte en varios lugares (cada solapa, cada cartel de arriba): dibuja el primero que
+ * sigue montado.
+ *
+ * Es un diálogo (Radix) para quedar arriba de todo, también del modal de la OT y de los
+ * diálogos de cortes o de alta. Pero NO se lleva el foco: el foco queda donde estaba (el
+ * campo o el globo que se estaba llenando). Si se lo llevara, los globos (el casillero de
+ * la cañera, el alta de un proveedor, «Marcar pedido…») se cerrarían solos al perderlo, y
+ * justamente lo que se quiere es que lo cargado quede a la vista. Por lo mismo, tocarlo
+ * no mueve el foco (`onMouseDown`), Enter o Escape lo cierran sin llegarle al formulario
+ * de atrás (que con Enter volvería a guardar y con Escape se cerraría).
+ */
+export function CartelitoPractica() {
+    const [mio] = useState(() => proximoLugar++);
+    useEffect(() => {
+        lugares.push(mio);
+        avisarCartel();
+        return () => {
+            const i = lugares.indexOf(mio);
+            if (i >= 0) lugares.splice(i, 1);
+            if (!lugares.length) cartelAbierto = false;
+            avisarCartel();
+        };
+    }, [mio]);
+    const abierto = useSyncExternalStore(suscribirCartel, () => cartelAbierto, () => false);
+    const primero = useSyncExternalStore(suscribirCartel, () => lugares[0] ?? 0, () => 0);
+    const dibuja = primero === mio;
+
+    // Enter = «Entendido». En captura: que no le llegue al campo de atrás.
+    useEffect(() => {
+        if (!abierto || !dibuja) return;
+        const alTeclear = (e: KeyboardEvent) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            e.stopPropagation();
+            cerrarCartelito();
+        };
+        document.addEventListener("keydown", alTeclear, { capture: true });
+        return () => document.removeEventListener("keydown", alTeclear, { capture: true });
+    }, [abierto, dibuja]);
+
+    if (!dibuja) return null;
+    return (
+        <DialogPrimitive.Root open={abierto} onOpenChange={(v) => !v && cerrarCartelito()}>
+            <DialogPrimitive.Portal>
+                <DialogPrimitive.Overlay
+                    // z-[100]: arriba de la ficha del teléfono (z-60), los menús (z-70) y el modal de la OT.
+                    className="fixed inset-0 z-[100] bg-black/25 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+                    onMouseDown={(e) => e.preventDefault()}
+                />
+                <DialogPrimitive.Content
+                    className={cn(
+                        "fixed left-1/2 top-1/2 z-[100] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2",
+                        "rounded-xl border border-sky-200 bg-white p-5 shadow-2xl outline-none",
+                        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+                    )}
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                    onCloseAutoFocus={(e) => e.preventDefault()}
+                    onEscapeKeyDown={(e) => e.stopPropagation()}
+                    // Que tocarlo (el botón incluido) no le saque el foco al formulario de atrás:
+                    // el clic igual llega.
+                    onMouseDown={(e) => e.preventDefault()}
+                >
+                    <div className="flex items-start gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 ring-1 ring-sky-200">
+                            <FlaskConical className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <DialogPrimitive.Title className="text-base font-semibold text-gray-900">Esto no se guarda</DialogPrimitive.Title>
+                            <DialogPrimitive.Description className="mt-1 text-sm leading-relaxed text-gray-600">
+                                Estás en modo práctica: durante la prueba piloto las materias primas se cargan en el Sistema
+                                Integral. Acá podés recorrer la carga completa, pero no se graba nada.
+                            </DialogPrimitive.Description>
+                        </div>
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={cerrarCartelito}
+                            className="rounded-lg bg-[#DC143C] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#B8112E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                        >
+                            Entendido
+                        </button>
+                    </div>
+                </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
     );
 }
 

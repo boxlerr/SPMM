@@ -459,6 +459,9 @@ export function FormularioInsumo({
         if (esAlta) {
             const r = await mpPost<InsumoFicha>(`${API_URL}/materia-prima/insumos`, cuerpoAlta(), { forzar });
             setGuardando(false);
+            // Modo práctica: el cartelito ya salió y el formulario queda como está, con todo lo
+            // cargado (la descripción y el código armados incluidos), para seguir mirando.
+            if (r.practica) return;
             if (r.requiereConfirmacion) {
                 setAviso({ motivo: r.error ?? "Ya hay un insumo activo con esa descripción.", otro });
                 return;
@@ -522,6 +525,11 @@ export function FormularioInsumo({
         });
         const r = await mpPut<InsumoFicha>(`${API_URL}/materia-prima/insumos/${ficha.id}`, cambios, { forzar });
         setGuardando(false);
+        if (r.practica) {
+            // La lista vuelve a como estaba; el formulario sigue con los cambios a la vista.
+            revertir?.();
+            return;
+        }
         if (r.requiereConfirmacion) {
             revertir?.();
             setAviso({ motivo: r.error ?? "El servidor pide confirmar el cambio.", otro: false });
@@ -604,6 +612,7 @@ export function FormularioInsumo({
 
     const crearMaterial = async (nombre: string) => {
         const r = await altaMaterial(nombre);
+        if (r.practica) return;
         if (!r.dato) {
             toast.error(r.error ?? "No se pudo dar de alta el material.");
             return;
@@ -615,6 +624,7 @@ export function FormularioInsumo({
     const crearCalidad = async (nombre: string) => {
         if (b.id_material === null) return;
         const r = await altaCalidad(b.id_material, nombre);
+        if (r.practica) return;
         if (!r.dato) {
             toast.error(r.error ?? "No se pudo dar de alta la calidad.");
             return;

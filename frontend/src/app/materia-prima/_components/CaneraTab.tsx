@@ -26,7 +26,8 @@ import { cn } from "@/lib/utils";
 import { COLUMNAS_CANERA, FILAS_CANERA, numeroDeOcupacion } from "@/lib/materiaPrima";
 import { compararCeldas, useCanera } from "./CaneraDatos";
 import { GrillaCanera } from "./GrillaCanera";
-import { useRefrescoEspejo } from "./ModoEspejo";
+import { CartelitoPractica, useRefrescoEspejo } from "./ModoEspejo";
+import { useAlCargarMP } from "./NuevoAvisos";
 import { useConfirmarForzar } from "./PendientesForzar";
 
 export interface CaneraTabProps {
@@ -44,6 +45,9 @@ export function CaneraTab({ edita, espejo = false, activo = true }: CaneraTabPro
     const { confirmar, dialogo } = useConfirmarForzar();
     const estado = useCanera({ confirmar });
     useRefrescoEspejo(espejo && activo, estado.recargar);
+    // Materia prima cargada desde el botón «Nuevo» (una OT que pasa a tener lo suyo):
+    // los casilleros se piden de nuevo en silencio (ver NuevoAvisos.ts).
+    useAlCargarMP("canera", estado.recargar);
     const [buscar, setBuscar] = useState("");
 
     const ocupaciones = estado.canera?.ocupaciones ?? [];
@@ -181,6 +185,8 @@ export function CaneraTab({ edita, espejo = false, activo = true }: CaneraTabPro
             )}
 
             {dialogo}
+            {/* El «Esto no se guarda» del modo práctica (uno solo aunque se monte en cada solapa). */}
+            <CartelitoPractica />
         </div>
     );
 }

@@ -47,6 +47,16 @@ export type Novedad = {
 /** Las más nuevas arriba. Al agregar una, va al principio de la lista. */
 export const NOVEDADES: Novedad[] = [
     {
+        id: "materia-prima-modo-practica",
+        fecha: "2026-09-25",
+        tipo: "mejora",
+        seccion: "Materia prima",
+        titulo: "Botón «Nuevo» con las cargas del sistema viejo, y modo práctica para recorrerlas durante la prueba",
+        detalle:
+            "En Materia prima, arriba a la derecha, hay un botón «Nuevo» con las mismas cargas del Sistema Integral: materia prima para una orden, pedido a proveedor (elegís el proveedor, tildás lo que falta pedir y ponés la fecha que promete, y lo podés imprimir), insumo nuevo, movimiento de stock del pañol (ingreso, egreso o ajuste) y recorte. Durante la prueba piloto la sección está en «Modo práctica»: todo se puede tocar y llenar —también las tildes de Pendientes, la cañera, la ficha de cada insumo y la solapa Materias Primas de cada orden—, pero al guardar sale el cartel «Esto no se guarda», porque las materias primas se siguen cargando en el Sistema Integral. Antes la sección era de sólo lectura y no se podía ver cómo es cada carga.",
+        href: "/materia-prima",
+    },
+    {
         id: "pendientes-como-en-el-integral",
         fecha: "2026-09-25",
         tipo: "mejora",
@@ -132,7 +142,7 @@ export const NOVEDADES: Novedad[] = [
         seccion: "Materia prima",
         titulo: "Pantalla nueva «Materia prima»: lo que falta comprar en la semana, cada insumo con su stock y la cañera",
         detalle:
-            "Durante la prueba piloto las materias primas se siguen cargando en el Sistema Integral, como siempre: esta pantalla y la solapa Materias Primas de cada orden las muestran con las marcas de allá (pedido, reservado, disponible, en producción) y se actualizan solas cada 10 minutos. Por ahora son de sólo lectura, así nadie las carga dos veces. En el menú de la izquierda, debajo de Operaciones, está «Materia prima», con tres solapas. En «Pendientes» está lo que falta para las órdenes de la semana (las que el plan pone a trabajar, o todas las abiertas), con el proveedor y la fecha que prometió. En «Insumos» está el catálogo, con los mismos códigos del Sistema Integral: cada insumo con su stock, sus recortes, en qué órdenes se usó y sus precios, y el punto crítico que antes estaba en la solapa Materia Prima de Operaciones. En «Cañera», en qué estante quedó el material cortado de cada orden. Y la columna Material de las listas dice «Falta pedir» donde decía «Sin stock», y «Pedido / reservado» cuando ya está encargado o apartado; la línea «TRABAJO SIN MATERIAL» (TRA011) cuenta como lista aunque nadie la tilde.",
+            "Durante la prueba piloto las materias primas se siguen cargando en el Sistema Integral, como siempre: esta pantalla y la solapa Materias Primas de cada orden las muestran con las marcas de allá (pedido, reservado, disponible, en producción) y se actualizan solas cada 10 minutos. Lo que se toca acá no se guarda (desde el 25/09 se puede recorrer la carga completa en modo práctica), así nadie las carga dos veces. En el menú de la izquierda, debajo de Operaciones, está «Materia prima», con tres solapas. En «Pendientes» está lo que falta para las órdenes de la semana (las que el plan pone a trabajar, o todas las abiertas), con el proveedor y la fecha que prometió. En «Insumos» está el catálogo, con los mismos códigos del Sistema Integral: cada insumo con su stock, sus recortes, en qué órdenes se usó y sus precios, y el punto crítico que antes estaba en la solapa Materia Prima de Operaciones. En «Cañera», en qué estante quedó el material cortado de cada orden. Y la columna Material de las listas dice «Falta pedir» donde decía «Sin stock», y «Pedido / reservado» cuando ya está encargado o apartado; la línea «TRABAJO SIN MATERIAL» (TRA011) cuenta como lista aunque nadie la tilde.",
         href: "/materia-prima",
     },
     {
@@ -1740,7 +1750,7 @@ export const AVISO_AL_ENTRAR: AvisoAlEntrar | null = {
             titulo: "Durante la prueba piloto",
             puntos: [
                 "**Las materias primas se siguen cargando en el Sistema Integral**, como siempre: lo que lleva cada orden y lo que se pide.",
-                "**Acá se ven con sus marcas reales** (pedido, reservado, disponible, en producción) **y se actualizan solas cada 10 minutos.** Son de sólo lectura, para que nada se cargue dos veces.",
+                "**Acá se ven con sus marcas reales** (pedido, reservado, disponible, en producción) **y se actualizan solas cada 10 minutos.** Podés recorrer la carga completa (modo práctica), pero acá no se guarda nada, para que nada se cargue dos veces.",
                 "**Hay una pantalla nueva, «Materia prima»**, en el menú de la izquierda, debajo de Operaciones. Y en cada orden, la solapa Materias Primas muestra lo mismo.",
             ],
         },

@@ -54,13 +54,19 @@
  * Sin permiso de LEER Materia prima (`puedeVer = false`) no se pide nada: el backend
  * contestaría 403 y saldría el aviso general de «no tenés permiso».
  *
- * PRUEBA PILOTO (MODO ESPEJO, 24/09)
+ * PRUEBA PILOTO (MODO ESPEJO, 24/09; MODO PRÁCTICA, 25/09)
  *
  * Mientras el dueño de las materias primas sea el Sistema Integral (`dueno` de los
  * catálogos, ver app/materia-prima/_components/ModoEspejo.tsx), esta solapa MUESTRA lo
- * que se cargó allá, con sus marcas reales, y no deja tocar nada: ni barra de carga, ni
- * celdas, ni casillas, ni «No lleva», tenga el permiso que tenga quien la abre. Arriba va
- * el cartel que lo explica y, con la OT abierta, las líneas se vuelven a pedir solas.
+ * que se cargó allá, con sus marcas reales, y no GUARDA nada. Arriba va el cartel que lo
+ * explica y, con la OT abierta, las líneas se vuelven a pedir solas.
+ *  · Quien no puede escribir Materia prima la ve en sólo lectura.
+ *  · Quien puede, desde el 25/09 la usa entera en MODO PRÁCTICA (pedido de Julián: ver
+ *    cómo es la carga): barra de carga, celdas, casillas, cortes, historial, «No lleva»…
+ *    Cada guardado lo frena el candado de `mpFetch` y sale el cartelito «Esto no se
+ *    guarda»; lo tocado vuelve a su lugar y la barra y los diálogos quedan con lo cargado.
+ *    En una OT NUEVA las líneas se arman igual en memoria, pero al crear la OT no se
+ *    mandan (ver `mandarLineasDeOTNueva`).
  * Lo único que sigue igual es el CONSUMO (RF-15): no es de las materias primas del
  * Integral sino un registro propio de SPMM (ver ConsumoDeMaterial.tsx), y ya se cargaba
  * así cuando la lista venía del sistema viejo.
@@ -91,6 +97,7 @@ import { toast } from "@/lib/toast";
 import {
     consulta,
     fmtPrecio,
+    frenarPorPractica,
     mpGet,
     UNIDADES_LINEA,
     type CorteIn,
@@ -109,7 +116,7 @@ import {
 import { useConfirmarForzar } from "@/app/materia-prima/_components/PendientesForzar";
 import { useCatalogosMP } from "@/app/materia-prima/_components/InsumoCatalogos";
 import { CartelError, CartelSinServidor, Esqueleto } from "@/app/materia-prima/_components/InsumoComun";
-import { CartelEspejo, MarcaEspejo, useDuenoMP, useRefrescoEspejo } from "@/app/materia-prima/_components/ModoEspejo";
+import { CartelEspejo, MarcaEspejo, useDuenoMP, useModoMP, useRefrescoEspejo } from "@/app/materia-prima/_components/ModoEspejo";
 import {
     cambiarLineaLocal,
     filaDeLinea,
@@ -201,11 +208,14 @@ function SolapaMateriasPrimas({
     const modoLocal = idOrden === null;
     const { confirmar, dialogo } = useConfirmarForzar();
     const { catalogos } = useCatalogosMP();
-    // Prueba piloto: con el Integral como dueño nadie edita acá; mientras no se sabe
-    // quién es el dueño, tampoco (es un instante: ver ModoEspejo.tsx).
+    // Prueba piloto: con el Integral como dueño, quien puede escribir la usa en MODO
+    // PRÁCTICA (todo se toca, nada se guarda) y el resto la mira; mientras no se sabe quién
+    // es el dueño, nadie edita (es un instante: ver ModoEspejo.tsx).
     const dueno = useDuenoMP();
     const espejo = dueno.espejo;
-    const edita = puedeEditar && dueno.sabido && !espejo;
+    const modo = useModoMP(puedeEditar);
+    const edita = modo !== "lectura";
+    const practica = modo === "practica";
     const unidades = catalogos?.unidades_linea?.length ? catalogos.unidades_linea : UNIDADES_LINEA;
     const espesorSierra = catalogos?.espesor_sierra_mm ?? 3;
 
@@ -332,7 +342,7 @@ function SolapaMateriasPrimas({
                 ...lineas.map((l) => lineaLocal(deHistorial(l), { codigo: l.codigo, descripcion: l.descripcion, tipo: null, precio: null })),
             ]);
             toast.success(`Se ${lineas.length === 1 ? "agregó 1 línea" : `agregaron ${lineas.length} líneas`} del historial`, {
-                description: "Se guardan al crear la OT.",
+                description: practica ? "Modo práctica: al crear la OT no se guardan." : "Se guardan al crear la OT.",
             });
             return true;
         }
@@ -379,6 +389,9 @@ function SolapaMateriasPrimas({
 
     const descartarDelAlta = () => {
         if (!idOrden) return;
+        // Modo práctica: descartarlas también es un cambio (se pierden para siempre), y en
+        // la práctica no se toca nada de verdad. Quedan para cuando SPMM sea el dueño.
+        if (frenarPorPractica()) return;
         olvidarSinGuardar(idOrden);
         setDelAlta(null);
         toast("Se descartaron las materias primas que no se habían guardado al crear la OT");
@@ -418,6 +431,9 @@ function SolapaMateriasPrimas({
 
     const guardarCortes = (cortes: CorteIn[] | null, cantidad: { cantidad: number; unidad: string } | null) => {
         if (!filaCortes) return;
+        // Modo práctica: el diálogo queda abierto con los cortes escritos (y sale el
+        // cartelito). Los de una OT nueva no van al servidor: se guardan en memoria igual.
+        if (!filaCortes.local && frenarPorPractica()) return false;
         const c: CambiosFila = {};
         if (cortes) {
             c.cortes = cortes;
@@ -433,6 +449,9 @@ function SolapaMateriasPrimas({
 
     const cambiarNoLleva = async (v: boolean) => {
         if (modoLocal) {
+            // Modo práctica: en una OT nueva la marca viaja con el alta de la OT (no con las
+            // líneas), así que se guardaría de verdad. No se deja tildar: sale el cartelito.
+            if (frenarPorPractica()) return;
             onNoLlevaChange?.(v);
             return;
         }
@@ -488,13 +507,17 @@ function SolapaMateriasPrimas({
                             </span>
                         )}
                         {espejo ? (
-                            <MarcaEspejo aviso={dueno.aviso} />
+                            <MarcaEspejo aviso={dueno.aviso} practica={practica} />
                         ) : (
                             !puedeEditar && <MarcaSoloLectura que="las materias primas" />
                         )}
                     </h3>
                     <p className="text-xs text-gray-500">
-                        {espejo
+                        {practica && modoLocal
+                            ? "Lo que lleva esta orden. Modo práctica: podés cargarlas para ver cómo es, pero al crear la OT no se guardan."
+                            : practica
+                            ? "Lo que lleva esta orden, tal como está en el Sistema Integral. Podés cargar y tocar todo para ver cómo es, pero no se guarda nada."
+                            : espejo
                             ? "Lo que lleva esta orden, tal como está cargado en el Sistema Integral."
                             : modoLocal
                               ? "Lo que lleva esta orden. Se guarda al crear la OT; las marcas de compra se ponen después."
@@ -514,7 +537,7 @@ function SolapaMateriasPrimas({
                 )}
             </div>
 
-            {espejo && <CartelEspejo aviso={dueno.aviso} />}
+            {espejo && <CartelEspejo aviso={dueno.aviso} practica={practica} />}
 
             {mp.sinServidor && <CartelSinServidor />}
 
@@ -568,7 +591,9 @@ function SolapaMateriasPrimas({
                     {modoLocal && filas.length > 0 && (
                         <p className="flex items-start gap-1.5 text-[11px] text-blue-800">
                             <Info className="mt-px h-3.5 w-3.5 shrink-0" />
-                            La OT todavía no existe: {filas.length === 1 ? "esta línea se guarda" : `estas ${filas.length} líneas se guardan`} al tocar «Crear Orden».
+                            {practica
+                                ? `Modo práctica: ${filas.length === 1 ? "esta línea no se guarda" : `estas ${filas.length} líneas no se guardan`} al crear la OT (durante la prueba piloto se cargan en el Sistema Integral).`
+                                : <>La OT todavía no existe: {filas.length === 1 ? "esta línea se guarda" : `estas ${filas.length} líneas se guardan`} al tocar «Crear Orden».</>}
                         </p>
                     )}
 
@@ -615,7 +640,11 @@ function SolapaMateriasPrimas({
                                                       : "Esta orden no tiene materias primas cargadas."}
                                                 <br />
                                                 <span className="text-xs text-gray-400">
-                                                    {espejo
+                                                    {/* En modo práctica la casilla de abajo está habilitada: el «se marca allá»
+                                                        de sólo lectura decía lo contrario de lo que se ve. */}
+                                                    {practica
+                                                        ? "Si no lleva material, se marca abajo (en modo práctica no se guarda)."
+                                                        : espejo
                                                         ? "Si no lleva material, se marca allá y acá aparece la casilla de abajo tildada."
                                                         : "Si no lleva material, marcalo abajo: así deja de figurar como que falta cargarla."}
                                                 </span>
@@ -712,7 +741,9 @@ function SolapaMateriasPrimas({
                                 <span className="block text-xs text-gray-500">
                                     {noLlevaActual && usadas.length > 0
                                         ? `Ojo: tiene ${usadas.length} línea${usadas.length === 1 ? "" : "s"} cargada${usadas.length === 1 ? "" : "s"}; con esta marca no entra${usadas.length === 1 ? "" : "n"} en Pendientes.`
-                                        : espejo
+                                        : practica
+                                          ? "En modo práctica no se guarda: durante la prueba piloto se marca en el Sistema Integral."
+                                          : espejo
                                           ? "Se marca en el Sistema Integral; acá se ve como quedó."
                                           : "Marcala y la columna Material dice «No lleva» en vez de «Sin cargar», que es otra cosa."}
                                 </span>

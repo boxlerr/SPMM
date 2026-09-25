@@ -42,6 +42,7 @@ import {
     FILAS_CANERA,
     armarCelda,
     fmtFechaHora,
+    frenarPorPractica,
     numeroDeOcupacion,
     type Ocupacion,
 } from "@/lib/materiaPrima";
@@ -337,6 +338,8 @@ function CartelCasillero({
 
     const ubicar = async () => {
         if (!numero.trim()) return;
+        // Modo práctica: el globo queda abierto con el número escrito (y sale el cartelito).
+        if (frenarPorPractica()) return;
         setOcupado(true);
         // Se cierra ya: el casillero se pinta solo (optimista) y el cartel no tapa nada.
         onCerrar();
@@ -445,6 +448,7 @@ function CartelCasillero({
                                     <AccionCartel
                                         peligro
                                         onClick={() => {
+                                            if (frenarPorPractica()) return;
                                             onCerrar();
                                             void estado.liberar(o.id);
                                         }}
@@ -462,6 +466,7 @@ function CartelCasillero({
                                         desde={celda}
                                         titulo={`Mover la OT ${numeroDeOcupacion(o)} a…`}
                                         onElegir={(destino) => {
+                                            if (frenarPorPractica()) return;
                                             onCerrar();
                                             void estado.mover(o.id, destino);
                                         }}

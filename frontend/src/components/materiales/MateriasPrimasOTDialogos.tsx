@@ -68,9 +68,10 @@ export interface DialogoCortesProps {
     onCerrar: () => void;
     /**
      * Guardar: los cortes (null = no cambiaron, no se mandan) y, si se tocó «Usar
-     * sugerencia», la cantidad nueva de la línea.
+     * sugerencia», la cantidad nueva de la línea. Devolver `false` deja el diálogo abierto
+     * con lo escrito (el modo práctica: no se manda nada y sale el cartelito).
      */
-    onGuardar: (cortes: CorteIn[] | null, cantidad: { cantidad: number; unidad: string } | null) => void;
+    onGuardar: (cortes: CorteIn[] | null, cantidad: { cantidad: number; unidad: string } | null) => void | boolean;
 }
 
 /**
@@ -140,7 +141,7 @@ export function DialogoCortes({ fila, edita, espesorSierraMm, onCerrar, onGuarda
 
     const guardar = () => {
         if (!fila || error) return;
-        onGuardar(cambiaron ? cortes : null, cantidadNueva !== null ? { cantidad: cantidadNueva, unidad: "Mts" } : null);
+        if (onGuardar(cambiaron ? cortes : null, cantidadNueva !== null ? { cantidad: cantidadNueva, unidad: "Mts" } : null) === false) return;
         onCerrar();
     };
 

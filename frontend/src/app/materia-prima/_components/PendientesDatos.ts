@@ -290,6 +290,9 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
                         const rc = await mpPut<Linea>(`${API_URL}/materia-prima/lineas/${id}/cortes`, { cortes });
                         if (!rc.ok || !rc.data) {
                             sacarParche([id], n);
+                            // Modo práctica: vuelve a como estaba, sin «no se guardó» ni toast
+                            // (el cartelito ya salió).
+                            if (rc.practica) return false;
                             setUltimo("error");
                             toast.error(`No se guardaron los cortes de ${nombreDe(id)}: ${rc.error ?? "el servidor no contestó."}`);
                             return false;
@@ -318,6 +321,8 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
                         return true;
                     }
                     sacarParche([id], n);
+                    // Modo práctica: la tilde vuelve a su lugar y el cartelito lo explica.
+                    if (r.practica) return false;
                     setUltimo("error");
                     toast.error(`No se guardó ${nombreDe(id)}: ${r.error ?? "el servidor no contestó."}`);
                     return false;
@@ -363,6 +368,8 @@ export function usePendientes(q: ConsultaPendientes, confirmar: Confirmar) {
                         return true;
                     }
                     sacarParche(ids, n);
+                    // Modo práctica: un solo cartelito por todo el lote, y las líneas quedan elegidas.
+                    if (r.practica) return false;
                     setUltimo("error");
                     toast.error(`${que}: no se guardó ninguna. ${r.error ?? "El servidor no contestó."}`);
                     return false;

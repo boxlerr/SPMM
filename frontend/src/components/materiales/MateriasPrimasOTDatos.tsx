@@ -26,6 +26,7 @@ import { toast } from "@/lib/toast";
 import {
     aLineaIn,
     ahoraISO,
+    enModoPracticaMP,
     hoyISO,
     mpDelete,
     mpGet,
@@ -474,6 +475,9 @@ export function useLineasDeOT({
                         const r = await mpPut<Linea>(`${API_URL}/materia-prima/lineas/${id}/cortes`, { cortes });
                         if (!r.ok || !r.data) {
                             sacarParche(id, n);
+                            // Modo práctica: vuelve a como estaba, sin «no se guardó» ni toast
+                            // (el cartelito ya salió).
+                            if (r.practica) return false;
                             setUltimo("error");
                             toast.error(`No se guardaron los cortes de ${nombreDe(id)}`, { description: r.error ?? undefined });
                             return false;
@@ -501,6 +505,8 @@ export function useLineasDeOT({
                         setUltimo("ok");
                         return true;
                     }
+                    // Modo práctica: la celda o la casilla vuelve a su lugar y el cartelito lo explica.
+                    if (r.practica) return false;
                     setUltimo("error");
                     toast.error(`No se guardó ${nombreDe(id)}`, { description: r.error ?? "El servidor no contestó." });
                     return false;
@@ -540,6 +546,9 @@ export function useLineasDeOT({
                 const nuevas = r.ok && r.data ? (Array.isArray(r.data) ? r.data : [r.data]) : null;
                 if (!nuevas) {
                     sacarTemporales();
+                    // Modo práctica: la barra (o el diálogo del historial) recibe `false` y
+                    // vuelve a mostrar lo que se había cargado; el cartelito ya salió.
+                    if (r.practica) return false;
                     setUltimo("error");
                     toast.error(`No se pudo ${que}`, { description: r.error ?? "El servidor no contestó." });
                     return false;
@@ -599,6 +608,7 @@ export function useLineasDeOT({
                     }
                     if (!r.ok) {
                         soltar();
+                        if (r.practica) return false;
                         setUltimo("error");
                         toast.error(`No se borró ${nombreDe(id)}`, { description: r.error ?? "El servidor no contestó." });
                         return false;
@@ -641,6 +651,7 @@ export function useLineasDeOT({
                     return true;
                 }
                 setDatos((d) => (d ? { ...d, no_lleva_materia_prima: antes } : d));
+                if (r.practica) return false;
                 setUltimo("error");
                 toast.error("No se guardó «No lleva materias primas»", { description: r.error ?? "El servidor no contestó." });
                 return false;
@@ -721,6 +732,11 @@ export interface ResultadoAltaDeLineas {
     error: string | null;
     /** La persona no quiso cargarlas igual (409): no es un error, pero tampoco quedaron. */
     cancelado: boolean;
+    /**
+     * Modo práctica (prueba piloto, ver ModoEspejo.tsx): no se mandaron porque nada de
+     * materia prima se guarda. Tampoco es un error.
+     */
+    practica?: boolean;
 }
 
 /**
@@ -736,6 +752,11 @@ export async function mandarLineasDeOTNueva(
     preguntar: (motivo: string) => boolean | Promise<boolean>,
 ): Promise<ResultadoAltaDeLineas> {
     if (!lineas.length) return { ok: true, cuantas: 0, error: null, cancelado: false };
+    // Modo práctica: ni se mandan ni se guardan en el navegador para «Reintentar». Si se
+    // guardaran, al terminar la prueba un «Reintentar» cargaría de verdad las líneas de
+    // una práctica. Se pregunta sin avisar: el modal se cierra y lo dice él (el cartelito
+    // se iría con el modal).
+    if (enModoPracticaMP()) return { ok: false, cuantas: lineas.length, error: null, cancelado: false, practica: true };
     const url = `${API_URL}/materia-prima/ot/${idOrden}/lineas/lote`;
     const cuerpo = { lineas: lineas.map(aLineaIn) };
     let r = await mpPost<Linea[]>(url, cuerpo);

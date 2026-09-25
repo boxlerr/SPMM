@@ -35,6 +35,7 @@ import {
     ahoraISO,
     fmtCantidad,
     fmtFechaHora,
+    frenarPorPractica,
     leerCantidad,
     mpGet,
     mpPost,
@@ -132,6 +133,8 @@ export function FichaStock({ ficha, edita, onCambio }: FichaStockProps) {
 
     const anular = async (m: Movimiento, motivo: string) => {
         if (!datos) return;
+        // Modo práctica: la pregunta de anular queda abierta con el motivo escrito.
+        if (frenarPorPractica()) return;
         const antes = datos;
         setAnulando(null);
         poner(recontar({
@@ -142,7 +145,7 @@ export function FichaStock({ ficha, edita, onCambio }: FichaStockProps) {
         const r = await mpPut<Movimientos>(`${API_URL}/materia-prima/movimientos/${m.id}/anular`, cuerpo);
         if (!r.ok || !r.data) {
             poner(antes);
-            toast.error(`No se anuló el movimiento: ${r.error ?? "error desconocido"}`);
+            if (!r.practica) toast.error(`No se anuló el movimiento: ${r.error ?? "error desconocido"}`);
             return;
         }
         poner({ ...r.data, movimientos: r.data.movimientos ?? [], reservas: r.data.reservas ?? [] });
@@ -464,7 +467,8 @@ function FormMovimiento({ idPieza, datos, unidad, onCerrar, onOptimista, onRespu
         }
         if (!r.ok || !r.data) {
             onRespuesta(antes);
-            toast.error(`No se registró el movimiento: ${r.error ?? "error desconocido"}`);
+            // Modo práctica: el cartelito ya salió y el formulario queda abierto, con lo cargado.
+            if (!r.practica) toast.error(`No se registró el movimiento: ${r.error ?? "error desconocido"}`);
             return;
         }
         onRespuesta({ ...r.data, movimientos: r.data.movimientos ?? [], reservas: r.data.reservas ?? [] });

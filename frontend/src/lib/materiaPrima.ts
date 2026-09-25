@@ -146,9 +146,11 @@ export interface Catalogos {
  *    destino, decidido con Lucas el 23/09.
  *  · `integral`: en el sistema viejo («Sistema Integral»). Es la prueba piloto de la
  *    semana del 28/09, con los dos sistemas en paralelo: Carolina y Maxi siguen
- *    cargando allá, el sync lo trae con sus marcas reales y SPMM es un ESPEJO de sólo
- *    lectura. Si acá se pudiera escribir, el sync lo pisaría en la pasada siguiente (o
- *    peor: habría dos verdades hasta entonces).
+ *    cargando allá, el sync lo trae con sus marcas reales y SPMM es un ESPEJO: nada de
+ *    lo que se hace acá se GUARDA. Si se guardara, el sync lo pisaría en la pasada
+ *    siguiente (o peor: habría dos verdades hasta entonces). Quien tiene permiso de
+ *    escribir igual puede recorrer la carga entera en MODO PRÁCTICA (25/09, ver
+ *    `ModoMP` en ModoEspejo.tsx): al final, en vez de guardarse, sale un cartelito.
  *
  * Lo decide el backend y viaja en `GET /materia-prima/catalogos`: cambiar de uno a
  * otro no pide un deploy del front.
@@ -821,6 +823,10 @@ export function authHeaders(json = false): Record<string, string> {
  *  · `sinServidor`          → el backend todavía no tiene la sección (ver abajo).
  *  · `abortado`             → se canceló con la señal (una búsqueda pisada por otra):
  *                             no hay nada que avisar.
+ *  · `practica`             → la escritura la frenó el MODO PRÁCTICA (ver `frenarPorPractica`):
+ *                             no salió a la red y el cartelito ya está a la vista. Quien
+ *                             llama deshace en silencio lo optimista, NO muestra un toast
+ *                             y deja abierto el formulario (así se ve lo que se cargó).
  *  · el resto               → `error` es el motivo que dio el backend, listo para un toast.
  */
 export interface MpRespuesta<T> {
@@ -832,6 +838,7 @@ export interface MpRespuesta<T> {
     requiereConfirmacion: boolean;
     sinServidor: boolean;
     abortado: boolean;
+    practica: boolean;
 }
 
 export interface MpOpciones {
@@ -897,18 +904,57 @@ export function consulta(params: Record<string, string | number | boolean | null
 /**
  * El candado del modo espejo (ver `DuenoMP`), a nivel de los pedidos.
  *
- * Las pantallas ya se dibujan en sólo lectura cuando el dueño es el Integral (no hay
- * casillas, ni barra de carga, ni botones). Esto es la red de abajo: si algún camino
- * quedó sin tapar (un atajo de teclado, un guardado automático que arrancó justo antes
- * de enterarse), el pedido de escritura NO sale y vuelve como un error con el motivo,
- * que el que lo pidió ya sabe mostrar y revertir. Lo prende el almacén de catálogos
- * (InsumoCatalogos.ts) cuando llega `dueno`; mientras no se sepa, no traba nada.
+ * Con el Integral como dueño NINGUNA escritura sale a la red: el pedido vuelve al
+ * instante con `practica: true` (y el 423 con el motivo, para quien sólo mire eso). Lo
+ * prende el almacén de catálogos (InsumoCatalogos.ts) cuando llega `dueno`; mientras no
+ * se sepa, no traba nada. El backend, además, contesta 422 a cualquier escritura.
+ *
+ * Hasta el 25/09 las pantallas se dibujaban en sólo lectura y esto era la red de abajo.
+ * Ese día Julián pidió poder recorrer la carga completa («que lo habilites para ver
+ * cómo está adentro… pero al final no me deje guardarlo con un cartelito»): quien tiene
+ * permiso de escribir ve las pantallas editables (MODO PRÁCTICA, ver ModoEspejo.tsx) y
+ * es ESTE candado el que frena, en un solo lugar, cada guardado. Por eso el candado no
+ * se tocó: lo único nuevo es cómo se avisa (`frenarPorPractica`).
  */
 let avisoEspejo: string | null = null;
 
 /** Prende (con el texto a mostrar) o apaga el candado del modo espejo. */
 export function fijarModoEspejoMP(aviso: string | null): void {
     avisoEspejo = aviso;
+}
+
+/** ¿Está prendido el candado? Sin avisar nada: para decidir, no para frenar. */
+export const enModoPracticaMP = (): boolean => avisoEspejo !== null;
+
+/**
+ * Quién muestra el cartelito cuando se frena una escritura. Lo registra ModoEspejo.tsx
+ * (el cartel es React y acá no hay React): esto sólo avisa «se frenó una», y el cartel
+ * decide si se muestra (no dos veces seguidas, no si no hay pantalla que lo dibuje).
+ */
+const alFrenar = new Set<() => void>();
+
+/** Para ModoEspejo.tsx: que le avisen cada vez que el modo práctica frena una escritura. */
+export function escucharFrenosDePractica(oyente: () => void): () => void {
+    alFrenar.add(oyente);
+    return () => {
+        alFrenar.delete(oyente);
+    };
+}
+
+/**
+ * Si la sección está en modo práctica, pide el cartelito y devuelve `true`: quien llama
+ * no manda nada y deja todo como está. Si no, `false` y no hace nada.
+ *
+ * `mpFetch` lo usa en cada escritura, así que casi ninguna pantalla lo necesita. Lo
+ * llaman ANTES de mandar las que, por ser optimistas, cierran lo que se estaba
+ * cargando antes de que el pedido vuelva (el diálogo de cortes, el globo de un
+ * casillero de la cañera, la confirmación de borrar un recorte): preguntando antes, el
+ * globo o el diálogo quedan abiertos con lo escrito, que es lo que se quiere ver.
+ */
+export function frenarPorPractica(): boolean {
+    if (avisoEspejo === null) return false;
+    alFrenar.forEach((o) => o());
+    return true;
 }
 
 /** POST que no escribe: armar la descripción de un insumo en vivo. */
@@ -932,11 +978,13 @@ export async function mpFetch<T>(
 ): Promise<MpRespuesta<T>> {
     const base: MpRespuesta<T> = {
         ok: false, status: 0, data: null, error: null,
-        requiereConfirmacion: false, sinServidor: false, abortado: false,
+        requiereConfirmacion: false, sinServidor: false, abortado: false, practica: false,
     };
-    if (avisoEspejo && metodo !== "GET" && !esConsultaPorPost(url)) {
+    // La vista previa del alta (`/previsualizar`) SÍ sale: no escribe, y sin ella en modo
+    // práctica no se vería la descripción ni el código armándose.
+    if (metodo !== "GET" && !esConsultaPorPost(url) && frenarPorPractica()) {
         // 423 (Locked): no es un 409 (no hay «hacerlo igual») ni un 403 (el permiso lo tiene).
-        return { ...base, status: 423, error: avisoEspejo };
+        return { ...base, status: 423, error: avisoEspejo, practica: true };
     }
     const direccion = opciones.forzar ? conForzar(url) : url;
     let res: Response;

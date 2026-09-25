@@ -25,7 +25,7 @@ import { forwardRef, useState, type ButtonHTMLAttributes, type ReactNode } from 
 import { CheckCheck, Loader2, MapPin, PackageCheck, PackagePlus, Truck, Undo2, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import type { CambiosDeLote, Canera, FechaISO, ProveedorElegido } from "@/lib/materiaPrima";
+import { frenarPorPractica, type CambiosDeLote, type Canera, type FechaISO, type ProveedorElegido } from "@/lib/materiaPrima";
 import { CaneraElegirCelda } from "./CaneraElegirCelda";
 import { SelectorProveedor } from "./SelectorProveedor";
 
@@ -54,6 +54,9 @@ export function BarraDeAcciones({
     const [fecha, setFecha] = useState<FechaISO>("");
 
     const marcarPedido = () => {
+        // Modo práctica: el globo queda abierto con el proveedor y la fecha elegidos, y sale
+        // el cartelito (si se cerrara antes, no se vería lo cargado).
+        if (frenarPorPractica()) return;
         const cambios: CambiosDeLote = { pedido: true };
         if (proveedor.nombre) {
             cambios.id_proveedor = proveedor.id;

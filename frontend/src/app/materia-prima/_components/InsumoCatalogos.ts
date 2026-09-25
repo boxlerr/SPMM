@@ -112,6 +112,8 @@ export function useCatalogosMP(): EstadoCatalogos {
 export interface ResultadoAlta<T> {
     dato: T | null;
     error: string | null;
+    /** La frenó el modo práctica (el cartelito ya salió): no es un error que mostrar. */
+    practica?: boolean;
 }
 
 /**
@@ -122,6 +124,7 @@ export interface ResultadoAlta<T> {
 export async function altaMaterial(nombre: string): Promise<ResultadoAlta<Material>> {
     const cuerpo: MaterialIn = { nombre: nombre.trim().replace(/\s+/g, " ").toUpperCase() };
     const r = await mpPost<Material>(`${API_URL}/materia-prima/materiales`, cuerpo);
+    if (r.practica) return { dato: null, error: null, practica: true };
     if (!r.ok || !r.data) {
         // Un 422 «ya existe» casi siempre es que otro lo cargó mientras tanto: se vuelven
         // a pedir los catálogos para que aparezca en la lista.
@@ -143,6 +146,7 @@ export async function altaMaterial(nombre: string): Promise<ResultadoAlta<Materi
 export async function altaCalidad(idMaterial: number, nombre: string): Promise<ResultadoAlta<Calidad>> {
     const cuerpo: CalidadIn = { nombre: nombre.trim().replace(/\s+/g, " ") };
     const r = await mpPost<Calidad>(`${API_URL}/materia-prima/materiales/${idMaterial}/calidades`, cuerpo);
+    if (r.practica) return { dato: null, error: null, practica: true };
     if (!r.ok || !r.data) {
         if (r.status === 422) void cargarCatalogos(true);
         return { dato: null, error: r.error ?? "No se pudo dar de alta la calidad." };

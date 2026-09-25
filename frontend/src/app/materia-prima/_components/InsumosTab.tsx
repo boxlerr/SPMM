@@ -61,6 +61,8 @@ import {
 import { FichaInsumo, filaDe } from "./FichaInsumo";
 import { useCatalogosMP } from "./InsumoCatalogos";
 import { CartelError, CartelSinServidor } from "./InsumoComun";
+import { CartelitoPractica } from "./ModoEspejo";
+import { useAlCargarMP } from "./NuevoAvisos";
 
 export interface InsumosTabProps {
     edita: boolean;
@@ -179,6 +181,11 @@ export function InsumosTab({ edita, piezaInicial = null, nuevoInicial = false }:
     }, [busqueda, filtros, pagina, recarga]);
 
     useEffect(() => () => control.current?.abort(), []);
+
+    // Una carga del botón «Nuevo» (un insumo, un movimiento de stock, un recorte) cambió la
+    // lista: se vuelve a pedir la misma página con los mismos filtros, dejando las filas a
+    // la vista hasta que llegan las nuevas (ver NuevoAvisos.ts).
+    useAlCargarMP("insumos", () => setRecarga((n) => n + 1));
 
     const cambiarFiltro = <K extends keyof Filtros>(clave: K, valor: Filtros[K]) => {
         setFiltros((f) => ({ ...f, [clave]: valor }));
@@ -586,6 +593,8 @@ export function InsumosTab({ edita, piezaInicial = null, nuevoInicial = false }:
                     )}
                 />
             )}
+            {/* El «Esto no se guarda» del modo práctica (uno solo aunque se monte en cada solapa). */}
+            <CartelitoPractica />
         </div>
     );
 }
